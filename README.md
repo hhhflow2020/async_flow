@@ -27,6 +27,10 @@ struct AppRuntimeTraits {
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
+
+    static constexpr af::ThreadKind thread_kind(AppThread thread) noexcept {
+        return thread == AppThread::IO_0 ? af::ThreadKind::Epoll : af::ThreadKind::Worker;
+    }
 };
 
 using async = af::AsyncRuntime<AppRuntimeTraits>;
@@ -64,17 +68,33 @@ private:
     af::TaskResult run() override {
         switch (state_) {
         case State::Start:
-            state_ = State::QueryDb;
-            return pending_on(AppThread::DB_0);
+            return start();
         case State::QueryDb:
-            state_ = State::BackToLogic;
-            return pending_on(player_thread(player_id_));
+            return query_db();
         case State::BackToLogic:
-            state_ = State::Finish;
-            return again();
+            return back_to_logic();
         case State::Finish:
-            return done();
+            return finish();
         }
+        return done();
+    }
+
+    af::TaskResult start() {
+        state_ = State::QueryDb;
+        return pending_on(AppThread::DB_0);
+    }
+
+    af::TaskResult query_db() {
+        state_ = State::BackToLogic;
+        return pending_on(player_thread(player_id_));
+    }
+
+    af::TaskResult back_to_logic() {
+        state_ = State::Finish;
+        return again();
+    }
+
+    af::TaskResult finish() {
         return done();
     }
 
@@ -97,6 +117,28 @@ if (!started) {
 ```
 
 `make_task<T>()` 返回的是一个轻量包装句柄，内部由 runtime 统一接入对象池、生命周期引用和后续可替换的内存池策略。`async::start_task<T>()` 作为便捷入口保留，但公开示例统一使用 `make_task<T>() + do_it()`。
+
+## IO 线程
+
+traits 可通过 `thread_kind()` 把固定线程声明为 IO 线程。Linux 上 `ThreadKind::Epoll` 会在该 executor 内创建 epoll + eventfd，其他线程投递任务时通过合并唤醒写 eventfd；IO 线程空闲时直接阻塞在 `epoll_wait()`，任务和 fd readiness 都在同一个固定线程恢复。
+
+```cpp
+static constexpr af::ThreadKind thread_kind(AppThread thread) noexcept {
+    return thread == AppThread::IO_0 ? af::ThreadKind::Epoll : af::ThreadKind::Worker;
+}
+```
+
+任务必须先调度到对应 IO 线程，再调用 `wait_io()` 注册 fd 事件；事件到达后 runtime 会把 pending task 放回同一个 IO executor：
+
+```cpp
+state_ = State::Consume;
+if (!wait_io(AppThread::IO_0, fd_, af::io_readable, &result_)) {
+    return failed();
+}
+return pending();
+```
+
+`examples/io_epoll.cpp` 演示了 socketpair 可读事件的完整流程。非 Linux 平台会保留接口但不创建 epoll backend，业务可通过 `async::io_backend_available(AppThread::IO_0)` 做降级判断。
 
 ## 批处理 API
 
@@ -133,6 +175,7 @@ auto sharded = af::split_change_batch(batch, player_logic_shard_count);
 - `parallel_shards_ordered()` 会对每个 shard 维护 `last_applied_batch_id`，要求 batch id 连续递增。
 - `parallel_shards_ordered(..., af::retryable_ordered_batch_options, ...)` 支持重试同一个 batch 时跳过已经应用成功的 shard；`af::OrderedBatchRetrySkipPolicy` 可用于业务侧记录失败次数并决定重试、跳过或停止。
 - `start_ordered_task<Stream, ApplyTask>()` 会在指定 sequencer 线程上缓存乱序 batch，并按 batch_id 连续启动 apply task；如果 apply task 启动失败，不推进期待 batch id，后续重试仍从失败 batch 开始。
+- Linux IO executor 使用 epoll + eventfd，`wait_io()` 注册一次性 fd readiness 后恢复原 pending task；跨线程唤醒做合并写，避免每次任务投递都写 eventfd。
 - `CrudOp<Key, Value>` / `ChangeBatch<Key, Value>` 是纯数据 helper，不引入额外运行期状态。
 - `parallel_shards()` 的 handler 如果返回 `bool`，`false` 会计为 shard 失败；owner 恢复后可用 `last_parallel_failures()` 读取失败数。
 - `TaskResult::Cancelled` 可用于取消结束；runtime 未初始化或 stopping 时 `start_task()` 返回失败并销毁任务。
@@ -178,8 +221,10 @@ ASYNCFLOW_STRESS_MS=1500 ctest --test-dir build-tsan/build/Debug -R RuntimeStres
 - `examples/parallel_shards.cpp`：按 key 拆分 shard 并并行处理。
 - `examples/ordered_batches.cpp`：乱序 batch 进入 sequencer，并用全 shard 顺序屏障应用。
 - `examples/crud_apply.cpp`：完整 CRUD change batch 模板，包含乱序提交、sequencer、ordered shard apply。
+- `examples/io_epoll.cpp`：Linux epoll IO 线程等待 fd readiness 并恢复 pending task。
 - `tests/utility_tests.cpp`：队列、对象池、分片工具和 batch sequencer。
 - `tests/runtime_lifecycle_tests.cpp`：任务生命周期、状态机、背压和 shutdown。
+- `tests/runtime_io_tests.cpp`：IO 线程调度、epoll readiness 恢复，以及 StopImmediately 清理 pending IO wait。
 - `tests/runtime_parallel_tests.cpp`：parallel shard、失败汇总、有序 batch 和 retryable ordered apply。
 - `tests/runtime_stress_tests.cpp`：高并发 init/shutdown/start_task stress，CI 中也用于 TSAN job。
 - `benchmarks/queue_benchmarks.cpp` 与 `benchmarks/runtime_benchmarks.cpp`：底层结构和 runtime 路径分开压测。

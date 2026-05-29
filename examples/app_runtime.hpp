@@ -24,6 +24,10 @@ struct AppRuntimeTraits {
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
+
+    static constexpr af::ThreadKind thread_kind(AppThread thread) noexcept {
+        return thread == AppThread::IO_0 ? af::ThreadKind::Epoll : af::ThreadKind::Worker;
+    }
 };
 
 using async = af::AsyncRuntime<AppRuntimeTraits>;

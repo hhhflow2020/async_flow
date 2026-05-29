@@ -15,6 +15,7 @@ enum class BenchThread : std::int16_t {
     Logic_1,
     Logic_2,
     Logic_3,
+    IO_0,
     enum_thread_index_end,
 };
 
@@ -26,6 +27,10 @@ struct BenchRuntimeTraits {
     static constexpr std::size_t spsc_queue_capacity = 65536;
     static constexpr std::size_t external_queue_capacity = 65536;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+
+    static constexpr af::ThreadKind thread_kind(BenchThread thread) noexcept {
+        return thread == BenchThread::IO_0 ? af::ThreadKind::Epoll : af::ThreadKind::Worker;
+    }
 };
 
 using Runtime = af::AsyncRuntime<BenchRuntimeTraits>;
@@ -92,6 +97,41 @@ private:
     }
 
     int hops_{0};
+    std::atomic<int>* remaining_{nullptr};
+};
+
+class IoHopTask final : public Task {
+public:
+    explicit IoHopTask(Task::FactoryToken token) : Task(token) {}
+
+    bool do_it(std::atomic<int>* remaining) {
+        remaining_ = remaining;
+        state_ = State::Logic;
+        return schedule(BenchThread::Logic_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Logic,
+        Io,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Logic:
+            state_ = State::Io;
+            return pending_on(BenchThread::IO_0);
+
+        case State::Io:
+            if (remaining_->fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                remaining_->notify_one();
+            }
+            return done();
+        }
+        return failed();
+    }
+
+    State state_{State::Logic};
     std::atomic<int>* remaining_{nullptr};
 };
 
@@ -202,6 +242,32 @@ void BM_RuntimeCrossThreadHop(benchmark::State& state) {
     state.SetItemsProcessed(state.iterations() * state.range(0));
 }
 
+void BM_RuntimeIoThreadHop(benchmark::State& state) {
+    Runtime::init();
+    for (auto _ : state) {
+        const int task_count = static_cast<int>(state.range(0));
+        std::atomic<int> remaining{0};
+        bool launch_failed = false;
+        for (int i = 0; i < task_count; ++i) {
+            remaining.fetch_add(1, std::memory_order_relaxed);
+            const bool ok = Runtime::start_task<IoHopTask>(&remaining);
+            if (!ok) {
+                undo_remaining(remaining);
+                state.SkipWithError("Runtime::start_task<IoHopTask> failed");
+                launch_failed = true;
+                break;
+            }
+        }
+        wait_zero(remaining);
+        if (launch_failed) {
+            break;
+        }
+    }
+    Runtime::shutdown();
+
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+
 void BM_RuntimeParallelShards(benchmark::State& state) {
     Runtime::init();
     for (auto _ : state) {
@@ -232,6 +298,7 @@ void BM_RuntimeParallelShards(benchmark::State& state) {
 
 BENCHMARK(BM_RuntimeExternalStart)->Arg(1024)->Arg(8192)->Unit(benchmark::kMillisecond);
 BENCHMARK(BM_RuntimeCrossThreadHop)->Arg(1024)->Arg(8192)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_RuntimeIoThreadHop)->Arg(1024)->Arg(8192)->Unit(benchmark::kMillisecond);
 BENCHMARK(BM_RuntimeParallelShards)->Arg(128)->Arg(512)->Unit(benchmark::kMillisecond);
 
 } // namespace

@@ -31,12 +31,41 @@ enum class ShutdownPolicy : std::uint8_t {
     StopImmediately,
 };
 
+enum class ThreadKind : std::uint8_t {
+    Worker,
+    IoUring,
+    Epoll,
+};
+
 enum class TaskState : std::uint8_t {
     Created,
     Queued,
     Running,
     Pending,
     Done,
+};
+
+inline constexpr std::uint32_t io_readable = 1U << 0U;
+inline constexpr std::uint32_t io_writable = 1U << 1U;
+inline constexpr std::uint32_t io_error = 1U << 2U;
+inline constexpr std::uint32_t io_hangup = 1U << 3U;
+
+struct IoResult {
+    int fd{-1};
+    std::uint32_t events{0};
+    int error{0};
+
+    [[nodiscard]] bool readable() const noexcept {
+        return (events & io_readable) != 0U;
+    }
+
+    [[nodiscard]] bool writable() const noexcept {
+        return (events & io_writable) != 0U;
+    }
+
+    [[nodiscard]] bool failed() const noexcept {
+        return error != 0 || (events & (io_error | io_hangup)) != 0U;
+    }
 };
 
 namespace detail {
@@ -163,6 +192,10 @@ protected:
 
     static bool is_current(Thread thread) noexcept {
         return Runtime::current_thread() == thread;
+    }
+
+    [[nodiscard]] bool wait_io(Thread thread, int fd, std::uint32_t events, IoResult* result) noexcept {
+        return Runtime::io_wait(thread, fd, events, this, result);
     }
 
     [[nodiscard]] std::uint32_t last_parallel_failures() const noexcept {

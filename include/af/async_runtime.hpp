@@ -3,6 +3,7 @@
 #include <array>
 #include <atomic>
 #include <bit>
+#include <cerrno>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -17,6 +18,12 @@
 #include "af/detail/object_pool.hpp"
 #include "af/task.hpp"
 #include "absl/container/flat_hash_map.h"
+
+#if defined(__linux__)
+#include <sys/epoll.h>
+#include <sys/eventfd.h>
+#include <unistd.h>
+#endif
 
 namespace af {
 
@@ -150,6 +157,15 @@ public:
             return false;
         }
     }();
+
+    [[nodiscard]] static constexpr ThreadKind thread_kind(Thread thread) noexcept {
+        if constexpr (requires { Traits::thread_kind(thread); }) {
+            return Traits::thread_kind(thread);
+        } else {
+            static_cast<void>(thread);
+            return ThreadKind::Worker;
+        }
+    }
 
     AsyncRuntime() = delete;
 
@@ -497,6 +513,31 @@ public:
             return 0;
         }
         return ordered_batch_state_[index].last_applied_batch_id;
+    }
+
+    [[nodiscard]] static bool io_backend_available(Thread thread) noexcept {
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            return false;
+        }
+        return executors_[index]->io_backend_available();
+    }
+
+    [[nodiscard]] static bool io_wait(
+        Thread thread,
+        int fd,
+        std::uint32_t events,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || fd < 0 || events == 0U) {
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            return false;
+        }
+        return executors_[index]->register_io_wait(fd, events, task, result);
     }
 
 private:
@@ -870,11 +911,17 @@ private:
     public:
         explicit Executor(std::uint16_t index)
             : index_(index),
+              kind_(thread_kind(thread_from_index(index))),
               local_queue_(detail::next_power_of_two(spsc_queue_capacity < 2 ? 2 : spsc_queue_capacity)) {}
         Executor(const Executor&) = delete;
         Executor& operator=(const Executor&) = delete;
 
+        ~Executor() {
+            close_io_backend();
+        }
+
         void start() {
+            init_io_backend();
             worker_ = std::thread([this] {
                 run_loop();
             });
@@ -904,6 +951,63 @@ private:
                     std::memory_order_acquire)) {
                 notify_force();
             }
+        }
+
+        [[nodiscard]] bool io_backend_available() const noexcept {
+#if defined(__linux__)
+            return io_epoll_fd_ >= 0;
+#else
+            return false;
+#endif
+        }
+
+        [[nodiscard]] bool register_io_wait(
+            int fd,
+            std::uint32_t events,
+            Task* task,
+            IoResult* result) noexcept {
+            AF_ASSERT(current_thread_index_ == index_ && "io_wait must be called from its IO thread");
+            if (current_thread_index_ != index_ || task == nullptr || result == nullptr) {
+                return false;
+            }
+
+#if defined(__linux__)
+            if (io_epoll_fd_ < 0 || fd < 0 || events == 0U || io_waits_.find(fd) != io_waits_.end()) {
+                return false;
+            }
+
+            std::uint32_t native_events = EPOLLERR | EPOLLHUP | EPOLLONESHOT;
+            if ((events & io_readable) != 0U) {
+                native_events |= EPOLLIN;
+            }
+            if ((events & io_writable) != 0U) {
+                native_events |= EPOLLOUT;
+            }
+
+            epoll_event event{};
+            event.events = native_events;
+            event.data.fd = fd;
+
+            if (::epoll_ctl(io_epoll_fd_, EPOLL_CTL_ADD, fd, &event) != 0) {
+                if (errno != EEXIST ||
+                    ::epoll_ctl(io_epoll_fd_, EPOLL_CTL_MOD, fd, &event) != 0) {
+                    result->fd = fd;
+                    result->events = io_error;
+                    result->error = errno;
+                    return false;
+                }
+            }
+
+            *result = IoResult{fd, 0, 0};
+            io_waits_.emplace(fd, IoWaitRegistration{task, result});
+            return true;
+#else
+            static_cast<void>(fd);
+            static_cast<void>(events);
+            static_cast<void>(task);
+            result->error = ENOSYS;
+            return false;
+#endif
         }
 
         void mark_ready(std::uint16_t source) noexcept {
@@ -990,7 +1094,26 @@ private:
         }
 
     private:
+        [[nodiscard]] bool io_thread() const noexcept {
+            return kind_ == ThreadKind::Epoll;
+        }
+
         void notify_force() noexcept {
+#if defined(__linux__)
+            if (io_epoll_fd_ >= 0) {
+                bool expected = false;
+                if (io_wake_pending_.compare_exchange_strong(
+                        expected,
+                        true,
+                        std::memory_order_acq_rel,
+                        std::memory_order_acquire)) {
+                    const std::uint64_t value = 1;
+                    const auto written = ::write(io_wake_fd_, &value, sizeof(value));
+                    static_cast<void>(written);
+                }
+                return;
+            }
+#endif
             wake_epoch_.fetch_add(1, std::memory_order_release);
             wake_epoch_.notify_one();
         }
@@ -1012,6 +1135,10 @@ private:
                     continue;
                 }
 
+                if (poll_io(0)) {
+                    continue;
+                }
+
                 const std::uint32_t observed = wake_epoch_.load(std::memory_order_acquire);
                 sleeping_.store(true, std::memory_order_release);
                 if (stop_requested_.load(std::memory_order_acquire)) {
@@ -1022,8 +1149,12 @@ private:
                 if (Task* task = pop_one()) {
                     sleeping_.store(false, std::memory_order_relaxed);
                     execute(task);
+                } else if (poll_io(0)) {
+                    sleeping_.store(false, std::memory_order_relaxed);
                 } else {
-                    if (wake_epoch_.load(std::memory_order_acquire) == observed) {
+                    if (io_thread() && io_backend_available()) {
+                        static_cast<void>(poll_io(-1));
+                    } else if (wake_epoch_.load(std::memory_order_acquire) == observed) {
                         wake_epoch_.wait(observed, std::memory_order_acquire);
                     }
                     sleeping_.store(false, std::memory_order_relaxed);
@@ -1032,6 +1163,121 @@ private:
 
             current_thread_index_ = invalid_thread_index;
         }
+
+        void init_io_backend() noexcept {
+#if defined(__linux__)
+            if (!io_thread() || io_epoll_fd_ >= 0) {
+                return;
+            }
+
+            io_epoll_fd_ = ::epoll_create1(EPOLL_CLOEXEC);
+            if (io_epoll_fd_ < 0) {
+                return;
+            }
+
+            io_wake_fd_ = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+            if (io_wake_fd_ < 0) {
+                close_io_backend();
+                return;
+            }
+
+            epoll_event event{};
+            event.events = EPOLLIN;
+            event.data.fd = io_wake_fd_;
+            if (::epoll_ctl(io_epoll_fd_, EPOLL_CTL_ADD, io_wake_fd_, &event) != 0) {
+                close_io_backend();
+            }
+#endif
+        }
+
+        void close_io_backend() noexcept {
+#if defined(__linux__)
+            io_waits_.clear();
+            if (io_wake_fd_ >= 0) {
+                ::close(io_wake_fd_);
+                io_wake_fd_ = -1;
+            }
+            if (io_epoll_fd_ >= 0) {
+                ::close(io_epoll_fd_);
+                io_epoll_fd_ = -1;
+            }
+            io_wake_pending_.store(false, std::memory_order_relaxed);
+#endif
+        }
+
+        [[nodiscard]] bool poll_io(int timeout_ms) noexcept {
+#if defined(__linux__)
+            if (io_epoll_fd_ < 0) {
+                return false;
+            }
+
+            std::array<epoll_event, 64> events{};
+            const int count = ::epoll_wait(
+                io_epoll_fd_,
+                events.data(),
+                static_cast<int>(events.size()),
+                timeout_ms);
+            if (count <= 0) {
+                return false;
+            }
+
+            bool did_work = false;
+            for (int i = 0; i < count; ++i) {
+                const int fd = events[static_cast<std::size_t>(i)].data.fd;
+                if (fd == io_wake_fd_) {
+                    drain_io_wake();
+                    did_work = true;
+                    continue;
+                }
+
+                auto it = io_waits_.find(fd);
+                if (it == io_waits_.end()) {
+                    continue;
+                }
+
+                IoWaitRegistration registration = it->second;
+                io_waits_.erase(it);
+                static_cast<void>(::epoll_ctl(io_epoll_fd_, EPOLL_CTL_DEL, fd, nullptr));
+
+                registration.result->fd = fd;
+                registration.result->events = io_events_from_native(
+                    events[static_cast<std::size_t>(i)].events);
+                registration.result->error = 0;
+                enqueue_pending_blocking(index_, registration.task);
+                did_work = true;
+            }
+            return did_work;
+#else
+            static_cast<void>(timeout_ms);
+            return false;
+#endif
+        }
+
+#if defined(__linux__)
+        void drain_io_wake() noexcept {
+            std::uint64_t value = 0;
+            while (::read(io_wake_fd_, &value, sizeof(value)) == sizeof(value)) {
+            }
+            io_wake_pending_.store(false, std::memory_order_release);
+        }
+
+        [[nodiscard]] static std::uint32_t io_events_from_native(std::uint32_t events) noexcept {
+            std::uint32_t result = 0;
+            if ((events & EPOLLIN) != 0U) {
+                result |= io_readable;
+            }
+            if ((events & EPOLLOUT) != 0U) {
+                result |= io_writable;
+            }
+            if ((events & EPOLLERR) != 0U) {
+                result |= io_error;
+            }
+            if ((events & EPOLLHUP) != 0U) {
+                result |= io_hangup;
+            }
+            return result;
+        }
+#endif
 
         Task* pop_one() noexcept {
             if (Task* task = try_pop_local()) {
@@ -1105,6 +1351,7 @@ private:
         }
 
         std::uint16_t index_;
+        ThreadKind kind_{ThreadKind::Worker};
         std::uint16_t next_source_{0};
         std::vector<Task*> local_queue_;
         std::size_t local_head_{0};
@@ -1115,6 +1362,17 @@ private:
         alignas(detail::hardware_cache_line_size) std::atomic<std::uint32_t> wake_epoch_{0};
         std::atomic<bool> sleeping_{false};
         std::atomic<bool> stop_requested_{false};
+#if defined(__linux__)
+        struct IoWaitRegistration {
+            Task* task{nullptr};
+            IoResult* result{nullptr};
+        };
+
+        int io_epoll_fd_{-1};
+        int io_wake_fd_{-1};
+        absl::flat_hash_map<int, IoWaitRegistration> io_waits_;
+        alignas(detail::hardware_cache_line_size) std::atomic<bool> io_wake_pending_{false};
+#endif
         std::thread worker_;
     };
 

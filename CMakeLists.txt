@@ -41,6 +41,9 @@ if(ASYNCFLOW_BUILD_EXAMPLES)
 
     add_executable(asyncflow_crud_apply_example examples/crud_apply.cpp)
     target_link_libraries(asyncflow_crud_apply_example PRIVATE AsyncFlow::AsyncFlow)
+
+    add_executable(asyncflow_io_epoll_example examples/io_epoll.cpp)
+    target_link_libraries(asyncflow_io_epoll_example PRIVATE AsyncFlow::AsyncFlow)
 endif()
 
 if(ASYNCFLOW_BUILD_TESTS)
@@ -51,6 +54,7 @@ if(ASYNCFLOW_BUILD_TESTS)
     add_executable(
         asyncflow_runtime_tests
         tests/runtime_lifecycle_tests.cpp
+        tests/runtime_io_tests.cpp
         tests/runtime_parallel_tests.cpp
         tests/runtime_stress_tests.cpp
         tests/utility_tests.cpp
