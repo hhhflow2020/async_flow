@@ -20,6 +20,11 @@
 #include "af/task.hpp"
 #include "absl/container/flat_hash_map.h"
 
+#if !defined(_WIN32)
+#include <sys/socket.h>
+#include <sys/uio.h>
+#endif
+
 #if defined(__linux__)
 #include <algorithm>
 #include <linux/io_uring.h>
@@ -694,6 +699,106 @@ public:
         return executors_[index]->submit_io_uring_send(fd, data, size, flags, task, result);
     }
 
+#if !defined(_WIN32)
+    [[nodiscard]] static bool io_submit_recvmsg(
+        Thread thread,
+        int fd,
+        void* data,
+        std::size_t size,
+        sockaddr* address,
+        socklen_t* address_size,
+        std::uint32_t flags,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || fd < 0 || data == nullptr) {
+            if (result != nullptr) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = fd < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+#if defined(__linux__)
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_recvmsg(
+            fd,
+            data,
+            size,
+            address,
+            address_size,
+            flags,
+            task,
+            result);
+#else
+        static_cast<void>(thread);
+        static_cast<void>(size);
+        static_cast<void>(address);
+        static_cast<void>(address_size);
+        static_cast<void>(flags);
+        result->fd = fd;
+        result->events = io_error;
+        result->error = ENOSYS;
+        return false;
+#endif
+    }
+
+    [[nodiscard]] static bool io_submit_sendmsg(
+        Thread thread,
+        int fd,
+        const void* data,
+        std::size_t size,
+        const sockaddr* address,
+        socklen_t address_size,
+        std::uint32_t flags,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || fd < 0 || data == nullptr) {
+            if (result != nullptr) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = fd < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+#if defined(__linux__)
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_sendmsg(
+            fd,
+            data,
+            size,
+            address,
+            address_size,
+            flags,
+            task,
+            result);
+#else
+        static_cast<void>(thread);
+        static_cast<void>(size);
+        static_cast<void>(address);
+        static_cast<void>(address_size);
+        static_cast<void>(flags);
+        result->fd = fd;
+        result->events = io_error;
+        result->error = ENOSYS;
+        return false;
+#endif
+    }
+#endif
+
 private:
     enum class RuntimeStatus : std::uint8_t {
         Stopped,
@@ -1312,6 +1417,84 @@ private:
 #endif
         }
 
+#if !defined(_WIN32)
+        [[nodiscard]] bool submit_io_uring_recvmsg(
+            int fd,
+            void* data,
+            std::size_t size,
+            sockaddr* address,
+            socklen_t* address_size,
+            std::uint32_t flags,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_RECVMSG,
+                fd,
+                data,
+                size,
+                0,
+                flags,
+                io_readable,
+                task,
+                result,
+                address,
+                address_size == nullptr ? 0 : *address_size,
+                address_size);
+#else
+            static_cast<void>(fd);
+            static_cast<void>(data);
+            static_cast<void>(size);
+            static_cast<void>(address);
+            static_cast<void>(address_size);
+            static_cast<void>(flags);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
+        [[nodiscard]] bool submit_io_uring_sendmsg(
+            int fd,
+            const void* data,
+            std::size_t size,
+            const sockaddr* address,
+            socklen_t address_size,
+            std::uint32_t flags,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_SENDMSG,
+                fd,
+                const_cast<void*>(data),
+                size,
+                0,
+                flags,
+                io_writable,
+                task,
+                result,
+                const_cast<sockaddr*>(address),
+                address_size,
+                nullptr);
+#else
+            static_cast<void>(fd);
+            static_cast<void>(data);
+            static_cast<void>(size);
+            static_cast<void>(address);
+            static_cast<void>(address_size);
+            static_cast<void>(flags);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+#endif
+
         void mark_ready(std::uint16_t source) noexcept {
             if constexpr (thread_count <= 64U) {
                 const std::uint64_t bit = 1ULL << source;
@@ -1397,11 +1580,18 @@ private:
 
     private:
 #if defined(__linux__)
+        struct IoUringMessage {
+            iovec iov{};
+            msghdr header{};
+            socklen_t* address_size{nullptr};
+        };
+
         struct IoUringOperation {
             Task* task{nullptr};
             IoResult* result{nullptr};
             IoUringOperation* prev{nullptr};
             IoUringOperation* next{nullptr};
+            IoUringMessage* msg{nullptr};
             std::uint32_t complete_events{0};
         };
 #endif
@@ -1424,7 +1614,10 @@ private:
             std::uint32_t op_flags,
             std::uint32_t complete_events,
             Task* task,
-            IoResult* result) noexcept {
+            IoResult* result,
+            sockaddr* message_name = nullptr,
+            socklen_t message_name_len = 0,
+            socklen_t* message_name_len_out = nullptr) noexcept {
             AF_ASSERT(current_thread_index_ == index_ && "io_uring submit must be called from its IO thread");
             if (current_thread_index_ != index_ || task == nullptr || result == nullptr) {
                 if (result != nullptr) {
@@ -1440,13 +1633,14 @@ private:
                 result->error = fd < 0 ? EBADF : ENOSYS;
                 return false;
             }
+            const bool message_op = opcode == IORING_OP_RECVMSG || opcode == IORING_OP_SENDMSG;
             if (opcode != IORING_OP_FSYNC && data == nullptr) {
                 result->fd = fd;
                 result->events = io_error;
                 result->error = EINVAL;
                 return false;
             }
-            if (opcode != IORING_OP_FSYNC &&
+            if (opcode != IORING_OP_FSYNC && !message_op &&
                 size > static_cast<std::size_t>(std::numeric_limits<unsigned>::max())) {
                 result->fd = fd;
                 result->events = io_error;
@@ -1466,12 +1660,31 @@ private:
             operation->task = task;
             operation->result = result;
             operation->complete_events = complete_events;
+            operation->msg = nullptr;
+            if (message_op) {
+                try {
+                    operation->msg = io_uring_msg_pool_.create();
+                } catch (...) {
+                    io_uring_op_pool_.destroy(operation);
+                    result->fd = fd;
+                    result->events = io_error;
+                    result->error = ENOMEM;
+                    return false;
+                }
+                operation->msg->iov = iovec{data, size};
+                operation->msg->header = msghdr{};
+                operation->msg->header.msg_name = message_name;
+                operation->msg->header.msg_namelen = message_name_len;
+                operation->msg->header.msg_iov = &operation->msg->iov;
+                operation->msg->header.msg_iovlen = 1;
+                operation->msg->address_size = message_name_len_out;
+            }
             track_io_uring_operation(operation);
 
             io_uring_sqe* sqe = reserve_io_uring_sqe();
             if (sqe == nullptr) {
                 untrack_io_uring_operation(operation);
-                io_uring_op_pool_.destroy(operation);
+                destroy_io_uring_operation(operation);
                 result->fd = fd;
                 result->events = io_error;
                 result->error = EBUSY;
@@ -1484,6 +1697,9 @@ private:
             sqe->user_data = reinterpret_cast<std::uint64_t>(operation);
             if (opcode == IORING_OP_FSYNC) {
                 sqe->fsync_flags = op_flags;
+            } else if (message_op) {
+                sqe->addr = reinterpret_cast<std::uint64_t>(&operation->msg->header);
+                sqe->msg_flags = op_flags;
             } else if (opcode == IORING_OP_RECV || opcode == IORING_OP_SEND) {
                 sqe->addr = reinterpret_cast<std::uint64_t>(data);
                 sqe->len = static_cast<unsigned>(size);
@@ -1890,9 +2106,12 @@ private:
             } else {
                 operation->result->events = operation->complete_events;
                 operation->result->error = 0;
+                if (operation->msg != nullptr && operation->msg->address_size != nullptr) {
+                    *operation->msg->address_size = operation->msg->header.msg_namelen;
+                }
             }
             enqueue_pending_blocking(index_, operation->task);
-            io_uring_op_pool_.destroy(operation);
+            destroy_io_uring_operation(operation);
         }
 
         void track_io_uring_operation(IoUringOperation* operation) noexcept {
@@ -1924,7 +2143,7 @@ private:
                 IoUringOperation* next = operation->next;
                 operation->prev = nullptr;
                 operation->next = nullptr;
-                io_uring_op_pool_.destroy(operation);
+                destroy_io_uring_operation(operation);
                 operation = next;
             }
         }
@@ -1944,7 +2163,7 @@ private:
                 operation->prev = nullptr;
                 operation->next = nullptr;
                 if (operation == running_operation) {
-                    io_uring_op_pool_.destroy(operation);
+                    destroy_io_uring_operation(operation);
                     operation = next;
                     continue;
                 }
@@ -1953,9 +2172,17 @@ private:
                 operation->result->error = error;
                 operation->result->result = -error;
                 enqueue_pending_blocking(index_, operation->task);
-                io_uring_op_pool_.destroy(operation);
+                destroy_io_uring_operation(operation);
                 operation = next;
             }
+        }
+
+        void destroy_io_uring_operation(IoUringOperation* operation) noexcept {
+            if (operation->msg != nullptr) {
+                io_uring_msg_pool_.destroy(operation->msg);
+                operation->msg = nullptr;
+            }
+            io_uring_op_pool_.destroy(operation);
         }
 
         void drain_io_wake() noexcept {
@@ -2093,6 +2320,7 @@ private:
         std::uint32_t* io_uring_cq_ring_mask_{nullptr};
         io_uring_cqe* io_uring_cqes_{nullptr};
         IoUringOperation* io_uring_operations_{nullptr};
+        detail::ObjectPool<IoUringMessage> io_uring_msg_pool_;
         detail::ObjectPool<IoUringOperation> io_uring_op_pool_;
         alignas(detail::hardware_cache_line_size) std::atomic<bool> io_wake_pending_{false};
 #endif

@@ -517,7 +517,7 @@ auto sharded = af::split_change_batch(batch, shard_count);
 - Linux IO executor 使用 epoll + eventfd，任务先调度到指定 IO 线程后再注册 fd readiness，避免所有 IO 都通过 MPMC 队列跨线程搬运。
 - `ThreadKind::IoUring` 优先初始化 io_uring，并通过 eventfd 唤醒 completion；如果 io_uring 不可用，线程仍保留 epoll readiness fallback。
 - `af::IoFile::read_at()` / `write_at()` / `fsync()` 通过 io_uring 提交真正的文件异步操作，completion 后恢复原 task。
-- `af::TcpStream::recv_some()` / `send_some()` 在 `ThreadKind::IoUring` 线程上优先提交 `IORING_OP_RECV` / `IORING_OP_SEND`，ring 不可用或 would-block 时退回 epoll readiness。
+- `af::TcpStream::recv_some()` / `send_some()` 在 `ThreadKind::IoUring` 线程上优先提交 `IORING_OP_RECV` / `IORING_OP_SEND`；`af::UdpSocket::recv_from_some()` / `send_to_some()` 优先提交 `IORING_OP_RECVMSG` / `IORING_OP_SENDMSG`，ring 不可用或 would-block 时退回 epoll readiness。
 - `af::IoFile` / `af::TcpStream` / `af::UdpSocket` 仅保存 `thread + fd`，内联转发到 IO helper，不拥有 fd、不分配堆内存、不增加额外分支表。
 
 仍需注意：
@@ -677,7 +677,7 @@ async::parallel_shards_ordered(
 展示内容：
 
 - `af::TcpStream<AppThread>` 封装 stream socket 的 `recv/send` 状态机。
-- `af::UdpSocket<AppThread>` 封装 datagram socket 的 `recvfrom/sendto` 状态机。
+- `af::UdpSocket<AppThread>` 封装 datagram socket 的 `recvmsg/sendmsg` 或 `recvfrom/sendto` fallback 状态机。
 - fd readiness、syscall、io_uring submit/completion 和任务恢复都发生在绑定的 IO executor 上。
 
 运行方式：
@@ -702,6 +702,22 @@ async::parallel_shards_ordered(
 ./build-conan/build/Release/asyncflow_io_uring_file_example
 ```
 
+### 11.8 io_uring_datagram.cpp：UDP io_uring 业务模板
+
+文件：`examples/io_uring_datagram.cpp`
+
+该示例展示：
+
+- `ThreadKind::IoUring` 线程上用 `af::UdpSocket` 完成 client/server round trip。
+- `recv_from_some()` / `send_to_some()` 优先走 `recvmsg/sendmsg` completion，不可用时自动退回 epoll readiness。
+- 每个状态拆成成员函数，避免把业务流程揉在一个 `switch` 分支里。
+
+运行：
+
+```sh
+./build-conan/build/Release/asyncflow_io_uring_datagram_example
+```
+
 ## 12. 测试覆盖
 
 测试使用 GTest，入口目标是 `asyncflow_runtime_tests`。
@@ -712,7 +728,7 @@ async::parallel_shards_ordered(
 - `tests/runtime_parallel_tests.cpp`：parallel shards、失败汇总、有序 batch、ordered start 边界、retryable ordered apply。
 - `tests/runtime_stress_tests.cpp`：高并发 init/shutdown/start_task stress，可配合 TSAN 拉长运行。
 - `tests/utility_tests.cpp`：SPSC/MPSC/MPMC 队列、对象池、分片工具、CRUD helper、BatchSequencer、ordered retry/skip policy。
-- `tests/runtime_io_tests.cpp`：IO 线程、epoll readiness、io_uring 文件操作、io_uring TCP stream 操作、read/write/TCP/UDP helper 与 adapter、重复 fd wait、HUP/EOF、非法 fd、worker 误用和 pending IO shutdown。
+- `tests/runtime_io_tests.cpp`：IO 线程、epoll readiness、io_uring 文件操作、io_uring TCP stream 与 UDP datagram 操作、read/write/TCP/UDP helper 与 adapter、重复 fd wait、HUP/EOF、非法 fd、worker 误用和 pending IO shutdown。
 
 重点覆盖：
 
@@ -735,7 +751,7 @@ async::parallel_shards_ordered(
 - retryable ordered batch 跳过已经应用过同一 batch id 的 shard，只重跑仍落后的 shard。
 - ordered batch handler 失败时失败 shard 不推进版本。
 - epoll IO task 在 readable/writable、UDP 零长度报文、duplicate wait、peer HUP/EOF、非法 fd、adapter 边界下行为正确。
-- `ThreadKind::IoUring` 在线程上支持 epoll readiness fallback；io_uring 可用时覆盖文件 `write_at` / `fsync` / `read_at` 和 TCP `recv/send`。
+- `ThreadKind::IoUring` 在线程上支持 epoll readiness fallback；io_uring 可用时覆盖文件 `write_at` / `fsync` / `read_at`、TCP `recv/send` 和 UDP `recvmsg/sendmsg`。
 
 运行：
 
@@ -805,7 +821,7 @@ ctest --test-dir build-conan/build/Release --output-on-failure
 - `parallel_shards()` 必须在 runtime 线程中由 owner task 调用。
 - enum 必须连续递增，真实线程索引从 0 开始。
 - 业务跨线程传递应优先传 id、值对象或不可变数据，不应跨 owner thread 直接传可变业务对象引用。
-- `ThreadKind::IoUring` 依赖 Linux 内核和容器权限；不可用时 `io_uring_backend_available()` 返回 false，线程仍可作为 epoll readiness IO 线程使用，TCP helper 也会自动退回 readiness 路径。
+- `ThreadKind::IoUring` 依赖 Linux 内核和容器权限；不可用时 `io_uring_backend_available()` 返回 false，线程仍可作为 epoll readiness IO 线程使用，TCP/UDP helper 也会自动退回 readiness 路径。
 
 ## 16. CI 与后续可选增强
 

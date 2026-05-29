@@ -516,7 +516,35 @@ template <typename TaskT>
     static_cast<void>(state);
     return IoStatus::failed(ENOSYS);
 #else
+    if (detail::waiting_for_completion(state)) {
+        const IoStatus completion = detail::completed_uring_status(state);
+        if (completion.failed() && detail::io_would_block(completion.error)) {
+            return detail::arm_io_wait(task, thread, fd, io_readable, state);
+        }
+        return completion;
+    }
+    const bool resumed_from_readiness = state.waiting && state.wait_kind == IoWaitKind::Readiness;
     detail::clear_waiting(state);
+    if (!resumed_from_readiness && TaskT::Runtime::io_uring_backend_available(thread)) {
+        state.wait = IoResult{fd, 0, 0, 0};
+        if (TaskT::Runtime::io_submit_recvmsg(
+                thread,
+                fd,
+                data,
+                size,
+                address,
+                address_size,
+                0,
+                &task,
+                &state.wait)) {
+            state.waiting = true;
+            state.wait_kind = IoWaitKind::Completion;
+            return IoStatus::make_pending();
+        }
+        if (!detail::uring_submit_error_can_fallback(state.wait.error)) {
+            return IoStatus::failed(state.wait.error);
+        }
+    }
     for (;;) {
         const ssize_t n = ::recvfrom(fd, data, size, 0, address, address_size);
         if (n >= 0) {
@@ -561,7 +589,35 @@ template <typename TaskT>
     static_cast<void>(state);
     return IoStatus::failed(ENOSYS);
 #else
+    if (detail::waiting_for_completion(state)) {
+        const IoStatus completion = detail::completed_uring_status(state);
+        if (completion.failed() && detail::io_would_block(completion.error)) {
+            return detail::arm_io_wait(task, thread, fd, io_writable, state);
+        }
+        return completion;
+    }
+    const bool resumed_from_readiness = state.waiting && state.wait_kind == IoWaitKind::Readiness;
     detail::clear_waiting(state);
+    if (!resumed_from_readiness && TaskT::Runtime::io_uring_backend_available(thread)) {
+        state.wait = IoResult{fd, 0, 0, 0};
+        if (TaskT::Runtime::io_submit_sendmsg(
+                thread,
+                fd,
+                data,
+                size,
+                address,
+                address_size,
+                static_cast<std::uint32_t>(detail::io_no_signal_flag()),
+                &task,
+                &state.wait)) {
+            state.waiting = true;
+            state.wait_kind = IoWaitKind::Completion;
+            return IoStatus::make_pending();
+        }
+        if (!detail::uring_submit_error_can_fallback(state.wait.error)) {
+            return IoStatus::failed(state.wait.error);
+        }
+    }
     for (;;) {
         const ssize_t n = ::sendto(
             fd,
