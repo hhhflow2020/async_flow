@@ -36,7 +36,7 @@ using Task = Runtime::Task;
 
 ## 任务 API
 
-业务任务继承 `Runtime::Task`，通过 `schedule()` 首次调度，通过 `pending_on()` 切线程挂起，通过 `again()` 在当前线程继续，通过 `failed()` 失败结束并释放任务。`schedule()` 和 `Runtime::start_task()` 都会返回是否成功入队，队列满时不会无限增长。
+业务任务继承 `Runtime::Task`，通过 `schedule()` 首次调度，通过 `pending_on()` 切线程挂起，通过 `again()` 在当前线程继续，通过 `failed()` 失败结束并释放任务。`schedule()`、`Runtime::create_task()` 之后调用的启动函数、以及 `Runtime::start_task()` 都能表达入队是否成功，队列满时不会无限增长。
 
 ```cpp
 class LoginTask final : public Task {
@@ -70,12 +70,27 @@ private:
 };
 ```
 
+推荐的显式启动方式是先创建任务对象，再调用任务自己的启动函数；这个函数可以叫 `do_it()`，也可以是业务自定义名称，只要在函数里完成首次 `schedule()`：
+
+```cpp
+auto task = Runtime::create_task<LoginTask>();
+if (!task->do_it(player_id)) {
+    // 未调度成功时，task handle 析构会自动回收到对象池。
+}
+```
+
+保留的便捷写法等价于“创建后调用 `do_it()`”：
+
+```cpp
+Runtime::start_task<LoginTask>(player_id);
+```
+
 ## 性能边界
 
 - runtime 固定线程之间使用 bounded SPSC ring，每个 source -> target 一条队列。
 - 非 runtime 线程进入 executor 时使用 bounded MPMC ingress，用于 `start_task()` 等外部入口。
 - 队列容量由 traits 配置；`QueueFullPolicy::Reject` 直接返回失败，`QueueFullPolicy::Yield` 会让出 CPU 等待空位。
-- `start_task<T>()` 使用按任务类型分离的无锁 free-list 对象池，任务完成后回收到对应类型池。
+- `create_task<T>()` / `start_task<T>()` 使用按任务类型分离的无锁 free-list 对象池，任务完成后回收到对应类型池。
 - executor 空闲等待使用 C++20 `std::atomic::wait/notify_one`。
 - Task 生命周期由状态机保护，debug 下会检查重复调度、完成后调度、运行中重复唤醒。
 - `parallel_shards_ordered()` 会对每个 shard 维护 `last_applied_batch_id`，要求 batch id 连续递增。

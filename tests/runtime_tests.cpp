@@ -90,6 +90,63 @@ private:
     std::atomic<std::uint16_t>* ran_on_{nullptr};
 };
 
+class ManualStartTask final : public Task {
+public:
+    bool begin_on(TestThread target, std::atomic<int>* completed) {
+        completed_ = completed;
+        return schedule(target);
+    }
+
+private:
+    caf::TaskResult run() override {
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int>* completed_{nullptr};
+};
+
+class UnscheduledTask final : public Task {
+public:
+    explicit UnscheduledTask(std::atomic<int>* destroyed) : destroyed_(destroyed) {}
+
+    ~UnscheduledTask() override {
+        destroyed_->fetch_add(1, std::memory_order_release);
+    }
+
+    void configure_without_schedule() noexcept {}
+
+private:
+    caf::TaskResult run() override {
+        return failed();
+    }
+
+    std::atomic<int>* destroyed_{nullptr};
+};
+
+class TrackedDoneTask final : public Task {
+public:
+    explicit TrackedDoneTask(std::atomic<int>* destroyed) : destroyed_(destroyed) {}
+
+    ~TrackedDoneTask() override {
+        destroyed_->fetch_add(1, std::memory_order_release);
+    }
+
+    bool do_it(std::atomic<int>* completed) {
+        completed_ = completed;
+        return schedule(TestThread::Logic_0);
+    }
+
+private:
+    caf::TaskResult run() override {
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int>* destroyed_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+};
+
 class FailTask final : public Task {
 public:
     bool do_it(std::atomic<int>* completed) {
@@ -625,6 +682,44 @@ TEST_F(RuntimeFixture, OneShotTaskRunsOnRequestedThread) {
     EXPECT_EQ(ran_on.load(std::memory_order_acquire), Runtime::thread_index(TestThread::Logic_2));
 }
 
+TEST_F(RuntimeFixture, CreateTaskSupportsCustomStartFunction) {
+    std::atomic<int> completed{0};
+
+    auto task = Runtime::create_task<ManualStartTask>();
+    ASSERT_TRUE(task);
+    EXPECT_FALSE(task.scheduled());
+    ASSERT_TRUE(task->begin_on(TestThread::Logic_3, &completed));
+    EXPECT_TRUE(task.scheduled());
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+}
+
+TEST_F(RuntimeFixture, UnscheduledCreatedTaskIsDestroyedByHandle) {
+    std::atomic<int> destroyed{0};
+
+    {
+        auto task = Runtime::create_task<UnscheduledTask>(&destroyed);
+        ASSERT_TRUE(task);
+        task->configure_without_schedule();
+        EXPECT_FALSE(task.scheduled());
+    }
+
+    EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
+}
+
+TEST_F(RuntimeFixture, CreatedHandleKeepsCompletedTaskAliveUntilReset) {
+    std::atomic<int> completed{0};
+    std::atomic<int> destroyed{0};
+
+    {
+        auto task = Runtime::create_task<TrackedDoneTask>(&destroyed);
+        ASSERT_TRUE(task->do_it(&completed));
+        ASSERT_TRUE(wait_until_at_least(completed, 1));
+        EXPECT_EQ(destroyed.load(std::memory_order_acquire), 0);
+    }
+
+    EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
+}
+
 TEST_F(RuntimeFixture, FailedTaskIsReleased) {
     std::atomic<int> completed{0};
 
@@ -808,5 +903,17 @@ TEST(RuntimeShutdownTests, StartTaskFailsAndDestroysTaskWhenRuntimeIsNotInitiali
 
     std::atomic<int> destroyed{0};
     EXPECT_FALSE(NoInitRuntime::start_task<NoInitTask>(&destroyed));
+    EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
+}
+
+TEST(RuntimeShutdownTests, CreateTaskHandleDestroysTaskWhenScheduleFailsBeforeInit) {
+    NoInitRuntime::shutdown();
+
+    std::atomic<int> destroyed{0};
+    {
+        auto task = NoInitRuntime::create_task<NoInitTask>();
+        EXPECT_FALSE(task->do_it(&destroyed));
+        EXPECT_FALSE(task.scheduled());
+    }
     EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
 }

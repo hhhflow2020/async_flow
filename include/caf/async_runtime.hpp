@@ -41,6 +41,62 @@ public:
     using Thread = typename Traits::Thread;
     using Task = BasicTask<AsyncRuntime<Traits>>;
 
+    template <typename TaskT>
+    class [[nodiscard]] TaskHandle {
+    public:
+        TaskHandle() noexcept = default;
+        explicit TaskHandle(TaskT* task) noexcept : task_(task) {}
+
+        TaskHandle(const TaskHandle&) = delete;
+        TaskHandle& operator=(const TaskHandle&) = delete;
+
+        TaskHandle(TaskHandle&& other) noexcept : task_(std::exchange(other.task_, nullptr)) {}
+
+        TaskHandle& operator=(TaskHandle&& other) noexcept {
+            if (this != &other) {
+                reset();
+                task_ = std::exchange(other.task_, nullptr);
+            }
+            return *this;
+        }
+
+        ~TaskHandle() {
+            reset();
+        }
+
+        [[nodiscard]] TaskT* get() const noexcept {
+            return task_;
+        }
+
+        [[nodiscard]] TaskT& operator*() const noexcept {
+            CAF_ASSERT(task_ != nullptr);
+            return *task_;
+        }
+
+        [[nodiscard]] TaskT* operator->() const noexcept {
+            CAF_ASSERT(task_ != nullptr);
+            return task_;
+        }
+
+        [[nodiscard]] explicit operator bool() const noexcept {
+            return task_ != nullptr;
+        }
+
+        [[nodiscard]] bool scheduled() const noexcept {
+            return task_ != nullptr && !AsyncRuntime::is_task_created(task_);
+        }
+
+        void reset() noexcept {
+            if (task_ != nullptr) {
+                AsyncRuntime::release_task_handle(task_);
+                task_ = nullptr;
+            }
+        }
+
+    private:
+        TaskT* task_{nullptr};
+    };
+
     static constexpr std::uint16_t thread_count = Traits::thread_count;
     static constexpr std::uint16_t invalid_thread_index = thread_count;
     static constexpr std::size_t spsc_queue_capacity = [] {
@@ -111,36 +167,26 @@ public:
         initialized_.store(false, std::memory_order_release);
     }
 
+    template <typename TaskT, typename... CtorArgs>
+    [[nodiscard]] static TaskHandle<TaskT> create_task(CtorArgs&&... ctor_args) {
+        static_assert(std::is_base_of_v<Task, TaskT>, "TaskT must derive from Runtime::Task");
+        auto* task = allocate_task<TaskT>(std::forward<CtorArgs>(ctor_args)...);
+        task->attach_start_handle();
+        return TaskHandle<TaskT>(task);
+    }
+
     template <typename TaskT, typename... Args>
     [[nodiscard]] static bool start_task(Args&&... args) {
         static_assert(std::is_base_of_v<Task, TaskT>, "TaskT must derive from Runtime::Task");
-        auto* task = create_task<TaskT>();
-        using DoItResult = decltype(task->do_it(std::declval<Args>()...));
+        auto task = create_task<TaskT>();
+        using DoItResult = decltype(task.get()->do_it(std::declval<Args>()...));
 
         if constexpr (std::is_void_v<DoItResult>) {
-            try {
-                task->do_it(std::forward<Args>(args)...);
-            } catch (...) {
-                task->destroy_self();
-                throw;
-            }
-            if (task->is_created()) {
-                task->destroy_self();
-                return false;
-            }
-            return true;
+            task->do_it(std::forward<Args>(args)...);
+            return task.scheduled();
         } else {
-            bool ok = false;
-            try {
-                ok = static_cast<bool>(task->do_it(std::forward<Args>(args)...));
-            } catch (...) {
-                task->destroy_self();
-                throw;
-            }
-            if (!ok && task->is_created()) {
-                task->destroy_self();
-            }
-            return ok;
+            const bool ok = static_cast<bool>(task->do_it(std::forward<Args>(args)...));
+            return ok && task.scheduled();
         }
     }
 
@@ -252,10 +298,10 @@ public:
     template <typename StreamTag, typename ApplyTaskT, typename Batch>
     [[nodiscard]] static bool start_ordered_task(Thread sequencer_thread, Batch&& batch) {
         using BatchT = std::decay_t<Batch>;
-        auto* task = create_task<OrderedStartTask<StreamTag, ApplyTaskT, BatchT>>();
+        auto* task = allocate_task<OrderedStartTask<StreamTag, ApplyTaskT, BatchT>>();
         const bool ok = task->do_it(sequencer_thread, std::forward<Batch>(batch));
         if (!ok && task->is_created()) {
-            task->destroy_self();
+            task->release_lifetime_ref();
         }
         return ok;
     }
@@ -503,14 +549,14 @@ private:
 
             Task* shard_task = nullptr;
             if constexpr (Ordered) {
-                shard_task = create_task<ShardTask<Op, HandlerT, true>>(
+                shard_task = allocate_task<ShardTask<Op, HandlerT, true>>(
                     group,
                     i,
                     batch_id,
                     std::move(sharded_ops.shards[i]),
                     HandlerT(handler));
             } else {
-                shard_task = create_task<ShardTask<Op, HandlerT, false>>(
+                shard_task = allocate_task<ShardTask<Op, HandlerT, false>>(
                     group,
                     i,
                     0,
@@ -673,7 +719,7 @@ private:
             const std::uint16_t requested = task->take_requested_thread();
             CAF_ASSERT(requested == invalid_thread_index);
             task->state_.store(TaskState::Done, std::memory_order_release);
-            task->destroy_self();
+            task->release_lifetime_ref();
         }
 
         void finish_pending(Task* task) noexcept {
@@ -713,7 +759,7 @@ private:
     }
 
     template <typename TaskT, typename... Args>
-    [[nodiscard]] static TaskT* create_task(Args&&... args) {
+    [[nodiscard]] static TaskT* allocate_task(Args&&... args) {
         auto* task = task_pool<TaskT>().create(std::forward<Args>(args)...);
         task->set_destroy_fn(&destroy_task<TaskT>);
         return task;
@@ -722,6 +768,22 @@ private:
     template <typename TaskT>
     static void destroy_task(Task* task) noexcept {
         task_pool<TaskT>().destroy(static_cast<TaskT*>(task));
+    }
+
+    [[nodiscard]] static bool is_task_created(Task* task) noexcept {
+        return task != nullptr && task->is_created();
+    }
+
+    static void release_task_handle(Task* task) noexcept {
+        if (task == nullptr) {
+            return;
+        }
+
+        const TaskState state = task->state_.load(std::memory_order_acquire);
+        task->release_lifetime_ref();
+        if (state == TaskState::Created) {
+            task->release_lifetime_ref();
+        }
     }
 
     static void init_queues() {

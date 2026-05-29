@@ -116,9 +116,23 @@ private:
         destroy_fn_ = destroy_fn;
     }
 
+    void attach_start_handle() noexcept {
+        add_lifetime_ref();
+    }
+
     void destroy_self() noexcept {
         CAF_ASSERT(destroy_fn_ != nullptr);
         destroy_fn_(this);
+    }
+
+    void add_lifetime_ref() noexcept {
+        lifetime_refs_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    void release_lifetime_ref() noexcept {
+        if (lifetime_refs_.fetch_sub(1, std::memory_order_acq_rel) == 1U) {
+            destroy_self();
+        }
     }
 
     detail::ScheduleRequest request_schedule(std::uint16_t thread_index) noexcept {
@@ -193,6 +207,7 @@ private:
 
     std::atomic<TaskState> state_{TaskState::Created};
     std::atomic<std::uint32_t> requested_thread_{detail::no_requested_thread};
+    std::atomic<std::uint32_t> lifetime_refs_{1};
     std::uint32_t last_parallel_failures_{0};
     DestroyFn destroy_fn_{nullptr};
 

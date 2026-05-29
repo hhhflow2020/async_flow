@@ -38,12 +38,11 @@ static AppThread player_thread(std::uint64_t player_id) noexcept {
 
 class AddGoldTask final : public Task {
 public:
-    void do_it(std::uint64_t player_id, int gold, std::atomic<int>* completed) {
+    bool do_it(std::uint64_t player_id, int gold, std::atomic<int>* completed) {
         player_id_ = player_id;
         gold_ = gold;
         completed_ = completed;
-        [[maybe_unused]] const bool scheduled = schedule(player_thread(player_id_));
-        CAF_ASSERT(scheduled);
+        return schedule(player_thread(player_id_));
     }
 
 private:
@@ -111,8 +110,11 @@ int main() {
     Runtime::init();
 
     std::atomic<int> completed{0};
-    [[maybe_unused]] const bool add_started =
-        Runtime::start_task<AddGoldTask>(1001U, 100, &completed);
+    bool add_started = false;
+    {
+        auto add_task = Runtime::create_task<AddGoldTask>();
+        add_started = add_task->do_it(1001U, 100, &completed);
+    }
     [[maybe_unused]] const bool login_started = Runtime::start_task<LoginTask>(1002U, &completed);
     CAF_ASSERT(add_started);
     CAF_ASSERT(login_started);
