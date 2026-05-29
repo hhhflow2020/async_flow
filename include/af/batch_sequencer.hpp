@@ -29,7 +29,10 @@ public:
         }
 
         if (batch_id > next_batch_id_) {
-            pending_.emplace(batch_id, std::move(batch));
+            const auto [_, inserted] = pending_.emplace(batch_id, std::move(batch));
+            if (!inserted) {
+                return BatchSubmitStatus::Duplicate;
+            }
             return BatchSubmitStatus::Buffered;
         }
 

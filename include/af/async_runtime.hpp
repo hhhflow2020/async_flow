@@ -99,6 +99,8 @@ public:
 
     static constexpr std::uint16_t thread_count = Traits::thread_count;
     static constexpr std::uint16_t invalid_thread_index = thread_count;
+    static_assert(thread_count > 0, "AsyncRuntime requires at least one fixed thread");
+
     static constexpr std::size_t spsc_queue_capacity = [] {
         if constexpr (requires { Traits::spsc_queue_capacity; }) {
             return static_cast<std::size_t>(Traits::spsc_queue_capacity);
@@ -124,17 +126,17 @@ public:
     AsyncRuntime() = delete;
 
     static void init() {
-        bool expected = false;
-        if (!initialized_.compare_exchange_strong(
+        RuntimeStatus expected = RuntimeStatus::Stopped;
+        if (!status_.compare_exchange_strong(
                 expected,
-                true,
+                RuntimeStatus::Starting,
                 std::memory_order_acq_rel,
                 std::memory_order_acquire)) {
             return;
         }
 
-        stopping_.store(false, std::memory_order_release);
         ordered_batch_state_.assign(thread_count, OrderedBatchState{});
+        generation_.fetch_add(1, std::memory_order_acq_rel);
         init_queues();
         executors_.clear();
         executors_.reserve(thread_count);
@@ -144,14 +146,21 @@ public:
         for (auto& executor : executors_) {
             executor->start();
         }
+        status_.store(RuntimeStatus::Running, std::memory_order_release);
     }
 
     static void shutdown() {
-        if (!initialized_.load(std::memory_order_acquire)) {
+        RuntimeStatus expected = RuntimeStatus::Running;
+        if (!status_.compare_exchange_strong(
+                expected,
+                RuntimeStatus::Stopping,
+                std::memory_order_acq_rel,
+                std::memory_order_acquire)) {
             return;
         }
 
-        stopping_.store(true, std::memory_order_release);
+        wait_for_active_posts();
+
         for (auto& executor : executors_) {
             executor->request_stop();
         }
@@ -163,8 +172,7 @@ public:
         spsc_queues_.clear();
         external_queues_.clear();
         ordered_batch_state_.clear();
-        stopping_.store(false, std::memory_order_release);
-        initialized_.store(false, std::memory_order_release);
+        status_.store(RuntimeStatus::Stopped, std::memory_order_release);
     }
 
     template <typename TaskT, typename... CtorArgs>
@@ -196,16 +204,14 @@ public:
     }
 
     static bool post(Thread thread, Task* task) noexcept {
-        if (task == nullptr || !initialized_.load(std::memory_order_acquire)) {
-            return false;
-        }
-        if (stopping_.load(std::memory_order_acquire)) {
+        if (task == nullptr || !try_enter_post()) {
             return false;
         }
 
         const std::uint16_t index = thread_index(thread);
         if (index >= thread_count) {
             AF_ASSERT(false && "invalid thread index");
+            leave_post();
             return false;
         }
 
@@ -215,9 +221,12 @@ public:
             if (!enqueued) {
                 task->cancel_schedule(request.previous);
             }
+            leave_post();
             return enqueued;
         }
-        return request.action == detail::ScheduleAction::Deferred;
+        const bool deferred = request.action == detail::ScheduleAction::Deferred;
+        leave_post();
+        return deferred;
     }
 
     [[nodiscard]] static Thread current_thread() noexcept {
@@ -229,7 +238,7 @@ public:
     }
 
     [[nodiscard]] static bool is_stopping() noexcept {
-        return stopping_.load(std::memory_order_acquire);
+        return status_.load(std::memory_order_acquire) == RuntimeStatus::Stopping;
     }
 
     [[nodiscard]] static std::uint16_t current_thread_index() noexcept {
@@ -249,7 +258,8 @@ public:
     [[nodiscard]] static constexpr Thread shard_by(Key key) noexcept {
         static_assert(Count > 0);
         const auto begin = thread_index(Begin);
-        const auto shard = static_cast<std::uint16_t>(key % Count);
+        const auto value = static_cast<std::uint64_t>(key);
+        const auto shard = static_cast<std::uint16_t>(value % Count);
         return thread_from_index(static_cast<std::uint16_t>(begin + shard));
     }
 
@@ -258,9 +268,15 @@ public:
         std::vector<Op>&& ops,
         std::uint16_t shard_count,
         KeyFn&& key_fn) {
+        AF_ASSERT(shard_count > 0);
         ShardedOps<Op> sharded(shard_count);
+        if (shard_count == 0) {
+            return sharded;
+        }
+
         for (auto& op : ops) {
-            const std::uint16_t shard = static_cast<std::uint16_t>(key_fn(op) % shard_count);
+            const auto key = static_cast<std::uint64_t>(key_fn(op));
+            const std::uint16_t shard = static_cast<std::uint16_t>(key % shard_count);
             sharded.shards[shard].push_back(std::move(op));
         }
         return sharded;
@@ -312,6 +328,13 @@ public:
     }
 
 private:
+    enum class RuntimeStatus : std::uint8_t {
+        Stopped,
+        Starting,
+        Running,
+        Stopping,
+    };
+
     struct alignas(detail::hardware_cache_line_size) OrderedBatchState {
         std::uint64_t last_applied_batch_id{0};
     };
@@ -322,6 +345,13 @@ private:
         std::uint16_t resume_thread{invalid_thread_index};
         std::atomic<std::uint32_t> failed{0};
 
+        void init(std::uint32_t target_count, Task* group_owner, std::uint16_t group_resume_thread) noexcept {
+            pending.store(target_count, std::memory_order_relaxed);
+            owner = group_owner;
+            resume_thread = group_resume_thread;
+            failed.store(0, std::memory_order_relaxed);
+        }
+
         void complete(bool ok) noexcept {
             if (!ok) {
                 failed.fetch_add(1, std::memory_order_relaxed);
@@ -331,7 +361,7 @@ private:
                     owner->set_last_parallel_failures(failed.load(std::memory_order_acquire));
                     post_blocking(thread_from_index(resume_thread), owner);
                 }
-                delete this;
+                destroy_parallel_group(this);
             }
         }
     };
@@ -339,7 +369,14 @@ private:
     template <typename StreamTag, typename ApplyTaskT, typename BatchT>
     struct OrderedStartState {
         std::uint64_t next_batch_id{1};
+        std::uint64_t generation{0};
         std::map<std::uint64_t, BatchT> pending;
+
+        void reset(std::uint64_t runtime_generation) {
+            next_batch_id = 1;
+            generation = runtime_generation;
+            pending.clear();
+        }
 
         void submit(BatchT batch) {
             const std::uint64_t batch_id = batch.batch_id;
@@ -378,7 +415,14 @@ private:
 
     template <typename StreamTag, typename ApplyTaskT, typename BatchT>
     [[nodiscard]] static OrderedStartState<StreamTag, ApplyTaskT, BatchT>& ordered_start_state() {
-        static OrderedStartState<StreamTag, ApplyTaskT, BatchT> state;
+        static std::vector<OrderedStartState<StreamTag, ApplyTaskT, BatchT>> states(thread_count);
+        const std::uint16_t index = current_thread_index();
+        AF_ASSERT(index < states.size());
+        auto& state = states[index];
+        const std::uint64_t runtime_generation = generation_.load(std::memory_order_acquire);
+        if (state.generation != runtime_generation) {
+            state.reset(runtime_generation);
+        }
         return state;
     }
 
@@ -540,15 +584,11 @@ private:
         }
 
         if (target_count == 0) {
-            [[maybe_unused]] const bool posted = post(current_thread(), owner);
-            AF_ASSERT(posted);
+            post_blocking(current_thread(), owner);
             return;
         }
 
-        auto* group = new ParallelGroup();
-        group->pending.store(target_count, std::memory_order_relaxed);
-        group->owner = owner;
-        group->resume_thread = current_thread_index();
+        auto* group = create_parallel_group(target_count, owner, current_thread_index());
 
         using HandlerT = std::decay_t<Handler>;
         for (std::uint16_t i = 0; i < shard_count; ++i) {
@@ -580,7 +620,9 @@ private:
 
     class alignas(detail::hardware_cache_line_size) Executor {
     public:
-        explicit Executor(std::uint16_t index) noexcept : index_(index) {}
+        explicit Executor(std::uint16_t index)
+            : index_(index),
+              local_queue_(detail::next_power_of_two(spsc_queue_capacity < 2 ? 2 : spsc_queue_capacity)) {}
         Executor(const Executor&) = delete;
         Executor& operator=(const Executor&) = delete;
 
@@ -612,6 +654,64 @@ private:
                 ready_sources_.fetch_or(1ULL << source, std::memory_order_release);
             } else {
                 static_cast<void>(source);
+            }
+        }
+
+        [[nodiscard]] bool try_push_local(Task* task) noexcept {
+            if (local_size_ == local_queue_.size()) {
+                return false;
+            }
+
+            local_queue_[local_tail_ & (local_queue_.size() - 1U)] = task;
+            ++local_tail_;
+            ++local_size_;
+            return true;
+        }
+
+        [[nodiscard]] Task* try_pop_local() noexcept {
+            if (local_size_ == 0) {
+                return nullptr;
+            }
+
+            Task* task = local_queue_[local_head_ & (local_queue_.size() - 1U)];
+            ++local_head_;
+            --local_size_;
+            return task;
+        }
+
+        void execute(Task* task) noexcept {
+            const TaskState previous = task->state_.exchange(
+                TaskState::Running,
+                std::memory_order_acq_rel);
+            AF_ASSERT(previous == TaskState::Queued);
+            if (previous != TaskState::Queued) {
+                return;
+            }
+
+            TaskResult result = TaskResult::Done;
+            try {
+                result = task->run();
+            } catch (...) {
+                AF_ASSERT(false && "task::run must not throw");
+                result = TaskResult::Done;
+            }
+
+            switch (result) {
+            case TaskResult::Done:
+                finish_done(task);
+                break;
+            case TaskResult::Pending:
+                finish_pending(task);
+                break;
+            case TaskResult::Again:
+                finish_again(task);
+                break;
+            case TaskResult::Failed:
+                finish_done(task);
+                break;
+            case TaskResult::Cancelled:
+                finish_done(task);
+                break;
             }
         }
 
@@ -652,6 +752,10 @@ private:
         }
 
         Task* pop_one() noexcept {
+            if (Task* task = try_pop_local()) {
+                return task;
+            }
+
             if constexpr (thread_count <= 64U) {
                 std::uint64_t mask = ready_sources_.load(std::memory_order_acquire);
                 while (mask != 0U) {
@@ -688,42 +792,6 @@ private:
             return nullptr;
         }
 
-        void execute(Task* task) noexcept {
-            const TaskState previous = task->state_.exchange(
-                TaskState::Running,
-                std::memory_order_acq_rel);
-            AF_ASSERT(previous == TaskState::Queued);
-            if (previous != TaskState::Queued) {
-                return;
-            }
-
-            TaskResult result = TaskResult::Done;
-            try {
-                result = task->run();
-            } catch (...) {
-                AF_ASSERT(false && "task::run must not throw");
-                result = TaskResult::Done;
-            }
-
-            switch (result) {
-            case TaskResult::Done:
-                finish_done(task);
-                break;
-            case TaskResult::Pending:
-                finish_pending(task);
-                break;
-            case TaskResult::Again:
-                finish_again(task);
-                break;
-            case TaskResult::Failed:
-                finish_done(task);
-                break;
-            case TaskResult::Cancelled:
-                finish_done(task);
-                break;
-            }
-        }
-
         void finish_done(Task* task) noexcept {
             const std::uint16_t requested = task->take_requested_thread();
             AF_ASSERT(requested == invalid_thread_index);
@@ -748,6 +816,10 @@ private:
 
         std::uint16_t index_;
         std::uint16_t next_source_{0};
+        std::vector<Task*> local_queue_;
+        std::size_t local_head_{0};
+        std::size_t local_tail_{0};
+        std::size_t local_size_{0};
         alignas(detail::hardware_cache_line_size) std::atomic<std::uint64_t> ready_sources_{0};
         alignas(detail::hardware_cache_line_size) std::atomic<std::uint32_t> wake_epoch_{0};
         std::atomic<bool> sleeping_{false};
@@ -756,15 +828,35 @@ private:
     };
 
     using SpscQueue = detail::BoundedSpscQueue<Task>;
-    using ExternalQueue = detail::BoundedMpmcQueue<Task>;
+    using ExternalQueue = detail::BoundedMpscQueue<Task>;
 
     template <typename TaskT>
     using TaskPool = detail::ObjectPool<TaskT>;
+
+    using ParallelGroupPool = detail::ObjectPool<ParallelGroup>;
 
     template <typename TaskT>
     [[nodiscard]] static TaskPool<TaskT>& task_pool() {
         static TaskPool<TaskT> pool;
         return pool;
+    }
+
+    [[nodiscard]] static ParallelGroupPool& parallel_group_pool() {
+        static ParallelGroupPool pool;
+        return pool;
+    }
+
+    [[nodiscard]] static ParallelGroup* create_parallel_group(
+        std::uint32_t target_count,
+        Task* owner,
+        std::uint16_t resume_thread) {
+        auto* group = parallel_group_pool().create();
+        group->init(target_count, owner, resume_thread);
+        return group;
+    }
+
+    static void destroy_parallel_group(ParallelGroup* group) noexcept {
+        parallel_group_pool().destroy(group);
     }
 
     template <typename TaskT, typename... Args>
@@ -857,6 +949,10 @@ private:
         std::uint16_t source,
         std::uint16_t target,
         Task* task) noexcept {
+        if (source == target) {
+            return executors_[target]->try_push_local(task);
+        }
+
         const bool ok = spsc_queue(source, target).try_push(task);
         if (ok) {
             mark_source_ready(source, target);
@@ -881,6 +977,18 @@ private:
         std::uint16_t source,
         std::uint16_t target,
         Task* task) noexcept {
+        if (source == target) {
+            Executor& executor = *executors_[target];
+            while (!executor.try_push_local(task)) {
+                if (Task* ready = executor.try_pop_local()) {
+                    executor.execute(ready);
+                } else {
+                    std::this_thread::yield();
+                }
+            }
+            return;
+        }
+
         while (!spsc_queue(source, target).try_push(task)) {
             std::this_thread::yield();
         }
@@ -914,8 +1022,39 @@ private:
         enqueue_ready_blocking(index, task);
     }
 
-    static inline std::atomic<bool> initialized_{false};
-    static inline std::atomic<bool> stopping_{false};
+    [[nodiscard]] static bool try_enter_post() noexcept {
+        if (status_.load(std::memory_order_acquire) != RuntimeStatus::Running) {
+            return false;
+        }
+
+        active_posts_.fetch_add(1, std::memory_order_acq_rel);
+        if (status_.load(std::memory_order_acquire) == RuntimeStatus::Running) {
+            return true;
+        }
+
+        leave_post();
+        return false;
+    }
+
+    static void leave_post() noexcept {
+        if (active_posts_.fetch_sub(1, std::memory_order_acq_rel) == 1U) {
+            active_posts_.notify_all();
+        }
+    }
+
+    static void wait_for_active_posts() noexcept {
+        for (;;) {
+            const std::uint32_t count = active_posts_.load(std::memory_order_acquire);
+            if (count == 0) {
+                return;
+            }
+            active_posts_.wait(count, std::memory_order_acquire);
+        }
+    }
+
+    static inline std::atomic<RuntimeStatus> status_{RuntimeStatus::Stopped};
+    static inline std::atomic<std::uint32_t> active_posts_{0};
+    static inline std::atomic<std::uint64_t> generation_{0};
     static inline std::vector<std::unique_ptr<Executor>> executors_;
     static inline std::vector<std::unique_ptr<SpscQueue>> spsc_queues_;
     static inline std::vector<std::unique_ptr<ExternalQueue>> external_queues_;

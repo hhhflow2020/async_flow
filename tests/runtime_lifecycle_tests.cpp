@@ -4,14 +4,10 @@
 #include <cstdint>
 #include <thread>
 #include <type_traits>
-#include <vector>
 
 #include <gtest/gtest.h>
 
-#include "af/batch_sequencer.hpp"
 #include "af/async_flow.hpp"
-#include "af/detail/bounded_queues.hpp"
-#include "af/detail/object_pool.hpp"
 
 namespace {
 
@@ -19,18 +15,6 @@ template <typename T>
 bool wait_until_at_least(std::atomic<T>& value, T expected) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (value.load(std::memory_order_acquire) < expected) {
-        if (std::chrono::steady_clock::now() > deadline) {
-            return false;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    return true;
-}
-
-template <typename T>
-bool wait_until_equal(std::atomic<T>& value, T expected) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (value.load(std::memory_order_acquire) != expected) {
         if (std::chrono::steady_clock::now() > deadline) {
             return false;
         }
@@ -246,240 +230,6 @@ private:
     std::array<std::atomic<std::uint16_t>, 4>* seen_{nullptr};
 };
 
-class ParallelTask final : public Task {
-public:
-    explicit ParallelTask(Task::FactoryToken token) : Task(token) {}
-
-    bool do_it(
-        af::ParallelMode mode,
-        std::atomic<int>* completed,
-        std::array<std::atomic<int>, 4>* shard_hits,
-        std::atomic<int>* sum) {
-        mode_ = mode;
-        completed_ = completed;
-        shard_hits_ = shard_hits;
-        sum_ = sum;
-
-        ops_ = af::ShardedOps<int>(4);
-        ops_.shards[0] = {1};
-        ops_.shards[2] = {2, 3};
-        return schedule(TestThread::Logic_0);
-    }
-
-private:
-    enum class State : std::uint8_t {
-        Split,
-        Finish,
-    };
-
-    af::TaskResult run() override {
-        switch (state_) {
-        case State::Split:
-            state_ = State::Finish;
-            Runtime::parallel_shards(
-                TestThread::Logic_0,
-                ops_,
-                mode_,
-                this,
-                [this](std::uint16_t shard, std::vector<int>& shard_ops) {
-                    (*shard_hits_)[shard].fetch_add(1, std::memory_order_relaxed);
-                    int local_sum = 0;
-                    for (int value : shard_ops) {
-                        local_sum += value;
-                    }
-                    sum_->fetch_add(local_sum, std::memory_order_relaxed);
-                });
-            return pending();
-
-        case State::Finish:
-            completed_->fetch_add(1, std::memory_order_release);
-            return done();
-        }
-
-        return failed();
-    }
-
-    State state_{State::Split};
-    af::ParallelMode mode_{af::ParallelMode::NonEmptyOnly};
-    af::ShardedOps<int> ops_{4};
-    std::atomic<int>* completed_{nullptr};
-    std::array<std::atomic<int>, 4>* shard_hits_{nullptr};
-    std::atomic<int>* sum_{nullptr};
-};
-
-class ParallelFailureTask final : public Task {
-public:
-    explicit ParallelFailureTask(Task::FactoryToken token) : Task(token) {}
-
-    bool do_it(std::atomic<int>* completed, std::atomic<std::uint32_t>* failures) {
-        completed_ = completed;
-        failures_ = failures;
-
-        ops_ = af::ShardedOps<int>(4);
-        ops_.shards[0] = {1};
-        ops_.shards[1] = {2};
-        return schedule(TestThread::Logic_0);
-    }
-
-private:
-    enum class State : std::uint8_t {
-        Split,
-        Finish,
-    };
-
-    af::TaskResult run() override {
-        switch (state_) {
-        case State::Split:
-            state_ = State::Finish;
-            Runtime::parallel_shards(
-                TestThread::Logic_0,
-                ops_,
-                af::ParallelMode::NonEmptyOnly,
-                this,
-                [](std::uint16_t shard, std::vector<int>&) {
-                    return shard != 1;
-                });
-            return pending();
-
-        case State::Finish:
-            failures_->store(last_parallel_failures(), std::memory_order_release);
-            completed_->fetch_add(1, std::memory_order_release);
-            return done();
-        }
-
-        return failed();
-    }
-
-    State state_{State::Split};
-    af::ShardedOps<int> ops_{4};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<std::uint32_t>* failures_{nullptr};
-};
-
-class EmptyParallelTask final : public Task {
-public:
-    explicit EmptyParallelTask(Task::FactoryToken token) : Task(token) {}
-
-    bool do_it(std::atomic<int>* completed) {
-        completed_ = completed;
-        ops_ = af::ShardedOps<int>(4);
-        return schedule(TestThread::Logic_0);
-    }
-
-private:
-    enum class State : std::uint8_t {
-        Split,
-        Finish,
-    };
-
-    af::TaskResult run() override {
-        switch (state_) {
-        case State::Split:
-            state_ = State::Finish;
-            Runtime::parallel_shards(
-                TestThread::Logic_0,
-                ops_,
-                af::ParallelMode::NonEmptyOnly,
-                this,
-                [](std::uint16_t, std::vector<int>&) { FAIL() << "empty shards should skip"; });
-            return pending();
-
-        case State::Finish:
-            completed_->fetch_add(1, std::memory_order_release);
-            return done();
-        }
-
-        return failed();
-    }
-
-    State state_{State::Split};
-    af::ShardedOps<int> ops_{4};
-    std::atomic<int>* completed_{nullptr};
-};
-
-class OrderedTask final : public Task {
-public:
-    explicit OrderedTask(Task::FactoryToken token) : Task(token) {}
-
-    bool do_it(
-        std::uint64_t batch_id,
-        std::atomic<int>* completed,
-        std::array<std::atomic<int>, 4>* shard_hits,
-        std::array<std::atomic<std::uint64_t>, 4>* batch_seen) {
-        batch_id_ = batch_id;
-        completed_ = completed;
-        shard_hits_ = shard_hits;
-        batch_seen_ = batch_seen;
-        ops_ = af::ShardedOps<int>(4);
-        ops_.shards[0] = {7};
-        return schedule(TestThread::Logic_0);
-    }
-
-private:
-    enum class State : std::uint8_t {
-        Apply,
-        Finish,
-    };
-
-    af::TaskResult run() override {
-        switch (state_) {
-        case State::Apply:
-            state_ = State::Finish;
-            Runtime::parallel_shards_ordered(
-                TestThread::Logic_0,
-                ops_,
-                batch_id_,
-                this,
-                [this](std::uint16_t shard, std::vector<int>&, std::uint64_t batch_id) {
-                    (*shard_hits_)[shard].fetch_add(1, std::memory_order_relaxed);
-                    (*batch_seen_)[shard].store(batch_id, std::memory_order_release);
-                });
-            return pending();
-
-        case State::Finish:
-            completed_->fetch_add(1, std::memory_order_release);
-            return done();
-        }
-
-        return failed();
-    }
-
-    State state_{State::Apply};
-    std::uint64_t batch_id_{0};
-    af::ShardedOps<int> ops_{4};
-    std::atomic<int>* completed_{nullptr};
-    std::array<std::atomic<int>, 4>* shard_hits_{nullptr};
-    std::array<std::atomic<std::uint64_t>, 4>* batch_seen_{nullptr};
-};
-
-struct OrderedStartStream {};
-
-struct OrderedStartBatch {
-    std::uint64_t batch_id{0};
-    int value{0};
-    std::vector<int>* applied{nullptr};
-    std::atomic<int>* completed{nullptr};
-};
-
-class OrderedStartApplyTask final : public Task {
-public:
-    explicit OrderedStartApplyTask(Task::FactoryToken token) : Task(token) {}
-
-    bool do_it(OrderedStartBatch batch) {
-        batch_ = batch;
-        return schedule(TestThread::Logic_0);
-    }
-
-private:
-    af::TaskResult run() override {
-        batch_.applied->push_back(batch_.value);
-        batch_.completed->fetch_add(1, std::memory_order_release);
-        return done();
-    }
-
-    OrderedStartBatch batch_;
-};
-
 enum class TinyThread : std::uint16_t {
     Logic_0,
     enum_num_end,
@@ -586,6 +336,34 @@ private:
     std::atomic<int>* completed_{nullptr};
 };
 
+class YieldFanoutTask final : public YieldTask {
+public:
+    explicit YieldFanoutTask(YieldTask::FactoryToken token) : YieldTask(token) {}
+
+    bool do_it(int child_count, std::atomic<int>* completed, std::atomic<bool>* all_started) {
+        child_count_ = child_count;
+        completed_ = completed;
+        all_started_ = all_started;
+        return schedule(YieldThread::Logic_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        for (int i = 0; i < child_count_; ++i) {
+            if (!YieldRuntime::start_task<YieldCountTask>(YieldThread::Logic_0, completed_)) {
+                all_started_->store(false, std::memory_order_release);
+                return failed();
+            }
+        }
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    int child_count_{0};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<bool>* all_started_{nullptr};
+};
+
 enum class NoInitThread : std::uint16_t {
     Logic_0,
     enum_num_end,
@@ -627,86 +405,6 @@ static_assert(!std::is_constructible_v<UnscheduledTask, std::atomic<int>*>);
 static_assert(!std::is_default_constructible_v<NoInitTask>);
 
 } // namespace
-
-TEST(QueueTests, BoundedSpscPreservesFifoAndRejectsWhenFull) {
-    af::detail::BoundedSpscQueue<int> queue(2);
-    int a = 1;
-    int b = 2;
-    int c = 3;
-
-    EXPECT_TRUE(queue.try_push(&a));
-    EXPECT_TRUE(queue.try_push(&b));
-    EXPECT_FALSE(queue.try_push(&c));
-    EXPECT_EQ(queue.try_pop(), &a);
-    EXPECT_EQ(queue.try_pop(), &b);
-    EXPECT_EQ(queue.try_pop(), nullptr);
-    EXPECT_TRUE(queue.try_push(&c));
-    EXPECT_EQ(queue.try_pop(), &c);
-}
-
-TEST(QueueTests, BoundedMpmcRejectsWhenFull) {
-    af::detail::BoundedMpmcQueue<int> queue(2);
-    int a = 1;
-    int b = 2;
-    int c = 3;
-
-    EXPECT_TRUE(queue.try_push(&a));
-    EXPECT_TRUE(queue.try_push(&b));
-    EXPECT_FALSE(queue.try_push(&c));
-    EXPECT_EQ(queue.try_pop(), &a);
-    EXPECT_EQ(queue.try_pop(), &b);
-    EXPECT_EQ(queue.try_pop(), nullptr);
-}
-
-TEST(PoolTests, ObjectPoolReusesReleasedStorage) {
-    struct Payload {
-        int value{0};
-    };
-
-    af::detail::ObjectPool<Payload, 2> pool;
-    Payload* first = pool.create();
-    first->value = 42;
-    pool.destroy(first);
-
-    Payload* second = pool.create();
-    EXPECT_EQ(second, first);
-    pool.destroy(second);
-}
-
-TEST(UtilityTests, SplitByShardGroupsByKey) {
-    struct Op {
-        std::uint64_t key;
-        int value;
-    };
-
-    std::vector<Op> ops{{0, 10}, {1, 11}, {4, 14}, {6, 16}};
-    auto sharded = Runtime::split_by_shard(std::move(ops), 4, [](const Op& op) {
-        return op.key;
-    });
-
-    ASSERT_EQ(sharded.shard_count(), 4);
-    ASSERT_EQ(sharded.shards[0].size(), 2);
-    ASSERT_EQ(sharded.shards[1].size(), 1);
-    ASSERT_EQ(sharded.shards[2].size(), 1);
-    ASSERT_TRUE(sharded.shards[3].empty());
-}
-
-TEST(UtilityTests, BatchSequencerBuffersOutOfOrderBatches) {
-    af::BatchSequencer<int> sequencer(1);
-    std::vector<int> submitted;
-
-    auto submit = [&](int value) {
-        submitted.push_back(value);
-    };
-
-    EXPECT_EQ(sequencer.submit(2, 20, submit), af::BatchSubmitStatus::Buffered);
-    EXPECT_TRUE(submitted.empty());
-    EXPECT_EQ(sequencer.submit(1, 10, submit), af::BatchSubmitStatus::Submitted);
-    ASSERT_EQ(submitted.size(), 2);
-    EXPECT_EQ(submitted[0], 10);
-    EXPECT_EQ(submitted[1], 20);
-    EXPECT_EQ(sequencer.submit(1, 10, submit), af::BatchSubmitStatus::Duplicate);
-}
 
 TEST_F(RuntimeFixture, OneShotTaskRunsOnRequestedThread) {
     std::atomic<int> completed{0};
@@ -786,98 +484,6 @@ TEST_F(RuntimeFixture, StateMachineCanHopThreadsAndAgainOnCurrentThread) {
     EXPECT_EQ(seen[3].load(), Runtime::thread_index(TestThread::Logic_1));
 }
 
-TEST_F(RuntimeFixture, ParallelShardsNonEmptyOnlySkipsEmptyShards) {
-    std::atomic<int> completed{0};
-    std::array<std::atomic<int>, 4> shard_hits{};
-    std::atomic<int> sum{0};
-
-    ASSERT_TRUE(Runtime::start_task<ParallelTask>(
-        af::ParallelMode::NonEmptyOnly,
-        &completed,
-        &shard_hits,
-        &sum));
-    ASSERT_TRUE(wait_until_at_least(completed, 1));
-    EXPECT_EQ(shard_hits[0].load(), 1);
-    EXPECT_EQ(shard_hits[1].load(), 0);
-    EXPECT_EQ(shard_hits[2].load(), 1);
-    EXPECT_EQ(shard_hits[3].load(), 0);
-    EXPECT_EQ(sum.load(), 6);
-}
-
-TEST_F(RuntimeFixture, ParallelShardsAllShardsRunsNoopShards) {
-    std::atomic<int> completed{0};
-    std::array<std::atomic<int>, 4> shard_hits{};
-    std::atomic<int> sum{0};
-
-    ASSERT_TRUE(Runtime::start_task<ParallelTask>(
-        af::ParallelMode::AllShards,
-        &completed,
-        &shard_hits,
-        &sum));
-    ASSERT_TRUE(wait_until_at_least(completed, 1));
-    for (const auto& hit : shard_hits) {
-        EXPECT_EQ(hit.load(), 1);
-    }
-    EXPECT_EQ(sum.load(), 6);
-}
-
-TEST_F(RuntimeFixture, ParallelShardFailuresAreVisibleToOwner) {
-    std::atomic<int> completed{0};
-    std::atomic<std::uint32_t> failures{0};
-
-    ASSERT_TRUE(Runtime::start_task<ParallelFailureTask>(&completed, &failures));
-    ASSERT_TRUE(wait_until_at_least(completed, 1));
-    EXPECT_EQ(failures.load(std::memory_order_acquire), 1U);
-}
-
-TEST_F(RuntimeFixture, EmptyNonEmptyParallelResumesOwner) {
-    std::atomic<int> completed{0};
-
-    ASSERT_TRUE(Runtime::start_task<EmptyParallelTask>(&completed));
-    ASSERT_TRUE(wait_until_at_least(completed, 1));
-}
-
-TEST_F(RuntimeFixture, OrderedStartTaskBuffersOutOfOrderBatches) {
-    std::atomic<int> completed{0};
-    std::vector<int> applied;
-
-    ASSERT_TRUE((Runtime::start_ordered_task<OrderedStartStream, OrderedStartApplyTask>(
-        TestThread::DB_0,
-        OrderedStartBatch{2, 20, &applied, &completed})));
-    ASSERT_TRUE((Runtime::start_ordered_task<OrderedStartStream, OrderedStartApplyTask>(
-        TestThread::DB_0,
-        OrderedStartBatch{1, 10, &applied, &completed})));
-    ASSERT_TRUE((Runtime::start_ordered_task<OrderedStartStream, OrderedStartApplyTask>(
-        TestThread::DB_0,
-        OrderedStartBatch{3, 30, &applied, &completed})));
-
-    ASSERT_TRUE(wait_until_at_least(completed, 3));
-    ASSERT_EQ(applied.size(), 3);
-    EXPECT_EQ(applied[0], 10);
-    EXPECT_EQ(applied[1], 20);
-    EXPECT_EQ(applied[2], 30);
-}
-
-TEST_F(RuntimeFixture, OrderedBatchRunsEveryShardAndAcceptsContiguousBatches) {
-    std::atomic<int> completed{0};
-    std::array<std::atomic<int>, 4> shard_hits{};
-    std::array<std::atomic<std::uint64_t>, 4> batch_seen{};
-
-    ASSERT_TRUE(Runtime::start_task<OrderedTask>(1U, &completed, &shard_hits, &batch_seen));
-    ASSERT_TRUE(wait_until_at_least(completed, 1));
-    for (std::uint16_t i = 0; i < 4; ++i) {
-        EXPECT_EQ(shard_hits[i].load(), 1);
-        EXPECT_EQ(batch_seen[i].load(), 1U);
-    }
-
-    ASSERT_TRUE(Runtime::start_task<OrderedTask>(2U, &completed, &shard_hits, &batch_seen));
-    ASSERT_TRUE(wait_until_at_least(completed, 2));
-    for (std::uint16_t i = 0; i < 4; ++i) {
-        EXPECT_EQ(shard_hits[i].load(), 2);
-        EXPECT_EQ(batch_seen[i].load(), 2U);
-    }
-}
-
 TEST(RuntimeBackpressureTests, RejectPolicyReturnsFalseAndDeletesRejectedTask) {
     TinyRuntime::init();
 
@@ -930,6 +536,20 @@ TEST(RuntimeBackpressureTests, YieldPolicyAllowsManyExternalProducers) {
 
     EXPECT_TRUE(all_started.load(std::memory_order_acquire));
     EXPECT_TRUE(wait_until_at_least(completed, producer_count * tasks_per_producer));
+    YieldRuntime::shutdown();
+}
+
+TEST(RuntimeBackpressureTests, YieldPolicyHandlesSameThreadFanoutWithBoundedLocalQueue) {
+    YieldRuntime::init();
+
+    constexpr int child_count = 128;
+    std::atomic<int> completed{0};
+    std::atomic<bool> all_started{true};
+
+    ASSERT_TRUE(YieldRuntime::start_task<YieldFanoutTask>(child_count, &completed, &all_started));
+    EXPECT_TRUE(wait_until_at_least(completed, child_count + 1));
+    EXPECT_TRUE(all_started.load(std::memory_order_acquire));
+
     YieldRuntime::shutdown();
 }
 

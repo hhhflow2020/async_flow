@@ -92,9 +92,11 @@ Runtime::start_task<LoginTask>(player_id);
 ## 性能边界
 
 - runtime 固定线程之间使用 bounded SPSC ring，每个 source -> target 一条队列。
-- 非 runtime 线程进入 executor 时使用 bounded MPMC ingress，用于 `start_task()` 等外部入口。
+- runtime 线程调度到自身时走 executor 本地 bounded queue，阻塞路径会先消化本地任务，避免固定容量队列满时自旋等待自己。
+- 非 runtime 线程进入 executor 时使用 bounded MPSC ingress，用于 `start_task()` 等外部入口。
 - 队列容量由 traits 配置；`QueueFullPolicy::Reject` 直接返回失败，`QueueFullPolicy::Yield` 会让出 CPU 等待空位。
-- `make_task<T>()` / `start_task<T>()` 使用按任务类型分离的无锁 free-list 对象池，任务完成后回收到对应类型池；`create_task<T>()` 作为兼容别名保留。
+- shutdown 会先切到 stopping 并等待在途外部 post 退出，再停止 executor，避免队列清理和外部投递并发踩踏。
+- `make_task<T>()` / `start_task<T>()` 使用按任务类型分离的对象池，slot 回收通过 per-block bounded MPMC free queue 避免 Treiber free-list ABA；`create_task<T>()` 作为兼容别名保留。
 - executor 空闲等待使用 C++20 `std::atomic::wait/notify_one`。
 - Task 生命周期由状态机保护，debug 下会检查重复调度、完成后调度、运行中重复唤醒。
 - `parallel_shards_ordered()` 会对每个 shard 维护 `last_applied_batch_id`，要求 batch id 连续递增。
@@ -107,8 +109,21 @@ Runtime::start_task<LoginTask>(player_id);
 
 ```sh
 conan install . --output-folder=build-conan --build=missing -s build_type=Release
-cmake --preset conan-release
-cmake --build --preset conan-release --parallel
+cmake -S . -B build-conan/build/Release \
+  -DCMAKE_TOOLCHAIN_FILE=build-conan/build/Release/generators/conan_toolchain.cmake \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build-conan/build/Release --parallel
 ctest --test-dir build-conan/build/Release --output-on-failure
 ./build-conan/build/Release/asyncflow_runtime_benchmarks --benchmark_min_time=0.005s
 ```
+
+## 示例与测试布局
+
+- `examples/app_runtime.hpp`：示例共享的线程 enum、traits、Runtime alias 和分片函数。
+- `examples/basic.cpp`：两步式 `make_task()`、`start_task()` 和状态机切线程。
+- `examples/parallel_shards.cpp`：按 key 拆分 shard 并并行处理。
+- `examples/ordered_batches.cpp`：乱序 batch 进入 sequencer，并用全 shard 顺序屏障应用。
+- `tests/utility_tests.cpp`：队列、对象池、分片工具和 batch sequencer。
+- `tests/runtime_lifecycle_tests.cpp`：任务生命周期、状态机、背压和 shutdown。
+- `tests/runtime_parallel_tests.cpp`：parallel shard、失败汇总和有序 batch。
+- `benchmarks/queue_benchmarks.cpp` 与 `benchmarks/runtime_benchmarks.cpp`：底层结构和 runtime 路径分开压测。
