@@ -9,6 +9,7 @@
 
 #if defined(__linux__)
 #include <fcntl.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
@@ -116,6 +117,32 @@ private:
     std::atomic<std::uint16_t>* ran_on_{nullptr};
 };
 
+class WorkerIoWaitRejectedTask final : public IoTaskBase {
+public:
+    explicit WorkerIoWaitRejectedTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(std::atomic<int>* completed, std::atomic<int>* error) {
+        completed_ = completed;
+        error_ = error;
+        return schedule(IoTestThread::Logic_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        af::IoResult result{};
+        const bool ok = wait_io(IoTestThread::Logic_0, 0, af::io_readable, &result);
+        if (ok) {
+            return failed();
+        }
+        error_->store(result.error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* error_{nullptr};
+};
+
 #if defined(__linux__)
 class SocketReadableTask final : public IoTaskBase {
 public:
@@ -142,37 +169,333 @@ private:
     af::TaskResult run() override {
         switch (state_) {
         case State::Arm:
-            state_ = State::Read;
-            if (!wait_io(IoTestThread::IO_0, fd_, af::io_readable, &result_)) {
-                return failed();
-            }
-            armed_->fetch_add(1, std::memory_order_release);
-            return pending();
+            return arm_read();
 
-        case State::Read: {
-            if (!result_.readable()) {
-                return failed();
-            }
-
-            char value = 0;
-            const auto n = ::read(fd_, &value, sizeof(value));
-            if (n != 1) {
-                return failed();
-            }
-            byte_read_->store(value, std::memory_order_release);
-            completed_->fetch_add(1, std::memory_order_release);
-            return done();
-        }
+        case State::Read:
+            return finish_read();
         }
         return failed();
     }
 
+    af::TaskResult arm_read() {
+        state_ = State::Read;
+        const af::IoStatus status = af::io_read_some(
+            *this,
+            IoTestThread::IO_0,
+            fd_,
+            &value_,
+            sizeof(value_),
+            read_);
+        if (!status.pending()) {
+            return failed();
+        }
+        armed_->fetch_add(1, std::memory_order_release);
+        return pending();
+    }
+
+    af::TaskResult finish_read() {
+        const af::IoStatus status = af::io_read_some(
+            *this,
+            IoTestThread::IO_0,
+            fd_,
+            &value_,
+            sizeof(value_),
+            read_);
+        if (!status.ready() || status.bytes != sizeof(value_)) {
+            return failed();
+        }
+        byte_read_->store(value_, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
     State state_{State::Arm};
     int fd_{-1};
-    af::IoResult result_{};
+    char value_{0};
+    af::IoOpState read_{};
     std::atomic<int>* armed_{nullptr};
     std::atomic<int>* completed_{nullptr};
     std::atomic<char>* byte_read_{nullptr};
+};
+
+class SocketWritableTask final : public IoTaskBase {
+public:
+    explicit SocketWritableTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(int fd, std::atomic<int>* armed, std::atomic<int>* completed) {
+        fd_ = fd;
+        armed_ = armed;
+        completed_ = completed;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        const af::IoStatus status = af::io_write_some(
+            *this,
+            IoTestThread::IO_0,
+            fd_,
+            &value_,
+            sizeof(value_),
+            write_);
+        if (status.pending()) {
+            armed_->fetch_add(1, std::memory_order_release);
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(value_)) {
+            return failed();
+        }
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    int fd_{-1};
+    char value_{'w'};
+    af::IoOpState write_{};
+    std::atomic<int>* armed_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+};
+
+class UdpRecvTask final : public IoTaskBase {
+public:
+    explicit UdpRecvTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(
+        int fd,
+        std::atomic<int>* armed,
+        std::atomic<int>* completed,
+        std::atomic<char>* byte_read,
+        std::size_t expected_bytes = 1U) {
+        fd_ = fd;
+        armed_ = armed;
+        completed_ = completed;
+        byte_read_ = byte_read;
+        expected_bytes_ = expected_bytes;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        peer_size_ = sizeof(peer_);
+        const af::IoStatus status = af::io_recv_from_some(
+            *this,
+            IoTestThread::IO_0,
+            fd_,
+            &value_,
+            sizeof(value_),
+            reinterpret_cast<sockaddr*>(&peer_),
+            &peer_size_,
+            recv_);
+        if (status.pending()) {
+            armed_->fetch_add(1, std::memory_order_release);
+            return pending();
+        }
+        if (!status.ready() || status.bytes != expected_bytes_) {
+            return failed();
+        }
+        if (status.bytes != 0U) {
+            byte_read_->store(value_, std::memory_order_release);
+        }
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    int fd_{-1};
+    char value_{0};
+    std::size_t expected_bytes_{1U};
+    sockaddr_storage peer_{};
+    socklen_t peer_size_{sizeof(peer_)};
+    af::IoOpState recv_{};
+    std::atomic<int>* armed_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<char>* byte_read_{nullptr};
+};
+
+class UdpSendToTask final : public IoTaskBase {
+public:
+    explicit UdpSendToTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(
+        int fd,
+        sockaddr_in address,
+        socklen_t address_size,
+        char value,
+        std::atomic<int>* completed,
+        std::atomic<int>* bytes_sent) {
+        fd_ = fd;
+        address_ = address;
+        address_size_ = address_size;
+        value_ = value;
+        completed_ = completed;
+        bytes_sent_ = bytes_sent;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        const af::IoStatus status = af::io_send_to_some(
+            *this,
+            IoTestThread::IO_0,
+            fd_,
+            &value_,
+            sizeof(value_),
+            reinterpret_cast<const sockaddr*>(&address_),
+            address_size_,
+            send_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(value_)) {
+            return failed();
+        }
+        bytes_sent_->store(static_cast<int>(status.bytes), std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    int fd_{-1};
+    sockaddr_in address_{};
+    socklen_t address_size_{sizeof(address_)};
+    char value_{0};
+    af::IoOpState send_{};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* bytes_sent_{nullptr};
+};
+
+class SocketHangupTask final : public IoTaskBase {
+public:
+    explicit SocketHangupTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(int fd, std::atomic<int>* armed, std::atomic<int>* closed) {
+        fd_ = fd;
+        armed_ = armed;
+        closed_ = closed;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        const af::IoStatus status = af::io_read_some(
+            *this,
+            IoTestThread::IO_0,
+            fd_,
+            &value_,
+            sizeof(value_),
+            read_);
+        if (status.pending()) {
+            armed_->fetch_add(1, std::memory_order_release);
+            return pending();
+        }
+        if (!status.closed()) {
+            return failed();
+        }
+        closed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    int fd_{-1};
+    char value_{0};
+    af::IoOpState read_{};
+    std::atomic<int>* armed_{nullptr};
+    std::atomic<int>* closed_{nullptr};
+};
+
+class DuplicateWaitRejectedTask final : public IoTaskBase {
+public:
+    explicit DuplicateWaitRejectedTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(int fd, std::atomic<int>* rejected, std::atomic<int>* error) {
+        fd_ = fd;
+        rejected_ = rejected;
+        error_ = error;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        af::IoResult result{};
+        if (wait_io(IoTestThread::IO_0, fd_, af::io_readable, &result)) {
+            return failed();
+        }
+        error_->store(result.error, std::memory_order_release);
+        rejected_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    int fd_{-1};
+    std::atomic<int>* rejected_{nullptr};
+    std::atomic<int>* error_{nullptr};
+};
+
+class BadFdReadTask final : public IoTaskBase {
+public:
+    explicit BadFdReadTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(std::atomic<int>* completed, std::atomic<int>* error) {
+        completed_ = completed;
+        error_ = error;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        char value = 0;
+        af::IoOpState read{};
+        const af::IoStatus status = af::io_read_some(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            &value,
+            sizeof(value),
+            read);
+        if (!status.failed()) {
+            return failed();
+        }
+        error_->store(status.error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* error_{nullptr};
+};
+
+class ZeroByteIoTask final : public IoTaskBase {
+public:
+    explicit ZeroByteIoTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(std::atomic<int>* completed) {
+        completed_ = completed;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        af::IoOpState read{};
+        af::IoOpState write{};
+        const af::IoStatus read_status = af::io_read_some(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            nullptr,
+            0,
+            read);
+        const af::IoStatus write_status = af::io_write_some(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            nullptr,
+            0,
+            write);
+        if (!read_status.ready() || read_status.bytes != 0U ||
+            !write_status.ready() || write_status.bytes != 0U) {
+            return failed();
+        }
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int>* completed_{nullptr};
 };
 
 class PendingSocketWaitTask final : public FastIoTaskBase {
@@ -225,6 +548,46 @@ void close_pair(int fds[2]) {
         ::close(fds[1]);
     }
 }
+
+bool fill_until_blocked(int fd) {
+    char data[4096]{};
+    bool blocked = false;
+    for (;;) {
+        const ssize_t n = ::write(fd, data, sizeof(data));
+        if (n > 0) {
+            continue;
+        }
+        if (n < 0 && errno == EINTR) {
+            continue;
+        }
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            blocked = true;
+        }
+        break;
+    }
+    return blocked;
+}
+
+void drain_available(int fd) {
+    char data[4096]{};
+    for (;;) {
+        const ssize_t n = ::read(fd, data, sizeof(data));
+        if (n > 0) {
+            continue;
+        }
+        if (n < 0 && errno == EINTR) {
+            continue;
+        }
+        break;
+    }
+}
+
+void close_fd(int& fd) {
+    if (fd >= 0) {
+        ::close(fd);
+        fd = -1;
+    }
+}
 #endif
 
 } // namespace
@@ -236,6 +599,16 @@ TEST_F(IoRuntimeFixture, IoThreadUsesConfiguredThreadKindAndAcceptsTasks) {
     ASSERT_TRUE(IoRuntime::start_task<IoHopTask>(&completed, &ran_on));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(ran_on.load(std::memory_order_acquire), IoRuntime::thread_index(IoTestThread::IO_0));
+}
+
+TEST_F(IoRuntimeFixture, WorkerThreadDoesNotExposeIoBackend) {
+    EXPECT_FALSE(IoRuntime::io_backend_available(IoTestThread::Logic_0));
+
+    std::atomic<int> completed{0};
+    std::atomic<int> error{0};
+    ASSERT_TRUE(IoRuntime::start_task<WorkerIoWaitRejectedTask>(&completed, &error));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_NE(error.load(std::memory_order_acquire), 0);
 }
 
 TEST_F(IoRuntimeFixture, EpollIoThreadResumesTaskWhenFdBecomesReadable) {
@@ -258,6 +631,249 @@ TEST_F(IoRuntimeFixture, EpollIoThreadResumesTaskWhenFdBecomesReadable) {
     ASSERT_EQ(::write(fds[1], &value, sizeof(value)), 1);
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(byte_read.load(std::memory_order_acquire), value);
+
+    close_pair(fds);
+#else
+    GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, IoHelpersHandleInvalidAndZeroByteOperations) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    std::atomic<int> bad_fd_completed{0};
+    std::atomic<int> bad_fd_error{0};
+    ASSERT_TRUE(IoRuntime::start_task<BadFdReadTask>(&bad_fd_completed, &bad_fd_error));
+    ASSERT_TRUE(wait_until_at_least(bad_fd_completed, 1));
+    EXPECT_EQ(bad_fd_error.load(std::memory_order_acquire), EBADF);
+
+    std::atomic<int> zero_completed{0};
+    ASSERT_TRUE(IoRuntime::start_task<ZeroByteIoTask>(&zero_completed));
+    ASSERT_TRUE(wait_until_at_least(zero_completed, 1));
+#else
+    GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, EpollIoThreadRejectsDuplicateFdWait) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<char> byte_read{0};
+    ASSERT_TRUE(IoRuntime::start_task<SocketReadableTask>(fds[0], &armed, &completed, &byte_read));
+    ASSERT_TRUE(wait_until_at_least(armed, 1));
+
+    std::atomic<int> rejected{0};
+    std::atomic<int> error{0};
+    ASSERT_TRUE(IoRuntime::start_task<DuplicateWaitRejectedTask>(fds[0], &rejected, &error));
+    ASSERT_TRUE(wait_until_at_least(rejected, 1));
+    EXPECT_EQ(error.load(std::memory_order_acquire), EALREADY);
+
+    const char value = 'd';
+    ASSERT_EQ(::write(fds[1], &value, sizeof(value)), 1);
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(byte_read.load(std::memory_order_acquire), value);
+
+    close_pair(fds);
+#else
+    GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, EpollIoThreadResumesTaskWhenFdBecomesWritable) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+    ASSERT_TRUE(fill_until_blocked(fds[0]));
+
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    ASSERT_TRUE(IoRuntime::start_task<SocketWritableTask>(fds[0], &armed, &completed));
+    ASSERT_TRUE(wait_until_at_least(armed, 1));
+
+    drain_available(fds[1]);
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+
+    close_pair(fds);
+#else
+    GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, EpollIoThreadResumesUdpRecvFromHelper) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int receiver = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(receiver, 0);
+    int sender = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(sender, 0);
+
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = 0;
+    ASSERT_EQ(::bind(receiver, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+
+    socklen_t address_size = sizeof(address);
+    ASSERT_EQ(::getsockname(receiver, reinterpret_cast<sockaddr*>(&address), &address_size), 0);
+
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<char> byte_read{0};
+    ASSERT_TRUE(IoRuntime::start_task<UdpRecvTask>(receiver, &armed, &completed, &byte_read));
+    ASSERT_TRUE(wait_until_at_least(armed, 1));
+
+    const char value = 'u';
+    ASSERT_EQ(::sendto(
+                  sender,
+                  &value,
+                  sizeof(value),
+                  0,
+                  reinterpret_cast<sockaddr*>(&address),
+                  address_size),
+              1);
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(byte_read.load(std::memory_order_acquire), value);
+
+    close_fd(sender);
+    close_fd(receiver);
+#else
+    GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, EpollIoThreadAcceptsUdpZeroLengthDatagram) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int receiver = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(receiver, 0);
+    int sender = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(sender, 0);
+
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = 0;
+    ASSERT_EQ(::bind(receiver, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+
+    socklen_t address_size = sizeof(address);
+    ASSERT_EQ(::getsockname(receiver, reinterpret_cast<sockaddr*>(&address), &address_size), 0);
+
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<char> byte_read{'z'};
+
+    const char value = 0;
+    ASSERT_EQ(::sendto(
+                  sender,
+                  &value,
+                  0,
+                  0,
+                  reinterpret_cast<sockaddr*>(&address),
+                  address_size),
+              0);
+
+    ASSERT_TRUE(IoRuntime::start_task<UdpRecvTask>(receiver, &armed, &completed, &byte_read, 0U));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(byte_read.load(std::memory_order_acquire), 'z');
+
+    close_fd(sender);
+    close_fd(receiver);
+#else
+    GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, EpollIoThreadSendsUdpDatagramFromHelper) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int receiver = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(receiver, 0);
+    int sender = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(sender, 0);
+
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = 0;
+    ASSERT_EQ(::bind(receiver, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+
+    socklen_t address_size = sizeof(address);
+    ASSERT_EQ(::getsockname(receiver, reinterpret_cast<sockaddr*>(&address), &address_size), 0);
+
+    std::atomic<int> completed{0};
+    std::atomic<int> bytes_sent{0};
+    const char value = 's';
+    ASSERT_TRUE(IoRuntime::start_task<UdpSendToTask>(
+        sender,
+        address,
+        address_size,
+        value,
+        &completed,
+        &bytes_sent));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), 1);
+
+    char received = 0;
+    sockaddr_storage peer{};
+    socklen_t peer_size = sizeof(peer);
+    ASSERT_EQ(::recvfrom(
+                  receiver,
+                  &received,
+                  sizeof(received),
+                  0,
+                  reinterpret_cast<sockaddr*>(&peer),
+                  &peer_size),
+              1);
+    EXPECT_EQ(received, value);
+
+    close_fd(sender);
+    close_fd(receiver);
+#else
+    GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, EpollIoThreadReportsPeerHangupAsClosedRead) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+
+    std::atomic<int> armed{0};
+    std::atomic<int> closed{0};
+    ASSERT_TRUE(IoRuntime::start_task<SocketHangupTask>(fds[0], &armed, &closed));
+    ASSERT_TRUE(wait_until_at_least(armed, 1));
+
+    ::close(fds[1]);
+    fds[1] = -1;
+    ASSERT_TRUE(wait_until_at_least(closed, 1));
 
     close_pair(fds);
 #else

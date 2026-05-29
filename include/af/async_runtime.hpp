@@ -530,11 +530,19 @@ public:
         Task* task,
         IoResult* result) noexcept {
         if (task == nullptr || result == nullptr || fd < 0 || events == 0U) {
+            if (result != nullptr) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = fd < 0 ? EBADF : EINVAL;
+            }
             return false;
         }
 
         const std::uint16_t index = thread_index(thread);
         if (index >= executors_.size()) {
+            result->fd = fd;
+            result->events = io_error;
+            result->error = EINVAL;
             return false;
         }
         return executors_[index]->register_io_wait(fd, events, task, result);
@@ -968,11 +976,27 @@ private:
             IoResult* result) noexcept {
             AF_ASSERT(current_thread_index_ == index_ && "io_wait must be called from its IO thread");
             if (current_thread_index_ != index_ || task == nullptr || result == nullptr) {
+                if (result != nullptr) {
+                    result->fd = fd;
+                    result->events = io_error;
+                    result->error = EINVAL;
+                }
                 return false;
             }
 
 #if defined(__linux__)
             if (io_epoll_fd_ < 0 || fd < 0 || events == 0U || io_waits_.find(fd) != io_waits_.end()) {
+                result->fd = fd;
+                result->events = io_error;
+                if (fd < 0) {
+                    result->error = EBADF;
+                } else if (events == 0U) {
+                    result->error = EINVAL;
+                } else if (io_epoll_fd_ < 0) {
+                    result->error = ENOSYS;
+                } else {
+                    result->error = EALREADY;
+                }
                 return false;
             }
 

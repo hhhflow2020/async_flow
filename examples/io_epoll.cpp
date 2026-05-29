@@ -54,7 +54,14 @@ private:
 
     af::TaskResult arm_read() {
         state_ = State::Consume;
-        if (!wait_io(AppThread::IO_0, fd_, af::io_readable, &result_)) {
+        const af::IoStatus status = af::io_read_some(
+            *this,
+            AppThread::IO_0,
+            fd_,
+            &value_,
+            sizeof(value_),
+            read_);
+        if (!status.pending()) {
             return failed();
         }
         armed_->fetch_add(1, std::memory_order_release);
@@ -62,23 +69,25 @@ private:
     }
 
     af::TaskResult consume() {
-        if (!result_.readable()) {
+        const af::IoStatus status = af::io_read_some(
+            *this,
+            AppThread::IO_0,
+            fd_,
+            &value_,
+            sizeof(value_),
+            read_);
+        if (!status.ready() || status.bytes != sizeof(value_)) {
             return failed();
         }
-
-        char value = 0;
-        const auto n = ::read(fd_, &value, sizeof(value));
-        if (n != 1) {
-            return failed();
-        }
-        std::cout << "IO_0 received byte: " << value << '\n';
+        std::cout << "IO_0 received byte: " << value_ << '\n';
         completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
 
     State state_{State::ArmRead};
     int fd_{-1};
-    af::IoResult result_{};
+    char value_{0};
+    af::IoOpState read_{};
     std::atomic<int>* armed_{nullptr};
     std::atomic<int>* completed_{nullptr};
 };
