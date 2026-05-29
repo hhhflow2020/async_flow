@@ -70,6 +70,28 @@ private:
     af::ShardedOps<int> sharded_deltas_{player_logic_shard_count};
 };
 
+class SubmitPlayerDeltaBatchTask final : public Task {
+public:
+    explicit SubmitPlayerDeltaBatchTask(Task::FactoryToken token) : Task(token) {}
+
+    bool do_it(PlayerDeltaBatch batch) {
+        batch_ = std::move(batch);
+        return schedule(AppThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        const bool started =
+            async::start_ordered_task<PlayerDeltaStream, ApplyPlayerDeltaBatchTask>(
+                AppThread::Logic_0,
+                std::move(batch_));
+        AF_ASSERT(started);
+        return started ? done() : failed();
+    }
+
+    PlayerDeltaBatch batch_;
+};
+
 } // namespace
 
 int main() {
@@ -79,18 +101,19 @@ int main() {
     std::atomic<int> total_delta{0};
     std::array<std::atomic<std::uint64_t>, player_logic_shard_count> shard_batch_seen{};
 
-    [[maybe_unused]] const bool second_started =
-        async::start_ordered_task<PlayerDeltaStream, ApplyPlayerDeltaBatchTask>(
-            AppThread::Logic_0,
-            PlayerDeltaBatch{2, {5, 6}, &completed, &total_delta, &shard_batch_seen});
-    [[maybe_unused]] const bool first_started =
-        async::start_ordered_task<PlayerDeltaStream, ApplyPlayerDeltaBatchTask>(
-            AppThread::Logic_0,
-            PlayerDeltaBatch{1, {1, 2, 3, 4}, &completed, &total_delta, &shard_batch_seen});
-    AF_ASSERT(second_started);
-    AF_ASSERT(first_started);
+    {
+        auto second_task = async::make_task<SubmitPlayerDeltaBatchTask>();
+        auto first_task = async::make_task<SubmitPlayerDeltaBatchTask>();
 
-    wait_completed(completed, 2);
+        [[maybe_unused]] const bool second_started = second_task->do_it(
+            PlayerDeltaBatch{2, {5, 6}, &completed, &total_delta, &shard_batch_seen});
+        [[maybe_unused]] const bool first_started = first_task->do_it(
+            PlayerDeltaBatch{1, {1, 2, 3, 4}, &completed, &total_delta, &shard_batch_seen});
+        AF_ASSERT(second_started);
+        AF_ASSERT(first_started);
+
+        wait_completed(completed, 2);
+    }
 
     std::cout << "ordered total delta: " << total_delta.load(std::memory_order_relaxed) << '\n';
     for (std::uint16_t shard = 0; shard < player_logic_shard_count; ++shard) {

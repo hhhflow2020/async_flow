@@ -89,14 +89,17 @@ int main() {
         {1010, 40},
     };
 
-    [[maybe_unused]] const bool started = async::start_task<AddGoldBatchTask>(
-        std::move(ops),
-        &completed,
-        &total_gold,
-        &shard_hits);
-    AF_ASSERT(started);
+    {
+        auto task = async::make_task<AddGoldBatchTask>();
+        [[maybe_unused]] const bool started = task->do_it(
+            std::move(ops),
+            &completed,
+            &total_gold,
+            &shard_hits);
+        AF_ASSERT(started);
 
-    wait_completed(completed, 1);
+        wait_completed(completed, 1);
+    }
 
     std::cout << "parallel total gold: " << total_gold.load(std::memory_order_relaxed) << '\n';
     for (std::uint16_t shard = 0; shard < player_logic_shard_count; ++shard) {

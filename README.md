@@ -47,16 +47,16 @@ inline AppThread player_thread(std::uint64_t player_id) noexcept {
 
 ## 任务 API
 
-业务任务继承 `async::Task`，通过 `schedule()` 首次调度，通过 `pending_on()` 切线程挂起，通过 `again()` 在当前线程继续，通过 `failed()` 失败结束并释放任务。`schedule()`、`async::make_task()` 之后调用的启动函数、以及 `async::start_task()` 都能表达入队是否成功，队列满时不会无限增长。
+业务任务继承 `async::Task`，通过 `schedule()` 首次调度，通过 `pending_on()` 切线程挂起，通过 `again()` 在当前线程继续，通过 `failed()` 失败结束并释放任务。`schedule()` 和 `async::make_task()` 之后调用的启动函数都能表达入队是否成功，队列满时不会无限增长。
 
 ```cpp
 class LoginTask final : public Task {
 public:
     explicit LoginTask(Task::FactoryToken token) : Task(token) {}
 
-    void do_it(std::uint64_t player_id) {
+    bool do_it(std::uint64_t player_id) {
         player_id_ = player_id;
-        schedule(player_thread(player_id_));
+        return schedule(player_thread(player_id_));
     }
 
 private:
@@ -85,20 +85,17 @@ private:
 
 每个任务构造函数必须把 `Task::FactoryToken` 作为第一个参数并传给基类。这个 token 只有 runtime 能生成，因此业务代码无法直接在栈上构造任务，也无法直接 `new` 任务。业务侧也不要直接 `delete` 任务对象。
 
-推荐的显式启动方式是通过框架工厂创建受管任务对象，再调用任务自己的启动函数；这个函数可以叫 `do_it()`，也可以是业务自定义名称，只要在函数里完成首次 `schedule()`：
+推荐的启动方式是两步式：先通过框架工厂创建受管任务对象，再调用任务自己的启动函数；这个函数可以叫 `do_it()`，也可以是业务自定义名称，只要在函数里完成首次 `schedule()`：
 
 ```cpp
 auto task = async::make_task<LoginTask>();
-if (!task->do_it(player_id)) {
+const bool started = task->do_it(player_id);
+if (!started) {
     // 未调度成功时，task handle 析构会自动回收到对象池。
 }
 ```
 
-`make_task<T>()` 返回的是一个轻量包装句柄，内部由 runtime 统一接入对象池、生命周期引用和后续可替换的内存池策略。保留的便捷写法等价于“创建后调用 `do_it()`”：
-
-```cpp
-async::start_task<LoginTask>(player_id);
-```
+`make_task<T>()` 返回的是一个轻量包装句柄，内部由 runtime 统一接入对象池、生命周期引用和后续可替换的内存池策略。`async::start_task<T>()` 作为便捷入口保留，但公开示例统一使用 `make_task<T>() + do_it()`。
 
 ## 性能边界
 
@@ -131,7 +128,7 @@ ctest --test-dir build-conan/build/Release --output-on-failure
 ## 示例与测试布局
 
 - `examples/app_runtime.hpp`：示例共享的线程 enum、traits、async alias 和分片函数。
-- `examples/basic.cpp`：两步式 `make_task()`、`start_task()` 和状态机切线程。
+- `examples/basic.cpp`：两步式 `make_task() + do_it()` 和状态机切线程。
 - `examples/parallel_shards.cpp`：按 key 拆分 shard 并并行处理。
 - `examples/ordered_batches.cpp`：乱序 batch 进入 sequencer，并用全 shard 顺序屏障应用。
 - `tests/utility_tests.cpp`：队列、对象池、分片工具和 batch sequencer。
