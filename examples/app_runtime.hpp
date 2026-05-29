@@ -26,16 +26,16 @@ struct AppRuntimeTraits {
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
 };
 
-using Flow = af::AsyncRuntime<AppRuntimeTraits>;
-using Task = Flow::Task;
+using async = af::AsyncRuntime<AppRuntimeTraits>;
+using Task = async::Task;
 
 inline constexpr AppThread player_logic_begin = AppThread::Logic_0;
 inline constexpr std::uint16_t player_logic_shard_count =
     static_cast<std::uint16_t>(
-        Flow::thread_index(AppThread::Logic_3) - Flow::thread_index(player_logic_begin) + 1U);
+        async::thread_index(AppThread::Logic_3) - async::thread_index(player_logic_begin) + 1U);
 
 inline AppThread player_thread(std::uint64_t player_id) noexcept {
-    return Flow::shard_by<player_logic_begin, player_logic_shard_count>(
+    return async::shard_by<player_logic_begin, player_logic_shard_count>(
         player_id);
 }
 

@@ -25,7 +25,7 @@ public:
         completed_ = completed;
         total_gold_ = total_gold;
         shard_hits_ = shard_hits;
-        sharded_ops_ = Flow::split_by_shard(
+        sharded_ops_ = async::split_by_shard(
             std::move(ops),
             player_logic_shard_count,
             [](const AddGoldOp& op) { return op.player_id; });
@@ -42,7 +42,7 @@ private:
         switch (state_) {
         case State::Split:
             state_ = State::Finish;
-            Flow::parallel_shards(
+            async::parallel_shards(
                 player_logic_begin,
                 sharded_ops_,
                 af::ParallelMode::NonEmptyOnly,
@@ -76,7 +76,7 @@ private:
 } // namespace
 
 int main() {
-    Flow::init();
+    async::init();
 
     std::atomic<int> completed{0};
     std::atomic<int> total_gold{0};
@@ -89,7 +89,7 @@ int main() {
         {1010, 40},
     };
 
-    [[maybe_unused]] const bool started = Flow::start_task<AddGoldBatchTask>(
+    [[maybe_unused]] const bool started = async::start_task<AddGoldBatchTask>(
         std::move(ops),
         &completed,
         &total_gold,
@@ -104,6 +104,6 @@ int main() {
                   << shard_hits[shard].load(std::memory_order_relaxed) << '\n';
     }
 
-    Flow::shutdown();
+    async::shutdown();
     return 0;
 }
