@@ -157,6 +157,11 @@ public:
     }
 
     static void shutdown() {
+        AF_ASSERT(!is_runtime_thread() && "shutdown must be called from a non-runtime thread");
+        if (is_runtime_thread()) {
+            return;
+        }
+
         RuntimeStatus expected = RuntimeStatus::Running;
         if (!status_.compare_exchange_strong(
                 expected,
@@ -1108,19 +1113,27 @@ private:
     }
 
     static void on_task_started() noexcept {
-        unfinished_tasks_.fetch_add(1, std::memory_order_acq_rel);
-    }
-
-    static void on_task_finished() noexcept {
-        if (unfinished_tasks_.fetch_sub(1, std::memory_order_acq_rel) == 1U) {
-            unfinished_tasks_.notify_all();
+        if constexpr (shutdown_policy == ShutdownPolicy::WaitForTasks) {
+            unfinished_tasks_.fetch_add(1, std::memory_order_acq_rel);
         }
     }
 
-    static inline std::atomic<RuntimeStatus> status_{RuntimeStatus::Stopped};
-    static inline std::atomic<std::uint32_t> active_posts_{0};
-    static inline std::atomic<std::uint32_t> unfinished_tasks_{0};
-    static inline std::atomic<std::uint64_t> generation_{0};
+    static void on_task_finished() noexcept {
+        if constexpr (shutdown_policy == ShutdownPolicy::WaitForTasks) {
+            if (unfinished_tasks_.fetch_sub(1, std::memory_order_acq_rel) == 1U) {
+                unfinished_tasks_.notify_all();
+            }
+        }
+    }
+
+    alignas(detail::hardware_cache_line_size) static inline std::atomic<RuntimeStatus> status_{
+        RuntimeStatus::Stopped};
+    alignas(detail::hardware_cache_line_size) static inline std::atomic<std::uint32_t> active_posts_{
+        0};
+    alignas(detail::hardware_cache_line_size) static inline std::atomic<std::uint32_t> unfinished_tasks_{
+        0};
+    alignas(detail::hardware_cache_line_size) static inline std::atomic<std::uint64_t> generation_{
+        0};
     static inline std::vector<std::unique_ptr<Executor>> executors_;
     static inline std::vector<std::unique_ptr<SpscQueue>> spsc_queues_;
     static inline std::vector<std::unique_ptr<ExternalQueue>> external_queues_;

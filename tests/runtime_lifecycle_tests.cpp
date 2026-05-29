@@ -407,6 +407,7 @@ private:
 enum class WaitShutdownThread : std::int16_t {
     enum_thread_index_start = -1,
     Logic_0,
+    DB_0,
     enum_thread_index_end,
 };
 
@@ -448,6 +449,82 @@ private:
     std::atomic<int>* started_{nullptr};
     std::atomic<bool>* release_{nullptr};
     std::atomic<int>* completed_{nullptr};
+};
+
+class WaitShutdownHopDuringStopTask final : public WaitShutdownTaskBase {
+public:
+    explicit WaitShutdownHopDuringStopTask(WaitShutdownTaskBase::FactoryToken token)
+        : WaitShutdownTaskBase(token) {}
+
+    bool do_it(
+        std::atomic<int>* started,
+        std::atomic<bool>* release,
+        std::atomic<int>* completed,
+        std::array<std::atomic<std::uint16_t>, 2>* seen) {
+        started_ = started;
+        release_ = release;
+        completed_ = completed;
+        seen_ = seen;
+        return schedule(WaitShutdownThread::Logic_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Start,
+        Db,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Start:
+            (*seen_)[0].store(WaitShutdownRuntime::current_thread_index(), std::memory_order_release);
+            started_->fetch_add(1, std::memory_order_release);
+            started_->notify_one();
+            while (!release_->load(std::memory_order_acquire)) {
+                release_->wait(false, std::memory_order_acquire);
+            }
+            state_ = State::Db;
+            return pending_on(WaitShutdownThread::DB_0);
+
+        case State::Db:
+            (*seen_)[1].store(WaitShutdownRuntime::current_thread_index(), std::memory_order_release);
+            completed_->fetch_add(1, std::memory_order_release);
+            completed_->notify_one();
+            return done();
+        }
+
+        return failed();
+    }
+
+    State state_{State::Start};
+    std::atomic<int>* started_{nullptr};
+    std::atomic<bool>* release_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+    std::array<std::atomic<std::uint16_t>, 2>* seen_{nullptr};
+};
+
+class WaitShutdownRejectedTask final : public WaitShutdownTaskBase {
+public:
+    explicit WaitShutdownRejectedTask(WaitShutdownTaskBase::FactoryToken token)
+        : WaitShutdownTaskBase(token) {}
+
+    ~WaitShutdownRejectedTask() override {
+        if (destroyed_ != nullptr) {
+            destroyed_->fetch_add(1, std::memory_order_release);
+        }
+    }
+
+    bool do_it(std::atomic<int>* destroyed) {
+        destroyed_ = destroyed;
+        return schedule(WaitShutdownThread::Logic_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
+
+    std::atomic<int>* destroyed_{nullptr};
 };
 
 enum class FastShutdownThread : std::int16_t {
@@ -571,6 +648,18 @@ TEST_F(RuntimeFixture, StateMachineCanHopThreadsAndAgainOnCurrentThread) {
     EXPECT_EQ(seen[3].load(), Runtime::thread_index(TestThread::Logic_1));
 }
 
+TEST_F(RuntimeFixture, WaitForIdleReturnsAfterAcceptedTasksComplete) {
+    std::atomic<int> completed{0};
+    std::atomic<std::uint16_t> ran_on{Runtime::invalid_thread_index};
+
+    ASSERT_TRUE(Runtime::start_task<OneShotTask>(TestThread::Logic_1, &completed, &ran_on));
+    Runtime::wait_for_idle();
+
+    EXPECT_EQ(completed.load(std::memory_order_acquire), 1);
+    EXPECT_EQ(ran_on.load(std::memory_order_acquire), Runtime::thread_index(TestThread::Logic_1));
+    EXPECT_EQ(Runtime::unfinished_task_count(), 0U);
+}
+
 TEST(RuntimeBackpressureTests, RejectPolicyReturnsFalseAndDeletesRejectedTask) {
     TinyRuntime::init();
 
@@ -586,11 +675,13 @@ TEST(RuntimeBackpressureTests, RejectPolicyReturnsFalseAndDeletesRejectedTask) {
     EXPECT_TRUE(TinyRuntime::start_task<TinyNoopTask>(&completed, &destroyed));
     EXPECT_FALSE(TinyRuntime::start_task<TinyNoopTask>(&completed, &destroyed));
     EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
+    EXPECT_EQ(TinyRuntime::unfinished_task_count(), 3U);
 
     release.store(true, std::memory_order_release);
     release.notify_one();
     EXPECT_TRUE(wait_until_at_least(completed, 3));
     EXPECT_TRUE(wait_until_at_least(destroyed, 3));
+    EXPECT_EQ(TinyRuntime::unfinished_task_count(), 0U);
 
     TinyRuntime::shutdown();
 }
@@ -681,6 +772,96 @@ TEST(RuntimeShutdownTests, WaitForTasksPolicyBlocksUntilAcceptedTasksComplete) {
     });
 
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    EXPECT_FALSE(shutdown_done.load(std::memory_order_acquire));
+
+    release.store(true, std::memory_order_release);
+    release.notify_one();
+    shutdown_thread.join();
+
+    EXPECT_TRUE(shutdown_done.load(std::memory_order_acquire));
+    EXPECT_EQ(completed.load(std::memory_order_acquire), 1);
+}
+
+TEST(RuntimeShutdownTests, WaitForTasksPolicyAllowsRuntimeThreadRescheduleWhileStopping) {
+    WaitShutdownRuntime::init();
+
+    std::atomic<int> started{0};
+    std::atomic<bool> release{false};
+    std::atomic<int> completed{0};
+    std::atomic<bool> shutdown_done{false};
+    std::array<std::atomic<std::uint16_t>, 2> seen{};
+    for (auto& value : seen) {
+        value.store(WaitShutdownRuntime::invalid_thread_index, std::memory_order_relaxed);
+    }
+
+    ASSERT_TRUE(WaitShutdownRuntime::start_task<WaitShutdownHopDuringStopTask>(
+        &started,
+        &release,
+        &completed,
+        &seen));
+    ASSERT_TRUE(wait_until_at_least(started, 1));
+
+    std::thread shutdown_thread([&] {
+        WaitShutdownRuntime::shutdown();
+        shutdown_done.store(true, std::memory_order_release);
+        shutdown_done.notify_one();
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    EXPECT_FALSE(shutdown_done.load(std::memory_order_acquire));
+
+    release.store(true, std::memory_order_release);
+    release.notify_one();
+    shutdown_thread.join();
+
+    EXPECT_TRUE(shutdown_done.load(std::memory_order_acquire));
+    EXPECT_EQ(completed.load(std::memory_order_acquire), 1);
+    EXPECT_EQ(seen[0].load(std::memory_order_acquire),
+              WaitShutdownRuntime::thread_index(WaitShutdownThread::Logic_0));
+    EXPECT_EQ(seen[1].load(std::memory_order_acquire),
+              WaitShutdownRuntime::thread_index(WaitShutdownThread::DB_0));
+    EXPECT_EQ(WaitShutdownRuntime::unfinished_task_count(), 0U);
+}
+
+TEST(RuntimeShutdownTests, WaitForTasksPolicyRejectsExternalStartsWhileStopping) {
+    WaitShutdownRuntime::init();
+
+    std::atomic<int> started{0};
+    std::atomic<bool> release{false};
+    std::atomic<int> completed{0};
+    std::atomic<int> destroyed{0};
+    std::atomic<bool> shutdown_done{false};
+
+    ASSERT_TRUE(WaitShutdownRuntime::start_task<WaitShutdownBlockingTask>(
+        &started,
+        &release,
+        &completed));
+    ASSERT_TRUE(wait_until_at_least(started, 1));
+
+    std::thread shutdown_thread([&] {
+        WaitShutdownRuntime::shutdown();
+        shutdown_done.store(true, std::memory_order_release);
+        shutdown_done.notify_one();
+    });
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    bool saw_stopping = false;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (WaitShutdownRuntime::is_stopping()) {
+            saw_stopping = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (!saw_stopping) {
+        release.store(true, std::memory_order_release);
+        release.notify_one();
+        shutdown_thread.join();
+        FAIL() << "runtime did not enter stopping";
+    }
+
+    EXPECT_FALSE(WaitShutdownRuntime::start_task<WaitShutdownRejectedTask>(&destroyed));
+    EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
     EXPECT_FALSE(shutdown_done.load(std::memory_order_acquire));
 
     release.store(true, std::memory_order_release);

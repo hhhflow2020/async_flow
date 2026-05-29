@@ -105,7 +105,7 @@ if (!started) {
 - 非 runtime 线程进入 executor 时使用 bounded MPSC ingress，用于 `start_task()` 等外部入口。
 - 队列容量由 traits 配置；`QueueFullPolicy::Reject` 直接返回失败，`QueueFullPolicy::Yield` 会让出 CPU 等待空位。
 - shutdown 会先切到 stopping 并等待在途外部 post 退出，再停止 executor，避免队列清理和外部投递并发踩踏。
-- `ShutdownPolicy::WaitForTasks` 会让 `shutdown()` 等已接收任务全部结束；`ShutdownPolicy::StopImmediately` 不等待未完成任务，适合进程退出路径。
+- `ShutdownPolicy::WaitForTasks` 会让 `shutdown()` 等已接收任务全部结束；`ShutdownPolicy::StopImmediately` 不等待未完成任务，也不保证仍处于 `Pending` 的任务析构，适合进程退出路径。
 - `make_task<T>()` / `start_task<T>()` 使用按任务类型分离的对象池，slot 回收通过 per-block bounded MPMC free queue 避免 Treiber free-list ABA；`create_task<T>()` 作为兼容别名保留。
 - executor 空闲等待使用 C++20 `std::atomic::wait/notify_one`。
 - Task 生命周期由状态机保护，debug 下会检查重复调度、完成后调度、运行中重复唤醒。
