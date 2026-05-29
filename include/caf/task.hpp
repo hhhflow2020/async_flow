@@ -16,6 +16,7 @@ enum class TaskResult : std::uint8_t {
     Pending,
     Again,
     Failed,
+    Cancelled,
 };
 
 enum class QueueFullPolicy : std::uint8_t {
@@ -53,6 +54,7 @@ class BasicTask {
 public:
     using Runtime = RuntimeT;
     using Thread = typename Runtime::Thread;
+    using DestroyFn = void (*)(BasicTask*) noexcept;
 
     BasicTask() = default;
     BasicTask(const BasicTask&) = delete;
@@ -65,8 +67,9 @@ protected:
     }
 
     TaskResult pending_on(Thread thread) noexcept {
-        [[maybe_unused]] const bool ok = Runtime::post(thread, this);
-        CAF_ASSERT(ok);
+        if (!Runtime::post(thread, this)) {
+            return TaskResult::Cancelled;
+        }
         return TaskResult::Pending;
     }
 
@@ -86,6 +89,14 @@ protected:
         return TaskResult::Failed;
     }
 
+    static TaskResult cancelled() noexcept {
+        return TaskResult::Cancelled;
+    }
+
+    static bool runtime_stopping() noexcept {
+        return Runtime::is_stopping();
+    }
+
     static Thread current_thread() noexcept {
         return Runtime::current_thread();
     }
@@ -94,8 +105,21 @@ protected:
         return Runtime::current_thread() == thread;
     }
 
+    [[nodiscard]] std::uint32_t last_parallel_failures() const noexcept {
+        return last_parallel_failures_;
+    }
+
 private:
     virtual TaskResult run() = 0;
+
+    void set_destroy_fn(DestroyFn destroy_fn) noexcept {
+        destroy_fn_ = destroy_fn;
+    }
+
+    void destroy_self() noexcept {
+        CAF_ASSERT(destroy_fn_ != nullptr);
+        destroy_fn_(this);
+    }
 
     detail::ScheduleRequest request_schedule(std::uint16_t thread_index) noexcept {
         for (;;) {
@@ -141,6 +165,10 @@ private:
         return state_.load(std::memory_order_acquire) == TaskState::Created;
     }
 
+    void set_last_parallel_failures(std::uint32_t failures) noexcept {
+        last_parallel_failures_ = failures;
+    }
+
     bool request_wake_while_running(std::uint16_t thread_index) noexcept {
         std::uint32_t expected = detail::no_requested_thread;
         const std::uint32_t desired = static_cast<std::uint32_t>(thread_index) + 1U;
@@ -165,6 +193,8 @@ private:
 
     std::atomic<TaskState> state_{TaskState::Created};
     std::atomic<std::uint32_t> requested_thread_{detail::no_requested_thread};
+    std::uint32_t last_parallel_failures_{0};
+    DestroyFn destroy_fn_{nullptr};
 
     template <typename TraitsT>
     friend class AsyncRuntime;

@@ -10,6 +10,7 @@
 #include "caf/batch_sequencer.hpp"
 #include "caf/caf.hpp"
 #include "caf/detail/bounded_queues.hpp"
+#include "caf/detail/object_pool.hpp"
 
 namespace {
 
@@ -103,6 +104,28 @@ private:
     }
 
     std::atomic<int>* completed_{nullptr};
+};
+
+class CancelResultTask final : public Task {
+public:
+    bool do_it(std::atomic<int>* completed, std::atomic<int>* destroyed) {
+        completed_ = completed;
+        destroyed_ = destroyed;
+        return schedule(TestThread::Logic_0);
+    }
+
+    ~CancelResultTask() override {
+        destroyed_->fetch_add(1, std::memory_order_release);
+    }
+
+private:
+    caf::TaskResult run() override {
+        completed_->fetch_add(1, std::memory_order_release);
+        return cancelled();
+    }
+
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* destroyed_{nullptr};
 };
 
 class HopTask final : public Task {
@@ -212,6 +235,53 @@ private:
     std::atomic<int>* sum_{nullptr};
 };
 
+class ParallelFailureTask final : public Task {
+public:
+    bool do_it(std::atomic<int>* completed, std::atomic<std::uint32_t>* failures) {
+        completed_ = completed;
+        failures_ = failures;
+
+        ops_ = caf::ShardedOps<int>(4);
+        ops_.shards[0] = {1};
+        ops_.shards[1] = {2};
+        return schedule(TestThread::Logic_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Split,
+        Finish,
+    };
+
+    caf::TaskResult run() override {
+        switch (state_) {
+        case State::Split:
+            state_ = State::Finish;
+            Runtime::parallel_shards(
+                TestThread::Logic_0,
+                ops_,
+                caf::ParallelMode::NonEmptyOnly,
+                this,
+                [](std::uint16_t shard, std::vector<int>&) {
+                    return shard != 1;
+                });
+            return pending();
+
+        case State::Finish:
+            failures_->store(last_parallel_failures(), std::memory_order_release);
+            completed_->fetch_add(1, std::memory_order_release);
+            return done();
+        }
+
+        return failed();
+    }
+
+    State state_{State::Split};
+    caf::ShardedOps<int> ops_{4};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<std::uint32_t>* failures_{nullptr};
+};
+
 class EmptyParallelTask final : public Task {
 public:
     bool do_it(std::atomic<int>* completed) {
@@ -302,6 +372,32 @@ private:
     std::atomic<int>* completed_{nullptr};
     std::array<std::atomic<int>, 4>* shard_hits_{nullptr};
     std::array<std::atomic<std::uint64_t>, 4>* batch_seen_{nullptr};
+};
+
+struct OrderedStartStream {};
+
+struct OrderedStartBatch {
+    std::uint64_t batch_id{0};
+    int value{0};
+    std::vector<int>* applied{nullptr};
+    std::atomic<int>* completed{nullptr};
+};
+
+class OrderedStartApplyTask final : public Task {
+public:
+    bool do_it(OrderedStartBatch batch) {
+        batch_ = batch;
+        return schedule(TestThread::Logic_0);
+    }
+
+private:
+    caf::TaskResult run() override {
+        batch_.applied->push_back(batch_.value);
+        batch_.completed->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    OrderedStartBatch batch_;
 };
 
 enum class TinyThread : std::uint16_t {
@@ -404,6 +500,40 @@ private:
     std::atomic<int>* completed_{nullptr};
 };
 
+enum class NoInitThread : std::uint16_t {
+    Logic_0,
+    enum_num_end,
+};
+
+struct NoInitRuntimeTraits {
+    using Thread = NoInitThread;
+
+    static constexpr std::uint16_t thread_count =
+        static_cast<std::uint16_t>(NoInitThread::enum_num_end);
+};
+
+using NoInitRuntime = caf::AsyncRuntime<NoInitRuntimeTraits>;
+using NoInitTaskBase = NoInitRuntime::Task;
+
+class NoInitTask final : public NoInitTaskBase {
+public:
+    bool do_it(std::atomic<int>* destroyed) {
+        destroyed_ = destroyed;
+        return schedule(NoInitThread::Logic_0);
+    }
+
+    ~NoInitTask() override {
+        destroyed_->fetch_add(1, std::memory_order_release);
+    }
+
+private:
+    caf::TaskResult run() override {
+        return failed();
+    }
+
+    std::atomic<int>* destroyed_{nullptr};
+};
+
 } // namespace
 
 TEST(QueueTests, BoundedSpscPreservesFifoAndRejectsWhenFull) {
@@ -434,6 +564,21 @@ TEST(QueueTests, BoundedMpmcRejectsWhenFull) {
     EXPECT_EQ(queue.try_pop(), &a);
     EXPECT_EQ(queue.try_pop(), &b);
     EXPECT_EQ(queue.try_pop(), nullptr);
+}
+
+TEST(PoolTests, ObjectPoolReusesReleasedStorage) {
+    struct Payload {
+        int value{0};
+    };
+
+    caf::detail::ObjectPool<Payload, 2> pool;
+    Payload* first = pool.create();
+    first->value = 42;
+    pool.destroy(first);
+
+    Payload* second = pool.create();
+    EXPECT_EQ(second, first);
+    pool.destroy(second);
 }
 
 TEST(UtilityTests, SplitByShardGroupsByKey) {
@@ -487,6 +632,15 @@ TEST_F(RuntimeFixture, FailedTaskIsReleased) {
     ASSERT_TRUE(wait_until_at_least(completed, 1));
 }
 
+TEST_F(RuntimeFixture, CancelledTaskIsReleased) {
+    std::atomic<int> completed{0};
+    std::atomic<int> destroyed{0};
+
+    ASSERT_TRUE(Runtime::start_task<CancelResultTask>(&completed, &destroyed));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    ASSERT_TRUE(wait_until_at_least(destroyed, 1));
+}
+
 TEST_F(RuntimeFixture, StateMachineCanHopThreadsAndAgainOnCurrentThread) {
     std::atomic<int> completed{0};
     std::array<std::atomic<std::uint16_t>, 4> seen{};
@@ -537,11 +691,41 @@ TEST_F(RuntimeFixture, ParallelShardsAllShardsRunsNoopShards) {
     EXPECT_EQ(sum.load(), 6);
 }
 
+TEST_F(RuntimeFixture, ParallelShardFailuresAreVisibleToOwner) {
+    std::atomic<int> completed{0};
+    std::atomic<std::uint32_t> failures{0};
+
+    ASSERT_TRUE(Runtime::start_task<ParallelFailureTask>(&completed, &failures));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(failures.load(std::memory_order_acquire), 1U);
+}
+
 TEST_F(RuntimeFixture, EmptyNonEmptyParallelResumesOwner) {
     std::atomic<int> completed{0};
 
     ASSERT_TRUE(Runtime::start_task<EmptyParallelTask>(&completed));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
+}
+
+TEST_F(RuntimeFixture, OrderedStartTaskBuffersOutOfOrderBatches) {
+    std::atomic<int> completed{0};
+    std::vector<int> applied;
+
+    ASSERT_TRUE((Runtime::start_ordered_task<OrderedStartStream, OrderedStartApplyTask>(
+        TestThread::DB_0,
+        OrderedStartBatch{2, 20, &applied, &completed})));
+    ASSERT_TRUE((Runtime::start_ordered_task<OrderedStartStream, OrderedStartApplyTask>(
+        TestThread::DB_0,
+        OrderedStartBatch{1, 10, &applied, &completed})));
+    ASSERT_TRUE((Runtime::start_ordered_task<OrderedStartStream, OrderedStartApplyTask>(
+        TestThread::DB_0,
+        OrderedStartBatch{3, 30, &applied, &completed})));
+
+    ASSERT_TRUE(wait_until_at_least(completed, 3));
+    ASSERT_EQ(applied.size(), 3);
+    EXPECT_EQ(applied[0], 10);
+    EXPECT_EQ(applied[1], 20);
+    EXPECT_EQ(applied[2], 30);
 }
 
 TEST_F(RuntimeFixture, OrderedBatchRunsEveryShardAndAcceptsContiguousBatches) {
@@ -617,4 +801,12 @@ TEST(RuntimeBackpressureTests, YieldPolicyAllowsManyExternalProducers) {
     EXPECT_TRUE(all_started.load(std::memory_order_acquire));
     EXPECT_TRUE(wait_until_at_least(completed, producer_count * tasks_per_producer));
     YieldRuntime::shutdown();
+}
+
+TEST(RuntimeShutdownTests, StartTaskFailsAndDestroysTaskWhenRuntimeIsNotInitialized) {
+    NoInitRuntime::shutdown();
+
+    std::atomic<int> destroyed{0};
+    EXPECT_FALSE(NoInitRuntime::start_task<NoInitTask>(&destroyed));
+    EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
 }

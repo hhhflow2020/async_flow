@@ -7,6 +7,7 @@
 
 #include "caf/caf.hpp"
 #include "caf/detail/bounded_queues.hpp"
+#include "caf/detail/object_pool.hpp"
 
 namespace {
 
@@ -151,6 +152,24 @@ void BM_SpscQueuePushPop(benchmark::State& state) {
     state.SetItemsProcessed(state.iterations() * state.range(0));
 }
 
+void BM_ObjectPoolCreateDestroy(benchmark::State& state) {
+    struct Payload {
+        std::uint64_t values[8]{};
+    };
+
+    caf::detail::ObjectPool<Payload> pool;
+
+    for (auto _ : state) {
+        for (int i = 0; i < state.range(0); ++i) {
+            auto* object = pool.create();
+            benchmark::DoNotOptimize(object);
+            pool.destroy(object);
+        }
+    }
+
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+
 void BM_RuntimeExternalStart(benchmark::State& state) {
     for (auto _ : state) {
         Runtime::init();
@@ -200,6 +219,7 @@ void BM_RuntimeParallelShards(benchmark::State& state) {
 }
 
 BENCHMARK(BM_SpscQueuePushPop)->Arg(1024)->Arg(16384);
+BENCHMARK(BM_ObjectPoolCreateDestroy)->Arg(1024)->Arg(16384);
 BENCHMARK(BM_RuntimeExternalStart)->Arg(1024)->Arg(8192)->Unit(benchmark::kMillisecond);
 BENCHMARK(BM_RuntimeCrossThreadHop)->Arg(1024)->Arg(8192)->Unit(benchmark::kMillisecond);
 BENCHMARK(BM_RuntimeParallelShards)->Arg(128)->Arg(512)->Unit(benchmark::kMillisecond);

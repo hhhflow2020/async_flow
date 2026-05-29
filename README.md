@@ -75,9 +75,13 @@ private:
 - runtime 固定线程之间使用 bounded SPSC ring，每个 source -> target 一条队列。
 - 非 runtime 线程进入 executor 时使用 bounded MPMC ingress，用于 `start_task()` 等外部入口。
 - 队列容量由 traits 配置；`QueueFullPolicy::Reject` 直接返回失败，`QueueFullPolicy::Yield` 会让出 CPU 等待空位。
+- `start_task<T>()` 使用按任务类型分离的无锁 free-list 对象池，任务完成后回收到对应类型池。
 - executor 空闲等待使用 C++20 `std::atomic::wait/notify_one`。
 - Task 生命周期由状态机保护，debug 下会检查重复调度、完成后调度、运行中重复唤醒。
 - `parallel_shards_ordered()` 会对每个 shard 维护 `last_applied_batch_id`，要求 batch id 连续递增。
+- `start_ordered_task<Stream, ApplyTask>()` 会在指定 sequencer 线程上缓存乱序 batch，并按 batch_id 连续启动 apply task。
+- `parallel_shards()` 的 handler 如果返回 `bool`，`false` 会计为 shard 失败；owner 恢复后可用 `last_parallel_failures()` 读取失败数。
+- `TaskResult::Cancelled` 可用于取消结束；runtime 未初始化或 stopping 时 `start_task()` 返回失败并销毁任务。
 - 热路径不使用 `std::function`，shard handler 通过模板静态绑定。
 
 ## 构建与测试

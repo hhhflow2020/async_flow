@@ -3,6 +3,7 @@
 #include <atomic>
 #include <bit>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <new>
 #include <thread>
@@ -12,6 +13,7 @@
 
 #include "caf/detail/bounded_queues.hpp"
 #include "caf/detail/config.hpp"
+#include "caf/detail/object_pool.hpp"
 #include "caf/task.hpp"
 
 namespace caf {
@@ -112,20 +114,31 @@ public:
     template <typename TaskT, typename... Args>
     [[nodiscard]] static bool start_task(Args&&... args) {
         static_assert(std::is_base_of_v<Task, TaskT>, "TaskT must derive from Runtime::Task");
-        auto* task = new TaskT();
+        auto* task = create_task<TaskT>();
         using DoItResult = decltype(task->do_it(std::declval<Args>()...));
 
         if constexpr (std::is_void_v<DoItResult>) {
-            task->do_it(std::forward<Args>(args)...);
+            try {
+                task->do_it(std::forward<Args>(args)...);
+            } catch (...) {
+                task->destroy_self();
+                throw;
+            }
             if (task->is_created()) {
-                delete task;
+                task->destroy_self();
                 return false;
             }
             return true;
         } else {
-            const bool ok = static_cast<bool>(task->do_it(std::forward<Args>(args)...));
+            bool ok = false;
+            try {
+                ok = static_cast<bool>(task->do_it(std::forward<Args>(args)...));
+            } catch (...) {
+                task->destroy_self();
+                throw;
+            }
             if (!ok && task->is_created()) {
-                delete task;
+                task->destroy_self();
             }
             return ok;
         }
@@ -162,6 +175,10 @@ public:
 
     [[nodiscard]] static bool is_runtime_thread() noexcept {
         return current_thread_index_ < thread_count;
+    }
+
+    [[nodiscard]] static bool is_stopping() noexcept {
+        return stopping_.load(std::memory_order_acquire);
     }
 
     [[nodiscard]] static std::uint16_t current_thread_index() noexcept {
@@ -232,6 +249,17 @@ public:
             std::forward<Handler>(handler));
     }
 
+    template <typename StreamTag, typename ApplyTaskT, typename Batch>
+    [[nodiscard]] static bool start_ordered_task(Thread sequencer_thread, Batch&& batch) {
+        using BatchT = std::decay_t<Batch>;
+        auto* task = create_task<OrderedStartTask<StreamTag, ApplyTaskT, BatchT>>();
+        const bool ok = task->do_it(sequencer_thread, std::forward<Batch>(batch));
+        if (!ok && task->is_created()) {
+            task->destroy_self();
+        }
+        return ok;
+    }
+
 private:
     struct alignas(detail::hardware_cache_line_size) OrderedBatchState {
         std::uint64_t last_applied_batch_id{0};
@@ -249,11 +277,75 @@ private:
             }
             if (pending.fetch_sub(1, std::memory_order_acq_rel) == 1U) {
                 if (owner != nullptr && resume_thread < thread_count) {
+                    owner->set_last_parallel_failures(failed.load(std::memory_order_acquire));
                     post_blocking(thread_from_index(resume_thread), owner);
                 }
                 delete this;
             }
         }
+    };
+
+    template <typename StreamTag, typename ApplyTaskT, typename BatchT>
+    struct OrderedStartState {
+        std::uint64_t next_batch_id{1};
+        std::map<std::uint64_t, BatchT> pending;
+
+        void submit(BatchT batch) {
+            const std::uint64_t batch_id = batch.batch_id;
+            if (batch_id < next_batch_id) {
+                return;
+            }
+
+            if (batch_id > next_batch_id) {
+                pending.emplace(batch_id, std::move(batch));
+                return;
+            }
+
+            start_ready(std::move(batch));
+            drain_ready();
+        }
+
+        void start_ready(BatchT batch) {
+            [[maybe_unused]] const bool ok = AsyncRuntime::start_task<ApplyTaskT>(std::move(batch));
+            CAF_ASSERT(ok);
+            ++next_batch_id;
+        }
+
+        void drain_ready() {
+            for (;;) {
+                auto it = pending.find(next_batch_id);
+                if (it == pending.end()) {
+                    return;
+                }
+
+                BatchT batch = std::move(it->second);
+                pending.erase(it);
+                start_ready(std::move(batch));
+            }
+        }
+    };
+
+    template <typename StreamTag, typename ApplyTaskT, typename BatchT>
+    [[nodiscard]] static OrderedStartState<StreamTag, ApplyTaskT, BatchT>& ordered_start_state() {
+        static OrderedStartState<StreamTag, ApplyTaskT, BatchT> state;
+        return state;
+    }
+
+    template <typename StreamTag, typename ApplyTaskT, typename BatchT>
+    class OrderedStartTask final : public Task {
+    public:
+        bool do_it(Thread sequencer_thread, BatchT batch) {
+            batch_ = std::move(batch);
+            return this->schedule(sequencer_thread);
+        }
+
+    private:
+        TaskResult run() override {
+            ordered_start_state<StreamTag, ApplyTaskT, BatchT>().submit(std::move(batch_));
+            return this->done();
+        }
+
+        BatchT batch_{};
     };
 
     template <typename Op, typename Handler, bool Ordered>
@@ -281,9 +373,21 @@ private:
             if (ok) {
                 try {
                     if constexpr (Ordered) {
-                        handler_(shard_index_, ops_, batch_id_);
+                        using HandlerResult =
+                            std::invoke_result_t<Handler&, std::uint16_t, std::vector<Op>&, std::uint64_t>;
+                        if constexpr (std::is_same_v<HandlerResult, bool>) {
+                            ok = handler_(shard_index_, ops_, batch_id_);
+                        } else {
+                            handler_(shard_index_, ops_, batch_id_);
+                        }
                     } else {
-                        handler_(shard_index_, ops_);
+                        using HandlerResult =
+                            std::invoke_result_t<Handler&, std::uint16_t, std::vector<Op>&>;
+                        if constexpr (std::is_same_v<HandlerResult, bool>) {
+                            ok = handler_(shard_index_, ops_);
+                        } else {
+                            handler_(shard_index_, ops_);
+                        }
                     }
                 } catch (...) {
                     CAF_ASSERT(false && "parallel shard handler must not throw");
@@ -399,14 +503,14 @@ private:
 
             Task* shard_task = nullptr;
             if constexpr (Ordered) {
-                shard_task = new ShardTask<Op, HandlerT, true>(
+                shard_task = create_task<ShardTask<Op, HandlerT, true>>(
                     group,
                     i,
                     batch_id,
                     std::move(sharded_ops.shards[i]),
                     HandlerT(handler));
             } else {
-                shard_task = new ShardTask<Op, HandlerT, false>(
+                shard_task = create_task<ShardTask<Op, HandlerT, false>>(
                     group,
                     i,
                     0,
@@ -559,6 +663,9 @@ private:
             case TaskResult::Failed:
                 finish_done(task);
                 break;
+            case TaskResult::Cancelled:
+                finish_done(task);
+                break;
             }
         }
 
@@ -566,7 +673,7 @@ private:
             const std::uint16_t requested = task->take_requested_thread();
             CAF_ASSERT(requested == invalid_thread_index);
             task->state_.store(TaskState::Done, std::memory_order_release);
-            delete task;
+            task->destroy_self();
         }
 
         void finish_pending(Task* task) noexcept {
@@ -595,6 +702,27 @@ private:
 
     using SpscQueue = detail::BoundedSpscQueue<Task>;
     using ExternalQueue = detail::BoundedMpmcQueue<Task>;
+
+    template <typename TaskT>
+    using TaskPool = detail::ObjectPool<TaskT>;
+
+    template <typename TaskT>
+    [[nodiscard]] static TaskPool<TaskT>& task_pool() {
+        static TaskPool<TaskT> pool;
+        return pool;
+    }
+
+    template <typename TaskT, typename... Args>
+    [[nodiscard]] static TaskT* create_task(Args&&... args) {
+        auto* task = task_pool<TaskT>().create(std::forward<Args>(args)...);
+        task->set_destroy_fn(&destroy_task<TaskT>);
+        return task;
+    }
+
+    template <typename TaskT>
+    static void destroy_task(Task* task) noexcept {
+        task_pool<TaskT>().destroy(static_cast<TaskT*>(task));
+    }
 
     static void init_queues() {
         spsc_queues_.clear();
