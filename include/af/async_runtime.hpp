@@ -338,6 +338,20 @@ public:
     }
 
     template <typename Op, typename Handler>
+    static void parallel_shards(
+        ShardedOps<Op>& sharded_ops,
+        ParallelMode mode,
+        Task* owner,
+        Handler&& handler) {
+        parallel_shards(
+            thread_from_index(0),
+            sharded_ops,
+            mode,
+            owner,
+            std::forward<Handler>(handler));
+    }
+
+    template <typename Op, typename Handler>
     static void parallel_shards_ordered(
         Thread shard_begin,
         ShardedOps<Op>& sharded_ops,
@@ -354,6 +368,37 @@ public:
             std::forward<Handler>(handler));
     }
 
+    template <typename Op, typename Handler>
+    static void parallel_shards_ordered(
+        ShardedOps<Op>& sharded_ops,
+        std::uint64_t batch_id,
+        Task* owner,
+        Handler&& handler) {
+        parallel_shards_ordered(
+            thread_from_index(0),
+            sharded_ops,
+            batch_id,
+            owner,
+            std::forward<Handler>(handler));
+    }
+
+    template <typename Op, typename Handler>
+    static void parallel_shards(
+        ShardedOps<Op>& sharded_ops,
+        ParallelMode mode,
+        std::uint64_t batch_id,
+        Task* owner,
+        Handler&& handler) {
+        AF_ASSERT(mode == ParallelMode::AllShards);
+        static_cast<void>(mode);
+        parallel_shards_ordered(
+            thread_from_index(0),
+            sharded_ops,
+            batch_id,
+            owner,
+            std::forward<Handler>(handler));
+    }
+
     template <typename StreamTag, typename ApplyTaskT, typename Batch>
     [[nodiscard]] static bool start_ordered_task(Thread sequencer_thread, Batch&& batch) {
         using BatchT = std::decay_t<Batch>;
@@ -363,6 +408,15 @@ public:
             task->release_lifetime_ref();
         }
         return ok;
+    }
+
+    [[nodiscard]] static std::uint64_t ordered_last_applied_batch_id(Thread thread) noexcept {
+        const std::uint16_t index = thread_index(thread);
+        if (index >= ordered_batch_state_.size()) {
+            AF_ASSERT(false && "invalid ordered batch thread");
+            return 0;
+        }
+        return ordered_batch_state_[index].last_applied_batch_id;
     }
 
 private:

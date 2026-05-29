@@ -98,6 +98,27 @@ if (!started) {
 
 `make_task<T>()` 返回的是一个轻量包装句柄，内部由 runtime 统一接入对象池、生命周期引用和后续可替换的内存池策略。`async::start_task<T>()` 作为便捷入口保留，但公开示例统一使用 `make_task<T>() + do_it()`。
 
+## 批处理 API
+
+普通批处理可以显式给出 shard 起点，也可以使用默认从线程 0 开始的便捷重载：
+
+```cpp
+async::parallel_shards(sharded_ops, af::ParallelMode::NonEmptyOnly, this, handler);
+```
+
+有序 batch 会强制走 `AllShards` 语义，并推进每个 shard 的 `last_applied_batch_id`：
+
+```cpp
+async::parallel_shards(sharded_ops, af::ParallelMode::AllShards, batch_id, this, handler);
+```
+
+框架也提供轻量 CRUD batch 类型，业务可以直接组合成自己的有序变更流：
+
+```cpp
+af::ChangeBatch<std::uint64_t, PlayerDelta> batch;
+auto sharded = af::split_change_batch(batch, player_logic_shard_count);
+```
+
 ## 性能边界
 
 - runtime 固定线程之间使用 bounded SPSC ring，每个 source -> target 一条队列。
@@ -111,6 +132,7 @@ if (!started) {
 - Task 生命周期由状态机保护，debug 下会检查重复调度、完成后调度、运行中重复唤醒。
 - `parallel_shards_ordered()` 会对每个 shard 维护 `last_applied_batch_id`，要求 batch id 连续递增。
 - `start_ordered_task<Stream, ApplyTask>()` 会在指定 sequencer 线程上缓存乱序 batch，并按 batch_id 连续启动 apply task。
+- `CrudOp<Key, Value>` / `ChangeBatch<Key, Value>` 是纯数据 helper，不引入额外运行期状态。
 - `parallel_shards()` 的 handler 如果返回 `bool`，`false` 会计为 shard 失败；owner 恢复后可用 `last_parallel_failures()` 读取失败数。
 - `TaskResult::Cancelled` 可用于取消结束；runtime 未初始化或 stopping 时 `start_task()` 返回失败并销毁任务。
 - 热路径不使用 `std::function`，shard handler 通过模板静态绑定。

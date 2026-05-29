@@ -263,6 +263,156 @@ private:
     std::array<std::atomic<std::uint64_t>, 4>* batch_seen_{nullptr};
 };
 
+class DefaultParallelOverloadTask final : public Task {
+public:
+    explicit DefaultParallelOverloadTask(Task::FactoryToken token) : Task(token) {}
+
+    bool do_it(std::atomic<int>* completed, std::atomic<std::uint16_t>* ran_on) {
+        completed_ = completed;
+        ran_on_ = ran_on;
+        ops_ = af::ShardedOps<int>(2);
+        ops_.shards[1] = {42};
+        return schedule(TestThread::Logic_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Split,
+        Finish,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Split:
+            state_ = State::Finish;
+            Runtime::parallel_shards(
+                ops_,
+                af::ParallelMode::NonEmptyOnly,
+                this,
+                [this](std::uint16_t, std::vector<int>&) {
+                    ran_on_->store(Runtime::current_thread_index(), std::memory_order_release);
+                });
+            return pending();
+
+        case State::Finish:
+            completed_->fetch_add(1, std::memory_order_release);
+            return done();
+        }
+
+        return failed();
+    }
+
+    State state_{State::Split};
+    af::ShardedOps<int> ops_{2};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<std::uint16_t>* ran_on_{nullptr};
+};
+
+class OrderedOverloadTask final : public Task {
+public:
+    explicit OrderedOverloadTask(Task::FactoryToken token) : Task(token) {}
+
+    bool do_it(
+        std::uint64_t batch_id,
+        std::atomic<int>* completed,
+        std::array<std::atomic<int>, 4>* shard_hits) {
+        batch_id_ = batch_id;
+        completed_ = completed;
+        shard_hits_ = shard_hits;
+        ops_ = af::ShardedOps<int>(4);
+        ops_.shards[0] = {1};
+        return schedule(TestThread::Logic_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Apply,
+        Finish,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Apply:
+            state_ = State::Finish;
+            Runtime::parallel_shards(
+                ops_,
+                af::ParallelMode::AllShards,
+                batch_id_,
+                this,
+                [this](std::uint16_t shard, std::vector<int>&, std::uint64_t) {
+                    (*shard_hits_)[shard].fetch_add(1, std::memory_order_release);
+                });
+            return pending();
+
+        case State::Finish:
+            completed_->fetch_add(1, std::memory_order_release);
+            return done();
+        }
+
+        return failed();
+    }
+
+    State state_{State::Apply};
+    std::uint64_t batch_id_{0};
+    af::ShardedOps<int> ops_{4};
+    std::atomic<int>* completed_{nullptr};
+    std::array<std::atomic<int>, 4>* shard_hits_{nullptr};
+};
+
+class OrderedFailureTask final : public Task {
+public:
+    explicit OrderedFailureTask(Task::FactoryToken token) : Task(token) {}
+
+    bool do_it(
+        std::uint64_t batch_id,
+        std::uint16_t fail_shard,
+        std::atomic<int>* completed,
+        std::atomic<std::uint32_t>* failures) {
+        batch_id_ = batch_id;
+        fail_shard_ = fail_shard;
+        completed_ = completed;
+        failures_ = failures;
+        ops_ = af::ShardedOps<int>(4);
+        return schedule(TestThread::Logic_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Apply,
+        Finish,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Apply:
+            state_ = State::Finish;
+            Runtime::parallel_shards_ordered(
+                TestThread::Logic_0,
+                ops_,
+                batch_id_,
+                this,
+                [this](std::uint16_t shard, std::vector<int>&, std::uint64_t) {
+                    return shard != fail_shard_;
+                });
+            return pending();
+
+        case State::Finish:
+            failures_->store(last_parallel_failures(), std::memory_order_release);
+            completed_->fetch_add(1, std::memory_order_release);
+            return done();
+        }
+
+        return failed();
+    }
+
+    State state_{State::Apply};
+    std::uint64_t batch_id_{0};
+    std::uint16_t fail_shard_{0};
+    af::ShardedOps<int> ops_{4};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<std::uint32_t>* failures_{nullptr};
+};
+
 struct OrderedStartStream {};
 
 struct OrderedStartBatch {
@@ -344,6 +494,15 @@ TEST_F(ParallelRuntimeFixture, EmptyNonEmptyParallelResumesOwner) {
     ASSERT_TRUE(wait_until_at_least(completed, 1));
 }
 
+TEST_F(ParallelRuntimeFixture, ParallelShardsDefaultBeginOverloadUsesThreadZero) {
+    std::atomic<int> completed{0};
+    std::atomic<std::uint16_t> ran_on{Runtime::invalid_thread_index};
+
+    ASSERT_TRUE(Runtime::start_task<DefaultParallelOverloadTask>(&completed, &ran_on));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(ran_on.load(std::memory_order_acquire), Runtime::thread_index(TestThread::Logic_1));
+}
+
 TEST_F(ParallelRuntimeFixture, OrderedStartTaskBuffersOutOfOrderBatches) {
     std::atomic<int> completed{0};
     std::vector<int> applied;
@@ -363,6 +522,49 @@ TEST_F(ParallelRuntimeFixture, OrderedStartTaskBuffersOutOfOrderBatches) {
     EXPECT_EQ(applied[0], 10);
     EXPECT_EQ(applied[1], 20);
     EXPECT_EQ(applied[2], 30);
+}
+
+TEST_F(ParallelRuntimeFixture, OrderedStartTaskKeepsGapBufferedUntilMissingBatchArrives) {
+    std::atomic<int> completed{0};
+    std::vector<int> applied;
+
+    ASSERT_TRUE((Runtime::start_ordered_task<OrderedStartStream, OrderedStartApplyTask>(
+        TestThread::DB_0,
+        OrderedStartBatch{2, 20, &applied, &completed})));
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    EXPECT_EQ(completed.load(std::memory_order_acquire), 0);
+    EXPECT_TRUE(applied.empty());
+
+    ASSERT_TRUE((Runtime::start_ordered_task<OrderedStartStream, OrderedStartApplyTask>(
+        TestThread::DB_0,
+        OrderedStartBatch{1, 10, &applied, &completed})));
+    ASSERT_TRUE(wait_until_at_least(completed, 2));
+    ASSERT_EQ(applied.size(), 2);
+    EXPECT_EQ(applied[0], 10);
+    EXPECT_EQ(applied[1], 20);
+}
+
+TEST_F(ParallelRuntimeFixture, OrderedStartTaskIgnoresDuplicateAndOldBatches) {
+    std::atomic<int> completed{0};
+    std::vector<int> applied;
+
+    ASSERT_TRUE((Runtime::start_ordered_task<OrderedStartStream, OrderedStartApplyTask>(
+        TestThread::DB_0,
+        OrderedStartBatch{1, 10, &applied, &completed})));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    ASSERT_TRUE((Runtime::start_ordered_task<OrderedStartStream, OrderedStartApplyTask>(
+        TestThread::DB_0,
+        OrderedStartBatch{1, 100, &applied, &completed})));
+    ASSERT_TRUE((Runtime::start_ordered_task<OrderedStartStream, OrderedStartApplyTask>(
+        TestThread::DB_0,
+        OrderedStartBatch{2, 20, &applied, &completed})));
+    ASSERT_TRUE(wait_until_at_least(completed, 2));
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    EXPECT_EQ(completed.load(std::memory_order_acquire), 2);
+    ASSERT_EQ(applied.size(), 2);
+    EXPECT_EQ(applied[0], 10);
+    EXPECT_EQ(applied[1], 20);
 }
 
 TEST(RuntimeOrderedStartTests, OrderedStartStateResetsAfterRuntimeRestart) {
@@ -409,4 +611,32 @@ TEST_F(ParallelRuntimeFixture, OrderedBatchRunsEveryShardAndAcceptsContiguousBat
         EXPECT_EQ(shard_hits[i].load(), 2);
         EXPECT_EQ(batch_seen[i].load(), 2U);
     }
+}
+
+TEST_F(ParallelRuntimeFixture, OrderedBatchConvenienceOverloadRunsAllShards) {
+    std::atomic<int> completed{0};
+    std::array<std::atomic<int>, 4> shard_hits{};
+
+    ASSERT_TRUE(Runtime::start_task<OrderedOverloadTask>(1U, &completed, &shard_hits));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    for (std::uint16_t i = 0; i < 4; ++i) {
+        EXPECT_EQ(shard_hits[i].load(std::memory_order_acquire), 1);
+        EXPECT_EQ(
+            Runtime::ordered_last_applied_batch_id(Runtime::thread_from_index(i)),
+            1U);
+    }
+}
+
+TEST_F(ParallelRuntimeFixture, OrderedBatchFailureDoesNotAdvanceFailedShard) {
+    std::atomic<int> completed{0};
+    std::atomic<std::uint32_t> failures{0};
+
+    ASSERT_TRUE(Runtime::start_task<OrderedFailureTask>(1U, 1U, &completed, &failures));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+
+    EXPECT_EQ(failures.load(std::memory_order_acquire), 1U);
+    EXPECT_EQ(Runtime::ordered_last_applied_batch_id(TestThread::Logic_0), 1U);
+    EXPECT_EQ(Runtime::ordered_last_applied_batch_id(TestThread::Logic_1), 0U);
+    EXPECT_EQ(Runtime::ordered_last_applied_batch_id(TestThread::Logic_2), 1U);
+    EXPECT_EQ(Runtime::ordered_last_applied_batch_id(TestThread::Logic_3), 1U);
 }

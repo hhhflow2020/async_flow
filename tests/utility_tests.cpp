@@ -151,6 +151,54 @@ TEST(UtilityTests, SplitByShardGroupsByKey) {
     ASSERT_TRUE(sharded.shards[3].empty());
 }
 
+TEST(UtilityTests, SplitCrudOpsGroupsByKeyAndKeepsOperationData) {
+    std::vector<af::CrudOp<std::uint64_t, int>> ops{
+        {af::OpType::Add, 0, 10},
+        {af::OpType::Update, 5, 15},
+        {af::OpType::Delete, 2, 20},
+    };
+
+    auto sharded = af::split_crud_ops(std::move(ops), 4);
+
+    ASSERT_EQ(sharded.shard_count(), 4);
+    ASSERT_EQ(sharded.shards[0].size(), 1);
+    ASSERT_EQ(sharded.shards[1].size(), 1);
+    ASSERT_EQ(sharded.shards[2].size(), 1);
+    EXPECT_EQ(sharded.shards[0][0].type, af::OpType::Add);
+    EXPECT_EQ(sharded.shards[0][0].value, 10);
+    EXPECT_EQ(sharded.shards[1][0].type, af::OpType::Update);
+    EXPECT_EQ(sharded.shards[1][0].value, 15);
+    EXPECT_EQ(sharded.shards[2][0].type, af::OpType::Delete);
+    EXPECT_EQ(sharded.shards[2][0].value, 20);
+}
+
+TEST(UtilityTests, SplitChangeBatchSupportsCustomShardFunction) {
+    af::ChangeBatch<std::uint64_t, int> batch{
+        7,
+        {
+            {af::OpType::Add, 10, 1},
+            {af::OpType::Update, 11, 2},
+            {af::OpType::Delete, 12, 3},
+        },
+    };
+
+    auto sharded = af::split_change_batch(
+        batch,
+        2,
+        [](std::uint64_t key) {
+            return key / 10U;
+        });
+
+    EXPECT_EQ(batch.batch_id, 7U);
+    EXPECT_TRUE(batch.ops.empty());
+    ASSERT_EQ(sharded.shard_count(), 2);
+    EXPECT_TRUE(sharded.shards[0].empty());
+    ASSERT_EQ(sharded.shards[1].size(), 3);
+    EXPECT_EQ(sharded.shards[1][0].key, 10U);
+    EXPECT_EQ(sharded.shards[1][1].key, 11U);
+    EXPECT_EQ(sharded.shards[1][2].key, 12U);
+}
+
 TEST(UtilityTests, BatchSequencerBuffersOutOfOrderBatches) {
     af::BatchSequencer<int> sequencer(1);
     std::vector<int> submitted;
