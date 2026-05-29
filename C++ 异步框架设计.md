@@ -715,10 +715,10 @@ Benchmark 使用 Google Benchmark，入口目标是 `asyncflow_runtime_benchmark
 运行：
 
 ```sh
-./build-conan/build/Release/asyncflow_runtime_benchmarks --benchmark_min_time=0.001s
+./build-conan/build/Release/asyncflow_runtime_benchmarks --benchmark_min_time=0.01s
 ./build-conan/build/Release/asyncflow_runtime_benchmarks \
   --benchmark_filter=BM_Runtime \
-  --benchmark_min_time=0.001s \
+  --benchmark_min_time=0.01s \
   --benchmark_repetitions=7 \
   --benchmark_report_aggregates_only=true \
   --benchmark_out=runtime_benchmarks.json \
@@ -726,7 +726,7 @@ Benchmark 使用 Google Benchmark，入口目标是 `asyncflow_runtime_benchmark
 python3 scripts/check_benchmark_regression.py runtime_benchmarks.json benchmarks/perf_baseline.json
 ```
 
-CI 使用 `benchmarks/perf_baseline.json` 作为 runtime benchmark baseline，并由 `scripts/check_benchmark_regression.py` 按阈值检测回归。
+CI 使用 `benchmarks/perf_baseline_github_ubuntu.json` 作为 GitHub Ubuntu runner 的 runtime benchmark baseline，并由 `scripts/check_benchmark_regression.py` 按阈值检测回归。本地机器仍可使用 `benchmarks/perf_baseline.json` 做开发参考。
 
 ## 14. 构建
 
@@ -771,7 +771,8 @@ ctest --test-dir build-conan/build/Release --output-on-failure
 
 - `.github/workflows/ci.yml`：Debug 测试、TSAN stress、Release benchmark 三个 job。
 - `tests/runtime_stress_tests.cpp`：高并发反复 `init()` / `shutdown()` / `start_task()`，默认短跑，可通过 `ASYNCFLOW_STRESS_MS` 拉长。
-- `benchmarks/perf_baseline.json`：runtime benchmark baseline。
+- `benchmarks/perf_baseline.json`：本地 runtime benchmark baseline。
+- `benchmarks/perf_baseline_github_ubuntu.json`：GitHub Ubuntu runner runtime benchmark baseline。
 - `scripts/check_benchmark_regression.py`：读取 Google Benchmark JSON，并按 `default_max_regression` 或单项阈值失败。
 
 后续仍可按业务压力继续补充：

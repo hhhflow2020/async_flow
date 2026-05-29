@@ -147,10 +147,10 @@ cmake -S . -B build-conan/build/Release \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build build-conan/build/Release --parallel
 ctest --test-dir build-conan/build/Release --output-on-failure
-./build-conan/build/Release/asyncflow_runtime_benchmarks --benchmark_min_time=0.001s
+./build-conan/build/Release/asyncflow_runtime_benchmarks --benchmark_min_time=0.01s
 ./build-conan/build/Release/asyncflow_runtime_benchmarks \
   --benchmark_filter=BM_Runtime \
-  --benchmark_min_time=0.001s \
+  --benchmark_min_time=0.01s \
   --benchmark_repetitions=7 \
   --benchmark_report_aggregates_only=true \
   --benchmark_out=runtime_benchmarks.json \
@@ -183,4 +183,5 @@ ASYNCFLOW_STRESS_MS=1500 ctest --test-dir build-tsan/build/Debug -R RuntimeStres
 - `tests/runtime_parallel_tests.cpp`：parallel shard、失败汇总、有序 batch 和 retryable ordered apply。
 - `tests/runtime_stress_tests.cpp`：高并发 init/shutdown/start_task stress，CI 中也用于 TSAN job。
 - `benchmarks/queue_benchmarks.cpp` 与 `benchmarks/runtime_benchmarks.cpp`：底层结构和 runtime 路径分开压测。
-- `benchmarks/perf_baseline.json` 与 `scripts/check_benchmark_regression.py`：CI 性能 baseline 与回归阈值检查。
+- `benchmarks/perf_baseline.json`：本地 runtime benchmark baseline。
+- `benchmarks/perf_baseline_github_ubuntu.json` 与 `scripts/check_benchmark_regression.py`：GitHub Ubuntu runner 性能 baseline 与回归阈值检查。
