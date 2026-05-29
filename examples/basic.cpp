@@ -112,7 +112,7 @@ int main() {
     std::atomic<int> completed{0};
     bool add_started = false;
     {
-        auto add_task = Runtime::create_task<AddGoldTask>();
+        auto add_task = Runtime::make_task<AddGoldTask>();
         add_started = add_task->do_it(1001U, 100, &completed);
     }
     [[maybe_unused]] const bool login_started = Runtime::start_task<LoginTask>(1002U, &completed);

@@ -685,7 +685,7 @@ TEST_F(RuntimeFixture, OneShotTaskRunsOnRequestedThread) {
 TEST_F(RuntimeFixture, CreateTaskSupportsCustomStartFunction) {
     std::atomic<int> completed{0};
 
-    auto task = Runtime::create_task<ManualStartTask>();
+    auto task = Runtime::make_task<ManualStartTask>();
     ASSERT_TRUE(task);
     EXPECT_FALSE(task.scheduled());
     ASSERT_TRUE(task->begin_on(TestThread::Logic_3, &completed));
@@ -697,7 +697,7 @@ TEST_F(RuntimeFixture, UnscheduledCreatedTaskIsDestroyedByHandle) {
     std::atomic<int> destroyed{0};
 
     {
-        auto task = Runtime::create_task<UnscheduledTask>(&destroyed);
+        auto task = Runtime::make_task<UnscheduledTask>(&destroyed);
         ASSERT_TRUE(task);
         task->configure_without_schedule();
         EXPECT_FALSE(task.scheduled());
@@ -711,7 +711,7 @@ TEST_F(RuntimeFixture, CreatedHandleKeepsCompletedTaskAliveUntilReset) {
     std::atomic<int> destroyed{0};
 
     {
-        auto task = Runtime::create_task<TrackedDoneTask>(&destroyed);
+        auto task = Runtime::make_task<TrackedDoneTask>(&destroyed);
         ASSERT_TRUE(task->do_it(&completed));
         ASSERT_TRUE(wait_until_at_least(completed, 1));
         EXPECT_EQ(destroyed.load(std::memory_order_acquire), 0);
@@ -911,7 +911,7 @@ TEST(RuntimeShutdownTests, CreateTaskHandleDestroysTaskWhenScheduleFailsBeforeIn
 
     std::atomic<int> destroyed{0};
     {
-        auto task = NoInitRuntime::create_task<NoInitTask>();
+        auto task = NoInitRuntime::make_task<NoInitTask>();
         EXPECT_FALSE(task->do_it(&destroyed));
         EXPECT_FALSE(task.scheduled());
     }
