@@ -54,6 +54,24 @@ struct ScheduleRequest {
 
 inline constexpr std::uint32_t no_requested_thread = 0;
 
+template <typename RuntimeT>
+inline constexpr bool task_registry_enabled_v = [] {
+    if constexpr (requires { RuntimeT::Traits::enable_task_registry; }) {
+        return static_cast<bool>(RuntimeT::Traits::enable_task_registry);
+    } else {
+        return false;
+    }
+}();
+
+template <typename TaskT>
+struct TaskRegistryLinks {
+    TaskT* prev{nullptr};
+    TaskT* next{nullptr};
+    bool registered{false};
+};
+
+struct EmptyTaskRegistryLinks {};
+
 } // namespace detail
 
 template <typename RuntimeT>
@@ -153,6 +171,7 @@ protected:
 
 private:
     virtual TaskResult run() = 0;
+    virtual void on_runtime_cancel() noexcept {}
 
     void set_destroy_fn(DestroyFn destroy_fn) noexcept {
         destroy_fn_ = destroy_fn;
@@ -252,6 +271,11 @@ private:
     std::atomic<std::uint32_t> lifetime_refs_{1};
     std::uint32_t last_parallel_failures_{0};
     DestroyFn destroy_fn_{nullptr};
+    [[no_unique_address]] std::conditional_t<
+        detail::task_registry_enabled_v<Runtime>,
+        detail::TaskRegistryLinks<BasicTask>,
+        detail::EmptyTaskRegistryLinks>
+        registry_;
 
     template <typename TraitsT>
     friend class AsyncRuntime;

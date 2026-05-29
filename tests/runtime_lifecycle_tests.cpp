@@ -539,6 +539,7 @@ struct FastShutdownRuntimeTraits {
     static constexpr std::uint16_t thread_count =
         static_cast<std::uint16_t>(FastShutdownThread::enum_thread_index_end);
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::StopImmediately;
+    static constexpr bool enable_task_registry = true;
 };
 
 using FastShutdownRuntime = af::AsyncRuntime<FastShutdownRuntimeTraits>;
@@ -549,9 +550,16 @@ public:
     explicit FastShutdownPendingTask(FastShutdownTaskBase::FactoryToken token)
         : FastShutdownTaskBase(token) {}
 
-    bool do_it(std::atomic<int>* entered) {
+    bool do_it(std::atomic<int>* entered, std::atomic<int>* destroyed = nullptr) {
         entered_ = entered;
+        destroyed_ = destroyed;
         return schedule(FastShutdownThread::Logic_0);
+    }
+
+    ~FastShutdownPendingTask() override {
+        if (destroyed_ != nullptr) {
+            destroyed_->fetch_add(1, std::memory_order_release);
+        }
     }
 
 private:
@@ -562,6 +570,7 @@ private:
     }
 
     std::atomic<int>* entered_{nullptr};
+    std::atomic<int>* destroyed_{nullptr};
 };
 
 static_assert(!std::is_default_constructible_v<OneShotTask>);
@@ -881,4 +890,16 @@ TEST(RuntimeShutdownTests, StopImmediatelyPolicyDoesNotWaitForPendingTasks) {
 
     FastShutdownRuntime::shutdown();
     EXPECT_EQ(FastShutdownRuntime::unfinished_task_count(), 0U);
+}
+
+TEST(RuntimeShutdownTests, StopImmediatelyTaskRegistryCancelsAndDestroysPendingTasks) {
+    FastShutdownRuntime::init();
+
+    std::atomic<int> entered{0};
+    std::atomic<int> destroyed{0};
+    ASSERT_TRUE(FastShutdownRuntime::start_task<FastShutdownPendingTask>(&entered, &destroyed));
+    ASSERT_TRUE(wait_until_at_least(entered, 1));
+
+    FastShutdownRuntime::shutdown();
+    EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
 }

@@ -126,12 +126,13 @@ auto sharded = af::split_change_batch(batch, player_logic_shard_count);
 - 非 runtime 线程进入 executor 时使用 bounded MPSC ingress，用于 `start_task()` 等外部入口。
 - 队列容量由 traits 配置；`QueueFullPolicy::Reject` 直接返回失败，`QueueFullPolicy::Yield` 会让出 CPU 等待空位。
 - shutdown 会先切到 stopping 并等待在途外部 post 退出，再停止 executor，避免队列清理和外部投递并发踩踏。
-- `ShutdownPolicy::WaitForTasks` 会让 `shutdown()` 等已接收任务全部结束；`ShutdownPolicy::StopImmediately` 不等待未完成任务，也不保证仍处于 `Pending` 的任务析构，适合进程退出路径。
+- `ShutdownPolicy::WaitForTasks` 会让 `shutdown()` 等已接收任务全部结束；`ShutdownPolicy::StopImmediately` 不等待未完成任务，traits 可通过 `enable_task_registry = true` 开启任务注册表，在 shutdown 后取消并释放仍处于 `Pending` / `Queued` 的任务。
 - `make_task<T>()` / `start_task<T>()` 使用按任务类型分离的对象池，slot 回收通过 per-block bounded MPMC free queue 避免 Treiber free-list ABA；`create_task<T>()` 作为兼容别名保留。
 - executor 空闲等待使用 C++20 `std::atomic::wait/notify_one`。
 - Task 生命周期由状态机保护，debug 下会检查重复调度、完成后调度、运行中重复唤醒。
 - `parallel_shards_ordered()` 会对每个 shard 维护 `last_applied_batch_id`，要求 batch id 连续递增。
-- `start_ordered_task<Stream, ApplyTask>()` 会在指定 sequencer 线程上缓存乱序 batch，并按 batch_id 连续启动 apply task。
+- `parallel_shards_ordered(..., af::retryable_ordered_batch_options, ...)` 支持重试同一个 batch 时跳过已经应用成功的 shard；`af::OrderedBatchRetrySkipPolicy` 可用于业务侧记录失败次数并决定重试、跳过或停止。
+- `start_ordered_task<Stream, ApplyTask>()` 会在指定 sequencer 线程上缓存乱序 batch，并按 batch_id 连续启动 apply task；如果 apply task 启动失败，不推进期待 batch id，后续重试仍从失败 batch 开始。
 - `CrudOp<Key, Value>` / `ChangeBatch<Key, Value>` 是纯数据 helper，不引入额外运行期状态。
 - `parallel_shards()` 的 handler 如果返回 `bool`，`false` 会计为 shard 失败；owner 恢复后可用 `last_parallel_failures()` 读取失败数。
 - `TaskResult::Cancelled` 可用于取消结束；runtime 未初始化或 stopping 时 `start_task()` 返回失败并销毁任务。
@@ -146,7 +147,28 @@ cmake -S . -B build-conan/build/Release \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build build-conan/build/Release --parallel
 ctest --test-dir build-conan/build/Release --output-on-failure
-./build-conan/build/Release/asyncflow_runtime_benchmarks --benchmark_min_time=0.005s
+./build-conan/build/Release/asyncflow_runtime_benchmarks --benchmark_min_time=0.001s
+./build-conan/build/Release/asyncflow_runtime_benchmarks \
+  --benchmark_filter=BM_Runtime \
+  --benchmark_min_time=0.001s \
+  --benchmark_repetitions=7 \
+  --benchmark_report_aggregates_only=true \
+  --benchmark_out=runtime_benchmarks.json \
+  --benchmark_out_format=json
+python3 scripts/check_benchmark_regression.py runtime_benchmarks.json benchmarks/perf_baseline.json
+```
+
+TSAN/stress 可通过 CMake 选项打开：
+
+```sh
+conan install . --output-folder=build-tsan --build=missing -s build_type=Debug
+cmake -S . -B build-tsan/build/Debug \
+  -DCMAKE_TOOLCHAIN_FILE=build-tsan/build/Debug/generators/conan_toolchain.cmake \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DASYNCFLOW_ENABLE_TSAN=ON \
+  -DASYNCFLOW_BUILD_BENCHMARKS=OFF
+cmake --build build-tsan/build/Debug --parallel
+ASYNCFLOW_STRESS_MS=1500 ctest --test-dir build-tsan/build/Debug -R RuntimeStressTests --output-on-failure
 ```
 
 ## 示例与测试布局
@@ -155,7 +177,10 @@ ctest --test-dir build-conan/build/Release --output-on-failure
 - `examples/basic.cpp`：两步式 `make_task() + do_it()` 和状态机切线程。
 - `examples/parallel_shards.cpp`：按 key 拆分 shard 并并行处理。
 - `examples/ordered_batches.cpp`：乱序 batch 进入 sequencer，并用全 shard 顺序屏障应用。
+- `examples/crud_apply.cpp`：完整 CRUD change batch 模板，包含乱序提交、sequencer、ordered shard apply。
 - `tests/utility_tests.cpp`：队列、对象池、分片工具和 batch sequencer。
 - `tests/runtime_lifecycle_tests.cpp`：任务生命周期、状态机、背压和 shutdown。
-- `tests/runtime_parallel_tests.cpp`：parallel shard、失败汇总和有序 batch。
+- `tests/runtime_parallel_tests.cpp`：parallel shard、失败汇总、有序 batch 和 retryable ordered apply。
+- `tests/runtime_stress_tests.cpp`：高并发 init/shutdown/start_task stress，CI 中也用于 TSAN job。
 - `benchmarks/queue_benchmarks.cpp` 与 `benchmarks/runtime_benchmarks.cpp`：底层结构和 runtime 路径分开压测。
+- `benchmarks/perf_baseline.json` 与 `scripts/check_benchmark_regression.py`：CI 性能 baseline 与回归阈值检查。

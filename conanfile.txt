@@ -1,4 +1,5 @@
 [requires]
+abseil/20260107.1
 gtest/1.17.0
 benchmark/1.9.5
 

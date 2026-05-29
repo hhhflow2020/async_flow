@@ -1,7 +1,14 @@
 #include <cstdint>
 #include <iostream>
+#include <mutex>
 
 #include "app_runtime.hpp"
+
+namespace {
+
+std::mutex cout_mutex;
+
+} // namespace
 
 class AddGoldTask final : public Task {
 public:
@@ -15,6 +22,7 @@ public:
 
 private:
     af::TaskResult run() override {
+        const std::lock_guard<std::mutex> lock(cout_mutex);
         std::cout << "add " << gold_ << " gold to player " << player_id_
                   << " on logic thread " << async::current_thread_index() << '\n';
         return done();
@@ -45,22 +53,39 @@ private:
     af::TaskResult run() override {
         switch (state_) {
         case State::Start:
-            state_ = State::QueryDb;
-            return pending_on(AppThread::DB_0);
+            return start_query();
 
         case State::QueryDb:
-            std::cout << "query login data for player " << player_id_ << " on DB\n";
-            state_ = State::BackToLogic;
-            return pending_on(player_thread(player_id_));
+            return query_db();
 
         case State::BackToLogic:
-            state_ = State::Finish;
-            return again();
+            return back_to_logic();
 
         case State::Finish:
-            return done();
+            return finish();
         }
 
+        return done();
+    }
+
+    af::TaskResult start_query() {
+        state_ = State::QueryDb;
+        return pending_on(AppThread::DB_0);
+    }
+
+    af::TaskResult query_db() {
+        const std::lock_guard<std::mutex> lock(cout_mutex);
+        std::cout << "query login data for player " << player_id_ << " on DB\n";
+        state_ = State::BackToLogic;
+        return pending_on(player_thread(player_id_));
+    }
+
+    af::TaskResult back_to_logic() {
+        state_ = State::Finish;
+        return again();
+    }
+
+    af::TaskResult finish() {
         return done();
     }
 

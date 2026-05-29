@@ -40,6 +40,12 @@ void wait_zero(std::atomic<int>& remaining) {
     }
 }
 
+void undo_remaining(std::atomic<int>& remaining) {
+    if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+        remaining.notify_one();
+    }
+}
+
 class CountTask final : public Task {
 public:
     explicit CountTask(Task::FactoryToken token) : Task(token) {}
@@ -147,12 +153,23 @@ void BM_RuntimeExternalStart(benchmark::State& state) {
     Runtime::init();
     for (auto _ : state) {
         const int task_count = static_cast<int>(state.range(0));
-        std::atomic<int> remaining{task_count};
+        std::atomic<int> remaining{0};
+        bool launch_failed = false;
         for (int i = 0; i < task_count; ++i) {
             const auto thread = static_cast<BenchThread>(i & 3);
-            benchmark::DoNotOptimize(Runtime::start_task<CountTask>(thread, &remaining));
+            remaining.fetch_add(1, std::memory_order_relaxed);
+            const bool ok = Runtime::start_task<CountTask>(thread, &remaining);
+            if (!ok) {
+                undo_remaining(remaining);
+                state.SkipWithError("Runtime::start_task<CountTask> failed");
+                launch_failed = true;
+                break;
+            }
         }
         wait_zero(remaining);
+        if (launch_failed) {
+            break;
+        }
     }
     Runtime::shutdown();
 
@@ -163,11 +180,22 @@ void BM_RuntimeCrossThreadHop(benchmark::State& state) {
     Runtime::init();
     for (auto _ : state) {
         const int task_count = static_cast<int>(state.range(0));
-        std::atomic<int> remaining{task_count};
+        std::atomic<int> remaining{0};
+        bool launch_failed = false;
         for (int i = 0; i < task_count; ++i) {
-            benchmark::DoNotOptimize(Runtime::start_task<HopTask>(8, &remaining));
+            remaining.fetch_add(1, std::memory_order_relaxed);
+            const bool ok = Runtime::start_task<HopTask>(8, &remaining);
+            if (!ok) {
+                undo_remaining(remaining);
+                state.SkipWithError("Runtime::start_task<HopTask> failed");
+                launch_failed = true;
+                break;
+            }
         }
         wait_zero(remaining);
+        if (launch_failed) {
+            break;
+        }
     }
     Runtime::shutdown();
 
@@ -178,13 +206,24 @@ void BM_RuntimeParallelShards(benchmark::State& state) {
     Runtime::init();
     for (auto _ : state) {
         const int task_count = static_cast<int>(state.range(0));
-        std::atomic<int> remaining{task_count};
+        std::atomic<int> remaining{0};
         std::atomic<std::uint64_t> sum{0};
+        bool launch_failed = false;
         for (int i = 0; i < task_count; ++i) {
-            benchmark::DoNotOptimize(Runtime::start_task<ParallelShardTask>(&remaining, &sum));
+            remaining.fetch_add(1, std::memory_order_relaxed);
+            const bool ok = Runtime::start_task<ParallelShardTask>(&remaining, &sum);
+            if (!ok) {
+                undo_remaining(remaining);
+                state.SkipWithError("Runtime::start_task<ParallelShardTask> failed");
+                launch_failed = true;
+                break;
+            }
         }
         wait_zero(remaining);
         benchmark::DoNotOptimize(sum.load(std::memory_order_relaxed));
+        if (launch_failed) {
+            break;
+        }
     }
     Runtime::shutdown();
 

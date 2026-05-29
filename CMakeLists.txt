@@ -12,10 +12,22 @@ target_include_directories(
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
 )
+find_package(absl CONFIG REQUIRED)
+target_link_libraries(asyncflow INTERFACE absl::flat_hash_map)
 
 option(ASYNCFLOW_BUILD_EXAMPLES "Build AsyncFlow examples" ON)
 option(ASYNCFLOW_BUILD_TESTS "Build AsyncFlow tests" ON)
 option(ASYNCFLOW_BUILD_BENCHMARKS "Build AsyncFlow benchmarks" ON)
+option(ASYNCFLOW_ENABLE_TSAN "Build targets with ThreadSanitizer instrumentation" OFF)
+
+if(ASYNCFLOW_ENABLE_TSAN)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        add_compile_options(-fsanitize=thread -fno-omit-frame-pointer -g)
+        add_link_options(-fsanitize=thread)
+    else()
+        message(FATAL_ERROR "ASYNCFLOW_ENABLE_TSAN requires Clang or GCC")
+    endif()
+endif()
 
 if(ASYNCFLOW_BUILD_EXAMPLES)
     add_executable(asyncflow_basic_example examples/basic.cpp)
@@ -26,6 +38,9 @@ if(ASYNCFLOW_BUILD_EXAMPLES)
 
     add_executable(asyncflow_ordered_batches_example examples/ordered_batches.cpp)
     target_link_libraries(asyncflow_ordered_batches_example PRIVATE AsyncFlow::AsyncFlow)
+
+    add_executable(asyncflow_crud_apply_example examples/crud_apply.cpp)
+    target_link_libraries(asyncflow_crud_apply_example PRIVATE AsyncFlow::AsyncFlow)
 endif()
 
 if(ASYNCFLOW_BUILD_TESTS)
@@ -37,6 +52,7 @@ if(ASYNCFLOW_BUILD_TESTS)
         asyncflow_runtime_tests
         tests/runtime_lifecycle_tests.cpp
         tests/runtime_parallel_tests.cpp
+        tests/runtime_stress_tests.cpp
         tests/utility_tests.cpp
     )
     target_link_libraries(asyncflow_runtime_tests PRIVATE AsyncFlow::AsyncFlow GTest::gtest_main)

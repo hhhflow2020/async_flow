@@ -1,10 +1,11 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <bit>
 #include <cstdint>
-#include <map>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <thread>
 #include <type_traits>
@@ -15,6 +16,7 @@
 #include "af/detail/config.hpp"
 #include "af/detail/object_pool.hpp"
 #include "af/task.hpp"
+#include "absl/container/flat_hash_map.h"
 
 namespace af {
 
@@ -22,6 +24,18 @@ enum class ParallelMode : std::uint8_t {
     NonEmptyOnly,
     AllShards,
 };
+
+enum class OrderedBatchReplayPolicy : std::uint8_t {
+    Strict,
+    SkipAlreadyApplied,
+};
+
+struct OrderedBatchOptions {
+    OrderedBatchReplayPolicy replay_policy{OrderedBatchReplayPolicy::Strict};
+};
+
+inline constexpr OrderedBatchOptions retryable_ordered_batch_options{
+    OrderedBatchReplayPolicy::SkipAlreadyApplied};
 
 template <typename Op>
 struct ShardedOps {
@@ -129,6 +143,13 @@ public:
             return ShutdownPolicy::WaitForTasks;
         }
     }();
+    static constexpr bool task_registry_enabled = [] {
+        if constexpr (requires { Traits::enable_task_registry; }) {
+            return static_cast<bool>(Traits::enable_task_registry);
+        } else {
+            return false;
+        }
+    }();
 
     AsyncRuntime() = delete;
 
@@ -144,6 +165,7 @@ public:
 
         ordered_batch_state_.assign(thread_count, OrderedBatchState{});
         generation_.fetch_add(1, std::memory_order_acq_rel);
+        reset_task_registry();
         init_queues();
         executors_.clear();
         executors_.reserve(thread_count);
@@ -171,7 +193,7 @@ public:
             return;
         }
 
-        wait_for_active_posts();
+        wait_for_external_posts();
         if constexpr (shutdown_policy == ShutdownPolicy::WaitForTasks) {
             wait_for_idle();
         }
@@ -181,6 +203,11 @@ public:
         }
         for (auto& executor : executors_) {
             executor->join();
+        }
+        if constexpr (shutdown_policy == ShutdownPolicy::StopImmediately) {
+            cancel_registered_tasks();
+        } else {
+            reset_task_registry();
         }
 
         executors_.clear();
@@ -235,14 +262,17 @@ public:
     }
 
     static bool post(Thread thread, Task* task) noexcept {
-        if (task == nullptr || !try_enter_post()) {
+        if (task == nullptr) {
             return false;
         }
 
         const std::uint16_t index = thread_index(thread);
         if (index >= thread_count) {
             AF_ASSERT(false && "invalid thread index");
-            leave_post();
+            return false;
+        }
+
+        if (!try_enter_post(index)) {
             return false;
         }
 
@@ -250,20 +280,20 @@ public:
         if (request.action == detail::ScheduleAction::Enqueue) {
             const bool first_schedule = request.previous == TaskState::Created;
             if (first_schedule) {
-                on_task_started();
+                on_task_started(task);
             }
             const bool enqueued = enqueue_ready_by_policy(index, task);
             if (!enqueued) {
                 if (first_schedule) {
-                    on_task_finished();
+                    on_task_finished(task);
                 }
                 task->cancel_schedule(request.previous);
             }
-            leave_post();
+            leave_post(index);
             return enqueued;
         }
         const bool deferred = request.action == detail::ScheduleAction::Deferred;
-        leave_post();
+        leave_post(index);
         return deferred;
     }
 
@@ -312,10 +342,23 @@ public:
             return sharded;
         }
 
+        std::vector<std::size_t> shard_sizes(shard_count, 0);
+        std::vector<std::uint16_t> shard_indexes;
+        shard_indexes.reserve(ops.size());
         for (auto& op : ops) {
             const auto key = static_cast<std::uint64_t>(key_fn(op));
             const std::uint16_t shard = static_cast<std::uint16_t>(key % shard_count);
-            sharded.shards[shard].push_back(std::move(op));
+            shard_indexes.push_back(shard);
+            ++shard_sizes[shard];
+        }
+
+        for (std::uint16_t shard = 0; shard < shard_count; ++shard) {
+            sharded.shards[shard].reserve(shard_sizes[shard]);
+        }
+
+        std::size_t index = 0;
+        for (auto& op : ops) {
+            sharded.shards[shard_indexes[index++]].push_back(std::move(op));
         }
         return sharded;
     }
@@ -333,6 +376,7 @@ public:
             sharded_ops,
             mode,
             0,
+            OrderedBatchOptions{},
             owner,
             std::forward<Handler>(handler));
     }
@@ -364,6 +408,26 @@ public:
             sharded_ops,
             ParallelMode::AllShards,
             batch_id,
+            OrderedBatchOptions{},
+            owner,
+            std::forward<Handler>(handler));
+    }
+
+    template <typename Op, typename Handler>
+    static void parallel_shards_ordered(
+        Thread shard_begin,
+        ShardedOps<Op>& sharded_ops,
+        std::uint64_t batch_id,
+        OrderedBatchOptions options,
+        Task* owner,
+        Handler&& handler) {
+        parallel_shards_impl(
+            std::bool_constant<true>{},
+            shard_begin,
+            sharded_ops,
+            ParallelMode::AllShards,
+            batch_id,
+            options,
             owner,
             std::forward<Handler>(handler));
     }
@@ -378,6 +442,22 @@ public:
             thread_from_index(0),
             sharded_ops,
             batch_id,
+            owner,
+            std::forward<Handler>(handler));
+    }
+
+    template <typename Op, typename Handler>
+    static void parallel_shards_ordered(
+        ShardedOps<Op>& sharded_ops,
+        std::uint64_t batch_id,
+        OrderedBatchOptions options,
+        Task* owner,
+        Handler&& handler) {
+        parallel_shards_ordered(
+            thread_from_index(0),
+            sharded_ops,
+            batch_id,
+            options,
             owner,
             std::forward<Handler>(handler));
     }
@@ -444,12 +524,12 @@ private:
             failed.store(0, std::memory_order_relaxed);
         }
 
-        void complete(bool ok) noexcept {
+        void complete(bool ok, bool resume_owner = true) noexcept {
             if (!ok) {
                 failed.fetch_add(1, std::memory_order_relaxed);
             }
             if (pending.fetch_sub(1, std::memory_order_acq_rel) == 1U) {
-                if (owner != nullptr && resume_thread < thread_count) {
+                if (resume_owner && owner != nullptr && resume_thread < thread_count) {
                     owner->set_last_parallel_failures(failed.load(std::memory_order_acquire));
                     post_blocking(thread_from_index(resume_thread), owner);
                 }
@@ -458,11 +538,21 @@ private:
         }
     };
 
+    struct alignas(detail::hardware_cache_line_size) ExternalPostCounter {
+        std::atomic<std::uint32_t> value{0};
+    };
+
+    enum class OrderedGuardDecision : std::uint8_t {
+        Run,
+        SkipAlreadyApplied,
+        Fail,
+    };
+
     template <typename StreamTag, typename ApplyTaskT, typename BatchT>
     struct OrderedStartState {
         std::uint64_t next_batch_id{1};
         std::uint64_t generation{0};
-        std::map<std::uint64_t, BatchT> pending;
+        absl::flat_hash_map<std::uint64_t, BatchT> pending;
 
         void reset(std::uint64_t runtime_generation) {
             next_batch_id = 1;
@@ -470,37 +560,44 @@ private:
             pending.clear();
         }
 
-        void submit(BatchT batch) {
+        [[nodiscard]] bool submit(BatchT batch) {
             const std::uint64_t batch_id = batch.batch_id;
             if (batch_id < next_batch_id) {
-                return;
+                return true;
             }
 
             if (batch_id > next_batch_id) {
                 pending.emplace(batch_id, std::move(batch));
-                return;
+                return true;
             }
 
-            start_ready(std::move(batch));
-            drain_ready();
+            if (!start_ready(std::move(batch))) {
+                return false;
+            }
+            return drain_ready();
         }
 
-        void start_ready(BatchT batch) {
-            [[maybe_unused]] const bool ok = AsyncRuntime::start_task<ApplyTaskT>(std::move(batch));
-            AF_ASSERT(ok);
+        [[nodiscard]] bool start_ready(BatchT batch) {
+            const bool ok = AsyncRuntime::start_task<ApplyTaskT>(std::move(batch));
+            if (!ok) {
+                return false;
+            }
             ++next_batch_id;
+            return true;
         }
 
-        void drain_ready() {
+        [[nodiscard]] bool drain_ready() {
             for (;;) {
                 auto it = pending.find(next_batch_id);
                 if (it == pending.end()) {
-                    return;
+                    return true;
                 }
 
                 BatchT batch = std::move(it->second);
                 pending.erase(it);
-                start_ready(std::move(batch));
+                if (!start_ready(std::move(batch))) {
+                    return false;
+                }
             }
         }
     };
@@ -530,8 +627,9 @@ private:
 
     private:
         TaskResult run() override {
-            ordered_start_state<StreamTag, ApplyTaskT, BatchT>().submit(std::move(batch_));
-            return this->done();
+            const bool ok = ordered_start_state<StreamTag, ApplyTaskT, BatchT>().submit(
+                std::move(batch_));
+            return ok ? this->done() : this->failed();
         }
 
         BatchT batch_{};
@@ -545,77 +643,112 @@ private:
             ParallelGroup* group,
             std::uint16_t shard_index,
             std::uint64_t batch_id,
+            OrderedBatchOptions options,
             std::vector<Op>&& ops,
             Handler handler)
             : Task(token),
               group_(group),
               shard_index_(shard_index),
               batch_id_(batch_id),
+              options_(options),
               ops_(std::move(ops)),
               handler_(std::move(handler)) {}
 
     private:
         TaskResult run() override {
-            bool ok = true;
-            if constexpr (Ordered) {
-                ok = check_order_guard();
-            }
-
-            if (ok) {
-                try {
-                    if constexpr (Ordered) {
-                        using HandlerResult =
-                            std::invoke_result_t<Handler&, std::uint16_t, std::vector<Op>&, std::uint64_t>;
-                        if constexpr (std::is_same_v<HandlerResult, bool>) {
-                            ok = handler_(shard_index_, ops_, batch_id_);
-                        } else {
-                            handler_(shard_index_, ops_, batch_id_);
-                        }
-                    } else {
-                        using HandlerResult =
-                            std::invoke_result_t<Handler&, std::uint16_t, std::vector<Op>&>;
-                        if constexpr (std::is_same_v<HandlerResult, bool>) {
-                            ok = handler_(shard_index_, ops_);
-                        } else {
-                            handler_(shard_index_, ops_);
-                        }
-                    }
-                } catch (...) {
-                    AF_ASSERT(false && "parallel shard handler must not throw");
-                    ok = false;
-                }
-            }
-
-            if constexpr (Ordered) {
-                if (ok) {
-                    commit_order_guard();
-                }
-            }
-
+            const bool ok = run_parallel_shard<Op, Handler, Ordered>(
+                shard_index_,
+                batch_id_,
+                options_,
+                ops_,
+                handler_);
             group_->complete(ok);
             return this->done();
         }
 
-        bool check_order_guard() noexcept {
-            const std::uint16_t thread = AsyncRuntime::current_thread_index();
-            AF_ASSERT(thread < ordered_batch_state_.size());
-            auto& state = ordered_batch_state_[thread];
-            const bool ok = batch_id_ == state.last_applied_batch_id + 1U;
-            AF_ASSERT(ok && "ordered batch id must be contiguous per shard");
-            return ok;
-        }
-
-        void commit_order_guard() noexcept {
-            const std::uint16_t thread = AsyncRuntime::current_thread_index();
-            ordered_batch_state_[thread].last_applied_batch_id = batch_id_;
+        void on_runtime_cancel() noexcept override {
+            group_->complete(false, false);
         }
 
         ParallelGroup* group_;
         std::uint16_t shard_index_;
         std::uint64_t batch_id_;
+        OrderedBatchOptions options_;
         std::vector<Op> ops_;
         Handler handler_;
     };
+
+    template <typename Op, typename Handler, bool Ordered>
+    [[nodiscard]] static bool run_parallel_shard(
+        std::uint16_t shard_index,
+        std::uint64_t batch_id,
+        OrderedBatchOptions options,
+        std::vector<Op>& ops,
+        Handler& handler) noexcept {
+        bool ok = true;
+        bool skip_handler = false;
+        if constexpr (Ordered) {
+            const OrderedGuardDecision decision = check_order_guard(batch_id, options);
+            ok = decision != OrderedGuardDecision::Fail;
+            skip_handler = decision == OrderedGuardDecision::SkipAlreadyApplied;
+        }
+
+        if (ok && !skip_handler) {
+            try {
+                if constexpr (Ordered) {
+                    using HandlerResult =
+                        std::invoke_result_t<Handler&, std::uint16_t, std::vector<Op>&, std::uint64_t>;
+                    if constexpr (std::is_same_v<HandlerResult, bool>) {
+                        ok = handler(shard_index, ops, batch_id);
+                    } else {
+                        handler(shard_index, ops, batch_id);
+                    }
+                } else {
+                    using HandlerResult =
+                        std::invoke_result_t<Handler&, std::uint16_t, std::vector<Op>&>;
+                    if constexpr (std::is_same_v<HandlerResult, bool>) {
+                        ok = handler(shard_index, ops);
+                    } else {
+                        handler(shard_index, ops);
+                    }
+                }
+            } catch (...) {
+                AF_ASSERT(false && "parallel shard handler must not throw");
+                ok = false;
+            }
+        }
+
+        if constexpr (Ordered) {
+            if (ok && !skip_handler) {
+                commit_order_guard(batch_id);
+            }
+        }
+        return ok;
+    }
+
+    [[nodiscard]] static OrderedGuardDecision check_order_guard(
+        std::uint64_t batch_id,
+        OrderedBatchOptions options) noexcept {
+        const std::uint16_t thread = AsyncRuntime::current_thread_index();
+        AF_ASSERT(thread < ordered_batch_state_.size());
+        auto& state = ordered_batch_state_[thread];
+        if (batch_id == state.last_applied_batch_id + 1U) {
+            return OrderedGuardDecision::Run;
+        }
+        if (options.replay_policy == OrderedBatchReplayPolicy::SkipAlreadyApplied &&
+            batch_id == state.last_applied_batch_id) {
+            return OrderedGuardDecision::SkipAlreadyApplied;
+        }
+        const bool ok = false;
+        AF_ASSERT(ok && "ordered batch id must be contiguous per shard");
+        static_cast<void>(ok);
+        return OrderedGuardDecision::Fail;
+    }
+
+    static void commit_order_guard(std::uint64_t batch_id) noexcept {
+        const std::uint16_t thread = AsyncRuntime::current_thread_index();
+        ordered_batch_state_[thread].last_applied_batch_id = batch_id;
+    }
 
     template <typename Op, typename Handler>
     static void parallel_shards_impl(
@@ -624,6 +757,7 @@ private:
         ShardedOps<Op>& sharded_ops,
         ParallelMode mode,
         std::uint64_t batch_id,
+        OrderedBatchOptions ordered_options,
         Task* owner,
         Handler&& handler) {
         parallel_shards_impl_typed<Op, Handler, false>(
@@ -631,6 +765,7 @@ private:
             sharded_ops,
             mode,
             batch_id,
+            ordered_options,
             owner,
             std::forward<Handler>(handler));
     }
@@ -642,6 +777,7 @@ private:
         ShardedOps<Op>& sharded_ops,
         ParallelMode mode,
         std::uint64_t batch_id,
+        OrderedBatchOptions ordered_options,
         Task* owner,
         Handler&& handler) {
         parallel_shards_impl_typed<Op, Handler, true>(
@@ -649,6 +785,7 @@ private:
             sharded_ops,
             mode,
             batch_id,
+            ordered_options,
             owner,
             std::forward<Handler>(handler));
     }
@@ -659,6 +796,7 @@ private:
         ShardedOps<Op>& sharded_ops,
         ParallelMode mode,
         std::uint64_t batch_id,
+        OrderedBatchOptions ordered_options,
         Task* owner,
         Handler&& handler) {
         AF_ASSERT(owner != nullptr);
@@ -668,10 +806,13 @@ private:
         const std::uint16_t shard_count = sharded_ops.shard_count();
         AF_ASSERT(begin + shard_count <= thread_count);
 
-        std::uint32_t target_count = 0;
-        for (std::uint16_t i = 0; i < shard_count; ++i) {
-            if (mode == ParallelMode::AllShards || !sharded_ops.shards[i].empty()) {
-                ++target_count;
+        std::uint32_t target_count = shard_count;
+        if (mode == ParallelMode::NonEmptyOnly) {
+            target_count = 0;
+            for (std::uint16_t i = 0; i < shard_count; ++i) {
+                if (!sharded_ops.shards[i].empty()) {
+                    ++target_count;
+                }
             }
         }
 
@@ -688,12 +829,27 @@ private:
                 continue;
             }
 
+            const Thread thread = thread_from_index(static_cast<std::uint16_t>(begin + i));
+            if (thread_index(thread) == current_thread_index()) {
+                auto ops = std::move(sharded_ops.shards[i]);
+                HandlerT local_handler(handler);
+                const bool ok = run_parallel_shard<Op, HandlerT, Ordered>(
+                    i,
+                    batch_id,
+                    ordered_options,
+                    ops,
+                    local_handler);
+                group->complete(ok);
+                continue;
+            }
+
             Task* shard_task = nullptr;
             if constexpr (Ordered) {
                 shard_task = allocate_task<ShardTask<Op, HandlerT, true>>(
                     group,
                     i,
                     batch_id,
+                    ordered_options,
                     std::move(sharded_ops.shards[i]),
                     HandlerT(handler));
             } else {
@@ -701,11 +857,11 @@ private:
                     group,
                     i,
                     0,
+                    OrderedBatchOptions{},
                     std::move(sharded_ops.shards[i]),
                     HandlerT(handler));
             }
 
-            const Thread thread = thread_from_index(static_cast<std::uint16_t>(begin + i));
             post_blocking(thread, shard_task);
         }
     }
@@ -736,17 +892,43 @@ private:
         }
 
         void notify() noexcept {
-            if (sleeping_.exchange(false, std::memory_order_acq_rel)) {
+            if (!sleeping_.load(std::memory_order_acquire)) {
+                return;
+            }
+
+            bool expected = true;
+            if (sleeping_.compare_exchange_strong(
+                    expected,
+                    false,
+                    std::memory_order_acq_rel,
+                    std::memory_order_acquire)) {
                 notify_force();
             }
         }
 
         void mark_ready(std::uint16_t source) noexcept {
             if constexpr (thread_count <= 64U) {
-                ready_sources_.fetch_or(1ULL << source, std::memory_order_release);
+                const std::uint64_t bit = 1ULL << source;
+                std::uint64_t mask = ready_sources_.load(std::memory_order_acquire);
+                while ((mask & bit) == 0U &&
+                       !ready_sources_.compare_exchange_weak(
+                           mask,
+                           mask | bit,
+                           std::memory_order_release,
+                           std::memory_order_acquire)) {
+                }
             } else {
                 static_cast<void>(source);
             }
+        }
+
+        void notify_external_ready() noexcept {
+            if (!external_ready_.load(std::memory_order_acquire)) {
+                external_ready_.store(true, std::memory_order_release);
+                notify_force();
+                return;
+            }
+            notify();
         }
 
         [[nodiscard]] bool try_push_local(Task* task) noexcept {
@@ -832,11 +1014,19 @@ private:
 
                 const std::uint32_t observed = wake_epoch_.load(std::memory_order_acquire);
                 sleeping_.store(true, std::memory_order_release);
+                if (stop_requested_.load(std::memory_order_acquire)) {
+                    sleeping_.store(false, std::memory_order_relaxed);
+                    continue;
+                }
+
                 if (Task* task = pop_one()) {
                     sleeping_.store(false, std::memory_order_relaxed);
                     execute(task);
                 } else {
-                    wake_epoch_.wait(observed, std::memory_order_acquire);
+                    if (wake_epoch_.load(std::memory_order_acquire) == observed) {
+                        wake_epoch_.wait(observed, std::memory_order_acquire);
+                    }
+                    sleeping_.store(false, std::memory_order_relaxed);
                 }
             }
 
@@ -854,13 +1044,12 @@ private:
                     const auto source = static_cast<std::uint16_t>(std::countr_zero(mask));
                     const std::uint64_t bit = 1ULL << source;
                     if (Task* task = spsc_queue(source, index_).try_pop()) {
-                        ready_sources_.fetch_or(bit, std::memory_order_release);
                         return task;
                     }
 
                     ready_sources_.fetch_and(~bit, std::memory_order_acq_rel);
                     if (Task* task = spsc_queue(source, index_).try_pop()) {
-                        ready_sources_.fetch_or(bit, std::memory_order_release);
+                        mark_ready(source);
                         return task;
                     }
 
@@ -877,18 +1066,26 @@ private:
                 }
             }
 
-            if (Task* task = external_queues_[index_]->try_pop()) {
-                return task;
+            if (external_ready_.load(std::memory_order_acquire)) {
+                if (Task* task = external_queues_[index_]->try_pop()) {
+                    return task;
+                }
+
+                external_ready_.store(false, std::memory_order_release);
+                if (Task* task = external_queues_[index_]->try_pop()) {
+                    external_ready_.store(true, std::memory_order_release);
+                    return task;
+                }
             }
 
-            return nullptr;
+            return external_queues_[index_]->try_pop();
         }
 
         void finish_done(Task* task) noexcept {
             const std::uint16_t requested = task->take_requested_thread();
             AF_ASSERT(requested == invalid_thread_index);
             task->state_.store(TaskState::Done, std::memory_order_release);
-            on_task_finished();
+            on_task_finished(task);
             task->release_lifetime_ref();
         }
 
@@ -914,6 +1111,7 @@ private:
         std::size_t local_tail_{0};
         std::size_t local_size_{0};
         alignas(detail::hardware_cache_line_size) std::atomic<std::uint64_t> ready_sources_{0};
+        alignas(detail::hardware_cache_line_size) std::atomic<bool> external_ready_{false};
         alignas(detail::hardware_cache_line_size) std::atomic<std::uint32_t> wake_epoch_{0};
         std::atomic<bool> sleeping_{false};
         std::atomic<bool> stop_requested_{false};
@@ -1008,7 +1206,7 @@ private:
         switch (request.action) {
         case detail::ScheduleAction::Enqueue:
             if (request.previous == TaskState::Created) {
-                on_task_started();
+                on_task_started(task);
             }
             enqueue_ready_blocking(index, task);
             return;
@@ -1036,7 +1234,7 @@ private:
 
         const bool ok = external_queues_[index]->try_push(task);
         if (ok) {
-            executors_[index]->notify();
+            executors_[index]->notify_external_ready();
         }
         return ok;
     }
@@ -1066,7 +1264,7 @@ private:
         while (!external_queues_[index]->try_push(task)) {
             std::this_thread::yield();
         }
-        executors_[index]->notify();
+        executors_[index]->notify_external_ready();
     }
 
     static void enqueue_ready_blocking_from(
@@ -1118,61 +1316,164 @@ private:
         enqueue_ready_blocking(index, task);
     }
 
-    [[nodiscard]] static bool try_enter_post() noexcept {
+    [[nodiscard]] static bool try_enter_post(std::uint16_t target) noexcept {
         const RuntimeStatus status = status_.load(std::memory_order_acquire);
-        if (status == RuntimeStatus::Running) {
-            active_posts_.fetch_add(1, std::memory_order_acq_rel);
-            if (status_.load(std::memory_order_acquire) == RuntimeStatus::Running) {
+        if (current_thread_index_ < thread_count) {
+            if (status == RuntimeStatus::Running) {
                 return true;
             }
 
             if constexpr (shutdown_policy == ShutdownPolicy::WaitForTasks) {
-                if (current_thread_index_ < thread_count &&
-                    status_.load(std::memory_order_acquire) == RuntimeStatus::Stopping) {
-                    return true;
-                }
+                return status == RuntimeStatus::Stopping;
             }
 
-            leave_post();
             return false;
         }
 
-        if constexpr (shutdown_policy == ShutdownPolicy::WaitForTasks) {
-            if (status == RuntimeStatus::Stopping && current_thread_index_ < thread_count) {
-                active_posts_.fetch_add(1, std::memory_order_acq_rel);
-                if (status_.load(std::memory_order_acquire) == RuntimeStatus::Stopping) {
-                    return true;
-                }
-                leave_post();
+        if (status == RuntimeStatus::Running) {
+            active_external_posts_[target].value.fetch_add(1, std::memory_order_acq_rel);
+            if (status_.load(std::memory_order_acquire) == RuntimeStatus::Running) {
+                return true;
             }
+
+            leave_post(target);
+            return false;
         }
 
         return false;
     }
 
-    static void leave_post() noexcept {
-        if (active_posts_.fetch_sub(1, std::memory_order_acq_rel) == 1U) {
-            active_posts_.notify_all();
+    static void leave_post(std::uint16_t target) noexcept {
+        if (current_thread_index_ < thread_count) {
+            return;
+        }
+
+        AF_ASSERT(target < thread_count);
+        if (active_external_posts_[target].value.fetch_sub(1, std::memory_order_acq_rel) == 1U) {
+            active_external_posts_[target].value.notify_all();
         }
     }
 
-    static void wait_for_active_posts() noexcept {
-        for (;;) {
-            const std::uint32_t count = active_posts_.load(std::memory_order_acquire);
-            if (count == 0) {
+    static void wait_for_external_posts() noexcept {
+        for (auto& counter : active_external_posts_) {
+            for (;;) {
+                const std::uint32_t count = counter.value.load(std::memory_order_acquire);
+                if (count == 0) {
+                    break;
+                }
+                counter.value.wait(count, std::memory_order_acquire);
+            }
+        }
+    }
+
+    static void reset_task_registry() noexcept {
+        if constexpr (task_registry_enabled) {
+            std::lock_guard<std::mutex> lock(task_registry_mutex_);
+            task_registry_head_ = nullptr;
+        }
+    }
+
+    static void register_task(Task* task) noexcept {
+        if constexpr (task_registry_enabled) {
+            std::lock_guard<std::mutex> lock(task_registry_mutex_);
+            AF_ASSERT(!task->registry_.registered);
+            task->registry_.prev = nullptr;
+            task->registry_.next = task_registry_head_;
+            if (task_registry_head_ != nullptr) {
+                task_registry_head_->registry_.prev = task;
+            }
+            task_registry_head_ = task;
+            task->registry_.registered = true;
+        } else {
+            static_cast<void>(task);
+        }
+    }
+
+    static void unregister_task(Task* task) noexcept {
+        if constexpr (task_registry_enabled) {
+            std::lock_guard<std::mutex> lock(task_registry_mutex_);
+            if (!task->registry_.registered) {
+                AF_ASSERT(false && "task was not registered");
                 return;
             }
-            active_posts_.wait(count, std::memory_order_acquire);
+
+            if (task->registry_.prev != nullptr) {
+                task->registry_.prev->registry_.next = task->registry_.next;
+            } else {
+                task_registry_head_ = task->registry_.next;
+            }
+            if (task->registry_.next != nullptr) {
+                task->registry_.next->registry_.prev = task->registry_.prev;
+            }
+
+            task->registry_.prev = nullptr;
+            task->registry_.next = nullptr;
+            task->registry_.registered = false;
+        } else {
+            static_cast<void>(task);
         }
     }
 
-    static void on_task_started() noexcept {
+    static void cancel_registered_tasks() noexcept {
+        if constexpr (task_registry_enabled) {
+            Task* task = nullptr;
+            {
+                std::lock_guard<std::mutex> lock(task_registry_mutex_);
+                task = task_registry_head_;
+                task_registry_head_ = nullptr;
+            }
+
+            while (task != nullptr) {
+                Task* next = task->registry_.next;
+                task->registry_.prev = nullptr;
+                task->registry_.next = nullptr;
+                task->registry_.registered = false;
+                cancel_registered_task(task);
+                task = next;
+            }
+        }
+    }
+
+    static void cancel_registered_task(Task* task) noexcept {
+        for (;;) {
+            TaskState state = task->state_.load(std::memory_order_acquire);
+            switch (state) {
+            case TaskState::Pending:
+            case TaskState::Queued: {
+                TaskState expected = state;
+                if (task->state_.compare_exchange_weak(
+                        expected,
+                        TaskState::Done,
+                        std::memory_order_acq_rel,
+                        std::memory_order_acquire)) {
+                    static_cast<void>(task->take_requested_thread());
+                    task->on_runtime_cancel();
+                    task->release_lifetime_ref();
+                    return;
+                }
+                break;
+            }
+
+            case TaskState::Created:
+            case TaskState::Running:
+                AF_ASSERT(false && "registered task cannot be cancelled in this state");
+                return;
+
+            case TaskState::Done:
+                return;
+            }
+        }
+    }
+
+    static void on_task_started(Task* task) noexcept {
+        register_task(task);
         if constexpr (shutdown_policy == ShutdownPolicy::WaitForTasks) {
             unfinished_tasks_.fetch_add(1, std::memory_order_acq_rel);
         }
     }
 
-    static void on_task_finished() noexcept {
+    static void on_task_finished(Task* task) noexcept {
+        unregister_task(task);
         if constexpr (shutdown_policy == ShutdownPolicy::WaitForTasks) {
             if (unfinished_tasks_.fetch_sub(1, std::memory_order_acq_rel) == 1U) {
                 unfinished_tasks_.notify_all();
@@ -1182,8 +1483,7 @@ private:
 
     alignas(detail::hardware_cache_line_size) static inline std::atomic<RuntimeStatus> status_{
         RuntimeStatus::Stopped};
-    alignas(detail::hardware_cache_line_size) static inline std::atomic<std::uint32_t> active_posts_{
-        0};
+    static inline std::array<ExternalPostCounter, thread_count> active_external_posts_{};
     alignas(detail::hardware_cache_line_size) static inline std::atomic<std::uint32_t> unfinished_tasks_{
         0};
     alignas(detail::hardware_cache_line_size) static inline std::atomic<std::uint64_t> generation_{
@@ -1192,6 +1492,8 @@ private:
     static inline std::vector<std::unique_ptr<SpscQueue>> spsc_queues_;
     static inline std::vector<std::unique_ptr<ExternalQueue>> external_queues_;
     static inline std::vector<OrderedBatchState> ordered_batch_state_;
+    static inline std::mutex task_registry_mutex_;
+    static inline Task* task_registry_head_{nullptr};
     static inline thread_local std::uint16_t current_thread_index_ = invalid_thread_index;
 };
 

@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install Conan
+        run: python -m pip install conan
+      - name: Configure
+        run: |
+          conan profile detect --force
+          conan install . --output-folder=build-conan --build=missing -s build_type=Debug
+          cmake -S . -B build-conan/build/Debug \
+            -DCMAKE_TOOLCHAIN_FILE=build-conan/build/Debug/generators/conan_toolchain.cmake \
+            -DCMAKE_BUILD_TYPE=Debug
+      - name: Build
+        run: cmake --build build-conan/build/Debug --parallel
+      - name: Test
+        run: ctest --test-dir build-conan/build/Debug --output-on-failure
+
+  tsan-stress:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install Conan
+        run: python -m pip install conan
+      - name: Configure TSAN
+        run: |
+          conan profile detect --force
+          conan install . --output-folder=build-conan-tsan --build=missing -s build_type=Debug
+          cmake -S . -B build-conan-tsan/build/Debug \
+            -DCMAKE_TOOLCHAIN_FILE=build-conan-tsan/build/Debug/generators/conan_toolchain.cmake \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DASYNCFLOW_ENABLE_TSAN=ON \
+            -DASYNCFLOW_BUILD_BENCHMARKS=OFF
+      - name: Build TSAN
+        run: cmake --build build-conan-tsan/build/Debug --parallel
+      - name: Stress Under TSAN
+        run: ASYNCFLOW_STRESS_MS=1500 ctest --test-dir build-conan-tsan/build/Debug -R RuntimeStressTests --output-on-failure
+
+  perf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install Conan
+        run: python -m pip install conan
+      - name: Configure Release
+        run: |
+          conan profile detect --force
+          conan install . --output-folder=build-conan-release --build=missing -s build_type=Release
+          cmake -S . -B build-conan-release/build/Release \
+            -DCMAKE_TOOLCHAIN_FILE=build-conan-release/build/Release/generators/conan_toolchain.cmake \
+            -DCMAKE_BUILD_TYPE=Release
+      - name: Build Benchmarks
+        run: cmake --build build-conan-release/build/Release --parallel --target asyncflow_runtime_benchmarks
+      - name: Check Performance Baseline
+        run: |
+          build-conan-release/build/Release/asyncflow_runtime_benchmarks \
+            --benchmark_filter=BM_Runtime \
+            --benchmark_min_time=0.001s \
+            --benchmark_repetitions=7 \
+            --benchmark_report_aggregates_only=true \
+            --benchmark_out=build-conan-release/runtime_benchmarks.json \
+            --benchmark_out_format=json
+          python scripts/check_benchmark_regression.py \
+            build-conan-release/runtime_benchmarks.json \
+            benchmarks/perf_baseline.json

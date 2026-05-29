@@ -39,27 +39,39 @@ private:
     af::TaskResult run() override {
         switch (state_) {
         case State::Split:
-            state_ = State::Finish;
-            async::parallel_shards(
-                player_logic_begin,
-                sharded_ops_,
-                af::ParallelMode::NonEmptyOnly,
-                this,
-                [this](std::uint16_t shard, std::vector<AddGoldOp>& shard_ops) {
-                    (*shard_hits_)[shard].fetch_add(1, std::memory_order_relaxed);
-                    int local_gold = 0;
-                    for (const auto& op : shard_ops) {
-                        local_gold += op.gold;
-                    }
-                    total_gold_->fetch_add(local_gold, std::memory_order_relaxed);
-                });
-            return pending();
+            return split_to_shards();
 
         case State::Finish:
-            return done();
+            return finish();
         }
 
         return failed();
+    }
+
+    af::TaskResult split_to_shards() {
+        state_ = State::Finish;
+        async::parallel_shards(
+            player_logic_begin,
+            sharded_ops_,
+            af::ParallelMode::NonEmptyOnly,
+            this,
+            [this](std::uint16_t shard, std::vector<AddGoldOp>& shard_ops) {
+                apply_shard(shard, shard_ops);
+            });
+        return pending();
+    }
+
+    void apply_shard(std::uint16_t shard, const std::vector<AddGoldOp>& shard_ops) {
+        (*shard_hits_)[shard].fetch_add(1, std::memory_order_relaxed);
+        int local_gold = 0;
+        for (const auto& op : shard_ops) {
+            local_gold += op.gold;
+        }
+        total_gold_->fetch_add(local_gold, std::memory_order_relaxed);
+    }
+
+    af::TaskResult finish() {
+        return done();
     }
 
     State state_{State::Split};

@@ -1,0 +1,25 @@
+{
+  "metric": "real_time",
+  "unit": "ms",
+  "default_max_regression": 0.75,
+  "benchmarks": {
+    "BM_RuntimeExternalStart/1024": {
+      "real_time": 0.321
+    },
+    "BM_RuntimeExternalStart/8192": {
+      "real_time": 2.663
+    },
+    "BM_RuntimeCrossThreadHop/1024": {
+      "real_time": 0.836
+    },
+    "BM_RuntimeCrossThreadHop/8192": {
+      "real_time": 6.711
+    },
+    "BM_RuntimeParallelShards/128": {
+      "real_time": 0.320
+    },
+    "BM_RuntimeParallelShards/512": {
+      "real_time": 1.308
+    }
+  }
+}

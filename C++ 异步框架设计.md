@@ -313,10 +313,11 @@ enum class ShutdownPolicy : std::uint8_t {
 快速退出策略。语义：
 
 - `shutdown()` 不等待 unfinished task。
-- 不保证仍处于 `Pending` 的任务析构或业务收尾。
 - 不为任务完成路径维护 unfinished task 计数，热路径更轻。
+- 默认不追踪 pending task，适合进程即将退出、业务不要求 pending 任务完整清理的路径。
+- 如果 traits 设置 `enable_task_registry = true`，首次成功调度的任务会进入 intrusive registry；`shutdown()` 停止并 join executor 后，会取消并释放仍处于 `Pending` / `Queued` 的任务。
 
-适合进程即将退出、业务不要求 pending 任务完整清理的路径。如果需要“不等待但仍取消并销毁所有 pending 任务”，需要额外引入任务注册/取消表，这会增加热路径成本，当前实现没有采用。
+未开启 registry 时 task 不携带 registry 链接字段；开启 registry 会增加首次调度和任务完成路径上的轻量锁成本，适合需要“不等待但仍销毁 pending task”的服务退出路径。
 
 ## 8. 批处理与 Shard
 
@@ -448,6 +449,7 @@ bool ok = async::start_ordered_task<PlayerDeltaStream, ApplyPlayerDeltaBatchTask
 - batch id 小于当前期待值：视为旧 batch，忽略。
 - batch id 等于当前期待值：立即启动 apply task，然后尝试 drain 后续连续 batch。
 - batch id 大于当前期待值：缓存，等待缺失 batch 到达。
+- apply task 启动失败：不推进期待 batch id，业务可重试同一个 batch。
 - runtime 重启后，ordered start 状态按 generation 重置。
 
 ## 9. CRUD Batch Helper
@@ -510,12 +512,14 @@ auto sharded = af::split_change_batch(batch, shard_count);
 - task 使用按类型分离对象池，减少频繁 malloc/free。
 - executor 空闲等待使用 C++20 `std::atomic::wait/notify_one`。
 - `StopImmediately` 不维护 task unfinished 计数，避免不等待策略承担额外热路径原子操作。
+- `StopImmediately` 可通过 `Traits::enable_task_registry = true` 开启 intrusive task registry，shutdown 后会取消并释放仍处于 `Pending` / `Queued` 的任务。
+- 有序 batch 提供 `af::retryable_ordered_batch_options`，业务重试同一 batch 时可跳过已经应用成功的 shard。
 
 仍需注意：
 
 - `WaitForTasks` 为了 shutdown 可等待，会在任务首次成功调度和最终完成时维护一个全局 unfinished counter。
-- 有序 batch 失败后的重试策略由业务决定；框架只保证失败 shard 不推进 batch id。
-- `StopImmediately` 不是完整取消清理机制。
+- 有序 batch 失败后的重试、跳过和补偿策略仍由业务决定；`af::OrderedBatchRetrySkipPolicy` 只负责记录失败次数并给出 Retry / Skip / Stop 决策。
+- 未开启 `enable_task_registry` 时，`StopImmediately` 仍保持最小热路径开销，不追踪 pending task。
 
 ## 11. 示例
 
@@ -644,6 +648,23 @@ async::parallel_shards_ordered(
 ./build-conan/build/Release/asyncflow_ordered_batches_example
 ```
 
+### 11.5 crud_apply.cpp：完整 CRUD apply 业务模板
+
+文件：`examples/crud_apply.cpp`
+
+展示内容：
+
+- 使用 `af::ChangeBatch<Key, Value>` 表示 Add / Update / Delete 变更流。
+- 外部乱序提交 batch，IO sequencer 使用 `start_ordered_task` 缓存并按 batch id 启动 apply task。
+- apply task 使用 `split_change_batch()` 拆分到 player logic shard。
+- `parallel_shards_ordered(..., af::retryable_ordered_batch_options, ...)` 支持失败后重试同一 batch 时跳过已成功 shard。
+
+运行方式：
+
+```sh
+./build-conan/build/Release/asyncflow_crud_apply_example
+```
+
 ## 12. 测试覆盖
 
 测试使用 GTest，入口目标是 `asyncflow_runtime_tests`。
@@ -651,8 +672,9 @@ async::parallel_shards_ordered(
 文件布局：
 
 - `tests/runtime_lifecycle_tests.cpp`：任务生命周期、状态机、背压、shutdown 策略。
-- `tests/runtime_parallel_tests.cpp`：parallel shards、失败汇总、有序 batch、ordered start 边界。
-- `tests/utility_tests.cpp`：SPSC/MPSC/MPMC 队列、对象池、分片工具、CRUD helper、BatchSequencer。
+- `tests/runtime_parallel_tests.cpp`：parallel shards、失败汇总、有序 batch、ordered start 边界、retryable ordered apply。
+- `tests/runtime_stress_tests.cpp`：高并发 init/shutdown/start_task stress，可配合 TSAN 拉长运行。
+- `tests/utility_tests.cpp`：SPSC/MPSC/MPMC 队列、对象池、分片工具、CRUD helper、BatchSequencer、ordered retry/skip policy。
 
 重点覆盖：
 
@@ -666,12 +688,13 @@ async::parallel_shards_ordered(
 - Runtime 未初始化或 stopping 后拒绝外部新任务。
 - `WaitForTasks` shutdown 等待已接收任务完成。
 - `WaitForTasks` stopping 阶段允许 runtime 线程恢复已接收任务。
-- `StopImmediately` 不等待 pending 任务。
+- `StopImmediately` 不等待 pending 任务；开启 registry 时会取消并销毁 pending task。
 - `NonEmptyOnly` 跳过空 shard。
 - `AllShards` 包含空 shard。
 - shard handler 失败可被 owner 读取。
 - ordered start 缓存乱序 batch、忽略重复/旧 batch、runtime 重启后重置。
 - ordered batch 连续推进每个 shard 的 `last_applied_batch_id`。
+- retryable ordered batch 跳过已经应用过同一 batch id 的 shard，只重跑仍落后的 shard。
 - ordered batch handler 失败时失败 shard 不推进版本。
 
 运行：
@@ -692,10 +715,18 @@ Benchmark 使用 Google Benchmark，入口目标是 `asyncflow_runtime_benchmark
 运行：
 
 ```sh
-./build-conan/build/Release/asyncflow_runtime_benchmarks --benchmark_min_time=0.005s
+./build-conan/build/Release/asyncflow_runtime_benchmarks --benchmark_min_time=0.001s
+./build-conan/build/Release/asyncflow_runtime_benchmarks \
+  --benchmark_filter=BM_Runtime \
+  --benchmark_min_time=0.001s \
+  --benchmark_repetitions=7 \
+  --benchmark_report_aggregates_only=true \
+  --benchmark_out=runtime_benchmarks.json \
+  --benchmark_out_format=json
+python3 scripts/check_benchmark_regression.py runtime_benchmarks.json benchmarks/perf_baseline.json
 ```
 
-当前 benchmark 用于观察趋势，不作为硬性性能门禁。若后续引入 CI，可增加稳定机器上的性能 baseline 和回归阈值。
+CI 使用 `benchmarks/perf_baseline.json` 作为 runtime benchmark baseline，并由 `scripts/check_benchmark_regression.py` 按阈值检测回归。
 
 ## 14. 构建
 
@@ -728,18 +759,22 @@ ctest --test-dir build-conan/build/Release --output-on-failure
 ## 15. 当前语义边界
 
 - `shutdown()` 必须从非 runtime 线程调用；debug 下会断言。
-- `StopImmediately` 只保证 executor 尽快停止，不保证 pending task 析构。
-- 有序 batch 的连续性由 `last_applied_batch_id` 保护；失败后的重试、跳过、补偿策略由业务实现。
+- `StopImmediately` 默认只保证 executor 尽快停止；如需完整 pending task 释放，应开启 `enable_task_registry`。
+- 有序 batch 的连续性由 `last_applied_batch_id` 保护；失败后的重试、跳过、补偿策略由业务实现，可使用 `OrderedBatchRetrySkipPolicy` 辅助决策。
 - `parallel_shards()` 必须在 runtime 线程中由 owner task 调用。
 - enum 必须连续递增，真实线程索引从 0 开始。
 - 业务跨线程传递应优先传 id、值对象或不可变数据，不应跨 owner thread 直接传可变业务对象引用。
 
-## 16. 后续可选增强
+## 16. CI 与后续可选增强
 
-这些不是当前必需项：
+当前 CI 覆盖普通测试、TSAN stress 和 runtime benchmark 回归检查：
 
-- 为 `StopImmediately` 增加可选任务注册表，实现完整 pending task 取消和销毁。
-- 增加 CI 性能 baseline 和回归阈值。
-- 增加 TSAN/stress 测试，覆盖长时间高并发 init/shutdown/start_task。
-- 为有序 batch 增加业务可配置的失败重试/跳过策略 helper。
-- 增加更多业务模板示例，例如 CRUD apply task 完整示例。
+- `.github/workflows/ci.yml`：Debug 测试、TSAN stress、Release benchmark 三个 job。
+- `tests/runtime_stress_tests.cpp`：高并发反复 `init()` / `shutdown()` / `start_task()`，默认短跑，可通过 `ASYNCFLOW_STRESS_MS` 拉长。
+- `benchmarks/perf_baseline.json`：runtime benchmark baseline。
+- `scripts/check_benchmark_regression.py`：读取 Google Benchmark JSON，并按 `default_max_regression` 或单项阈值失败。
+
+后续仍可按业务压力继续补充：
+
+- 在稳定 CI 机器上定期刷新 benchmark baseline。
+- 为更多业务域补模板，例如定时器、DB 回写、跨服消息 apply。

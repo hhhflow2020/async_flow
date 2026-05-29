@@ -39,27 +39,39 @@ private:
     af::TaskResult run() override {
         switch (state_) {
         case State::Apply:
-            state_ = State::Finish;
-            async::parallel_shards_ordered(
-                player_logic_begin,
-                sharded_deltas_,
-                batch_.batch_id,
-                this,
-                [this](std::uint16_t shard, std::vector<int>& deltas, std::uint64_t batch_id) {
-                    (*batch_.shard_batch_seen)[shard].store(batch_id, std::memory_order_release);
-                    int local_delta = 0;
-                    for (int delta : deltas) {
-                        local_delta += delta;
-                    }
-                    batch_.total_delta->fetch_add(local_delta, std::memory_order_relaxed);
-                });
-            return pending();
+            return apply_batch();
 
         case State::Finish:
-            return done();
+            return finish();
         }
 
         return failed();
+    }
+
+    af::TaskResult apply_batch() {
+        state_ = State::Finish;
+        async::parallel_shards_ordered(
+            player_logic_begin,
+            sharded_deltas_,
+            batch_.batch_id,
+            this,
+            [this](std::uint16_t shard, std::vector<int>& deltas, std::uint64_t batch_id) {
+                apply_shard(shard, deltas, batch_id);
+            });
+        return pending();
+    }
+
+    void apply_shard(std::uint16_t shard, const std::vector<int>& deltas, std::uint64_t batch_id) {
+        (*batch_.shard_batch_seen)[shard].store(batch_id, std::memory_order_release);
+        int local_delta = 0;
+        for (int delta : deltas) {
+            local_delta += delta;
+        }
+        batch_.total_delta->fetch_add(local_delta, std::memory_order_relaxed);
+    }
+
+    af::TaskResult finish() {
+        return done();
     }
 
     State state_{State::Apply};

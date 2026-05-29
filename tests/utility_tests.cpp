@@ -216,3 +216,38 @@ TEST(UtilityTests, BatchSequencerBuffersOutOfOrderBatches) {
     EXPECT_EQ(submitted[1], 20);
     EXPECT_EQ(sequencer.submit(1, 10, submit), af::BatchSubmitStatus::Duplicate);
 }
+
+TEST(UtilityTests, OrderedBatchRetrySkipPolicyTracksRetryAndSkipDecisions) {
+    af::OrderedBatchRetrySkipPolicy<std::uint64_t> policy({
+        .max_retries = 2,
+        .skip_after_retries = true,
+    });
+
+    auto first = policy.record_failure(7U);
+    EXPECT_TRUE(first.should_retry());
+    EXPECT_EQ(first.failure_count, 1U);
+
+    auto second = policy.record_failure(7U);
+    EXPECT_TRUE(second.should_retry());
+    EXPECT_EQ(second.failure_count, 2U);
+
+    auto third = policy.record_failure(7U);
+    EXPECT_TRUE(third.should_skip());
+    EXPECT_EQ(third.failure_count, 3U);
+    EXPECT_EQ(policy.failure_count(7U), 3U);
+
+    policy.record_success(7U);
+    EXPECT_EQ(policy.failure_count(7U), 0U);
+    EXPECT_TRUE(policy.record_failure(7U).should_retry());
+}
+
+TEST(UtilityTests, OrderedBatchRetrySkipPolicyCanStopInsteadOfSkipping) {
+    af::OrderedBatchRetrySkipPolicy<std::uint64_t> policy({
+        .max_retries = 0,
+        .skip_after_retries = false,
+    });
+
+    auto decision = policy.record_failure(9U);
+    EXPECT_TRUE(decision.should_stop());
+    EXPECT_EQ(decision.failure_count, 1U);
+}

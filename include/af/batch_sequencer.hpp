@@ -1,8 +1,9 @@
 #pragma once
 
 #include <cstdint>
-#include <map>
 #include <utility>
+
+#include "absl/container/flat_hash_map.h"
 
 namespace af {
 
@@ -10,6 +11,73 @@ enum class BatchSubmitStatus {
     Submitted,
     Buffered,
     Duplicate,
+};
+
+enum class OrderedBatchFailureAction : std::uint8_t {
+    Retry,
+    Skip,
+    Stop,
+};
+
+struct OrderedBatchRetrySkipOptions {
+    std::uint32_t max_retries{0};
+    bool skip_after_retries{true};
+};
+
+struct OrderedBatchFailureDecision {
+    OrderedBatchFailureAction action{OrderedBatchFailureAction::Stop};
+    std::uint32_t failure_count{0};
+
+    [[nodiscard]] bool should_retry() const noexcept {
+        return action == OrderedBatchFailureAction::Retry;
+    }
+
+    [[nodiscard]] bool should_skip() const noexcept {
+        return action == OrderedBatchFailureAction::Skip;
+    }
+
+    [[nodiscard]] bool should_stop() const noexcept {
+        return action == OrderedBatchFailureAction::Stop;
+    }
+};
+
+template <typename BatchId = std::uint64_t>
+class OrderedBatchRetrySkipPolicy {
+public:
+    explicit OrderedBatchRetrySkipPolicy(OrderedBatchRetrySkipOptions options = {})
+        : options_(options) {}
+
+    [[nodiscard]] OrderedBatchFailureDecision record_failure(BatchId batch_id) {
+        const std::uint32_t failure_count = ++failures_[batch_id];
+        if (failure_count <= options_.max_retries) {
+            return {OrderedBatchFailureAction::Retry, failure_count};
+        }
+        if (options_.skip_after_retries) {
+            return {OrderedBatchFailureAction::Skip, failure_count};
+        }
+        return {OrderedBatchFailureAction::Stop, failure_count};
+    }
+
+    void record_success(BatchId batch_id) {
+        failures_.erase(batch_id);
+    }
+
+    void reset(BatchId batch_id) {
+        failures_.erase(batch_id);
+    }
+
+    void clear() noexcept {
+        failures_.clear();
+    }
+
+    [[nodiscard]] std::uint32_t failure_count(BatchId batch_id) const {
+        const auto it = failures_.find(batch_id);
+        return it == failures_.end() ? 0U : it->second;
+    }
+
+private:
+    OrderedBatchRetrySkipOptions options_;
+    absl::flat_hash_map<BatchId, std::uint32_t> failures_;
 };
 
 template <typename Batch>
@@ -63,7 +131,7 @@ private:
     }
 
     std::uint64_t next_batch_id_;
-    std::map<std::uint64_t, Batch> pending_;
+    absl::flat_hash_map<std::uint64_t, Batch> pending_;
 };
 
 } // namespace af

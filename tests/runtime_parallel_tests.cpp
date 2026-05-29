@@ -413,7 +413,63 @@ private:
     std::atomic<std::uint32_t>* failures_{nullptr};
 };
 
+class OrderedRetryableTask final : public Task {
+public:
+    explicit OrderedRetryableTask(Task::FactoryToken token) : Task(token) {}
+
+    bool do_it(
+        std::uint64_t batch_id,
+        std::atomic<int>* completed,
+        std::array<std::atomic<int>, 4>* shard_hits,
+        std::atomic<std::uint32_t>* failures) {
+        batch_id_ = batch_id;
+        completed_ = completed;
+        shard_hits_ = shard_hits;
+        failures_ = failures;
+        ops_ = af::ShardedOps<int>(4);
+        return schedule(TestThread::Logic_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Apply,
+        Finish,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Apply:
+            state_ = State::Finish;
+            Runtime::parallel_shards_ordered(
+                TestThread::Logic_0,
+                ops_,
+                batch_id_,
+                af::retryable_ordered_batch_options,
+                this,
+                [this](std::uint16_t shard, std::vector<int>&, std::uint64_t) {
+                    (*shard_hits_)[shard].fetch_add(1, std::memory_order_release);
+                });
+            return pending();
+
+        case State::Finish:
+            failures_->store(last_parallel_failures(), std::memory_order_release);
+            completed_->fetch_add(1, std::memory_order_release);
+            return done();
+        }
+
+        return failed();
+    }
+
+    State state_{State::Apply};
+    std::uint64_t batch_id_{0};
+    af::ShardedOps<int> ops_{4};
+    std::atomic<int>* completed_{nullptr};
+    std::array<std::atomic<int>, 4>* shard_hits_{nullptr};
+    std::atomic<std::uint32_t>* failures_{nullptr};
+};
+
 struct OrderedStartStream {};
+struct OrderedStartFailureStream {};
 
 struct OrderedStartBatch {
     std::uint64_t batch_id{0};
@@ -439,6 +495,40 @@ private:
     }
 
     OrderedStartBatch batch_;
+};
+
+struct OrderedStartFailureBatch {
+    std::uint64_t batch_id{0};
+    int value{0};
+    std::vector<int>* applied{nullptr};
+    std::atomic<int>* attempts{nullptr};
+    std::atomic<int>* completed{nullptr};
+    std::atomic<bool>* fail_first_start{nullptr};
+};
+
+class OrderedStartFailingApplyTask final : public Task {
+public:
+    explicit OrderedStartFailingApplyTask(Task::FactoryToken token) : Task(token) {}
+
+    bool do_it(OrderedStartFailureBatch batch) {
+        batch.attempts->fetch_add(1, std::memory_order_release);
+        if (batch.batch_id == 1U &&
+            !batch.fail_first_start->exchange(true, std::memory_order_acq_rel)) {
+            return false;
+        }
+
+        batch_ = batch;
+        return schedule(TestThread::Logic_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        batch_.applied->push_back(batch_.value);
+        batch_.completed->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    OrderedStartFailureBatch batch_;
 };
 
 } // namespace
@@ -567,6 +657,36 @@ TEST_F(ParallelRuntimeFixture, OrderedStartTaskIgnoresDuplicateAndOldBatches) {
     EXPECT_EQ(applied[1], 20);
 }
 
+TEST_F(ParallelRuntimeFixture, OrderedStartDoesNotAdvanceWhenApplyStartFails) {
+    std::atomic<int> attempts{0};
+    std::atomic<int> completed{0};
+    std::atomic<bool> fail_first_start{false};
+    std::vector<int> applied;
+
+    ASSERT_TRUE((Runtime::start_ordered_task<OrderedStartFailureStream, OrderedStartFailingApplyTask>(
+        TestThread::DB_0,
+        OrderedStartFailureBatch{1, 10, &applied, &attempts, &completed, &fail_first_start})));
+    ASSERT_TRUE(wait_until_at_least(attempts, 1));
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    EXPECT_EQ(completed.load(std::memory_order_acquire), 0);
+
+    ASSERT_TRUE((Runtime::start_ordered_task<OrderedStartFailureStream, OrderedStartFailingApplyTask>(
+        TestThread::DB_0,
+        OrderedStartFailureBatch{2, 20, &applied, &attempts, &completed, &fail_first_start})));
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    EXPECT_EQ(attempts.load(std::memory_order_acquire), 1);
+    EXPECT_EQ(completed.load(std::memory_order_acquire), 0);
+
+    ASSERT_TRUE((Runtime::start_ordered_task<OrderedStartFailureStream, OrderedStartFailingApplyTask>(
+        TestThread::DB_0,
+        OrderedStartFailureBatch{1, 10, &applied, &attempts, &completed, &fail_first_start})));
+    ASSERT_TRUE(wait_until_at_least(completed, 2));
+
+    ASSERT_EQ(applied.size(), 2);
+    EXPECT_EQ(applied[0], 10);
+    EXPECT_EQ(applied[1], 20);
+}
+
 TEST(RuntimeOrderedStartTests, OrderedStartStateResetsAfterRuntimeRestart) {
     Runtime::init();
 
@@ -639,4 +759,39 @@ TEST_F(ParallelRuntimeFixture, OrderedBatchFailureDoesNotAdvanceFailedShard) {
     EXPECT_EQ(Runtime::ordered_last_applied_batch_id(TestThread::Logic_1), 0U);
     EXPECT_EQ(Runtime::ordered_last_applied_batch_id(TestThread::Logic_2), 1U);
     EXPECT_EQ(Runtime::ordered_last_applied_batch_id(TestThread::Logic_3), 1U);
+}
+
+TEST_F(ParallelRuntimeFixture, RetryableOrderedBatchSkipsAlreadyAppliedShards) {
+    std::atomic<int> failed_completed{0};
+    std::atomic<std::uint32_t> failed_failures{0};
+
+    ASSERT_TRUE(Runtime::start_task<OrderedFailureTask>(
+        1U,
+        1U,
+        &failed_completed,
+        &failed_failures));
+    ASSERT_TRUE(wait_until_at_least(failed_completed, 1));
+    ASSERT_EQ(failed_failures.load(std::memory_order_acquire), 1U);
+
+    std::atomic<int> retry_completed{0};
+    std::atomic<std::uint32_t> retry_failures{0};
+    std::array<std::atomic<int>, 4> shard_hits{};
+
+    ASSERT_TRUE(Runtime::start_task<OrderedRetryableTask>(
+        1U,
+        &retry_completed,
+        &shard_hits,
+        &retry_failures));
+    ASSERT_TRUE(wait_until_at_least(retry_completed, 1));
+
+    EXPECT_EQ(retry_failures.load(std::memory_order_acquire), 0U);
+    EXPECT_EQ(shard_hits[0].load(std::memory_order_acquire), 0);
+    EXPECT_EQ(shard_hits[1].load(std::memory_order_acquire), 1);
+    EXPECT_EQ(shard_hits[2].load(std::memory_order_acquire), 0);
+    EXPECT_EQ(shard_hits[3].load(std::memory_order_acquire), 0);
+    for (std::uint16_t i = 0; i < 4; ++i) {
+        EXPECT_EQ(
+            Runtime::ordered_last_applied_batch_id(Runtime::thread_from_index(i)),
+            1U);
+    }
 }
