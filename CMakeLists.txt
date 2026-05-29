@@ -44,6 +44,9 @@ if(ASYNCFLOW_BUILD_EXAMPLES)
 
     add_executable(asyncflow_io_epoll_example examples/io_epoll.cpp)
     target_link_libraries(asyncflow_io_epoll_example PRIVATE AsyncFlow::AsyncFlow)
+
+    add_executable(asyncflow_io_adapters_example examples/io_adapters.cpp)
+    target_link_libraries(asyncflow_io_adapters_example PRIVATE AsyncFlow::AsyncFlow)
 endif()
 
 if(ASYNCFLOW_BUILD_TESTS)
@@ -70,6 +73,7 @@ if(ASYNCFLOW_BUILD_BENCHMARKS)
     add_executable(
         asyncflow_runtime_benchmarks
         benchmarks/benchmark_main.cpp
+        benchmarks/io_benchmarks.cpp
         benchmarks/queue_benchmarks.cpp
         benchmarks/runtime_benchmarks.cpp
     )

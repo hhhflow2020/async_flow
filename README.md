@@ -138,7 +138,7 @@ if (!wait_io(AppThread::IO_0, fd_, af::io_readable, &result_)) {
 return pending();
 ```
 
-业务侧更推荐使用 `af::io_read_some()` / `af::io_write_some()` / `af::io_recv_from_some()` / `af::io_send_to_some()` 这组 helper。它们会先尝试一次非阻塞 syscall；遇到 `EAGAIN` / `EWOULDBLOCK` 时注册对应 readiness，并返回 `IoStep::Pending`：
+业务侧更推荐使用 `af::io_read_some()` / `af::io_write_some()` / `af::io_recv_some()` / `af::io_send_some()` / `af::io_recv_from_some()` / `af::io_send_to_some()` 这组 helper。它们会先尝试一次非阻塞 syscall；遇到 `EAGAIN` / `EWOULDBLOCK` 时注册对应 readiness，并返回 `IoStep::Pending`：
 
 ```cpp
 const af::IoStatus status = af::io_read_some(
@@ -156,7 +156,16 @@ if (!status.ready()) {
 }
 ```
 
-这些 helper 面向非阻塞 fd/socket，适合 TCP、UDP、pipe/eventfd 等 readiness 模型。普通文件在 epoll 下没有真正的异步文件 IO 语义；后续 io_uring backend 会承接文件 read/write/fsync 等真实异步操作。`examples/io_epoll.cpp` 演示了 socketpair 可读事件的完整流程。非 Linux 平台会保留接口但不创建 epoll backend，业务可通过 `async::io_backend_available(AppThread::IO_0)` 做降级判断。
+业务模板代码可以进一步用轻量 adapter 包住 `thread + fd`，避免每个状态都重复传线程和 fd：
+
+```cpp
+af::TcpStream<AppThread> stream(AppThread::IO_0, fd_);
+const af::IoStatus status = stream.recv_some(*this, buffer_, sizeof(buffer_), read_);
+```
+
+`af::IoFile<Thread>` 面向非阻塞 fd/readiness，`af::TcpStream<Thread>` 使用 `recv/send`，`af::UdpSocket<Thread>` 使用 `recvfrom/sendto`。这些 adapter 都是两个字段的小对象，不拥有 fd、不分配内存、不跨线程搬运 IO；任务仍然先调度到绑定的 IO 线程，syscall 和后续恢复都在同一个 executor 上完成。需要所有权时可使用 `af::UniqueFd` 在业务侧管理 fd 生命周期。
+
+这些 helper 和 adapter 面向非阻塞 fd/socket，适合 TCP、UDP、pipe/eventfd 等 readiness 模型。普通文件在 epoll 下没有真正的异步文件 IO 语义；后续 io_uring backend 会承接文件 read/write/fsync 等真实异步操作。`examples/io_epoll.cpp` 演示了 socketpair 可读事件的完整流程，`examples/io_adapters.cpp` 演示了 TCP stream 与 UDP datagram adapter。非 Linux 平台会保留接口但不创建 epoll backend，业务可通过 `async::io_backend_available(AppThread::IO_0)` 做降级判断。
 
 ## 批处理 API
 
@@ -194,7 +203,8 @@ auto sharded = af::split_change_batch(batch, player_logic_shard_count);
 - `parallel_shards_ordered(..., af::retryable_ordered_batch_options, ...)` 支持重试同一个 batch 时跳过已经应用成功的 shard；`af::OrderedBatchRetrySkipPolicy` 可用于业务侧记录失败次数并决定重试、跳过或停止。
 - `start_ordered_task<Stream, ApplyTask>()` 会在指定 sequencer 线程上缓存乱序 batch，并按 batch_id 连续启动 apply task；如果 apply task 启动失败，不推进期待 batch id，后续重试仍从失败 batch 开始。
 - Linux IO executor 使用 epoll + eventfd，`wait_io()` 注册一次性 fd readiness 后恢复原 pending task；跨线程唤醒做合并写，避免每次任务投递都写 eventfd。
-- `af::io_read_some()` / `af::io_write_some()` / `af::io_recv_from_some()` / `af::io_send_to_some()` 封装了非阻塞 fd 的 EAGAIN -> wait -> resume 流程，减少业务任务里重复写 syscall 分支。
+- `af::io_read_some()` / `af::io_write_some()` / `af::io_recv_some()` / `af::io_send_some()` / `af::io_recv_from_some()` / `af::io_send_to_some()` 封装了非阻塞 fd 的 EAGAIN -> wait -> resume 流程，减少业务任务里重复写 syscall 分支。
+- `af::IoFile` / `af::TcpStream` / `af::UdpSocket` 是零堆分配 adapter，仅保存 `thread + fd` 并内联转发到 helper；它们不会引入额外队列或 MPMC hop。
 - `CrudOp<Key, Value>` / `ChangeBatch<Key, Value>` 是纯数据 helper，不引入额外运行期状态。
 - `parallel_shards()` 的 handler 如果返回 `bool`，`false` 会计为 shard 失败；owner 恢复后可用 `last_parallel_failures()` 读取失败数。
 - `TaskResult::Cancelled` 可用于取消结束；runtime 未初始化或 stopping 时 `start_task()` 返回失败并销毁任务。
@@ -241,11 +251,12 @@ ASYNCFLOW_STRESS_MS=1500 ctest --test-dir build-tsan/build/Debug -R RuntimeStres
 - `examples/ordered_batches.cpp`：乱序 batch 进入 sequencer，并用全 shard 顺序屏障应用。
 - `examples/crud_apply.cpp`：完整 CRUD change batch 模板，包含乱序提交、sequencer、ordered shard apply。
 - `examples/io_epoll.cpp`：Linux epoll IO 线程等待 fd readiness 并恢复 pending task。
+- `examples/io_adapters.cpp`：使用 `af::TcpStream` 和 `af::UdpSocket` 编写业务状态机。
 - `tests/utility_tests.cpp`：队列、对象池、分片工具和 batch sequencer。
 - `tests/runtime_lifecycle_tests.cpp`：任务生命周期、状态机、背压和 shutdown。
-- `tests/runtime_io_tests.cpp`：IO 线程调度、epoll readiness 恢复、read/write/UDP helper、重复 fd wait 拒绝、HUP/EOF、非法 fd、worker 误用降级，以及 StopImmediately 清理 pending IO wait。
+- `tests/runtime_io_tests.cpp`：IO 线程调度、epoll readiness 恢复、read/write/TCP/UDP helper 与 adapter、重复 fd wait 拒绝、HUP/EOF、非法 fd、worker 误用降级，以及 StopImmediately 清理 pending IO wait。
 - `tests/runtime_parallel_tests.cpp`：parallel shard、失败汇总、有序 batch 和 retryable ordered apply。
 - `tests/runtime_stress_tests.cpp`：高并发 init/shutdown/start_task stress，CI 中也用于 TSAN job。
-- `benchmarks/queue_benchmarks.cpp` 与 `benchmarks/runtime_benchmarks.cpp`：底层结构和 runtime 路径分开压测。
+- `benchmarks/io_benchmarks.cpp`、`benchmarks/queue_benchmarks.cpp` 与 `benchmarks/runtime_benchmarks.cpp`：IO adapter、底层结构和 runtime 路径分开压测。
 - `benchmarks/perf_baseline.json`：本地 runtime benchmark baseline。
 - `benchmarks/perf_baseline_github_ubuntu.json` 与 `scripts/check_benchmark_regression.py`：GitHub Ubuntu runner 性能 baseline 与回归阈值检查。

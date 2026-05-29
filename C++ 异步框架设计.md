@@ -514,6 +514,8 @@ auto sharded = af::split_change_batch(batch, shard_count);
 - `StopImmediately` 不维护 task unfinished 计数，避免不等待策略承担额外热路径原子操作。
 - `StopImmediately` 可通过 `Traits::enable_task_registry = true` 开启 intrusive task registry，shutdown 后会取消并释放仍处于 `Pending` / `Queued` 的任务。
 - 有序 batch 提供 `af::retryable_ordered_batch_options`，业务重试同一 batch 时可跳过已经应用成功的 shard。
+- Linux IO executor 使用 epoll + eventfd，任务先调度到指定 IO 线程后再注册 fd readiness，避免所有 IO 都通过 MPMC 队列跨线程搬运。
+- `af::IoFile` / `af::TcpStream` / `af::UdpSocket` 仅保存 `thread + fd`，内联转发到 IO helper，不拥有 fd、不分配堆内存、不增加额外分支表。
 
 仍需注意：
 
@@ -665,6 +667,22 @@ async::parallel_shards_ordered(
 ./build-conan/build/Release/asyncflow_crud_apply_example
 ```
 
+### 11.6 io_adapters.cpp：TCP/UDP IO adapter 业务模板
+
+文件：`examples/io_adapters.cpp`
+
+展示内容：
+
+- `af::TcpStream<AppThread>` 封装 stream socket 的 `recv/send` 状态机。
+- `af::UdpSocket<AppThread>` 封装 datagram socket 的 `recvfrom/sendto` 状态机。
+- fd readiness、syscall 和任务恢复都发生在绑定的 IO executor 上。
+
+运行方式：
+
+```sh
+./build-conan/build/Release/asyncflow_io_adapters_example
+```
+
 ## 12. 测试覆盖
 
 测试使用 GTest，入口目标是 `asyncflow_runtime_tests`。
@@ -675,6 +693,7 @@ async::parallel_shards_ordered(
 - `tests/runtime_parallel_tests.cpp`：parallel shards、失败汇总、有序 batch、ordered start 边界、retryable ordered apply。
 - `tests/runtime_stress_tests.cpp`：高并发 init/shutdown/start_task stress，可配合 TSAN 拉长运行。
 - `tests/utility_tests.cpp`：SPSC/MPSC/MPMC 队列、对象池、分片工具、CRUD helper、BatchSequencer、ordered retry/skip policy。
+- `tests/runtime_io_tests.cpp`：IO 线程、read/write/TCP/UDP helper 与 adapter、重复 fd wait、HUP/EOF、非法 fd、worker 误用和 pending IO shutdown。
 
 重点覆盖：
 
@@ -696,6 +715,7 @@ async::parallel_shards_ordered(
 - ordered batch 连续推进每个 shard 的 `last_applied_batch_id`。
 - retryable ordered batch 跳过已经应用过同一 batch id 的 shard，只重跑仍落后的 shard。
 - ordered batch handler 失败时失败 shard 不推进版本。
+- epoll IO task 在 readable/writable、UDP 零长度报文、duplicate wait、peer HUP/EOF、非法 fd、adapter 边界下行为正确。
 
 运行：
 
@@ -709,6 +729,7 @@ Benchmark 使用 Google Benchmark，入口目标是 `asyncflow_runtime_benchmark
 
 文件布局：
 
+- `benchmarks/io_benchmarks.cpp`：IO adapter inline/zero-byte 快路径开销。
 - `benchmarks/queue_benchmarks.cpp`：SPSC、MPSC、对象池基础性能。
 - `benchmarks/runtime_benchmarks.cpp`：外部 start、跨线程 hop、parallel shards runtime 路径。
 
@@ -764,6 +785,7 @@ ctest --test-dir build-conan/build/Release --output-on-failure
 - `parallel_shards()` 必须在 runtime 线程中由 owner task 调用。
 - enum 必须连续递增，真实线程索引从 0 开始。
 - 业务跨线程传递应优先传 id、值对象或不可变数据，不应跨 owner thread 直接传可变业务对象引用。
+- 当前 epoll helper/adapter 面向非阻塞 fd readiness；普通文件的真正异步 read/write/fsync 留给后续 io_uring backend。
 
 ## 16. CI 与后续可选增强
 

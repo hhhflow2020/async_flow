@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cstdint>
 #include <thread>
+#include <type_traits>
 
 #include <gtest/gtest.h>
 
@@ -70,6 +71,15 @@ struct FastIoRuntimeTraits {
 
 using FastIoRuntime = af::AsyncRuntime<FastIoRuntimeTraits>;
 using FastIoTaskBase = FastIoRuntime::Task;
+
+TEST(IoAdapterTraits, AdaptersAreThinTriviallyCopyableViews) {
+    EXPECT_TRUE(std::is_trivially_copyable_v<af::IoFile<IoTestThread>>);
+    EXPECT_TRUE(std::is_trivially_copyable_v<af::TcpStream<IoTestThread>>);
+    EXPECT_TRUE(std::is_trivially_copyable_v<af::UdpSocket<IoTestThread>>);
+    EXPECT_LE(sizeof(af::IoFile<IoTestThread>), 8U);
+    EXPECT_LE(sizeof(af::TcpStream<IoTestThread>), 8U);
+    EXPECT_LE(sizeof(af::UdpSocket<IoTestThread>), 8U);
+}
 
 class IoRuntimeFixture : public testing::Test {
 protected:
@@ -266,7 +276,7 @@ public:
         std::atomic<int>* completed,
         std::atomic<char>* byte_read,
         std::size_t expected_bytes = 1U) {
-        fd_ = fd;
+        socket_.reset(IoTestThread::IO_0, fd);
         armed_ = armed;
         completed_ = completed;
         byte_read_ = byte_read;
@@ -277,10 +287,8 @@ public:
 private:
     af::TaskResult run() override {
         peer_size_ = sizeof(peer_);
-        const af::IoStatus status = af::io_recv_from_some(
+        const af::IoStatus status = socket_.recv_from_some(
             *this,
-            IoTestThread::IO_0,
-            fd_,
             &value_,
             sizeof(value_),
             reinterpret_cast<sockaddr*>(&peer_),
@@ -300,7 +308,7 @@ private:
         return done();
     }
 
-    int fd_{-1};
+    af::UdpSocket<IoTestThread> socket_{};
     char value_{0};
     std::size_t expected_bytes_{1U};
     sockaddr_storage peer_{};
@@ -322,7 +330,7 @@ public:
         char value,
         std::atomic<int>* completed,
         std::atomic<int>* bytes_sent) {
-        fd_ = fd;
+        socket_.reset(IoTestThread::IO_0, fd);
         address_ = address;
         address_size_ = address_size;
         value_ = value;
@@ -333,10 +341,8 @@ public:
 
 private:
     af::TaskResult run() override {
-        const af::IoStatus status = af::io_send_to_some(
+        const af::IoStatus status = socket_.send_to_some(
             *this,
-            IoTestThread::IO_0,
-            fd_,
             &value_,
             sizeof(value_),
             reinterpret_cast<const sockaddr*>(&address_),
@@ -353,13 +359,126 @@ private:
         return done();
     }
 
-    int fd_{-1};
+    af::UdpSocket<IoTestThread> socket_{};
     sockaddr_in address_{};
     socklen_t address_size_{sizeof(address_)};
     char value_{0};
     af::IoOpState send_{};
     std::atomic<int>* completed_{nullptr};
     std::atomic<int>* bytes_sent_{nullptr};
+};
+
+class StreamAdapterEchoTask final : public IoTaskBase {
+public:
+    explicit StreamAdapterEchoTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(
+        int fd,
+        std::atomic<int>* armed,
+        std::atomic<int>* completed,
+        std::atomic<char>* byte_read) {
+        stream_.reset(IoTestThread::IO_0, fd);
+        armed_ = armed;
+        completed_ = completed;
+        byte_read_ = byte_read;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        ReadRequest,
+        SendResponse,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::ReadRequest:
+            return read_request();
+
+        case State::SendResponse:
+            return send_response();
+        }
+        return failed();
+    }
+
+    af::TaskResult read_request() {
+        const af::IoStatus status = stream_.recv_some(
+            *this,
+            &request_,
+            sizeof(request_),
+            read_);
+        if (status.pending()) {
+            armed_->fetch_add(1, std::memory_order_release);
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(request_)) {
+            return failed();
+        }
+        byte_read_->store(request_, std::memory_order_release);
+        state_ = State::SendResponse;
+        return again();
+    }
+
+    af::TaskResult send_response() {
+        const af::IoStatus status = stream_.send_some(
+            *this,
+            &response_,
+            sizeof(response_),
+            write_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(response_)) {
+            return failed();
+        }
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    State state_{State::ReadRequest};
+    af::TcpStream<IoTestThread> stream_{};
+    char request_{0};
+    char response_{'R'};
+    af::IoOpState read_{};
+    af::IoOpState write_{};
+    std::atomic<int>* armed_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<char>* byte_read_{nullptr};
+};
+
+class FileAdapterBoundaryTask final : public IoTaskBase {
+public:
+    explicit FileAdapterBoundaryTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(std::atomic<int>* completed, std::atomic<int>* error) {
+        completed_ = completed;
+        error_ = error;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        af::IoFile<IoTestThread> file(IoTestThread::IO_0, -1);
+        af::IoOpState read{};
+        af::IoOpState write{};
+        char value = 0;
+
+        const af::IoStatus zero_read = file.read_some(*this, nullptr, 0, read);
+        const af::IoStatus zero_write = file.write_some(*this, nullptr, 0, write);
+        const af::IoStatus bad_read = file.read_some(*this, &value, sizeof(value), read);
+        if (!zero_read.ready() || zero_read.bytes != 0U ||
+            !zero_write.ready() || zero_write.bytes != 0U ||
+            !bad_read.failed()) {
+            return failed();
+        }
+
+        error_->store(bad_read.error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* error_{nullptr};
 };
 
 class SocketHangupTask final : public IoTaskBase {
@@ -653,6 +772,56 @@ TEST_F(IoRuntimeFixture, IoHelpersHandleInvalidAndZeroByteOperations) {
     std::atomic<int> zero_completed{0};
     ASSERT_TRUE(IoRuntime::start_task<ZeroByteIoTask>(&zero_completed));
     ASSERT_TRUE(wait_until_at_least(zero_completed, 1));
+#else
+    GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, FileAdapterHandlesInvalidAndZeroByteOperations) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    std::atomic<int> completed{0};
+    std::atomic<int> error{0};
+    ASSERT_TRUE(IoRuntime::start_task<FileAdapterBoundaryTask>(&completed, &error));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(error.load(std::memory_order_acquire), EBADF);
+#else
+    GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, StreamAdapterReceivesAndSendsSocketBytes) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<char> byte_read{0};
+    ASSERT_TRUE(IoRuntime::start_task<StreamAdapterEchoTask>(
+        fds[0],
+        &armed,
+        &completed,
+        &byte_read));
+    ASSERT_TRUE(wait_until_at_least(armed, 1));
+
+    const char request = 'Q';
+    ASSERT_EQ(::write(fds[1], &request, sizeof(request)), 1);
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(byte_read.load(std::memory_order_acquire), request);
+
+    char response = 0;
+    ASSERT_EQ(::read(fds[1], &response, sizeof(response)), 1);
+    EXPECT_EQ(response, 'R');
+
+    close_pair(fds);
 #else
     GTEST_SKIP() << "epoll backend is Linux-only";
 #endif
