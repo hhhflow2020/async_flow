@@ -1,4 +1,57 @@
+# OS / filesystem noise
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+
+# Editor / IDE local state
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# CMake / Conan local build trees
 build/
 build-*/
+cmake-build-*/
+out/
+
+# CMake generated files when configured in the source tree
+CMakeCache.txt
+CMakeFiles/
+CTestTestfile.cmake
+Testing/
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
 CMakeUserPresets.json
-.DS_Store
+
+# Conan generated files when installed in the source tree
+conanbuild.*
+conanrun.*
+deactivate_conanbuild.*
+deactivate_conanrun.*
+conandeps_legacy.cmake
+conan_toolchain.cmake
+
+# Native build outputs
+*.a
+*.dylib
+*.dll
+*.exe
+*.o
+*.obj
+*.out
+*.so
+
+# Coverage / profiling / sanitizer byproducts
+*.gcda
+*.gcno
+*.profdata
+*.profraw
+*.sancov
+*.tsan
+
+# Local benchmark output
+*_benchmarks.json
