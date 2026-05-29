@@ -93,9 +93,11 @@ using UringIoTaskBase = UringIoRuntime::Task;
 TEST(IoAdapterTraits, AdaptersAreThinTriviallyCopyableViews) {
     EXPECT_TRUE(std::is_trivially_copyable_v<af::IoFile<IoTestThread>>);
     EXPECT_TRUE(std::is_trivially_copyable_v<af::TcpStream<IoTestThread>>);
+    EXPECT_TRUE(std::is_trivially_copyable_v<af::TcpListener<IoTestThread>>);
     EXPECT_TRUE(std::is_trivially_copyable_v<af::UdpSocket<IoTestThread>>);
     EXPECT_LE(sizeof(af::IoFile<IoTestThread>), 8U);
     EXPECT_LE(sizeof(af::TcpStream<IoTestThread>), 8U);
+    EXPECT_LE(sizeof(af::TcpListener<IoTestThread>), 8U);
     EXPECT_LE(sizeof(af::UdpSocket<IoTestThread>), 8U);
 }
 
@@ -395,6 +397,84 @@ private:
     af::IoOpState send_{};
     std::atomic<int>* completed_{nullptr};
     std::atomic<int>* bytes_sent_{nullptr};
+};
+
+class TcpAcceptTask final : public IoTaskBase {
+public:
+    explicit TcpAcceptTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(int fd, std::atomic<int>* armed, std::atomic<int>* completed) {
+        listener_.reset(IoTestThread::IO_0, fd);
+        armed_ = armed;
+        completed_ = completed;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        peer_size_ = sizeof(peer_);
+        const af::IoStatus status = listener_.accept_some(
+            *this,
+            reinterpret_cast<sockaddr*>(&peer_),
+            &peer_size_,
+            &accepted_fd_,
+            accept_);
+        if (status.pending()) {
+            armed_->fetch_add(1, std::memory_order_release);
+            return pending();
+        }
+        if (!status.ready() || accepted_fd_ < 0 || peer_size_ == 0U) {
+            return failed();
+        }
+        ::close(accepted_fd_);
+        accepted_fd_ = -1;
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    af::TcpListener<IoTestThread> listener_{};
+    sockaddr_storage peer_{};
+    socklen_t peer_size_{sizeof(peer_)};
+    int accepted_fd_{-1};
+    af::IoOpState accept_{};
+    std::atomic<int>* armed_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+};
+
+class TcpConnectTask final : public IoTaskBase {
+public:
+    explicit TcpConnectTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(int fd, sockaddr_in address, socklen_t address_size, std::atomic<int>* completed) {
+        stream_.reset(IoTestThread::IO_0, fd);
+        address_ = address;
+        address_size_ = address_size;
+        completed_ = completed;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        const af::IoStatus status = stream_.connect(
+            *this,
+            reinterpret_cast<const sockaddr*>(&address_),
+            address_size_,
+            connect_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready()) {
+            return failed();
+        }
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    af::TcpStream<IoTestThread> stream_{};
+    sockaddr_in address_{};
+    socklen_t address_size_{sizeof(address_)};
+    af::IoOpState connect_{};
+    std::atomic<int>* completed_{nullptr};
 };
 
 class StreamAdapterEchoTask final : public IoTaskBase {
@@ -755,6 +835,84 @@ private:
     std::atomic<int>* bytes_sent_{nullptr};
 };
 
+class UringTcpAcceptTask final : public UringIoTaskBase {
+public:
+    explicit UringTcpAcceptTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
+
+    bool do_it(int fd, std::atomic<int>* armed, std::atomic<int>* completed) {
+        listener_.reset(IoTestThread::IO_0, fd);
+        armed_ = armed;
+        completed_ = completed;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        peer_size_ = sizeof(peer_);
+        const af::IoStatus status = listener_.accept_some(
+            *this,
+            reinterpret_cast<sockaddr*>(&peer_),
+            &peer_size_,
+            &accepted_fd_,
+            accept_);
+        if (status.pending()) {
+            armed_->fetch_add(1, std::memory_order_release);
+            return pending();
+        }
+        if (!status.ready() || accepted_fd_ < 0 || peer_size_ == 0U) {
+            return failed();
+        }
+        ::close(accepted_fd_);
+        accepted_fd_ = -1;
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    af::TcpListener<IoTestThread> listener_{};
+    sockaddr_storage peer_{};
+    socklen_t peer_size_{sizeof(peer_)};
+    int accepted_fd_{-1};
+    af::IoOpState accept_{};
+    std::atomic<int>* armed_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+};
+
+class UringTcpConnectTask final : public UringIoTaskBase {
+public:
+    explicit UringTcpConnectTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
+
+    bool do_it(int fd, sockaddr_in address, socklen_t address_size, std::atomic<int>* completed) {
+        stream_.reset(IoTestThread::IO_0, fd);
+        address_ = address;
+        address_size_ = address_size;
+        completed_ = completed;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        const af::IoStatus status = stream_.connect(
+            *this,
+            reinterpret_cast<const sockaddr*>(&address_),
+            address_size_,
+            connect_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready()) {
+            return failed();
+        }
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    af::TcpStream<IoTestThread> stream_{};
+    sockaddr_in address_{};
+    socklen_t address_size_{sizeof(address_)};
+    af::IoOpState connect_{};
+    std::atomic<int>* completed_{nullptr};
+};
+
 class SocketHangupTask final : public IoTaskBase {
 public:
     explicit SocketHangupTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
@@ -975,6 +1133,49 @@ void drain_available(int fd) {
     }
 }
 
+bool create_tcp_listener(int& listener, sockaddr_in& address, socklen_t& address_size) {
+    listener = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    if (listener < 0) {
+        return false;
+    }
+
+    address = sockaddr_in{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = 0;
+    if (::bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 ||
+        ::listen(listener, 16) != 0) {
+        ::close(listener);
+        listener = -1;
+        return false;
+    }
+
+    address_size = sizeof(address);
+    if (::getsockname(listener, reinterpret_cast<sockaddr*>(&address), &address_size) != 0) {
+        ::close(listener);
+        listener = -1;
+        return false;
+    }
+    return true;
+}
+
+int accept_tcp_until_ready(int listener) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    for (;;) {
+        const int fd = ::accept4(listener, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
+        if (fd >= 0) {
+            return fd;
+        }
+        if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
+            return -1;
+        }
+        if (std::chrono::steady_clock::now() > deadline) {
+            return -1;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
 void close_fd(int& fd) {
     if (fd >= 0) {
         ::close(fd);
@@ -1101,6 +1302,63 @@ TEST_F(IoRuntimeFixture, StreamAdapterReceivesAndSendsSocketBytes) {
 #endif
 }
 
+TEST_F(IoRuntimeFixture, EpollIoThreadAcceptsTcpConnectionFromHelper) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int listener = -1;
+    sockaddr_in address{};
+    socklen_t address_size = sizeof(address);
+    ASSERT_TRUE(create_tcp_listener(listener, address, address_size));
+
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    ASSERT_TRUE(IoRuntime::start_task<TcpAcceptTask>(listener, &armed, &completed));
+    ASSERT_TRUE(wait_until_at_least(armed, 1));
+
+    int client = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(client, 0);
+    const int rc = ::connect(client, reinterpret_cast<sockaddr*>(&address), address_size);
+    ASSERT_TRUE(rc == 0 || errno == EINPROGRESS);
+
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    close_fd(client);
+    close_fd(listener);
+#else
+    GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, EpollIoThreadConnectsTcpStreamFromHelper) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int listener = -1;
+    sockaddr_in address{};
+    socklen_t address_size = sizeof(address);
+    ASSERT_TRUE(create_tcp_listener(listener, address, address_size));
+
+    int client = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(client, 0);
+
+    std::atomic<int> completed{0};
+    ASSERT_TRUE(IoRuntime::start_task<TcpConnectTask>(client, address, address_size, &completed));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+
+    int accepted = accept_tcp_until_ready(listener);
+    ASSERT_GE(accepted, 0);
+    close_fd(accepted);
+    close_fd(client);
+    close_fd(listener);
+#else
+    GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
 TEST_F(UringIoRuntimeFixture, IoUringThreadFallsBackToEpollReadiness) {
 #if defined(__linux__)
     if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
@@ -1149,6 +1407,67 @@ TEST_F(UringIoRuntimeFixture, IoUringThreadSendsStreamBytesOrFallsBackToEpoll) {
     EXPECT_EQ(value, 'S');
 
     close_pair(fds);
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringThreadAcceptsTcpConnectionOrFallsBackToEpoll) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io backend unavailable";
+    }
+
+    int listener = -1;
+    sockaddr_in address{};
+    socklen_t address_size = sizeof(address);
+    ASSERT_TRUE(create_tcp_listener(listener, address, address_size));
+
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringTcpAcceptTask>(listener, &armed, &completed));
+    ASSERT_TRUE(wait_until_at_least(armed, 1));
+
+    int client = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(client, 0);
+    const int rc = ::connect(client, reinterpret_cast<sockaddr*>(&address), address_size);
+    ASSERT_TRUE(rc == 0 || errno == EINPROGRESS);
+
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    close_fd(client);
+    close_fd(listener);
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringThreadConnectsTcpStreamOrFallsBackToEpoll) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io backend unavailable";
+    }
+
+    int listener = -1;
+    sockaddr_in address{};
+    socklen_t address_size = sizeof(address);
+    ASSERT_TRUE(create_tcp_listener(listener, address, address_size));
+
+    int client = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(client, 0);
+
+    std::atomic<int> completed{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringTcpConnectTask>(
+        client,
+        address,
+        address_size,
+        &completed));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+
+    int accepted = accept_tcp_until_ready(listener);
+    ASSERT_GE(accepted, 0);
+    close_fd(accepted);
+    close_fd(client);
+    close_fd(listener);
 #else
     GTEST_SKIP() << "io_uring backend is Linux-only";
 #endif

@@ -5,6 +5,7 @@
 #include <bit>
 #include <cerrno>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -797,6 +798,92 @@ public:
         return false;
 #endif
     }
+
+    [[nodiscard]] static bool io_submit_accept(
+        Thread thread,
+        int fd,
+        sockaddr* address,
+        socklen_t* address_size,
+        int flags,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || fd < 0 ||
+            ((address == nullptr) != (address_size == nullptr))) {
+            if (result != nullptr) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = fd < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+#if defined(__linux__)
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_accept(
+            fd,
+            address,
+            address_size,
+            flags,
+            task,
+            result);
+#else
+        static_cast<void>(thread);
+        static_cast<void>(address);
+        static_cast<void>(address_size);
+        static_cast<void>(flags);
+        result->fd = fd;
+        result->events = io_error;
+        result->error = ENOSYS;
+        return false;
+#endif
+    }
+
+    [[nodiscard]] static bool io_submit_connect(
+        Thread thread,
+        int fd,
+        const sockaddr* address,
+        socklen_t address_size,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || fd < 0 || address == nullptr || address_size == 0U) {
+            if (result != nullptr) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = fd < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+#if defined(__linux__)
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_connect(
+            fd,
+            address,
+            address_size,
+            task,
+            result);
+#else
+        static_cast<void>(thread);
+        static_cast<void>(address);
+        static_cast<void>(address_size);
+        result->fd = fd;
+        result->events = io_error;
+        result->error = ENOSYS;
+        return false;
+#endif
+    }
 #endif
 
 private:
@@ -1493,6 +1580,80 @@ private:
             return false;
 #endif
         }
+
+        [[nodiscard]] bool submit_io_uring_accept(
+            int fd,
+            sockaddr* address,
+            socklen_t* address_size,
+            int flags,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_ACCEPT,
+                fd,
+                nullptr,
+                0,
+                0,
+                static_cast<std::uint32_t>(flags),
+                io_readable,
+                task,
+                result,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                0,
+                address,
+                address_size);
+#else
+            static_cast<void>(fd);
+            static_cast<void>(address);
+            static_cast<void>(address_size);
+            static_cast<void>(flags);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
+        [[nodiscard]] bool submit_io_uring_connect(
+            int fd,
+            const sockaddr* address,
+            socklen_t address_size,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_CONNECT,
+                fd,
+                nullptr,
+                0,
+                0,
+                0,
+                io_writable,
+                task,
+                result,
+                nullptr,
+                0,
+                nullptr,
+                address,
+                address_size,
+                nullptr,
+                nullptr);
+#else
+            static_cast<void>(fd);
+            static_cast<void>(address);
+            static_cast<void>(address_size);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
 #endif
 
         void mark_ready(std::uint16_t source) noexcept {
@@ -1586,12 +1747,21 @@ private:
             socklen_t* address_size{nullptr};
         };
 
+        struct IoUringSocketAddress {
+            sockaddr_storage storage{};
+            socklen_t size{0};
+            sockaddr* output{nullptr};
+            socklen_t* output_size{nullptr};
+            socklen_t output_capacity{0};
+        };
+
         struct IoUringOperation {
             Task* task{nullptr};
             IoResult* result{nullptr};
             IoUringOperation* prev{nullptr};
             IoUringOperation* next{nullptr};
             IoUringMessage* msg{nullptr};
+            IoUringSocketAddress* socket_address{nullptr};
             std::uint32_t complete_events{0};
         };
 #endif
@@ -1617,7 +1787,11 @@ private:
             IoResult* result,
             sockaddr* message_name = nullptr,
             socklen_t message_name_len = 0,
-            socklen_t* message_name_len_out = nullptr) noexcept {
+            socklen_t* message_name_len_out = nullptr,
+            const sockaddr* socket_address = nullptr,
+            socklen_t socket_address_size = 0,
+            sockaddr* socket_address_out = nullptr,
+            socklen_t* socket_address_size_out = nullptr) noexcept {
             AF_ASSERT(current_thread_index_ == index_ && "io_uring submit must be called from its IO thread");
             if (current_thread_index_ != index_ || task == nullptr || result == nullptr) {
                 if (result != nullptr) {
@@ -1634,7 +1808,13 @@ private:
                 return false;
             }
             const bool message_op = opcode == IORING_OP_RECVMSG || opcode == IORING_OP_SENDMSG;
-            if (opcode != IORING_OP_FSYNC && data == nullptr) {
+            const bool accept_op = opcode == IORING_OP_ACCEPT;
+            const bool connect_op = opcode == IORING_OP_CONNECT;
+            const bool address_op = accept_op || connect_op;
+            const bool accept_address_op =
+                accept_op && socket_address_out != nullptr && socket_address_size_out != nullptr;
+            const bool needs_socket_address = connect_op || accept_address_op;
+            if (opcode != IORING_OP_FSYNC && !address_op && data == nullptr) {
                 result->fd = fd;
                 result->events = io_error;
                 result->error = EINVAL;
@@ -1642,6 +1822,22 @@ private:
             }
             if (opcode != IORING_OP_FSYNC && !message_op &&
                 size > static_cast<std::size_t>(std::numeric_limits<unsigned>::max())) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = EINVAL;
+                return false;
+            }
+            if (connect_op &&
+                (socket_address == nullptr ||
+                 socket_address_size == 0U ||
+                 socket_address_size > static_cast<socklen_t>(sizeof(sockaddr_storage)))) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = EINVAL;
+                return false;
+            }
+            if (accept_op &&
+                ((socket_address_out == nullptr) != (socket_address_size_out == nullptr))) {
                 result->fd = fd;
                 result->events = io_error;
                 result->error = EINVAL;
@@ -1661,6 +1857,7 @@ private:
             operation->result = result;
             operation->complete_events = complete_events;
             operation->msg = nullptr;
+            operation->socket_address = nullptr;
             if (message_op) {
                 try {
                     operation->msg = io_uring_msg_pool_.create();
@@ -1678,6 +1875,31 @@ private:
                 operation->msg->header.msg_iov = &operation->msg->iov;
                 operation->msg->header.msg_iovlen = 1;
                 operation->msg->address_size = message_name_len_out;
+            }
+            if (needs_socket_address) {
+                try {
+                    operation->socket_address = io_uring_address_pool_.create();
+                } catch (...) {
+                    destroy_io_uring_operation(operation);
+                    result->fd = fd;
+                    result->events = io_error;
+                    result->error = ENOMEM;
+                    return false;
+                }
+                operation->socket_address->storage = sockaddr_storage{};
+                operation->socket_address->output = nullptr;
+                operation->socket_address->output_size = nullptr;
+                operation->socket_address->output_capacity = 0;
+                if (connect_op) {
+                    std::memcpy(&operation->socket_address->storage, socket_address, socket_address_size);
+                    operation->socket_address->size = socket_address_size;
+                } else {
+                    operation->socket_address->size = sizeof(operation->socket_address->storage);
+                    operation->socket_address->output = socket_address_out;
+                    operation->socket_address->output_size = socket_address_size_out;
+                    operation->socket_address->output_capacity =
+                        socket_address_size_out == nullptr ? 0 : *socket_address_size_out;
+                }
             }
             track_io_uring_operation(operation);
 
@@ -1700,6 +1922,15 @@ private:
             } else if (message_op) {
                 sqe->addr = reinterpret_cast<std::uint64_t>(&operation->msg->header);
                 sqe->msg_flags = op_flags;
+            } else if (accept_op) {
+                if (operation->socket_address != nullptr) {
+                    sqe->addr = reinterpret_cast<std::uint64_t>(&operation->socket_address->storage);
+                    sqe->addr2 = reinterpret_cast<std::uint64_t>(&operation->socket_address->size);
+                }
+                sqe->accept_flags = op_flags;
+            } else if (connect_op) {
+                sqe->addr = reinterpret_cast<std::uint64_t>(&operation->socket_address->storage);
+                sqe->off = operation->socket_address->size;
             } else if (opcode == IORING_OP_RECV || opcode == IORING_OP_SEND) {
                 sqe->addr = reinterpret_cast<std::uint64_t>(data);
                 sqe->len = static_cast<unsigned>(size);
@@ -2109,6 +2340,20 @@ private:
                 if (operation->msg != nullptr && operation->msg->address_size != nullptr) {
                     *operation->msg->address_size = operation->msg->header.msg_namelen;
                 }
+                if (operation->socket_address != nullptr &&
+                    operation->socket_address->output_size != nullptr) {
+                    const socklen_t actual_size = operation->socket_address->size;
+                    if (operation->socket_address->output != nullptr &&
+                        operation->socket_address->output_capacity != 0U) {
+                        const auto copy_size = static_cast<std::size_t>(
+                            std::min(actual_size, operation->socket_address->output_capacity));
+                        std::memcpy(
+                            operation->socket_address->output,
+                            &operation->socket_address->storage,
+                            copy_size);
+                    }
+                    *operation->socket_address->output_size = actual_size;
+                }
             }
             enqueue_pending_blocking(index_, operation->task);
             destroy_io_uring_operation(operation);
@@ -2181,6 +2426,10 @@ private:
             if (operation->msg != nullptr) {
                 io_uring_msg_pool_.destroy(operation->msg);
                 operation->msg = nullptr;
+            }
+            if (operation->socket_address != nullptr) {
+                io_uring_address_pool_.destroy(operation->socket_address);
+                operation->socket_address = nullptr;
             }
             io_uring_op_pool_.destroy(operation);
         }
@@ -2321,6 +2570,7 @@ private:
         io_uring_cqe* io_uring_cqes_{nullptr};
         IoUringOperation* io_uring_operations_{nullptr};
         detail::ObjectPool<IoUringMessage> io_uring_msg_pool_;
+        detail::ObjectPool<IoUringSocketAddress> io_uring_address_pool_;
         detail::ObjectPool<IoUringOperation> io_uring_op_pool_;
         alignas(detail::hardware_cache_line_size) std::atomic<bool> io_wake_pending_{false};
 #endif

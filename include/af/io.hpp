@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cerrno>
+#include <climits>
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
@@ -9,6 +10,7 @@
 #include "af/task.hpp"
 
 #if !defined(_WIN32)
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -146,6 +148,60 @@ namespace detail {
 #endif
 }
 
+[[nodiscard]] inline int io_default_accept_flags() noexcept {
+    int flags = 0;
+#if defined(SOCK_NONBLOCK)
+    flags |= SOCK_NONBLOCK;
+#endif
+#if defined(SOCK_CLOEXEC)
+    flags |= SOCK_CLOEXEC;
+#endif
+    return flags;
+}
+
+[[nodiscard]] inline bool io_connect_in_progress(int error) noexcept {
+    return error == EINPROGRESS || error == EALREADY || error == EINTR ||
+           error == EAGAIN
+#if EWOULDBLOCK != EAGAIN
+        || error == EWOULDBLOCK
+#endif
+        ;
+}
+
+[[nodiscard]] inline int io_socket_connect_error(int fd) noexcept {
+    int error = 0;
+    socklen_t error_size = sizeof(error);
+    if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &error_size) != 0) {
+        return errno == 0 ? EIO : errno;
+    }
+    return error;
+}
+
+[[nodiscard]] inline bool io_apply_accepted_flags(int fd, int flags, int& error) noexcept {
+    error = 0;
+#if defined(SOCK_NONBLOCK)
+    if ((flags & SOCK_NONBLOCK) != 0) {
+        const int current = ::fcntl(fd, F_GETFL, 0);
+        if (current < 0 || ::fcntl(fd, F_SETFL, current | O_NONBLOCK) != 0) {
+            error = errno == 0 ? EIO : errno;
+            return false;
+        }
+    }
+#else
+    static_cast<void>(flags);
+#endif
+#if defined(SOCK_CLOEXEC)
+    if ((flags & SOCK_CLOEXEC) != 0) {
+        const int current = ::fcntl(fd, F_GETFD, 0);
+        if (current < 0 || ::fcntl(fd, F_SETFD, current | FD_CLOEXEC) != 0) {
+            error = errno == 0 ? EIO : errno;
+            return false;
+        }
+    }
+#endif
+    return true;
+}
+
 template <typename TaskT>
 [[nodiscard]] IoStatus arm_io_wait(
     TaskT& task,
@@ -195,6 +251,172 @@ inline void clear_waiting(IoOpState& state) noexcept {
 }
 
 } // namespace detail
+
+template <typename TaskT>
+[[nodiscard]] IoStatus io_accept_some(
+    TaskT& task,
+    typename TaskT::Thread thread,
+    int fd,
+    sockaddr* address,
+    socklen_t* address_size,
+    int* accepted_fd,
+    IoOpState& state,
+    int flags = detail::io_default_accept_flags()) noexcept {
+    if (accepted_fd == nullptr) {
+        return IoStatus::failed(EINVAL);
+    }
+    if ((address == nullptr) != (address_size == nullptr)) {
+        return IoStatus::failed(EINVAL);
+    }
+    *accepted_fd = -1;
+
+#if defined(_WIN32)
+    static_cast<void>(task);
+    static_cast<void>(thread);
+    static_cast<void>(fd);
+    static_cast<void>(address);
+    static_cast<void>(address_size);
+    static_cast<void>(state);
+    static_cast<void>(flags);
+    return IoStatus::failed(ENOSYS);
+#else
+    if (detail::waiting_for_completion(state)) {
+        const IoStatus completion = detail::completed_uring_status(state);
+        if (completion.failed() && detail::io_would_block(completion.error)) {
+            return detail::arm_io_wait(task, thread, fd, io_readable, state);
+        }
+        if (!completion.ready()) {
+            return completion;
+        }
+        if (completion.bytes > static_cast<std::size_t>(INT_MAX)) {
+            return IoStatus::failed(EOVERFLOW);
+        }
+        *accepted_fd = static_cast<int>(completion.bytes);
+        return IoStatus::ready(0);
+    }
+    const bool resumed_from_readiness = state.waiting && state.wait_kind == IoWaitKind::Readiness;
+    detail::clear_waiting(state);
+    if (!resumed_from_readiness && TaskT::Runtime::io_uring_backend_available(thread)) {
+        state.wait = IoResult{fd, 0, 0, 0};
+        if (TaskT::Runtime::io_submit_accept(
+                thread,
+                fd,
+                address,
+                address_size,
+                flags,
+                &task,
+                &state.wait)) {
+            state.waiting = true;
+            state.wait_kind = IoWaitKind::Completion;
+            return IoStatus::make_pending();
+        }
+        if (!detail::uring_submit_error_can_fallback(state.wait.error)) {
+            return IoStatus::failed(state.wait.error);
+        }
+    }
+    for (;;) {
+#if defined(__linux__)
+        const int accepted = ::accept4(fd, address, address_size, flags);
+#else
+        const int accepted = ::accept(fd, address, address_size);
+#endif
+        if (accepted >= 0) {
+#if !defined(__linux__)
+            int flag_error = 0;
+            if (!detail::io_apply_accepted_flags(accepted, flags, flag_error)) {
+                ::close(accepted);
+                return IoStatus::failed(flag_error);
+            }
+#endif
+            *accepted_fd = accepted;
+            return IoStatus::ready(0);
+        }
+
+        const int error = errno;
+        if (error == EINTR) {
+            continue;
+        }
+        if (detail::io_would_block(error)) {
+            return detail::arm_io_wait(task, thread, fd, io_readable, state);
+        }
+        return IoStatus::failed(error);
+    }
+#endif
+}
+
+template <typename TaskT>
+[[nodiscard]] IoStatus io_connect(
+    TaskT& task,
+    typename TaskT::Thread thread,
+    int fd,
+    const sockaddr* address,
+    socklen_t address_size,
+    IoOpState& state) noexcept {
+    if (address == nullptr || address_size == 0U) {
+        return IoStatus::failed(EINVAL);
+    }
+
+#if defined(_WIN32)
+    static_cast<void>(task);
+    static_cast<void>(thread);
+    static_cast<void>(fd);
+    static_cast<void>(address);
+    static_cast<void>(address_size);
+    static_cast<void>(state);
+    return IoStatus::failed(ENOSYS);
+#else
+    if (detail::waiting_for_completion(state)) {
+        const IoStatus completion = detail::completed_uring_status(state);
+        if (completion.failed() && detail::io_connect_in_progress(completion.error)) {
+            return detail::arm_io_wait(task, thread, fd, io_writable, state);
+        }
+        return completion.ready() ? IoStatus::ready(0) : completion;
+    }
+    const bool resumed_from_readiness = state.waiting && state.wait_kind == IoWaitKind::Readiness;
+    detail::clear_waiting(state);
+    if (resumed_from_readiness) {
+        const int error = detail::io_socket_connect_error(fd);
+        if (error == 0 || error == EISCONN) {
+            return IoStatus::ready(0);
+        }
+        if (detail::io_connect_in_progress(error)) {
+            return detail::arm_io_wait(task, thread, fd, io_writable, state);
+        }
+        return IoStatus::failed(error);
+    }
+    if (TaskT::Runtime::io_uring_backend_available(thread)) {
+        state.wait = IoResult{fd, 0, 0, 0};
+        if (TaskT::Runtime::io_submit_connect(
+                thread,
+                fd,
+                address,
+                address_size,
+                &task,
+                &state.wait)) {
+            state.waiting = true;
+            state.wait_kind = IoWaitKind::Completion;
+            return IoStatus::make_pending();
+        }
+        if (!detail::uring_submit_error_can_fallback(state.wait.error)) {
+            return IoStatus::failed(state.wait.error);
+        }
+    }
+    for (;;) {
+        if (::connect(fd, address, address_size) == 0) {
+            return IoStatus::ready(0);
+        }
+
+        const int error = errno;
+        if (error == EISCONN) {
+            return IoStatus::ready(0);
+        }
+        if (detail::io_connect_in_progress(error)) {
+            return detail::arm_io_wait(task, thread, fd, io_writable, state);
+        }
+        return IoStatus::failed(error);
+    }
+#endif
+}
 
 template <typename TaskT>
 [[nodiscard]] IoStatus io_recv_some(
@@ -767,6 +989,18 @@ public:
     }
 
     template <typename TaskT>
+    [[nodiscard]] IoStatus connect(
+        TaskT& task,
+        const sockaddr* address,
+        socklen_t address_size,
+        IoOpState& state) const noexcept {
+        static_assert(
+            std::is_same_v<typename TaskT::Thread, ThreadT>,
+            "IoStream thread type must match the task runtime thread type");
+        return af::io_connect(task, this->thread_, this->fd_, address, address_size, state);
+    }
+
+    template <typename TaskT>
     [[nodiscard]] IoStatus read_some(
         TaskT& task,
         void* data,
@@ -782,6 +1016,34 @@ public:
         std::size_t size,
         IoOpState& state) const noexcept {
         return send_some(task, data, size, state);
+    }
+};
+
+template <typename ThreadT>
+class IoListener : public IoDescriptor<ThreadT> {
+public:
+    using IoDescriptor<ThreadT>::IoDescriptor;
+
+    template <typename TaskT>
+    [[nodiscard]] IoStatus accept_some(
+        TaskT& task,
+        sockaddr* address,
+        socklen_t* address_size,
+        int* accepted_fd,
+        IoOpState& state,
+        int flags = detail::io_default_accept_flags()) const noexcept {
+        static_assert(
+            std::is_same_v<typename TaskT::Thread, ThreadT>,
+            "IoListener thread type must match the task runtime thread type");
+        return af::io_accept_some(
+            task,
+            this->thread_,
+            this->fd_,
+            address,
+            address_size,
+            accepted_fd,
+            state,
+            flags);
     }
 };
 
@@ -837,6 +1099,9 @@ public:
 
 template <typename ThreadT>
 using TcpStream = IoStream<ThreadT>;
+
+template <typename ThreadT>
+using TcpListener = IoListener<ThreadT>;
 
 template <typename ThreadT>
 using UdpSocket = IoDatagramSocket<ThreadT>;

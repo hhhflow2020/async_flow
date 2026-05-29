@@ -73,6 +73,27 @@ struct FakeRuntime {
         af::IoResult*) noexcept {
         return false;
     }
+
+    static bool io_submit_accept(
+        BenchIoThread,
+        int,
+        sockaddr*,
+        socklen_t*,
+        int,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
+    static bool io_submit_connect(
+        BenchIoThread,
+        int,
+        const sockaddr*,
+        socklen_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
 #endif
 };
 
@@ -108,8 +129,28 @@ void BM_IoDatagramAdapterZeroByteRecv(benchmark::State& state) {
     }
 }
 
+void BM_IoListenerAdapterInvalidAccept(benchmark::State& state) {
+    FakeTask task;
+    af::TcpListener<BenchIoThread> listener(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(listener.accept_some(task, nullptr, nullptr, nullptr, op));
+    }
+}
+
+void BM_IoStreamAdapterInvalidConnect(benchmark::State& state) {
+    FakeTask task;
+    af::TcpStream<BenchIoThread> stream(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(stream.connect(task, nullptr, 0, op));
+    }
+}
+
 BENCHMARK(BM_IoFileAdapterZeroByteRead);
 BENCHMARK(BM_IoStreamAdapterZeroByteSend);
 BENCHMARK(BM_IoDatagramAdapterZeroByteRecv);
+BENCHMARK(BM_IoListenerAdapterInvalidAccept);
+BENCHMARK(BM_IoStreamAdapterInvalidConnect);
 
 } // namespace
