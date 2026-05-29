@@ -138,7 +138,7 @@ if (!wait_io(AppThread::IO_0, fd_, af::io_readable, &result_)) {
 return pending();
 ```
 
-业务侧更推荐使用 `af::io_read_some()` / `af::io_write_some()` / `af::io_recv_some()` / `af::io_send_some()` / `af::io_recv_from_some()` / `af::io_send_to_some()` 这组 helper。它们会先尝试一次非阻塞 syscall；遇到 `EAGAIN` / `EWOULDBLOCK` 时注册对应 readiness，并返回 `IoStep::Pending`：
+业务侧更推荐使用 `af::io_read_some()` / `af::io_write_some()` / `af::io_recv_some()` / `af::io_send_some()` / `af::io_recv_from_some()` / `af::io_send_to_some()` 这组 helper。普通 epoll 线程会先尝试一次非阻塞 syscall；遇到 `EAGAIN` / `EWOULDBLOCK` 时注册对应 readiness，并返回 `IoStep::Pending`。`ThreadKind::IoUring` 线程上，`recv_some()` / `send_some()` 会优先提交 `IORING_OP_RECV` / `IORING_OP_SEND`，当 backend 不可用、ring 满或 socket completion 返回 would-block 时退回 epoll readiness：
 
 ```cpp
 const af::IoStatus status = af::io_read_some(
@@ -163,9 +163,9 @@ af::TcpStream<AppThread> stream(AppThread::IO_0, fd_);
 const af::IoStatus status = stream.recv_some(*this, buffer_, sizeof(buffer_), read_);
 ```
 
-`af::IoFile<Thread>` 面向非阻塞 fd/readiness，`af::TcpStream<Thread>` 使用 `recv/send`，`af::UdpSocket<Thread>` 使用 `recvfrom/sendto`。这些 adapter 都是两个字段的小对象，不拥有 fd、不分配内存、不跨线程搬运 IO；任务仍然先调度到绑定的 IO 线程，syscall 和后续恢复都在同一个 executor 上完成。需要所有权时可使用 `af::UniqueFd` 在业务侧管理 fd 生命周期。
+`af::IoFile<Thread>` 面向非阻塞 fd/readiness，`af::TcpStream<Thread>` 使用 `recv/send`，`af::UdpSocket<Thread>` 使用 `recvfrom/sendto`。这些 adapter 都是两个字段的小对象，不拥有 fd、不分配内存、不跨线程搬运 IO；任务仍然先调度到绑定的 IO 线程，syscall、io_uring submit/completion 和后续恢复都在同一个 executor 上完成。需要所有权时可使用 `af::UniqueFd` 在业务侧管理 fd 生命周期。
 
-在 `ThreadKind::IoUring` 线程上，`af::IoFile` 还提供 `read_at()` / `write_at()` / `fsync()`，通过 io_uring 提交真正的文件异步操作；业务可通过 `async::io_uring_backend_available(thread)` 判断是否启用。非 Linux 平台会保留接口但不创建 IO backend，业务可通过 `async::io_backend_available(thread)` 做降级判断。`examples/io_epoll.cpp` 演示 socketpair readiness，`examples/io_adapters.cpp` 演示 TCP/UDP adapter，`examples/io_uring_file.cpp` 演示文件 write/fsync/read。
+在 `ThreadKind::IoUring` 线程上，`af::IoFile` 还提供 `read_at()` / `write_at()` / `fsync()`，通过 io_uring 提交真正的文件异步操作；`af::TcpStream` 的 `recv_some()` / `send_some()` 也会优先走 io_uring。业务可通过 `async::io_uring_backend_available(thread)` 判断是否启用。非 Linux 平台会保留接口但不创建 IO backend，业务可通过 `async::io_backend_available(thread)` 做降级判断。`examples/io_epoll.cpp` 演示 socketpair readiness，`examples/io_adapters.cpp` 演示 TCP/UDP adapter，`examples/io_uring_file.cpp` 演示文件 write/fsync/read。
 
 ## 批处理 API
 
@@ -204,7 +204,7 @@ auto sharded = af::split_change_batch(batch, player_logic_shard_count);
 - `start_ordered_task<Stream, ApplyTask>()` 会在指定 sequencer 线程上缓存乱序 batch，并按 batch_id 连续启动 apply task；如果 apply task 启动失败，不推进期待 batch id，后续重试仍从失败 batch 开始。
 - Linux IO executor 使用 epoll + eventfd，`wait_io()` 注册一次性 fd readiness 后恢复原 pending task；跨线程唤醒做合并写，避免每次任务投递都写 eventfd。
 - `af::io_read_some()` / `af::io_write_some()` / `af::io_recv_some()` / `af::io_send_some()` / `af::io_recv_from_some()` / `af::io_send_to_some()` 封装了非阻塞 fd 的 EAGAIN -> wait -> resume 流程，减少业务任务里重复写 syscall 分支。
-- `ThreadKind::IoUring` 在同一个 IO executor 内用 raw io_uring syscall 提交 `read_at` / `write_at` / `fsync`，completion 通过 eventfd 唤醒，不把文件 IO completion 跨线程搬运。
+- `ThreadKind::IoUring` 在同一个 IO executor 内用 raw io_uring syscall 提交 `read_at` / `write_at` / `fsync` 和 TCP `recv/send`，completion 通过 eventfd 唤醒，不把 IO completion 跨线程搬运。
 - `af::IoFile` / `af::TcpStream` / `af::UdpSocket` 是零堆分配 adapter，仅保存 `thread + fd` 并内联转发到 helper；它们不会引入额外队列或 MPMC hop。
 - `CrudOp<Key, Value>` / `ChangeBatch<Key, Value>` 是纯数据 helper，不引入额外运行期状态。
 - `parallel_shards()` 的 handler 如果返回 `bool`，`false` 会计为 shard 失败；owner 恢复后可用 `last_parallel_failures()` 读取失败数。
@@ -256,7 +256,7 @@ ASYNCFLOW_STRESS_MS=1500 ctest --test-dir build-tsan/build/Debug -R RuntimeStres
 - `examples/io_uring_file.cpp`：使用 `af::IoFile::write_at()` / `fsync()` / `read_at()` 编写文件异步 IO 状态机。
 - `tests/utility_tests.cpp`：队列、对象池、分片工具和 batch sequencer。
 - `tests/runtime_lifecycle_tests.cpp`：任务生命周期、状态机、背压和 shutdown。
-- `tests/runtime_io_tests.cpp`：IO 线程调度、epoll readiness 恢复、io_uring 文件 helper、read/write/TCP/UDP helper 与 adapter、重复 fd wait 拒绝、HUP/EOF、非法 fd、worker 误用降级，以及 StopImmediately 清理 pending IO wait。
+- `tests/runtime_io_tests.cpp`：IO 线程调度、epoll readiness 恢复、io_uring 文件和 TCP stream helper、read/write/TCP/UDP helper 与 adapter、重复 fd wait 拒绝、HUP/EOF、非法 fd、worker 误用降级，以及 StopImmediately 清理 pending IO wait。
 - `tests/runtime_parallel_tests.cpp`：parallel shard、失败汇总、有序 batch 和 retryable ordered apply。
 - `tests/runtime_stress_tests.cpp`：高并发 init/shutdown/start_task stress，CI 中也用于 TSAN job。
 - `benchmarks/io_benchmarks.cpp`、`benchmarks/queue_benchmarks.cpp` 与 `benchmarks/runtime_benchmarks.cpp`：IO adapter、底层结构和 runtime 路径分开压测。

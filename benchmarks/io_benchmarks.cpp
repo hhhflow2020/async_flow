@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <cstdint>
 
 #include <benchmark/benchmark.h>
@@ -11,9 +12,35 @@ enum class BenchIoThread : std::int16_t {
 };
 
 struct FakeRuntime {
+    static bool io_uring_backend_available(BenchIoThread) noexcept {
+        return false;
+    }
+
     static bool io_wait(
         BenchIoThread,
         int,
+        std::uint32_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
+    static bool io_submit_recv(
+        BenchIoThread,
+        int,
+        void*,
+        std::size_t,
+        std::uint32_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
+    static bool io_submit_send(
+        BenchIoThread,
+        int,
+        const void*,
+        std::size_t,
         std::uint32_t,
         void*,
         af::IoResult*) noexcept {

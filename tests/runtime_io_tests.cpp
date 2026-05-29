@@ -629,6 +629,35 @@ private:
     std::atomic<char>* byte_read_{nullptr};
 };
 
+class UringStreamSendTask final : public UringIoTaskBase {
+public:
+    explicit UringStreamSendTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
+
+    bool do_it(int fd, std::atomic<int>* completed) {
+        stream_.reset(IoTestThread::IO_0, fd);
+        completed_ = completed;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        const af::IoStatus status = stream_.send_some(*this, &value_, sizeof(value_), write_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(value_)) {
+            return failed();
+        }
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    af::TcpStream<IoTestThread> stream_{};
+    char value_{'S'};
+    af::IoOpState write_{};
+    std::atomic<int>* completed_{nullptr};
+};
+
 class SocketHangupTask final : public IoTaskBase {
 public:
     explicit SocketHangupTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
@@ -998,6 +1027,29 @@ TEST_F(UringIoRuntimeFixture, IoUringThreadFallsBackToEpollReadiness) {
     ASSERT_EQ(::write(fds[1], &value, sizeof(value)), 1);
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(byte_read.load(std::memory_order_acquire), value);
+
+    close_pair(fds);
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringThreadSendsStreamBytesOrFallsBackToEpoll) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io backend unavailable";
+    }
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+
+    std::atomic<int> completed{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringStreamSendTask>(fds[0], &completed));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+
+    char value = 0;
+    ASSERT_EQ(::read(fds[1], &value, sizeof(value)), 1);
+    EXPECT_EQ(value, 'S');
 
     close_pair(fds);
 #else
