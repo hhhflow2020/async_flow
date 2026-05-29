@@ -43,6 +43,8 @@ void wait_zero(std::atomic<int>& remaining) {
 
 class CountTask final : public Task {
 public:
+    explicit CountTask(Task::FactoryToken token) : Task(token) {}
+
     bool do_it(BenchThread thread, std::atomic<int>* remaining) {
         remaining_ = remaining;
         return schedule(thread);
@@ -61,6 +63,8 @@ private:
 
 class HopTask final : public Task {
 public:
+    explicit HopTask(Task::FactoryToken token) : Task(token) {}
+
     bool do_it(int hops, std::atomic<int>* remaining) {
         hops_ = hops;
         remaining_ = remaining;
@@ -88,6 +92,8 @@ private:
 
 class ParallelShardTask final : public Task {
 public:
+    explicit ParallelShardTask(Task::FactoryToken token) : Task(token) {}
+
     bool do_it(std::atomic<int>* remaining, std::atomic<std::uint64_t>* sum) {
         remaining_ = remaining;
         sum_ = sum;

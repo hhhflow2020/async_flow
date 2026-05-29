@@ -1,7 +1,9 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
+#include <new>
 #include <type_traits>
 
 #include "caf/detail/config.hpp"
@@ -56,12 +58,47 @@ public:
     using Thread = typename Runtime::Thread;
     using DestroyFn = void (*)(BasicTask*) noexcept;
 
-    BasicTask() = default;
+    class FactoryToken {
+    public:
+        FactoryToken(const FactoryToken&) noexcept = default;
+        FactoryToken& operator=(const FactoryToken&) = delete;
+
+    private:
+        constexpr FactoryToken() noexcept = default;
+
+        template <typename TraitsT>
+        friend class AsyncRuntime;
+    };
+
+    BasicTask() = delete;
     BasicTask(const BasicTask&) = delete;
     BasicTask& operator=(const BasicTask&) = delete;
     virtual ~BasicTask() = default;
 
+    static void* operator new(std::size_t) = delete;
+    static void* operator new[](std::size_t) = delete;
+    static void* operator new(std::size_t, std::align_val_t) = delete;
+    static void* operator new[](std::size_t, std::align_val_t) = delete;
+
 protected:
+    explicit BasicTask(FactoryToken) noexcept {}
+
+    static void operator delete(void* ptr) noexcept {
+        ::operator delete(ptr);
+    }
+
+    static void operator delete[](void* ptr) noexcept {
+        ::operator delete[](ptr);
+    }
+
+    static void operator delete(void* ptr, std::align_val_t align) noexcept {
+        ::operator delete(ptr, align);
+    }
+
+    static void operator delete[](void* ptr, std::align_val_t align) noexcept {
+        ::operator delete[](ptr, align);
+    }
+
     [[nodiscard]] bool schedule(Thread thread) noexcept {
         return Runtime::post(thread, this);
     }

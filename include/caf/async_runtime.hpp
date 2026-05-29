@@ -385,6 +385,8 @@ private:
     template <typename StreamTag, typename ApplyTaskT, typename BatchT>
     class OrderedStartTask final : public Task {
     public:
+        explicit OrderedStartTask(typename Task::FactoryToken token) : Task(token) {}
+
         bool do_it(Thread sequencer_thread, BatchT batch) {
             batch_ = std::move(batch);
             return this->schedule(sequencer_thread);
@@ -403,12 +405,14 @@ private:
     class ShardTask final : public Task {
     public:
         ShardTask(
+            typename Task::FactoryToken token,
             ParallelGroup* group,
             std::uint16_t shard_index,
             std::uint64_t batch_id,
             std::vector<Op>&& ops,
             Handler handler)
-            : group_(group),
+            : Task(token),
+              group_(group),
               shard_index_(shard_index),
               batch_id_(batch_id),
               ops_(std::move(ops)),
@@ -765,7 +769,9 @@ private:
 
     template <typename TaskT, typename... Args>
     [[nodiscard]] static TaskT* allocate_task(Args&&... args) {
-        auto* task = task_pool<TaskT>().create(std::forward<Args>(args)...);
+        auto* task = task_pool<TaskT>().create(
+            typename Task::FactoryToken{},
+            std::forward<Args>(args)...);
         task->set_destroy_fn(&destroy_task<TaskT>);
         return task;
     }

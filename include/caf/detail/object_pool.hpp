@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <memory>
 #include <new>
 #include <type_traits>
 #include <utility>
@@ -30,7 +31,7 @@ public:
     [[nodiscard]] T* create(Args&&... args) {
         void* memory = acquire_slot();
         try {
-            return new (memory) T(std::forward<Args>(args)...);
+            return std::construct_at(static_cast<T*>(memory), std::forward<Args>(args)...);
         } catch (...) {
             release_slot(memory);
             throw;
@@ -38,7 +39,7 @@ public:
     }
 
     void destroy(T* object) noexcept {
-        object->~T();
+        std::destroy_at(object);
         release_slot(object);
     }
 

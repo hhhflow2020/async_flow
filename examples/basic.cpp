@@ -38,6 +38,8 @@ static AppThread player_thread(std::uint64_t player_id) noexcept {
 
 class AddGoldTask final : public Task {
 public:
+    explicit AddGoldTask(Task::FactoryToken token) : Task(token) {}
+
     bool do_it(std::uint64_t player_id, int gold, std::atomic<int>* completed) {
         player_id_ = player_id;
         gold_ = gold;
@@ -61,6 +63,8 @@ private:
 
 class LoginTask final : public Task {
 public:
+    explicit LoginTask(Task::FactoryToken token) : Task(token) {}
+
     void do_it(std::uint64_t player_id, std::atomic<int>* completed) {
         player_id_ = player_id;
         completed_ = completed;

@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -73,6 +74,8 @@ protected:
 
 class OneShotTask final : public Task {
 public:
+    explicit OneShotTask(Task::FactoryToken token) : Task(token) {}
+
     bool do_it(TestThread target, std::atomic<int>* completed, std::atomic<std::uint16_t>* ran_on) {
         completed_ = completed;
         ran_on_ = ran_on;
@@ -92,6 +95,8 @@ private:
 
 class ManualStartTask final : public Task {
 public:
+    explicit ManualStartTask(Task::FactoryToken token) : Task(token) {}
+
     bool begin_on(TestThread target, std::atomic<int>* completed) {
         completed_ = completed;
         return schedule(target);
@@ -108,7 +113,8 @@ private:
 
 class UnscheduledTask final : public Task {
 public:
-    explicit UnscheduledTask(std::atomic<int>* destroyed) : destroyed_(destroyed) {}
+    UnscheduledTask(Task::FactoryToken token, std::atomic<int>* destroyed)
+        : Task(token), destroyed_(destroyed) {}
 
     ~UnscheduledTask() override {
         destroyed_->fetch_add(1, std::memory_order_release);
@@ -126,7 +132,8 @@ private:
 
 class TrackedDoneTask final : public Task {
 public:
-    explicit TrackedDoneTask(std::atomic<int>* destroyed) : destroyed_(destroyed) {}
+    TrackedDoneTask(Task::FactoryToken token, std::atomic<int>* destroyed)
+        : Task(token), destroyed_(destroyed) {}
 
     ~TrackedDoneTask() override {
         destroyed_->fetch_add(1, std::memory_order_release);
@@ -149,6 +156,8 @@ private:
 
 class FailTask final : public Task {
 public:
+    explicit FailTask(Task::FactoryToken token) : Task(token) {}
+
     bool do_it(std::atomic<int>* completed) {
         completed_ = completed;
         return schedule(TestThread::Logic_0);
@@ -165,6 +174,8 @@ private:
 
 class CancelResultTask final : public Task {
 public:
+    explicit CancelResultTask(Task::FactoryToken token) : Task(token) {}
+
     bool do_it(std::atomic<int>* completed, std::atomic<int>* destroyed) {
         completed_ = completed;
         destroyed_ = destroyed;
@@ -187,6 +198,8 @@ private:
 
 class HopTask final : public Task {
 public:
+    explicit HopTask(Task::FactoryToken token) : Task(token) {}
+
     bool do_it(std::atomic<int>* completed, std::array<std::atomic<std::uint16_t>, 4>* seen) {
         completed_ = completed;
         seen_ = seen;
@@ -235,6 +248,8 @@ private:
 
 class ParallelTask final : public Task {
 public:
+    explicit ParallelTask(Task::FactoryToken token) : Task(token) {}
+
     bool do_it(
         caf::ParallelMode mode,
         std::atomic<int>* completed,
@@ -294,6 +309,8 @@ private:
 
 class ParallelFailureTask final : public Task {
 public:
+    explicit ParallelFailureTask(Task::FactoryToken token) : Task(token) {}
+
     bool do_it(std::atomic<int>* completed, std::atomic<std::uint32_t>* failures) {
         completed_ = completed;
         failures_ = failures;
@@ -341,6 +358,8 @@ private:
 
 class EmptyParallelTask final : public Task {
 public:
+    explicit EmptyParallelTask(Task::FactoryToken token) : Task(token) {}
+
     bool do_it(std::atomic<int>* completed) {
         completed_ = completed;
         ops_ = caf::ShardedOps<int>(4);
@@ -380,6 +399,8 @@ private:
 
 class OrderedTask final : public Task {
 public:
+    explicit OrderedTask(Task::FactoryToken token) : Task(token) {}
+
     bool do_it(
         std::uint64_t batch_id,
         std::atomic<int>* completed,
@@ -442,6 +463,8 @@ struct OrderedStartBatch {
 
 class OrderedStartApplyTask final : public Task {
 public:
+    explicit OrderedStartApplyTask(Task::FactoryToken token) : Task(token) {}
+
     bool do_it(OrderedStartBatch batch) {
         batch_ = batch;
         return schedule(TestThread::Logic_0);
@@ -477,6 +500,8 @@ using TinyTask = TinyRuntime::Task;
 
 class BlockingTinyTask final : public TinyTask {
 public:
+    explicit BlockingTinyTask(TinyTask::FactoryToken token) : TinyTask(token) {}
+
     bool do_it(std::atomic<int>* started, std::atomic<bool>* release, std::atomic<int>* completed) {
         started_ = started;
         release_ = release;
@@ -502,6 +527,8 @@ private:
 
 class TinyNoopTask final : public TinyTask {
 public:
+    explicit TinyNoopTask(TinyTask::FactoryToken token) : TinyTask(token) {}
+
     bool do_it(std::atomic<int>* completed, std::atomic<int>* destroyed) {
         completed_ = completed;
         destroyed_ = destroyed;
@@ -543,6 +570,8 @@ using YieldTask = YieldRuntime::Task;
 
 class YieldCountTask final : public YieldTask {
 public:
+    explicit YieldCountTask(YieldTask::FactoryToken token) : YieldTask(token) {}
+
     bool do_it(YieldThread thread, std::atomic<int>* completed) {
         completed_ = completed;
         return schedule(thread);
@@ -574,6 +603,8 @@ using NoInitTaskBase = NoInitRuntime::Task;
 
 class NoInitTask final : public NoInitTaskBase {
 public:
+    explicit NoInitTask(NoInitTaskBase::FactoryToken token) : NoInitTaskBase(token) {}
+
     bool do_it(std::atomic<int>* destroyed) {
         destroyed_ = destroyed;
         return schedule(NoInitThread::Logic_0);
@@ -590,6 +621,10 @@ private:
 
     std::atomic<int>* destroyed_{nullptr};
 };
+
+static_assert(!std::is_default_constructible_v<OneShotTask>);
+static_assert(!std::is_constructible_v<UnscheduledTask, std::atomic<int>*>);
+static_assert(!std::is_default_constructible_v<NoInitTask>);
 
 } // namespace
 
@@ -682,7 +717,7 @@ TEST_F(RuntimeFixture, OneShotTaskRunsOnRequestedThread) {
     EXPECT_EQ(ran_on.load(std::memory_order_acquire), Runtime::thread_index(TestThread::Logic_2));
 }
 
-TEST_F(RuntimeFixture, CreateTaskSupportsCustomStartFunction) {
+TEST_F(RuntimeFixture, MakeTaskSupportsCustomStartFunction) {
     std::atomic<int> completed{0};
 
     auto task = Runtime::make_task<ManualStartTask>();
@@ -906,7 +941,7 @@ TEST(RuntimeShutdownTests, StartTaskFailsAndDestroysTaskWhenRuntimeIsNotInitiali
     EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
 }
 
-TEST(RuntimeShutdownTests, CreateTaskHandleDestroysTaskWhenScheduleFailsBeforeInit) {
+TEST(RuntimeShutdownTests, MakeTaskHandleDestroysTaskWhenScheduleFailsBeforeInit) {
     NoInitRuntime::shutdown();
 
     std::atomic<int> destroyed{0};

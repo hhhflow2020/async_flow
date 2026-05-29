@@ -41,6 +41,8 @@ using Task = Runtime::Task;
 ```cpp
 class LoginTask final : public Task {
 public:
+    explicit LoginTask(Task::FactoryToken token) : Task(token) {}
+
     void do_it(std::uint64_t player_id) {
         player_id_ = player_id;
         schedule(player_thread(player_id_));
@@ -70,6 +72,8 @@ private:
 };
 ```
 
+每个任务构造函数必须把 `Task::FactoryToken` 作为第一个参数并传给基类。这个 token 只有 runtime 能生成，因此业务代码无法直接在栈上构造任务，也无法直接 `new` 任务。业务侧也不要直接 `delete` 任务对象。
+
 推荐的显式启动方式是通过框架工厂创建受管任务对象，再调用任务自己的启动函数；这个函数可以叫 `do_it()`，也可以是业务自定义名称，只要在函数里完成首次 `schedule()`：
 
 ```cpp
@@ -79,7 +83,7 @@ if (!task->do_it(player_id)) {
 }
 ```
 
-业务侧不要直接 `new` / `delete` 任务对象。`make_task<T>()` 返回的是一个轻量包装句柄，内部由 runtime 统一接入对象池、生命周期引用和后续可替换的内存池策略。保留的便捷写法等价于“创建后调用 `do_it()`”：
+`make_task<T>()` 返回的是一个轻量包装句柄，内部由 runtime 统一接入对象池、生命周期引用和后续可替换的内存池策略。保留的便捷写法等价于“创建后调用 `do_it()`”：
 
 ```cpp
 Runtime::start_task<LoginTask>(player_id);
