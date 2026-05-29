@@ -9,19 +9,20 @@
 
 namespace {
 
-enum class BenchThread : std::uint16_t {
+enum class BenchThread : std::int16_t {
+    enum_thread_index_start = -1,
     Logic_0,
     Logic_1,
     Logic_2,
     Logic_3,
-    enum_num_end,
+    enum_thread_index_end,
 };
 
 struct BenchRuntimeTraits {
     using Thread = BenchThread;
 
     static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(BenchThread::enum_num_end);
+        static_cast<std::uint16_t>(BenchThread::enum_thread_index_end);
     static constexpr std::size_t spsc_queue_capacity = 65536;
     static constexpr std::size_t external_queue_capacity = 65536;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;

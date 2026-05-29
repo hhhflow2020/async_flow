@@ -12,19 +12,20 @@
 
 namespace {
 
-enum class UtilityThread : std::uint16_t {
+enum class UtilityThread : std::int16_t {
+    enum_thread_index_start = -1,
     Logic_0,
     Logic_1,
     Logic_2,
     Logic_3,
-    enum_num_end,
+    enum_thread_index_end,
 };
 
 struct UtilityRuntimeTraits {
     using Thread = UtilityThread;
 
     static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(UtilityThread::enum_num_end);
+        static_cast<std::uint16_t>(UtilityThread::enum_thread_index_end);
 };
 
 using Runtime = af::AsyncRuntime<UtilityRuntimeTraits>;

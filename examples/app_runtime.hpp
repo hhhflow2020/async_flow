@@ -5,21 +5,22 @@
 
 #include "af/async_flow.hpp"
 
-enum class AppThread : std::uint16_t {
+enum class AppThread : std::int16_t {
+    enum_thread_index_start = -1,
     Logic_0,
     Logic_1,
     Logic_2,
     Logic_3,
     DB_0,
     IO_0,
-    enum_num_end,
+    enum_thread_index_end,
 };
 
 struct AppRuntimeTraits {
     using Thread = AppThread;
 
     static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(AppThread::enum_num_end);
+        static_cast<std::uint16_t>(AppThread::enum_thread_index_end);
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;

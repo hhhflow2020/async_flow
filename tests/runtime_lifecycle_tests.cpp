@@ -23,20 +23,21 @@ bool wait_until_at_least(std::atomic<T>& value, T expected) {
     return true;
 }
 
-enum class TestThread : std::uint16_t {
+enum class TestThread : std::int16_t {
+    enum_thread_index_start = -1,
     Logic_0,
     Logic_1,
     Logic_2,
     Logic_3,
     DB_0,
-    enum_num_end,
+    enum_thread_index_end,
 };
 
 struct TestRuntimeTraits {
     using Thread = TestThread;
 
     static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(TestThread::enum_num_end);
+        static_cast<std::uint16_t>(TestThread::enum_thread_index_end);
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
@@ -230,16 +231,17 @@ private:
     std::array<std::atomic<std::uint16_t>, 4>* seen_{nullptr};
 };
 
-enum class TinyThread : std::uint16_t {
+enum class TinyThread : std::int16_t {
+    enum_thread_index_start = -1,
     Logic_0,
-    enum_num_end,
+    enum_thread_index_end,
 };
 
 struct TinyRuntimeTraits {
     using Thread = TinyThread;
 
     static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(TinyThread::enum_num_end);
+        static_cast<std::uint16_t>(TinyThread::enum_thread_index_end);
     static constexpr std::size_t spsc_queue_capacity = 2;
     static constexpr std::size_t external_queue_capacity = 2;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
@@ -299,17 +301,18 @@ private:
     std::atomic<int>* destroyed_{nullptr};
 };
 
-enum class YieldThread : std::uint16_t {
+enum class YieldThread : std::int16_t {
+    enum_thread_index_start = -1,
     Logic_0,
     Logic_1,
-    enum_num_end,
+    enum_thread_index_end,
 };
 
 struct YieldRuntimeTraits {
     using Thread = YieldThread;
 
     static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(YieldThread::enum_num_end);
+        static_cast<std::uint16_t>(YieldThread::enum_thread_index_end);
     static constexpr std::size_t spsc_queue_capacity = 64;
     static constexpr std::size_t external_queue_capacity = 64;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
@@ -364,16 +367,17 @@ private:
     std::atomic<bool>* all_started_{nullptr};
 };
 
-enum class NoInitThread : std::uint16_t {
+enum class NoInitThread : std::int16_t {
+    enum_thread_index_start = -1,
     Logic_0,
-    enum_num_end,
+    enum_thread_index_end,
 };
 
 struct NoInitRuntimeTraits {
     using Thread = NoInitThread;
 
     static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(NoInitThread::enum_num_end);
+        static_cast<std::uint16_t>(NoInitThread::enum_thread_index_end);
 };
 
 using NoInitRuntime = af::AsyncRuntime<NoInitRuntimeTraits>;
