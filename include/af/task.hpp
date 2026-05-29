@@ -26,6 +26,11 @@ enum class QueueFullPolicy : std::uint8_t {
     Yield,
 };
 
+enum class ShutdownPolicy : std::uint8_t {
+    WaitForTasks,
+    StopImmediately,
+};
+
 enum class TaskState : std::uint8_t {
     Created,
     Queued,

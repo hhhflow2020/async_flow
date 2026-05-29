@@ -13,7 +13,6 @@ struct PlayerDeltaStream {};
 struct PlayerDeltaBatch {
     std::uint64_t batch_id{0};
     std::vector<int> deltas;
-    std::atomic<int>* completed{nullptr};
     std::atomic<int>* total_delta{nullptr};
     std::array<std::atomic<std::uint64_t>, player_logic_shard_count>* shard_batch_seen{nullptr};
 };
@@ -57,8 +56,6 @@ private:
             return pending();
 
         case State::Finish:
-            batch_.completed->fetch_add(1, std::memory_order_release);
-            batch_.completed->notify_one();
             return done();
         }
 
@@ -97,7 +94,6 @@ private:
 int main() {
     async::init();
 
-    std::atomic<int> completed{0};
     std::atomic<int> total_delta{0};
     std::array<std::atomic<std::uint64_t>, player_logic_shard_count> shard_batch_seen{};
 
@@ -106,14 +102,14 @@ int main() {
         auto first_task = async::make_task<SubmitPlayerDeltaBatchTask>();
 
         [[maybe_unused]] const bool second_started = second_task->do_it(
-            PlayerDeltaBatch{2, {5, 6}, &completed, &total_delta, &shard_batch_seen});
+            PlayerDeltaBatch{2, {5, 6}, &total_delta, &shard_batch_seen});
         [[maybe_unused]] const bool first_started = first_task->do_it(
-            PlayerDeltaBatch{1, {1, 2, 3, 4}, &completed, &total_delta, &shard_batch_seen});
+            PlayerDeltaBatch{1, {1, 2, 3, 4}, &total_delta, &shard_batch_seen});
         AF_ASSERT(second_started);
         AF_ASSERT(first_started);
-
-        wait_completed(completed, 2);
     }
+
+    async::shutdown();
 
     std::cout << "ordered total delta: " << total_delta.load(std::memory_order_relaxed) << '\n';
     for (std::uint16_t shard = 0; shard < player_logic_shard_count; ++shard) {
@@ -121,6 +117,5 @@ int main() {
                   << shard_batch_seen[shard].load(std::memory_order_acquire) << '\n';
     }
 
-    async::shutdown();
     return 0;
 }

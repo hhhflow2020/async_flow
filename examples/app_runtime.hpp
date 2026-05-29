@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <cstdint>
 
 #include "af/async_flow.hpp"
@@ -24,6 +23,7 @@ struct AppRuntimeTraits {
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 };
 
 using async = af::AsyncRuntime<AppRuntimeTraits>;
@@ -37,13 +37,4 @@ inline constexpr std::uint16_t player_logic_shard_count =
 inline AppThread player_thread(std::uint64_t player_id) noexcept {
     return async::shard_by<player_logic_begin, player_logic_shard_count>(
         player_id);
-}
-
-inline void wait_completed(std::atomic<int>& completed, int expected) {
-    while (completed.load(std::memory_order_acquire) < expected) {
-        const int observed = completed.load(std::memory_order_acquire);
-        if (observed < expected) {
-            completed.wait(observed, std::memory_order_acquire);
-        }
-    }
 }

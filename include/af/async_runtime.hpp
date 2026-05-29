@@ -122,6 +122,13 @@ public:
             return QueueFullPolicy::Reject;
         }
     }();
+    static constexpr ShutdownPolicy shutdown_policy = [] {
+        if constexpr (requires { Traits::shutdown_policy; }) {
+            return Traits::shutdown_policy;
+        } else {
+            return ShutdownPolicy::WaitForTasks;
+        }
+    }();
 
     AsyncRuntime() = delete;
 
@@ -160,6 +167,9 @@ public:
         }
 
         wait_for_active_posts();
+        if constexpr (shutdown_policy == ShutdownPolicy::WaitForTasks) {
+            wait_for_idle();
+        }
 
         for (auto& executor : executors_) {
             executor->request_stop();
@@ -172,7 +182,23 @@ public:
         spsc_queues_.clear();
         external_queues_.clear();
         ordered_batch_state_.clear();
+        unfinished_tasks_.store(0, std::memory_order_release);
+        unfinished_tasks_.notify_all();
         status_.store(RuntimeStatus::Stopped, std::memory_order_release);
+    }
+
+    static void wait_for_idle() noexcept {
+        for (;;) {
+            const std::uint32_t count = unfinished_tasks_.load(std::memory_order_acquire);
+            if (count == 0) {
+                return;
+            }
+            unfinished_tasks_.wait(count, std::memory_order_acquire);
+        }
+    }
+
+    [[nodiscard]] static std::uint32_t unfinished_task_count() noexcept {
+        return unfinished_tasks_.load(std::memory_order_acquire);
     }
 
     template <typename TaskT, typename... CtorArgs>
@@ -217,8 +243,15 @@ public:
 
         const detail::ScheduleRequest request = task->request_schedule(index);
         if (request.action == detail::ScheduleAction::Enqueue) {
+            const bool first_schedule = request.previous == TaskState::Created;
+            if (first_schedule) {
+                on_task_started();
+            }
             const bool enqueued = enqueue_ready_by_policy(index, task);
             if (!enqueued) {
+                if (first_schedule) {
+                    on_task_finished();
+                }
                 task->cancel_schedule(request.previous);
             }
             leave_post();
@@ -796,6 +829,7 @@ private:
             const std::uint16_t requested = task->take_requested_thread();
             AF_ASSERT(requested == invalid_thread_index);
             task->state_.store(TaskState::Done, std::memory_order_release);
+            on_task_finished();
             task->release_lifetime_ref();
         }
 
@@ -914,6 +948,9 @@ private:
         const detail::ScheduleRequest request = task->request_schedule(index);
         switch (request.action) {
         case detail::ScheduleAction::Enqueue:
+            if (request.previous == TaskState::Created) {
+                on_task_started();
+            }
             enqueue_ready_blocking(index, task);
             return;
         case detail::ScheduleAction::Deferred:
@@ -1023,16 +1060,34 @@ private:
     }
 
     [[nodiscard]] static bool try_enter_post() noexcept {
-        if (status_.load(std::memory_order_acquire) != RuntimeStatus::Running) {
+        const RuntimeStatus status = status_.load(std::memory_order_acquire);
+        if (status == RuntimeStatus::Running) {
+            active_posts_.fetch_add(1, std::memory_order_acq_rel);
+            if (status_.load(std::memory_order_acquire) == RuntimeStatus::Running) {
+                return true;
+            }
+
+            if constexpr (shutdown_policy == ShutdownPolicy::WaitForTasks) {
+                if (current_thread_index_ < thread_count &&
+                    status_.load(std::memory_order_acquire) == RuntimeStatus::Stopping) {
+                    return true;
+                }
+            }
+
+            leave_post();
             return false;
         }
 
-        active_posts_.fetch_add(1, std::memory_order_acq_rel);
-        if (status_.load(std::memory_order_acquire) == RuntimeStatus::Running) {
-            return true;
+        if constexpr (shutdown_policy == ShutdownPolicy::WaitForTasks) {
+            if (status == RuntimeStatus::Stopping && current_thread_index_ < thread_count) {
+                active_posts_.fetch_add(1, std::memory_order_acq_rel);
+                if (status_.load(std::memory_order_acquire) == RuntimeStatus::Stopping) {
+                    return true;
+                }
+                leave_post();
+            }
         }
 
-        leave_post();
         return false;
     }
 
@@ -1052,8 +1107,19 @@ private:
         }
     }
 
+    static void on_task_started() noexcept {
+        unfinished_tasks_.fetch_add(1, std::memory_order_acq_rel);
+    }
+
+    static void on_task_finished() noexcept {
+        if (unfinished_tasks_.fetch_sub(1, std::memory_order_acq_rel) == 1U) {
+            unfinished_tasks_.notify_all();
+        }
+    }
+
     static inline std::atomic<RuntimeStatus> status_{RuntimeStatus::Stopped};
     static inline std::atomic<std::uint32_t> active_posts_{0};
+    static inline std::atomic<std::uint32_t> unfinished_tasks_{0};
     static inline std::atomic<std::uint64_t> generation_{0};
     static inline std::vector<std::unique_ptr<Executor>> executors_;
     static inline std::vector<std::unique_ptr<SpscQueue>> spsc_queues_;

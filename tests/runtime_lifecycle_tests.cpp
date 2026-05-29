@@ -404,6 +404,89 @@ private:
     std::atomic<int>* destroyed_{nullptr};
 };
 
+enum class WaitShutdownThread : std::int16_t {
+    enum_thread_index_start = -1,
+    Logic_0,
+    enum_thread_index_end,
+};
+
+struct WaitShutdownRuntimeTraits {
+    using Thread = WaitShutdownThread;
+
+    static constexpr std::uint16_t thread_count =
+        static_cast<std::uint16_t>(WaitShutdownThread::enum_thread_index_end);
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
+};
+
+using WaitShutdownRuntime = af::AsyncRuntime<WaitShutdownRuntimeTraits>;
+using WaitShutdownTaskBase = WaitShutdownRuntime::Task;
+
+class WaitShutdownBlockingTask final : public WaitShutdownTaskBase {
+public:
+    explicit WaitShutdownBlockingTask(WaitShutdownTaskBase::FactoryToken token)
+        : WaitShutdownTaskBase(token) {}
+
+    bool do_it(std::atomic<int>* started, std::atomic<bool>* release, std::atomic<int>* completed) {
+        started_ = started;
+        release_ = release;
+        completed_ = completed;
+        return schedule(WaitShutdownThread::Logic_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        started_->fetch_add(1, std::memory_order_release);
+        started_->notify_one();
+        while (!release_->load(std::memory_order_acquire)) {
+            release_->wait(false, std::memory_order_acquire);
+        }
+        completed_->fetch_add(1, std::memory_order_release);
+        completed_->notify_one();
+        return done();
+    }
+
+    std::atomic<int>* started_{nullptr};
+    std::atomic<bool>* release_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+};
+
+enum class FastShutdownThread : std::int16_t {
+    enum_thread_index_start = -1,
+    Logic_0,
+    enum_thread_index_end,
+};
+
+struct FastShutdownRuntimeTraits {
+    using Thread = FastShutdownThread;
+
+    static constexpr std::uint16_t thread_count =
+        static_cast<std::uint16_t>(FastShutdownThread::enum_thread_index_end);
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::StopImmediately;
+};
+
+using FastShutdownRuntime = af::AsyncRuntime<FastShutdownRuntimeTraits>;
+using FastShutdownTaskBase = FastShutdownRuntime::Task;
+
+class FastShutdownPendingTask final : public FastShutdownTaskBase {
+public:
+    explicit FastShutdownPendingTask(FastShutdownTaskBase::FactoryToken token)
+        : FastShutdownTaskBase(token) {}
+
+    bool do_it(std::atomic<int>* entered) {
+        entered_ = entered;
+        return schedule(FastShutdownThread::Logic_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        entered_->fetch_add(1, std::memory_order_release);
+        entered_->notify_one();
+        return pending();
+    }
+
+    std::atomic<int>* entered_{nullptr};
+};
+
 static_assert(!std::is_default_constructible_v<OneShotTask>);
 static_assert(!std::is_constructible_v<UnscheduledTask, std::atomic<int>*>);
 static_assert(!std::is_default_constructible_v<NoInitTask>);
@@ -575,4 +658,46 @@ TEST(RuntimeShutdownTests, MakeTaskHandleDestroysTaskWhenScheduleFailsBeforeInit
         EXPECT_FALSE(task.scheduled());
     }
     EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
+}
+
+TEST(RuntimeShutdownTests, WaitForTasksPolicyBlocksUntilAcceptedTasksComplete) {
+    WaitShutdownRuntime::init();
+
+    std::atomic<int> started{0};
+    std::atomic<bool> release{false};
+    std::atomic<int> completed{0};
+    std::atomic<bool> shutdown_done{false};
+
+    ASSERT_TRUE(WaitShutdownRuntime::start_task<WaitShutdownBlockingTask>(
+        &started,
+        &release,
+        &completed));
+    ASSERT_TRUE(wait_until_at_least(started, 1));
+
+    std::thread shutdown_thread([&] {
+        WaitShutdownRuntime::shutdown();
+        shutdown_done.store(true, std::memory_order_release);
+        shutdown_done.notify_one();
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    EXPECT_FALSE(shutdown_done.load(std::memory_order_acquire));
+
+    release.store(true, std::memory_order_release);
+    release.notify_one();
+    shutdown_thread.join();
+
+    EXPECT_TRUE(shutdown_done.load(std::memory_order_acquire));
+    EXPECT_EQ(completed.load(std::memory_order_acquire), 1);
+}
+
+TEST(RuntimeShutdownTests, StopImmediatelyPolicyDoesNotWaitForPendingTasks) {
+    FastShutdownRuntime::init();
+
+    std::atomic<int> entered{0};
+    ASSERT_TRUE(FastShutdownRuntime::start_task<FastShutdownPendingTask>(&entered));
+    ASSERT_TRUE(wait_until_at_least(entered, 1));
+
+    FastShutdownRuntime::shutdown();
+    EXPECT_EQ(FastShutdownRuntime::unfinished_task_count(), 0U);
 }
