@@ -1,4 +1,4 @@
-# C++ Async Framework
+# AsyncFlow
 
 一个基于固定线程枚举的轻量 C++20 异步任务框架。
 
@@ -27,10 +27,10 @@ struct AppRuntimeTraits {
 
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
-    static constexpr caf::QueueFullPolicy queue_full_policy = caf::QueueFullPolicy::Reject;
+    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
 };
 
-using Runtime = caf::AsyncRuntime<AppRuntimeTraits>;
+using Runtime = af::AsyncRuntime<AppRuntimeTraits>;
 using Task = Runtime::Task;
 ```
 
@@ -49,7 +49,7 @@ public:
     }
 
 private:
-    caf::TaskResult run() override {
+    af::TaskResult run() override {
         switch (state_) {
         case State::Start:
             state_ = State::QueryDb;
@@ -110,5 +110,5 @@ conan install . --output-folder=build-conan --build=missing -s build_type=Releas
 cmake --preset conan-release
 cmake --build --preset conan-release --parallel
 ctest --test-dir build-conan/build/Release --output-on-failure
-./build-conan/build/Release/caf_runtime_benchmarks --benchmark_min_time=0.005s
+./build-conan/build/Release/asyncflow_runtime_benchmarks --benchmark_min_time=0.005s
 ```

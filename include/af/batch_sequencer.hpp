@@ -4,7 +4,7 @@
 #include <map>
 #include <utility>
 
-namespace caf {
+namespace af {
 
 enum class BatchSubmitStatus {
     Submitted,
@@ -63,4 +63,4 @@ private:
     std::map<std::uint64_t, Batch> pending_;
 };
 
-} // namespace caf
+} // namespace af

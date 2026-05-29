@@ -8,10 +8,10 @@
 
 #include <gtest/gtest.h>
 
-#include "caf/batch_sequencer.hpp"
-#include "caf/caf.hpp"
-#include "caf/detail/bounded_queues.hpp"
-#include "caf/detail/object_pool.hpp"
+#include "af/batch_sequencer.hpp"
+#include "af/async_flow.hpp"
+#include "af/detail/bounded_queues.hpp"
+#include "af/detail/object_pool.hpp"
 
 namespace {
 
@@ -55,10 +55,10 @@ struct TestRuntimeTraits {
         static_cast<std::uint16_t>(TestThread::enum_num_end);
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
-    static constexpr caf::QueueFullPolicy queue_full_policy = caf::QueueFullPolicy::Reject;
+    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
 };
 
-using Runtime = caf::AsyncRuntime<TestRuntimeTraits>;
+using Runtime = af::AsyncRuntime<TestRuntimeTraits>;
 using Task = Runtime::Task;
 
 class RuntimeFixture : public testing::Test {
@@ -83,7 +83,7 @@ public:
     }
 
 private:
-    caf::TaskResult run() override {
+    af::TaskResult run() override {
         ran_on_->store(Runtime::current_thread_index(), std::memory_order_release);
         completed_->fetch_add(1, std::memory_order_release);
         return done();
@@ -103,7 +103,7 @@ public:
     }
 
 private:
-    caf::TaskResult run() override {
+    af::TaskResult run() override {
         completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
@@ -123,7 +123,7 @@ public:
     void configure_without_schedule() noexcept {}
 
 private:
-    caf::TaskResult run() override {
+    af::TaskResult run() override {
         return failed();
     }
 
@@ -145,7 +145,7 @@ public:
     }
 
 private:
-    caf::TaskResult run() override {
+    af::TaskResult run() override {
         completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
@@ -164,7 +164,7 @@ public:
     }
 
 private:
-    caf::TaskResult run() override {
+    af::TaskResult run() override {
         completed_->fetch_add(1, std::memory_order_release);
         return failed();
     }
@@ -187,7 +187,7 @@ public:
     }
 
 private:
-    caf::TaskResult run() override {
+    af::TaskResult run() override {
         completed_->fetch_add(1, std::memory_order_release);
         return cancelled();
     }
@@ -215,7 +215,7 @@ private:
         Finish,
     };
 
-    caf::TaskResult run() override {
+    af::TaskResult run() override {
         switch (state_) {
         case State::Start:
             (*seen_)[0].store(Runtime::current_thread_index(), std::memory_order_release);
@@ -251,7 +251,7 @@ public:
     explicit ParallelTask(Task::FactoryToken token) : Task(token) {}
 
     bool do_it(
-        caf::ParallelMode mode,
+        af::ParallelMode mode,
         std::atomic<int>* completed,
         std::array<std::atomic<int>, 4>* shard_hits,
         std::atomic<int>* sum) {
@@ -260,7 +260,7 @@ public:
         shard_hits_ = shard_hits;
         sum_ = sum;
 
-        ops_ = caf::ShardedOps<int>(4);
+        ops_ = af::ShardedOps<int>(4);
         ops_.shards[0] = {1};
         ops_.shards[2] = {2, 3};
         return schedule(TestThread::Logic_0);
@@ -272,7 +272,7 @@ private:
         Finish,
     };
 
-    caf::TaskResult run() override {
+    af::TaskResult run() override {
         switch (state_) {
         case State::Split:
             state_ = State::Finish;
@@ -300,8 +300,8 @@ private:
     }
 
     State state_{State::Split};
-    caf::ParallelMode mode_{caf::ParallelMode::NonEmptyOnly};
-    caf::ShardedOps<int> ops_{4};
+    af::ParallelMode mode_{af::ParallelMode::NonEmptyOnly};
+    af::ShardedOps<int> ops_{4};
     std::atomic<int>* completed_{nullptr};
     std::array<std::atomic<int>, 4>* shard_hits_{nullptr};
     std::atomic<int>* sum_{nullptr};
@@ -315,7 +315,7 @@ public:
         completed_ = completed;
         failures_ = failures;
 
-        ops_ = caf::ShardedOps<int>(4);
+        ops_ = af::ShardedOps<int>(4);
         ops_.shards[0] = {1};
         ops_.shards[1] = {2};
         return schedule(TestThread::Logic_0);
@@ -327,14 +327,14 @@ private:
         Finish,
     };
 
-    caf::TaskResult run() override {
+    af::TaskResult run() override {
         switch (state_) {
         case State::Split:
             state_ = State::Finish;
             Runtime::parallel_shards(
                 TestThread::Logic_0,
                 ops_,
-                caf::ParallelMode::NonEmptyOnly,
+                af::ParallelMode::NonEmptyOnly,
                 this,
                 [](std::uint16_t shard, std::vector<int>&) {
                     return shard != 1;
@@ -351,7 +351,7 @@ private:
     }
 
     State state_{State::Split};
-    caf::ShardedOps<int> ops_{4};
+    af::ShardedOps<int> ops_{4};
     std::atomic<int>* completed_{nullptr};
     std::atomic<std::uint32_t>* failures_{nullptr};
 };
@@ -362,7 +362,7 @@ public:
 
     bool do_it(std::atomic<int>* completed) {
         completed_ = completed;
-        ops_ = caf::ShardedOps<int>(4);
+        ops_ = af::ShardedOps<int>(4);
         return schedule(TestThread::Logic_0);
     }
 
@@ -372,14 +372,14 @@ private:
         Finish,
     };
 
-    caf::TaskResult run() override {
+    af::TaskResult run() override {
         switch (state_) {
         case State::Split:
             state_ = State::Finish;
             Runtime::parallel_shards(
                 TestThread::Logic_0,
                 ops_,
-                caf::ParallelMode::NonEmptyOnly,
+                af::ParallelMode::NonEmptyOnly,
                 this,
                 [](std::uint16_t, std::vector<int>&) { FAIL() << "empty shards should skip"; });
             return pending();
@@ -393,7 +393,7 @@ private:
     }
 
     State state_{State::Split};
-    caf::ShardedOps<int> ops_{4};
+    af::ShardedOps<int> ops_{4};
     std::atomic<int>* completed_{nullptr};
 };
 
@@ -410,7 +410,7 @@ public:
         completed_ = completed;
         shard_hits_ = shard_hits;
         batch_seen_ = batch_seen;
-        ops_ = caf::ShardedOps<int>(4);
+        ops_ = af::ShardedOps<int>(4);
         ops_.shards[0] = {7};
         return schedule(TestThread::Logic_0);
     }
@@ -421,7 +421,7 @@ private:
         Finish,
     };
 
-    caf::TaskResult run() override {
+    af::TaskResult run() override {
         switch (state_) {
         case State::Apply:
             state_ = State::Finish;
@@ -446,7 +446,7 @@ private:
 
     State state_{State::Apply};
     std::uint64_t batch_id_{0};
-    caf::ShardedOps<int> ops_{4};
+    af::ShardedOps<int> ops_{4};
     std::atomic<int>* completed_{nullptr};
     std::array<std::atomic<int>, 4>* shard_hits_{nullptr};
     std::array<std::atomic<std::uint64_t>, 4>* batch_seen_{nullptr};
@@ -471,7 +471,7 @@ public:
     }
 
 private:
-    caf::TaskResult run() override {
+    af::TaskResult run() override {
         batch_.applied->push_back(batch_.value);
         batch_.completed->fetch_add(1, std::memory_order_release);
         return done();
@@ -492,10 +492,10 @@ struct TinyRuntimeTraits {
         static_cast<std::uint16_t>(TinyThread::enum_num_end);
     static constexpr std::size_t spsc_queue_capacity = 2;
     static constexpr std::size_t external_queue_capacity = 2;
-    static constexpr caf::QueueFullPolicy queue_full_policy = caf::QueueFullPolicy::Reject;
+    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
 };
 
-using TinyRuntime = caf::AsyncRuntime<TinyRuntimeTraits>;
+using TinyRuntime = af::AsyncRuntime<TinyRuntimeTraits>;
 using TinyTask = TinyRuntime::Task;
 
 class BlockingTinyTask final : public TinyTask {
@@ -510,7 +510,7 @@ public:
     }
 
 private:
-    caf::TaskResult run() override {
+    af::TaskResult run() override {
         started_->fetch_add(1, std::memory_order_release);
         started_->notify_one();
         while (!release_->load(std::memory_order_acquire)) {
@@ -540,7 +540,7 @@ public:
     }
 
 private:
-    caf::TaskResult run() override {
+    af::TaskResult run() override {
         completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
@@ -562,10 +562,10 @@ struct YieldRuntimeTraits {
         static_cast<std::uint16_t>(YieldThread::enum_num_end);
     static constexpr std::size_t spsc_queue_capacity = 64;
     static constexpr std::size_t external_queue_capacity = 64;
-    static constexpr caf::QueueFullPolicy queue_full_policy = caf::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
 };
 
-using YieldRuntime = caf::AsyncRuntime<YieldRuntimeTraits>;
+using YieldRuntime = af::AsyncRuntime<YieldRuntimeTraits>;
 using YieldTask = YieldRuntime::Task;
 
 class YieldCountTask final : public YieldTask {
@@ -578,7 +578,7 @@ public:
     }
 
 private:
-    caf::TaskResult run() override {
+    af::TaskResult run() override {
         completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
@@ -598,7 +598,7 @@ struct NoInitRuntimeTraits {
         static_cast<std::uint16_t>(NoInitThread::enum_num_end);
 };
 
-using NoInitRuntime = caf::AsyncRuntime<NoInitRuntimeTraits>;
+using NoInitRuntime = af::AsyncRuntime<NoInitRuntimeTraits>;
 using NoInitTaskBase = NoInitRuntime::Task;
 
 class NoInitTask final : public NoInitTaskBase {
@@ -615,7 +615,7 @@ public:
     }
 
 private:
-    caf::TaskResult run() override {
+    af::TaskResult run() override {
         return failed();
     }
 
@@ -629,7 +629,7 @@ static_assert(!std::is_default_constructible_v<NoInitTask>);
 } // namespace
 
 TEST(QueueTests, BoundedSpscPreservesFifoAndRejectsWhenFull) {
-    caf::detail::BoundedSpscQueue<int> queue(2);
+    af::detail::BoundedSpscQueue<int> queue(2);
     int a = 1;
     int b = 2;
     int c = 3;
@@ -645,7 +645,7 @@ TEST(QueueTests, BoundedSpscPreservesFifoAndRejectsWhenFull) {
 }
 
 TEST(QueueTests, BoundedMpmcRejectsWhenFull) {
-    caf::detail::BoundedMpmcQueue<int> queue(2);
+    af::detail::BoundedMpmcQueue<int> queue(2);
     int a = 1;
     int b = 2;
     int c = 3;
@@ -663,7 +663,7 @@ TEST(PoolTests, ObjectPoolReusesReleasedStorage) {
         int value{0};
     };
 
-    caf::detail::ObjectPool<Payload, 2> pool;
+    af::detail::ObjectPool<Payload, 2> pool;
     Payload* first = pool.create();
     first->value = 42;
     pool.destroy(first);
@@ -692,20 +692,20 @@ TEST(UtilityTests, SplitByShardGroupsByKey) {
 }
 
 TEST(UtilityTests, BatchSequencerBuffersOutOfOrderBatches) {
-    caf::BatchSequencer<int> sequencer(1);
+    af::BatchSequencer<int> sequencer(1);
     std::vector<int> submitted;
 
     auto submit = [&](int value) {
         submitted.push_back(value);
     };
 
-    EXPECT_EQ(sequencer.submit(2, 20, submit), caf::BatchSubmitStatus::Buffered);
+    EXPECT_EQ(sequencer.submit(2, 20, submit), af::BatchSubmitStatus::Buffered);
     EXPECT_TRUE(submitted.empty());
-    EXPECT_EQ(sequencer.submit(1, 10, submit), caf::BatchSubmitStatus::Submitted);
+    EXPECT_EQ(sequencer.submit(1, 10, submit), af::BatchSubmitStatus::Submitted);
     ASSERT_EQ(submitted.size(), 2);
     EXPECT_EQ(submitted[0], 10);
     EXPECT_EQ(submitted[1], 20);
-    EXPECT_EQ(sequencer.submit(1, 10, submit), caf::BatchSubmitStatus::Duplicate);
+    EXPECT_EQ(sequencer.submit(1, 10, submit), af::BatchSubmitStatus::Duplicate);
 }
 
 TEST_F(RuntimeFixture, OneShotTaskRunsOnRequestedThread) {
@@ -792,7 +792,7 @@ TEST_F(RuntimeFixture, ParallelShardsNonEmptyOnlySkipsEmptyShards) {
     std::atomic<int> sum{0};
 
     ASSERT_TRUE(Runtime::start_task<ParallelTask>(
-        caf::ParallelMode::NonEmptyOnly,
+        af::ParallelMode::NonEmptyOnly,
         &completed,
         &shard_hits,
         &sum));
@@ -810,7 +810,7 @@ TEST_F(RuntimeFixture, ParallelShardsAllShardsRunsNoopShards) {
     std::atomic<int> sum{0};
 
     ASSERT_TRUE(Runtime::start_task<ParallelTask>(
-        caf::ParallelMode::AllShards,
+        af::ParallelMode::AllShards,
         &completed,
         &shard_hits,
         &sum));

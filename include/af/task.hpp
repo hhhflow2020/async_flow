@@ -6,9 +6,9 @@
 #include <new>
 #include <type_traits>
 
-#include "caf/detail/config.hpp"
+#include "af/detail/config.hpp"
 
-namespace caf {
+namespace af {
 
 template <typename TraitsT>
 class AsyncRuntime;
@@ -158,7 +158,7 @@ private:
     }
 
     void destroy_self() noexcept {
-        CAF_ASSERT(destroy_fn_ != nullptr);
+        AF_ASSERT(destroy_fn_ != nullptr);
         destroy_fn_(this);
     }
 
@@ -196,7 +196,7 @@ private:
 
             case TaskState::Queued:
             case TaskState::Done:
-                CAF_ASSERT(false && "task was scheduled more than once or after completion");
+                AF_ASSERT(false && "task was scheduled more than once or after completion");
                 return {detail::ScheduleAction::Rejected, state};
             }
         }
@@ -209,7 +209,7 @@ private:
             previous,
             std::memory_order_acq_rel,
             std::memory_order_acquire);
-        CAF_ASSERT(ok);
+        AF_ASSERT(ok);
     }
 
     [[nodiscard]] bool is_created() const noexcept {
@@ -228,7 +228,7 @@ private:
             desired,
             std::memory_order_acq_rel,
             std::memory_order_acquire);
-        CAF_ASSERT(ok && "a running task can only register one wake-up");
+        AF_ASSERT(ok && "a running task can only register one wake-up");
         return ok;
     }
 
@@ -252,4 +252,4 @@ private:
     friend class AsyncRuntime;
 };
 
-} // namespace caf
+} // namespace af

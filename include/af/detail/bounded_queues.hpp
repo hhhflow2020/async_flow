@@ -6,9 +6,9 @@
 #include <memory>
 #include <vector>
 
-#include "caf/detail/config.hpp"
+#include "af/detail/config.hpp"
 
-namespace caf::detail {
+namespace af::detail {
 
 inline constexpr std::size_t next_power_of_two(std::size_t value) noexcept {
     std::size_t result = 1;
@@ -155,4 +155,4 @@ private:
     alignas(hardware_cache_line_size) std::atomic<std::size_t> dequeue_pos_{0};
 };
 
-} // namespace caf::detail
+} // namespace af::detail

@@ -5,9 +5,9 @@
 
 #include <benchmark/benchmark.h>
 
-#include "caf/caf.hpp"
-#include "caf/detail/bounded_queues.hpp"
-#include "caf/detail/object_pool.hpp"
+#include "af/async_flow.hpp"
+#include "af/detail/bounded_queues.hpp"
+#include "af/detail/object_pool.hpp"
 
 namespace {
 
@@ -26,10 +26,10 @@ struct BenchRuntimeTraits {
         static_cast<std::uint16_t>(BenchThread::enum_num_end);
     static constexpr std::size_t spsc_queue_capacity = 65536;
     static constexpr std::size_t external_queue_capacity = 65536;
-    static constexpr caf::QueueFullPolicy queue_full_policy = caf::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
 };
 
-using Runtime = caf::AsyncRuntime<BenchRuntimeTraits>;
+using Runtime = af::AsyncRuntime<BenchRuntimeTraits>;
 using Task = Runtime::Task;
 
 void wait_zero(std::atomic<int>& remaining) {
@@ -51,7 +51,7 @@ public:
     }
 
 private:
-    caf::TaskResult run() override {
+    af::TaskResult run() override {
         if (remaining_->fetch_sub(1, std::memory_order_acq_rel) == 1) {
             remaining_->notify_one();
         }
@@ -72,7 +72,7 @@ public:
     }
 
 private:
-    caf::TaskResult run() override {
+    af::TaskResult run() override {
         if (hops_-- > 0) {
             const auto next = Runtime::current_thread() == BenchThread::Logic_0
                 ? BenchThread::Logic_1
@@ -97,7 +97,7 @@ public:
     bool do_it(std::atomic<int>* remaining, std::atomic<std::uint64_t>* sum) {
         remaining_ = remaining;
         sum_ = sum;
-        ops_ = caf::ShardedOps<std::uint64_t>(4);
+        ops_ = af::ShardedOps<std::uint64_t>(4);
         for (std::uint64_t i = 0; i < 1024; ++i) {
             ops_.shards[i & 3U].push_back(i);
         }
@@ -110,14 +110,14 @@ private:
         Finish,
     };
 
-    caf::TaskResult run() override {
+    af::TaskResult run() override {
         switch (state_) {
         case State::Split:
             state_ = State::Finish;
             Runtime::parallel_shards(
                 BenchThread::Logic_0,
                 ops_,
-                caf::ParallelMode::AllShards,
+                af::ParallelMode::AllShards,
                 this,
                 [this](std::uint16_t, std::vector<std::uint64_t>& shard_ops) {
                     std::uint64_t local = 0;
@@ -139,13 +139,13 @@ private:
     }
 
     State state_{State::Split};
-    caf::ShardedOps<std::uint64_t> ops_{4};
+    af::ShardedOps<std::uint64_t> ops_{4};
     std::atomic<int>* remaining_{nullptr};
     std::atomic<std::uint64_t>* sum_{nullptr};
 };
 
 void BM_SpscQueuePushPop(benchmark::State& state) {
-    caf::detail::BoundedSpscQueue<int> queue(65536);
+    af::detail::BoundedSpscQueue<int> queue(65536);
     int value = 42;
 
     for (auto _ : state) {
@@ -163,7 +163,7 @@ void BM_ObjectPoolCreateDestroy(benchmark::State& state) {
         std::uint64_t values[8]{};
     };
 
-    caf::detail::ObjectPool<Payload> pool;
+    af::detail::ObjectPool<Payload> pool;
 
     for (auto _ : state) {
         for (int i = 0; i < state.range(0); ++i) {

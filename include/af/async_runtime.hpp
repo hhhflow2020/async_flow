@@ -11,12 +11,12 @@
 #include <utility>
 #include <vector>
 
-#include "caf/detail/bounded_queues.hpp"
-#include "caf/detail/config.hpp"
-#include "caf/detail/object_pool.hpp"
-#include "caf/task.hpp"
+#include "af/detail/bounded_queues.hpp"
+#include "af/detail/config.hpp"
+#include "af/detail/object_pool.hpp"
+#include "af/task.hpp"
 
-namespace caf {
+namespace af {
 
 enum class ParallelMode : std::uint8_t {
     NonEmptyOnly,
@@ -69,12 +69,12 @@ public:
         }
 
         [[nodiscard]] TaskT& operator*() const noexcept {
-            CAF_ASSERT(task_ != nullptr);
+            AF_ASSERT(task_ != nullptr);
             return *task_;
         }
 
         [[nodiscard]] TaskT* operator->() const noexcept {
-            CAF_ASSERT(task_ != nullptr);
+            AF_ASSERT(task_ != nullptr);
             return task_;
         }
 
@@ -205,7 +205,7 @@ public:
 
         const std::uint16_t index = thread_index(thread);
         if (index >= thread_count) {
-            CAF_ASSERT(false && "invalid thread index");
+            AF_ASSERT(false && "invalid thread index");
             return false;
         }
 
@@ -358,7 +358,7 @@ private:
 
         void start_ready(BatchT batch) {
             [[maybe_unused]] const bool ok = AsyncRuntime::start_task<ApplyTaskT>(std::move(batch));
-            CAF_ASSERT(ok);
+            AF_ASSERT(ok);
             ++next_batch_id;
         }
 
@@ -445,7 +445,7 @@ private:
                         }
                     }
                 } catch (...) {
-                    CAF_ASSERT(false && "parallel shard handler must not throw");
+                    AF_ASSERT(false && "parallel shard handler must not throw");
                     ok = false;
                 }
             }
@@ -462,10 +462,10 @@ private:
 
         bool check_order_guard() noexcept {
             const std::uint16_t thread = AsyncRuntime::current_thread_index();
-            CAF_ASSERT(thread < ordered_batch_state_.size());
+            AF_ASSERT(thread < ordered_batch_state_.size());
             auto& state = ordered_batch_state_[thread];
             const bool ok = batch_id_ == state.last_applied_batch_id + 1U;
-            CAF_ASSERT(ok && "ordered batch id must be contiguous per shard");
+            AF_ASSERT(ok && "ordered batch id must be contiguous per shard");
             return ok;
         }
 
@@ -525,12 +525,12 @@ private:
         std::uint64_t batch_id,
         Task* owner,
         Handler&& handler) {
-        CAF_ASSERT(owner != nullptr);
-        CAF_ASSERT(is_runtime_thread() && "parallel_shards must be called from a runtime thread");
+        AF_ASSERT(owner != nullptr);
+        AF_ASSERT(is_runtime_thread() && "parallel_shards must be called from a runtime thread");
 
         const std::uint16_t begin = thread_index(shard_begin);
         const std::uint16_t shard_count = sharded_ops.shard_count();
-        CAF_ASSERT(begin + shard_count <= thread_count);
+        AF_ASSERT(begin + shard_count <= thread_count);
 
         std::uint32_t target_count = 0;
         for (std::uint16_t i = 0; i < shard_count; ++i) {
@@ -541,7 +541,7 @@ private:
 
         if (target_count == 0) {
             [[maybe_unused]] const bool posted = post(current_thread(), owner);
-            CAF_ASSERT(posted);
+            AF_ASSERT(posted);
             return;
         }
 
@@ -692,7 +692,7 @@ private:
             const TaskState previous = task->state_.exchange(
                 TaskState::Running,
                 std::memory_order_acq_rel);
-            CAF_ASSERT(previous == TaskState::Queued);
+            AF_ASSERT(previous == TaskState::Queued);
             if (previous != TaskState::Queued) {
                 return;
             }
@@ -701,7 +701,7 @@ private:
             try {
                 result = task->run();
             } catch (...) {
-                CAF_ASSERT(false && "task::run must not throw");
+                AF_ASSERT(false && "task::run must not throw");
                 result = TaskResult::Done;
             }
 
@@ -726,7 +726,7 @@ private:
 
         void finish_done(Task* task) noexcept {
             const std::uint16_t requested = task->take_requested_thread();
-            CAF_ASSERT(requested == invalid_thread_index);
+            AF_ASSERT(requested == invalid_thread_index);
             task->state_.store(TaskState::Done, std::memory_order_release);
             task->release_lifetime_ref();
         }
@@ -741,7 +741,7 @@ private:
 
         void finish_again(Task* task) noexcept {
             const std::uint16_t requested = task->take_requested_thread();
-            CAF_ASSERT(requested == invalid_thread_index);
+            AF_ASSERT(requested == invalid_thread_index);
             task->state_.store(TaskState::Queued, std::memory_order_release);
             enqueue_ready_blocking_from(index_, index_, task);
         }
@@ -817,7 +817,7 @@ private:
 
     static void post_blocking(Thread thread, Task* task) noexcept {
         const std::uint16_t index = thread_index(thread);
-        CAF_ASSERT(index < thread_count);
+        AF_ASSERT(index < thread_count);
 
         const detail::ScheduleRequest request = task->request_schedule(index);
         switch (request.action) {
@@ -827,7 +827,7 @@ private:
         case detail::ScheduleAction::Deferred:
             return;
         case detail::ScheduleAction::Rejected:
-            CAF_ASSERT(false && "failed to schedule task");
+            AF_ASSERT(false && "failed to schedule task");
             return;
         }
     }
@@ -910,7 +910,7 @@ private:
                 TaskState::Queued,
                 std::memory_order_acq_rel,
                 std::memory_order_acquire);
-        CAF_ASSERT(ok);
+        AF_ASSERT(ok);
         enqueue_ready_blocking(index, task);
     }
 
@@ -923,4 +923,4 @@ private:
     static inline thread_local std::uint16_t current_thread_index_ = invalid_thread_index;
 };
 
-} // namespace caf
+} // namespace af

@@ -7,9 +7,9 @@
 #include <type_traits>
 #include <utility>
 
-#include "caf/detail/config.hpp"
+#include "af/detail/config.hpp"
 
-namespace caf::detail {
+namespace af::detail {
 
 template <typename T, std::size_t ChunkSize = 256>
 class ObjectPool {
@@ -69,7 +69,7 @@ private:
 
         add_block();
         FreeNode* node = pop_free();
-        CAF_ASSERT(node != nullptr);
+        AF_ASSERT(node != nullptr);
         return node;
     }
 
@@ -120,4 +120,4 @@ private:
     std::atomic<Block*> blocks_{nullptr};
 };
 
-} // namespace caf::detail
+} // namespace af::detail

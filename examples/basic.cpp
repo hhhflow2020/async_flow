@@ -4,7 +4,7 @@
 #include <iostream>
 #include <thread>
 
-#include "caf/caf.hpp"
+#include "af/async_flow.hpp"
 
 enum class AppThread : std::uint16_t {
     Logic_0,
@@ -28,7 +28,7 @@ struct AppRuntimeTraits {
     static constexpr std::uint16_t logic_count = 4;
 };
 
-using Runtime = caf::AsyncRuntime<AppRuntimeTraits>;
+using Runtime = af::AsyncRuntime<AppRuntimeTraits>;
 using Task = Runtime::Task;
 
 static AppThread player_thread(std::uint64_t player_id) noexcept {
@@ -48,7 +48,7 @@ public:
     }
 
 private:
-    caf::TaskResult run() override {
+    af::TaskResult run() override {
         std::cout << "add " << gold_ << " gold to player " << player_id_
                   << " on logic thread " << Runtime::current_thread_index() << '\n';
         completed_->fetch_add(1, std::memory_order_release);
@@ -70,7 +70,7 @@ public:
         completed_ = completed;
         state_ = State::Start;
         [[maybe_unused]] const bool scheduled = schedule(player_thread(player_id_));
-        CAF_ASSERT(scheduled);
+        AF_ASSERT(scheduled);
     }
 
 private:
@@ -81,7 +81,7 @@ private:
         Finish,
     };
 
-    caf::TaskResult run() override {
+    af::TaskResult run() override {
         switch (state_) {
         case State::Start:
             state_ = State::QueryDb;
@@ -120,8 +120,8 @@ int main() {
         add_started = add_task->do_it(1001U, 100, &completed);
     }
     [[maybe_unused]] const bool login_started = Runtime::start_task<LoginTask>(1002U, &completed);
-    CAF_ASSERT(add_started);
-    CAF_ASSERT(login_started);
+    AF_ASSERT(add_started);
+    AF_ASSERT(login_started);
 
     while (completed.load(std::memory_order_acquire) < 2) {
         const int observed = completed.load(std::memory_order_acquire);
