@@ -155,6 +155,17 @@ template <typename TaskT>
     return IoStatus::failed(state.wait.error == 0 ? EINVAL : state.wait.error);
 }
 
+[[nodiscard]] inline IoStatus completed_uring_status(IoOpState& state) noexcept {
+    state.waiting = false;
+    if (state.wait.error != 0) {
+        return IoStatus::failed(state.wait.error);
+    }
+    if (state.wait.result < 0) {
+        return IoStatus::failed(static_cast<int>(-state.wait.result));
+    }
+    return IoStatus::ready(static_cast<std::size_t>(state.wait.result));
+}
+
 } // namespace detail
 
 template <typename TaskT>
@@ -284,6 +295,79 @@ template <typename TaskT>
         return IoStatus::failed(error);
     }
 #endif
+}
+
+template <typename TaskT>
+[[nodiscard]] IoStatus io_read_at(
+    TaskT& task,
+    typename TaskT::Thread thread,
+    int fd,
+    void* data,
+    std::size_t size,
+    std::uint64_t offset,
+    IoOpState& state) noexcept {
+    if (state.waiting) {
+        return detail::completed_uring_status(state);
+    }
+    if (size == 0U) {
+        return IoStatus::ready(0);
+    }
+    if (data == nullptr) {
+        return IoStatus::failed(EINVAL);
+    }
+
+    state.wait = IoResult{fd, 0, 0, 0};
+    if (TaskT::Runtime::io_submit_read_at(thread, fd, data, size, offset, &task, &state.wait)) {
+        state.waiting = true;
+        return IoStatus::make_pending();
+    }
+    return IoStatus::failed(state.wait.error == 0 ? ENOSYS : state.wait.error);
+}
+
+template <typename TaskT>
+[[nodiscard]] IoStatus io_write_at(
+    TaskT& task,
+    typename TaskT::Thread thread,
+    int fd,
+    const void* data,
+    std::size_t size,
+    std::uint64_t offset,
+    IoOpState& state) noexcept {
+    if (state.waiting) {
+        return detail::completed_uring_status(state);
+    }
+    if (size == 0U) {
+        return IoStatus::ready(0);
+    }
+    if (data == nullptr) {
+        return IoStatus::failed(EINVAL);
+    }
+
+    state.wait = IoResult{fd, 0, 0, 0};
+    if (TaskT::Runtime::io_submit_write_at(thread, fd, data, size, offset, &task, &state.wait)) {
+        state.waiting = true;
+        return IoStatus::make_pending();
+    }
+    return IoStatus::failed(state.wait.error == 0 ? ENOSYS : state.wait.error);
+}
+
+template <typename TaskT>
+[[nodiscard]] IoStatus io_fsync(
+    TaskT& task,
+    typename TaskT::Thread thread,
+    int fd,
+    std::uint32_t flags,
+    IoOpState& state) noexcept {
+    if (state.waiting) {
+        return detail::completed_uring_status(state);
+    }
+
+    state.wait = IoResult{fd, 0, 0, 0};
+    if (TaskT::Runtime::io_submit_fsync(thread, fd, flags, &task, &state.wait)) {
+        state.waiting = true;
+        return IoStatus::make_pending();
+    }
+    return IoStatus::failed(state.wait.error == 0 ? ENOSYS : state.wait.error);
 }
 
 template <typename TaskT>
@@ -478,6 +562,43 @@ public:
             std::is_same_v<typename TaskT::Thread, ThreadT>,
             "IoFile thread type must match the task runtime thread type");
         return af::io_write_some(task, this->thread_, this->fd_, data, size, state);
+    }
+
+    template <typename TaskT>
+    [[nodiscard]] IoStatus read_at(
+        TaskT& task,
+        void* data,
+        std::size_t size,
+        std::uint64_t offset,
+        IoOpState& state) const noexcept {
+        static_assert(
+            std::is_same_v<typename TaskT::Thread, ThreadT>,
+            "IoFile thread type must match the task runtime thread type");
+        return af::io_read_at(task, this->thread_, this->fd_, data, size, offset, state);
+    }
+
+    template <typename TaskT>
+    [[nodiscard]] IoStatus write_at(
+        TaskT& task,
+        const void* data,
+        std::size_t size,
+        std::uint64_t offset,
+        IoOpState& state) const noexcept {
+        static_assert(
+            std::is_same_v<typename TaskT::Thread, ThreadT>,
+            "IoFile thread type must match the task runtime thread type");
+        return af::io_write_at(task, this->thread_, this->fd_, data, size, offset, state);
+    }
+
+    template <typename TaskT>
+    [[nodiscard]] IoStatus fsync(
+        TaskT& task,
+        IoOpState& state,
+        std::uint32_t flags = 0) const noexcept {
+        static_assert(
+            std::is_same_v<typename TaskT::Thread, ThreadT>,
+            "IoFile thread type must match the task runtime thread type");
+        return af::io_fsync(task, this->thread_, this->fd_, flags, state);
     }
 };
 

@@ -1,5 +1,6 @@
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <cstdint>
 #include <thread>
 #include <type_traits>
@@ -72,6 +73,23 @@ struct FastIoRuntimeTraits {
 using FastIoRuntime = af::AsyncRuntime<FastIoRuntimeTraits>;
 using FastIoTaskBase = FastIoRuntime::Task;
 
+struct UringIoRuntimeTraits {
+    using Thread = IoTestThread;
+
+    static constexpr std::uint16_t thread_count =
+        static_cast<std::uint16_t>(IoTestThread::enum_thread_index_end);
+    static constexpr std::size_t spsc_queue_capacity = 1024;
+    static constexpr std::size_t external_queue_capacity = 1024;
+    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+
+    static constexpr af::ThreadKind thread_kind(IoTestThread thread) noexcept {
+        return thread == IoTestThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
+    }
+};
+
+using UringIoRuntime = af::AsyncRuntime<UringIoRuntimeTraits>;
+using UringIoTaskBase = UringIoRuntime::Task;
+
 TEST(IoAdapterTraits, AdaptersAreThinTriviallyCopyableViews) {
     EXPECT_TRUE(std::is_trivially_copyable_v<af::IoFile<IoTestThread>>);
     EXPECT_TRUE(std::is_trivially_copyable_v<af::TcpStream<IoTestThread>>);
@@ -89,6 +107,17 @@ protected:
 
     void TearDown() override {
         IoRuntime::shutdown();
+    }
+};
+
+class UringIoRuntimeFixture : public testing::Test {
+protected:
+    void SetUp() override {
+        UringIoRuntime::init();
+    }
+
+    void TearDown() override {
+        UringIoRuntime::shutdown();
     }
 };
 
@@ -481,6 +510,125 @@ private:
     std::atomic<int>* error_{nullptr};
 };
 
+class UringFileReadWriteTask final : public UringIoTaskBase {
+public:
+    explicit UringFileReadWriteTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
+
+    bool do_it(int fd, std::atomic<int>* completed, std::atomic<char>* byte_read) {
+        file_.reset(IoTestThread::IO_0, fd);
+        completed_ = completed;
+        byte_read_ = byte_read;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Write,
+        Fsync,
+        Read,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Write:
+            return write_value();
+
+        case State::Fsync:
+            return fsync_value();
+
+        case State::Read:
+            return read_value();
+        }
+        return failed();
+    }
+
+    af::TaskResult write_value() {
+        const af::IoStatus status = file_.write_at(*this, &value_, sizeof(value_), 0, write_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(value_)) {
+            return failed();
+        }
+        state_ = State::Fsync;
+        return again();
+    }
+
+    af::TaskResult fsync_value() {
+        const af::IoStatus status = file_.fsync(*this, fsync_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready()) {
+            return failed();
+        }
+        state_ = State::Read;
+        return again();
+    }
+
+    af::TaskResult read_value() {
+        const af::IoStatus status = file_.read_at(*this, &read_, sizeof(read_), 0, read_state_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(read_)) {
+            return failed();
+        }
+        byte_read_->store(read_, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    State state_{State::Write};
+    af::IoFile<IoTestThread> file_{};
+    char value_{'F'};
+    char read_{0};
+    af::IoOpState write_{};
+    af::IoOpState fsync_{};
+    af::IoOpState read_state_{};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<char>* byte_read_{nullptr};
+};
+
+class UringStreamFallbackTask final : public UringIoTaskBase {
+public:
+    explicit UringStreamFallbackTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
+
+    bool do_it(
+        int fd,
+        std::atomic<int>* armed,
+        std::atomic<int>* completed,
+        std::atomic<char>* byte_read) {
+        stream_.reset(IoTestThread::IO_0, fd);
+        armed_ = armed;
+        completed_ = completed;
+        byte_read_ = byte_read;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        const af::IoStatus status = stream_.recv_some(*this, &value_, sizeof(value_), read_);
+        if (status.pending()) {
+            armed_->fetch_add(1, std::memory_order_release);
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(value_)) {
+            return failed();
+        }
+        byte_read_->store(value_, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    af::TcpStream<IoTestThread> stream_{};
+    char value_{0};
+    af::IoOpState read_{};
+    std::atomic<int>* armed_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<char>* byte_read_{nullptr};
+};
+
 class SocketHangupTask final : public IoTaskBase {
 public:
     explicit SocketHangupTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
@@ -824,6 +972,63 @@ TEST_F(IoRuntimeFixture, StreamAdapterReceivesAndSendsSocketBytes) {
     close_pair(fds);
 #else
     GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringThreadFallsBackToEpollReadiness) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io backend unavailable";
+    }
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<char> byte_read{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringStreamFallbackTask>(
+        fds[0],
+        &armed,
+        &completed,
+        &byte_read));
+    ASSERT_TRUE(wait_until_at_least(armed, 1));
+
+    const char value = 'U';
+    ASSERT_EQ(::write(fds[1], &value, sizeof(value)), 1);
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(byte_read.load(std::memory_order_acquire), value);
+
+    close_pair(fds);
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringFileAdapterWritesFsyncsAndReadsAtOffset) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io_uring backend unavailable";
+    }
+
+    char path[] = "/tmp/asyncflow-uring-XXXXXX";
+    const int fd = ::mkstemp(path);
+    ASSERT_GE(fd, 0);
+    af::UniqueFd file(fd);
+
+    std::atomic<int> completed{0};
+    std::atomic<char> byte_read{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringFileReadWriteTask>(
+        file.get(),
+        &completed,
+        &byte_read));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(byte_read.load(std::memory_order_acquire), 'F');
+
+    file.reset();
+    static_cast<void>(::unlink(path));
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
 #endif
 }
 

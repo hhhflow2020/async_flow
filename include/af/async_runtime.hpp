@@ -5,6 +5,7 @@
 #include <bit>
 #include <cerrno>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -20,8 +21,12 @@
 #include "absl/container/flat_hash_map.h"
 
 #if defined(__linux__)
+#include <algorithm>
+#include <linux/io_uring.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
+#include <sys/mman.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 #endif
 
@@ -523,6 +528,14 @@ public:
         return executors_[index]->io_backend_available();
     }
 
+    [[nodiscard]] static bool io_uring_backend_available(Thread thread) noexcept {
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            return false;
+        }
+        return executors_[index]->io_uring_backend_available();
+    }
+
     [[nodiscard]] static bool io_wait(
         Thread thread,
         int fd,
@@ -546,6 +559,85 @@ public:
             return false;
         }
         return executors_[index]->register_io_wait(fd, events, task, result);
+    }
+
+    [[nodiscard]] static bool io_submit_read_at(
+        Thread thread,
+        int fd,
+        void* data,
+        std::size_t size,
+        std::uint64_t offset,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || fd < 0 || data == nullptr) {
+            if (result != nullptr) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = fd < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_read(fd, data, size, offset, task, result);
+    }
+
+    [[nodiscard]] static bool io_submit_write_at(
+        Thread thread,
+        int fd,
+        const void* data,
+        std::size_t size,
+        std::uint64_t offset,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || fd < 0 || data == nullptr) {
+            if (result != nullptr) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = fd < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_write(fd, data, size, offset, task, result);
+    }
+
+    [[nodiscard]] static bool io_submit_fsync(
+        Thread thread,
+        int fd,
+        std::uint32_t flags,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || fd < 0) {
+            if (result != nullptr) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = fd < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_fsync(fd, flags, task, result);
     }
 
 private:
@@ -969,6 +1061,14 @@ private:
 #endif
         }
 
+        [[nodiscard]] bool io_uring_backend_available() const noexcept {
+#if defined(__linux__)
+            return io_uring_fd_ >= 0;
+#else
+            return false;
+#endif
+        }
+
         [[nodiscard]] bool register_io_wait(
             int fd,
             std::uint32_t events,
@@ -1030,6 +1130,77 @@ private:
             static_cast<void>(events);
             static_cast<void>(task);
             result->error = ENOSYS;
+            return false;
+#endif
+        }
+
+        [[nodiscard]] bool submit_io_uring_read(
+            int fd,
+            void* data,
+            std::size_t size,
+            std::uint64_t offset,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(IORING_OP_READ, fd, data, size, offset, 0, io_readable, task, result);
+#else
+            static_cast<void>(fd);
+            static_cast<void>(data);
+            static_cast<void>(size);
+            static_cast<void>(offset);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
+        [[nodiscard]] bool submit_io_uring_write(
+            int fd,
+            const void* data,
+            std::size_t size,
+            std::uint64_t offset,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_WRITE,
+                fd,
+                const_cast<void*>(data),
+                size,
+                offset,
+                0,
+                io_writable,
+                task,
+                result);
+#else
+            static_cast<void>(fd);
+            static_cast<void>(data);
+            static_cast<void>(size);
+            static_cast<void>(offset);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
+        [[nodiscard]] bool submit_io_uring_fsync(
+            int fd,
+            std::uint32_t flags,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(IORING_OP_FSYNC, fd, nullptr, 0, 0, flags, io_writable, task, result);
+#else
+            static_cast<void>(fd);
+            static_cast<void>(flags);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
             return false;
 #endif
         }
@@ -1118,9 +1289,117 @@ private:
         }
 
     private:
+#if defined(__linux__)
+        struct IoUringOperation {
+            Task* task{nullptr};
+            IoResult* result{nullptr};
+            IoUringOperation* prev{nullptr};
+            IoUringOperation* next{nullptr};
+            std::uint32_t complete_events{0};
+        };
+#endif
+
         [[nodiscard]] bool io_thread() const noexcept {
-            return kind_ == ThreadKind::Epoll;
+            return kind_ == ThreadKind::Epoll || kind_ == ThreadKind::IoUring;
         }
+
+        [[nodiscard]] bool io_uring_thread() const noexcept {
+            return kind_ == ThreadKind::IoUring;
+        }
+
+#if defined(__linux__)
+        [[nodiscard]] bool submit_io_uring_op(
+            std::uint8_t opcode,
+            int fd,
+            void* data,
+            std::size_t size,
+            std::uint64_t offset,
+            std::uint32_t fsync_flags,
+            std::uint32_t complete_events,
+            Task* task,
+            IoResult* result) noexcept {
+            AF_ASSERT(current_thread_index_ == index_ && "io_uring submit must be called from its IO thread");
+            if (current_thread_index_ != index_ || task == nullptr || result == nullptr) {
+                if (result != nullptr) {
+                    result->fd = fd;
+                    result->events = io_error;
+                    result->error = EINVAL;
+                }
+                return false;
+            }
+            if (io_uring_fd_ < 0 || fd < 0) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = fd < 0 ? EBADF : ENOSYS;
+                return false;
+            }
+            if (opcode != IORING_OP_FSYNC && data == nullptr) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = EINVAL;
+                return false;
+            }
+            if (opcode != IORING_OP_FSYNC &&
+                size > static_cast<std::size_t>(std::numeric_limits<unsigned>::max())) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = EINVAL;
+                return false;
+            }
+
+            IoUringOperation* operation = nullptr;
+            try {
+                operation = io_uring_op_pool_.create();
+            } catch (...) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = ENOMEM;
+                return false;
+            }
+            operation->task = task;
+            operation->result = result;
+            operation->complete_events = complete_events;
+            track_io_uring_operation(operation);
+
+            io_uring_sqe* sqe = reserve_io_uring_sqe();
+            if (sqe == nullptr) {
+                untrack_io_uring_operation(operation);
+                io_uring_op_pool_.destroy(operation);
+                result->fd = fd;
+                result->events = io_error;
+                result->error = EBUSY;
+                return false;
+            }
+
+            *sqe = io_uring_sqe{};
+            sqe->opcode = opcode;
+            sqe->fd = fd;
+            sqe->user_data = reinterpret_cast<std::uint64_t>(operation);
+            if (opcode == IORING_OP_FSYNC) {
+                sqe->fsync_flags = fsync_flags;
+            } else {
+                sqe->addr = reinterpret_cast<std::uint64_t>(data);
+                sqe->len = static_cast<unsigned>(size);
+                sqe->off = offset;
+            }
+
+            result->fd = fd;
+            result->events = 0;
+            result->error = 0;
+            result->result = 0;
+
+            const int submit_error = flush_io_uring_submission();
+            if (submit_error != 0) {
+                result->events = io_error;
+                result->error = submit_error;
+                result->result = -submit_error;
+                fail_io_uring_backend(submit_error, operation);
+                return false;
+            }
+
+            return true;
+        }
+#endif
 
         void notify_force() noexcept {
 #if defined(__linux__)
@@ -1210,12 +1489,18 @@ private:
             event.data.fd = io_wake_fd_;
             if (::epoll_ctl(io_epoll_fd_, EPOLL_CTL_ADD, io_wake_fd_, &event) != 0) {
                 close_io_backend();
+                return;
+            }
+
+            if (io_uring_thread()) {
+                init_io_uring_backend();
             }
 #endif
         }
 
         void close_io_backend() noexcept {
 #if defined(__linux__)
+            close_io_uring_backend();
             io_waits_.clear();
             if (io_wake_fd_ >= 0) {
                 ::close(io_wake_fd_);
@@ -1231,8 +1516,9 @@ private:
 
         [[nodiscard]] bool poll_io(int timeout_ms) noexcept {
 #if defined(__linux__)
+            bool did_work = poll_io_uring_completions();
             if (io_epoll_fd_ < 0) {
-                return false;
+                return did_work;
             }
 
             std::array<epoll_event, 64> events{};
@@ -1242,14 +1528,16 @@ private:
                 static_cast<int>(events.size()),
                 timeout_ms);
             if (count <= 0) {
-                return false;
+                return did_work;
             }
 
-            bool did_work = false;
             for (int i = 0; i < count; ++i) {
                 const int fd = events[static_cast<std::size_t>(i)].data.fd;
                 if (fd == io_wake_fd_) {
                     drain_io_wake();
+                    if (poll_io_uring_completions()) {
+                        did_work = true;
+                    }
                     did_work = true;
                     continue;
                 }
@@ -1278,6 +1566,287 @@ private:
         }
 
 #if defined(__linux__)
+        [[nodiscard]] static int sys_io_uring_setup(
+            unsigned entries,
+            io_uring_params* params) noexcept {
+            return static_cast<int>(::syscall(__NR_io_uring_setup, entries, params));
+        }
+
+        [[nodiscard]] static int sys_io_uring_enter(
+            int ring_fd,
+            unsigned to_submit,
+            unsigned min_complete,
+            unsigned flags) noexcept {
+            return static_cast<int>(::syscall(
+                __NR_io_uring_enter,
+                ring_fd,
+                to_submit,
+                min_complete,
+                flags,
+                nullptr,
+                0));
+        }
+
+        [[nodiscard]] static int sys_io_uring_register(
+            int ring_fd,
+            unsigned opcode,
+            const void* arg,
+            unsigned nr_args) noexcept {
+            return static_cast<int>(::syscall(__NR_io_uring_register, ring_fd, opcode, arg, nr_args));
+        }
+
+        void init_io_uring_backend() noexcept {
+            if (io_uring_fd_ >= 0 || io_wake_fd_ < 0) {
+                return;
+            }
+
+            io_uring_params params{};
+            io_uring_fd_ = sys_io_uring_setup(io_uring_entries_, &params);
+            if (io_uring_fd_ < 0) {
+                return;
+            }
+
+            const std::size_t sq_ring_size =
+                params.sq_off.array + static_cast<std::size_t>(params.sq_entries) * sizeof(std::uint32_t);
+            const std::size_t cq_ring_size =
+                params.cq_off.cqes + static_cast<std::size_t>(params.cq_entries) * sizeof(io_uring_cqe);
+
+            if ((params.features & IORING_FEAT_SINGLE_MMAP) != 0U) {
+                io_uring_sq_ring_size_ = std::max(sq_ring_size, cq_ring_size);
+                io_uring_cq_ring_size_ = io_uring_sq_ring_size_;
+                io_uring_sq_ring_ = static_cast<std::byte*>(::mmap(
+                    nullptr,
+                    io_uring_sq_ring_size_,
+                    PROT_READ | PROT_WRITE,
+                    MAP_SHARED | MAP_POPULATE,
+                    io_uring_fd_,
+                    IORING_OFF_SQ_RING));
+                io_uring_cq_ring_ = io_uring_sq_ring_;
+            } else {
+                io_uring_sq_ring_size_ = sq_ring_size;
+                io_uring_cq_ring_size_ = cq_ring_size;
+                io_uring_sq_ring_ = static_cast<std::byte*>(::mmap(
+                    nullptr,
+                    io_uring_sq_ring_size_,
+                    PROT_READ | PROT_WRITE,
+                    MAP_SHARED | MAP_POPULATE,
+                    io_uring_fd_,
+                    IORING_OFF_SQ_RING));
+                io_uring_cq_ring_ = static_cast<std::byte*>(::mmap(
+                    nullptr,
+                    io_uring_cq_ring_size_,
+                    PROT_READ | PROT_WRITE,
+                    MAP_SHARED | MAP_POPULATE,
+                    io_uring_fd_,
+                    IORING_OFF_CQ_RING));
+            }
+
+            io_uring_sqes_size_ = static_cast<std::size_t>(params.sq_entries) * sizeof(io_uring_sqe);
+            io_uring_sqes_ = static_cast<io_uring_sqe*>(::mmap(
+                nullptr,
+                io_uring_sqes_size_,
+                PROT_READ | PROT_WRITE,
+                MAP_SHARED | MAP_POPULATE,
+                io_uring_fd_,
+                IORING_OFF_SQES));
+
+            if (io_uring_sq_ring_ == MAP_FAILED ||
+                io_uring_cq_ring_ == MAP_FAILED ||
+                io_uring_sqes_ == MAP_FAILED) {
+                close_io_uring_backend();
+                return;
+            }
+
+            io_uring_sq_head_ = ptr_at<std::uint32_t>(io_uring_sq_ring_, params.sq_off.head);
+            io_uring_sq_tail_ = ptr_at<std::uint32_t>(io_uring_sq_ring_, params.sq_off.tail);
+            io_uring_sq_ring_mask_ = ptr_at<std::uint32_t>(io_uring_sq_ring_, params.sq_off.ring_mask);
+            io_uring_sq_ring_entries_ = ptr_at<std::uint32_t>(io_uring_sq_ring_, params.sq_off.ring_entries);
+            io_uring_sq_array_ = ptr_at<std::uint32_t>(io_uring_sq_ring_, params.sq_off.array);
+            io_uring_cq_head_ = ptr_at<std::uint32_t>(io_uring_cq_ring_, params.cq_off.head);
+            io_uring_cq_tail_ = ptr_at<std::uint32_t>(io_uring_cq_ring_, params.cq_off.tail);
+            io_uring_cq_ring_mask_ = ptr_at<std::uint32_t>(io_uring_cq_ring_, params.cq_off.ring_mask);
+            io_uring_cqes_ = ptr_at<io_uring_cqe>(io_uring_cq_ring_, params.cq_off.cqes);
+
+            if (sys_io_uring_register(
+                    io_uring_fd_,
+                    IORING_REGISTER_EVENTFD,
+                    &io_wake_fd_,
+                    1) != 0) {
+                close_io_uring_backend();
+            }
+        }
+
+        template <typename T>
+        [[nodiscard]] static T* ptr_at(std::byte* base, std::uint32_t offset) noexcept {
+            return reinterpret_cast<T*>(base + offset);
+        }
+
+        void close_io_uring_backend() noexcept {
+            clear_io_uring_operations();
+            if (io_uring_sqes_ != nullptr && io_uring_sqes_ != MAP_FAILED) {
+                ::munmap(io_uring_sqes_, io_uring_sqes_size_);
+            }
+            if (io_uring_sq_ring_ != nullptr && io_uring_sq_ring_ != MAP_FAILED) {
+                ::munmap(io_uring_sq_ring_, io_uring_sq_ring_size_);
+            }
+            if (io_uring_cq_ring_ != nullptr &&
+                io_uring_cq_ring_ != MAP_FAILED &&
+                io_uring_cq_ring_ != io_uring_sq_ring_) {
+                ::munmap(io_uring_cq_ring_, io_uring_cq_ring_size_);
+            }
+            if (io_uring_fd_ >= 0) {
+                ::close(io_uring_fd_);
+            }
+
+            io_uring_fd_ = -1;
+            io_uring_sq_ring_ = nullptr;
+            io_uring_cq_ring_ = nullptr;
+            io_uring_sqes_ = nullptr;
+            io_uring_sq_ring_size_ = 0;
+            io_uring_cq_ring_size_ = 0;
+            io_uring_sqes_size_ = 0;
+            io_uring_sq_head_ = nullptr;
+            io_uring_sq_tail_ = nullptr;
+            io_uring_sq_ring_mask_ = nullptr;
+            io_uring_sq_ring_entries_ = nullptr;
+            io_uring_sq_array_ = nullptr;
+            io_uring_cq_head_ = nullptr;
+            io_uring_cq_tail_ = nullptr;
+            io_uring_cq_ring_mask_ = nullptr;
+            io_uring_cqes_ = nullptr;
+        }
+
+        [[nodiscard]] io_uring_sqe* reserve_io_uring_sqe() noexcept {
+            if (io_uring_fd_ < 0 || io_uring_sq_tail_ == nullptr || io_uring_sq_head_ == nullptr) {
+                return nullptr;
+            }
+
+            const std::uint32_t head = __atomic_load_n(io_uring_sq_head_, __ATOMIC_ACQUIRE);
+            const std::uint32_t tail = __atomic_load_n(io_uring_sq_tail_, __ATOMIC_RELAXED);
+            if (tail - head >= *io_uring_sq_ring_entries_) {
+                return nullptr;
+            }
+
+            const std::uint32_t index = tail & *io_uring_sq_ring_mask_;
+            io_uring_sq_array_[index] = index;
+            __atomic_store_n(io_uring_sq_tail_, tail + 1U, __ATOMIC_RELEASE);
+            return &io_uring_sqes_[index];
+        }
+
+        [[nodiscard]] int flush_io_uring_submission() noexcept {
+            for (;;) {
+                const int submitted = sys_io_uring_enter(io_uring_fd_, 1, 0, 0);
+                if (submitted > 0) {
+                    return 0;
+                }
+                if (submitted == 0) {
+                    return EIO;
+                }
+                if (errno == EINTR) {
+                    continue;
+                }
+                return errno == 0 ? EIO : errno;
+            }
+        }
+
+        [[nodiscard]] bool poll_io_uring_completions() noexcept {
+            if (io_uring_fd_ < 0 || io_uring_cq_head_ == nullptr || io_uring_cq_tail_ == nullptr) {
+                return false;
+            }
+
+            bool did_work = false;
+            std::uint32_t head = __atomic_load_n(io_uring_cq_head_, __ATOMIC_ACQUIRE);
+            const std::uint32_t tail = __atomic_load_n(io_uring_cq_tail_, __ATOMIC_ACQUIRE);
+            while (head != tail) {
+                io_uring_cqe& cqe = io_uring_cqes_[head & *io_uring_cq_ring_mask_];
+                auto* operation = reinterpret_cast<IoUringOperation*>(cqe.user_data);
+                if (operation != nullptr) {
+                    complete_io_uring_operation(operation, cqe.res);
+                    did_work = true;
+                }
+                ++head;
+            }
+            __atomic_store_n(io_uring_cq_head_, head, __ATOMIC_RELEASE);
+            return did_work;
+        }
+
+        void complete_io_uring_operation(IoUringOperation* operation, int result) noexcept {
+            untrack_io_uring_operation(operation);
+            operation->result->result = result;
+            if (result < 0) {
+                operation->result->events = io_error;
+                operation->result->error = -result;
+            } else {
+                operation->result->events = operation->complete_events;
+                operation->result->error = 0;
+            }
+            enqueue_pending_blocking(index_, operation->task);
+            io_uring_op_pool_.destroy(operation);
+        }
+
+        void track_io_uring_operation(IoUringOperation* operation) noexcept {
+            operation->prev = nullptr;
+            operation->next = io_uring_operations_;
+            if (io_uring_operations_ != nullptr) {
+                io_uring_operations_->prev = operation;
+            }
+            io_uring_operations_ = operation;
+        }
+
+        void untrack_io_uring_operation(IoUringOperation* operation) noexcept {
+            if (operation->prev != nullptr) {
+                operation->prev->next = operation->next;
+            } else if (io_uring_operations_ == operation) {
+                io_uring_operations_ = operation->next;
+            }
+            if (operation->next != nullptr) {
+                operation->next->prev = operation->prev;
+            }
+            operation->prev = nullptr;
+            operation->next = nullptr;
+        }
+
+        void clear_io_uring_operations() noexcept {
+            IoUringOperation* operation = io_uring_operations_;
+            io_uring_operations_ = nullptr;
+            while (operation != nullptr) {
+                IoUringOperation* next = operation->next;
+                operation->prev = nullptr;
+                operation->next = nullptr;
+                io_uring_op_pool_.destroy(operation);
+                operation = next;
+            }
+        }
+
+        void fail_io_uring_backend(int error, IoUringOperation* running_operation) noexcept {
+            clear_or_fail_io_uring_operations(error, running_operation);
+            close_io_uring_backend();
+        }
+
+        void clear_or_fail_io_uring_operations(
+            int error,
+            IoUringOperation* running_operation) noexcept {
+            IoUringOperation* operation = io_uring_operations_;
+            io_uring_operations_ = nullptr;
+            while (operation != nullptr) {
+                IoUringOperation* next = operation->next;
+                operation->prev = nullptr;
+                operation->next = nullptr;
+                if (operation == running_operation) {
+                    io_uring_op_pool_.destroy(operation);
+                    operation = next;
+                    continue;
+                }
+
+                operation->result->events = io_error;
+                operation->result->error = error;
+                operation->result->result = -error;
+                enqueue_pending_blocking(index_, operation->task);
+                io_uring_op_pool_.destroy(operation);
+                operation = next;
+            }
+        }
+
         void drain_io_wake() noexcept {
             std::uint64_t value = 0;
             while (::read(io_wake_fd_, &value, sizeof(value)) == sizeof(value)) {
@@ -1395,6 +1964,25 @@ private:
         int io_epoll_fd_{-1};
         int io_wake_fd_{-1};
         absl::flat_hash_map<int, IoWaitRegistration> io_waits_;
+        static constexpr unsigned io_uring_entries_{256};
+        int io_uring_fd_{-1};
+        std::byte* io_uring_sq_ring_{nullptr};
+        std::byte* io_uring_cq_ring_{nullptr};
+        io_uring_sqe* io_uring_sqes_{nullptr};
+        std::size_t io_uring_sq_ring_size_{0};
+        std::size_t io_uring_cq_ring_size_{0};
+        std::size_t io_uring_sqes_size_{0};
+        std::uint32_t* io_uring_sq_head_{nullptr};
+        std::uint32_t* io_uring_sq_tail_{nullptr};
+        std::uint32_t* io_uring_sq_ring_mask_{nullptr};
+        std::uint32_t* io_uring_sq_ring_entries_{nullptr};
+        std::uint32_t* io_uring_sq_array_{nullptr};
+        std::uint32_t* io_uring_cq_head_{nullptr};
+        std::uint32_t* io_uring_cq_tail_{nullptr};
+        std::uint32_t* io_uring_cq_ring_mask_{nullptr};
+        io_uring_cqe* io_uring_cqes_{nullptr};
+        IoUringOperation* io_uring_operations_{nullptr};
+        detail::ObjectPool<IoUringOperation> io_uring_op_pool_;
         alignas(detail::hardware_cache_line_size) std::atomic<bool> io_wake_pending_{false};
 #endif
         std::thread worker_;

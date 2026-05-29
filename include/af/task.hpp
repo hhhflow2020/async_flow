@@ -54,6 +54,7 @@ struct IoResult {
     int fd{-1};
     std::uint32_t events{0};
     int error{0};
+    std::int64_t result{0};
 
     [[nodiscard]] bool readable() const noexcept {
         return (events & io_readable) != 0U;
