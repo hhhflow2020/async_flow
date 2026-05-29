@@ -15,7 +15,7 @@ struct PlayerDeltaBatch {
     std::vector<int> deltas;
     std::atomic<int>* completed{nullptr};
     std::atomic<int>* total_delta{nullptr};
-    std::array<std::atomic<std::uint64_t>, AppRuntimeTraits::logic_count>* shard_batch_seen{nullptr};
+    std::array<std::atomic<std::uint64_t>, player_logic_shard_count>* shard_batch_seen{nullptr};
 };
 
 class ApplyPlayerDeltaBatchTask final : public Task {
@@ -24,9 +24,9 @@ public:
 
     bool do_it(PlayerDeltaBatch batch) {
         batch_ = std::move(batch);
-        sharded_deltas_ = af::ShardedOps<int>(AppRuntimeTraits::logic_count);
+        sharded_deltas_ = af::ShardedOps<int>(player_logic_shard_count);
         for (std::size_t i = 0; i < batch_.deltas.size(); ++i) {
-            sharded_deltas_.shards[i % AppRuntimeTraits::logic_count].push_back(batch_.deltas[i]);
+            sharded_deltas_.shards[i % player_logic_shard_count].push_back(batch_.deltas[i]);
         }
         return schedule(AppThread::Logic_0);
     }
@@ -42,7 +42,7 @@ private:
         case State::Apply:
             state_ = State::Finish;
             Runtime::parallel_shards_ordered(
-                AppRuntimeTraits::logic_begin,
+                player_logic_begin,
                 sharded_deltas_,
                 batch_.batch_id,
                 this,
@@ -67,7 +67,7 @@ private:
 
     State state_{State::Apply};
     PlayerDeltaBatch batch_;
-    af::ShardedOps<int> sharded_deltas_{AppRuntimeTraits::logic_count};
+    af::ShardedOps<int> sharded_deltas_{player_logic_shard_count};
 };
 
 } // namespace
@@ -77,7 +77,7 @@ int main() {
 
     std::atomic<int> completed{0};
     std::atomic<int> total_delta{0};
-    std::array<std::atomic<std::uint64_t>, AppRuntimeTraits::logic_count> shard_batch_seen{};
+    std::array<std::atomic<std::uint64_t>, player_logic_shard_count> shard_batch_seen{};
 
     [[maybe_unused]] const bool second_started =
         Runtime::start_ordered_task<PlayerDeltaStream, ApplyPlayerDeltaBatchTask>(
@@ -93,7 +93,7 @@ int main() {
     wait_completed(completed, 2);
 
     std::cout << "ordered total delta: " << total_delta.load(std::memory_order_relaxed) << '\n';
-    for (std::uint16_t shard = 0; shard < AppRuntimeTraits::logic_count; ++shard) {
+    for (std::uint16_t shard = 0; shard < player_logic_shard_count; ++shard) {
         std::cout << "shard " << shard << " last batch: "
                   << shard_batch_seen[shard].load(std::memory_order_acquire) << '\n';
     }

@@ -20,8 +20,6 @@ struct AppRuntimeTraits {
 
     static constexpr std::uint16_t thread_count =
         static_cast<std::uint16_t>(AppThread::enum_num_end);
-    static constexpr AppThread logic_begin = AppThread::Logic_0;
-    static constexpr std::uint16_t logic_count = 4;
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
@@ -30,8 +28,13 @@ struct AppRuntimeTraits {
 using Runtime = af::AsyncRuntime<AppRuntimeTraits>;
 using Task = Runtime::Task;
 
+inline constexpr AppThread player_logic_begin = AppThread::Logic_0;
+inline constexpr std::uint16_t player_logic_shard_count =
+    static_cast<std::uint16_t>(
+        Runtime::thread_index(AppThread::Logic_3) - Runtime::thread_index(player_logic_begin) + 1U);
+
 inline AppThread player_thread(std::uint64_t player_id) noexcept {
-    return Runtime::shard_by<AppRuntimeTraits::logic_begin, AppRuntimeTraits::logic_count>(
+    return Runtime::shard_by<player_logic_begin, player_logic_shard_count>(
         player_id);
 }
 

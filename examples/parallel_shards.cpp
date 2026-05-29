@@ -21,13 +21,13 @@ public:
         std::vector<AddGoldOp> ops,
         std::atomic<int>* completed,
         std::atomic<int>* total_gold,
-        std::array<std::atomic<int>, AppRuntimeTraits::logic_count>* shard_hits) {
+        std::array<std::atomic<int>, player_logic_shard_count>* shard_hits) {
         completed_ = completed;
         total_gold_ = total_gold;
         shard_hits_ = shard_hits;
         sharded_ops_ = Runtime::split_by_shard(
             std::move(ops),
-            AppRuntimeTraits::logic_count,
+            player_logic_shard_count,
             [](const AddGoldOp& op) { return op.player_id; });
         return schedule(AppThread::Logic_0);
     }
@@ -43,7 +43,7 @@ private:
         case State::Split:
             state_ = State::Finish;
             Runtime::parallel_shards(
-                AppRuntimeTraits::logic_begin,
+                player_logic_begin,
                 sharded_ops_,
                 af::ParallelMode::NonEmptyOnly,
                 this,
@@ -67,10 +67,10 @@ private:
     }
 
     State state_{State::Split};
-    af::ShardedOps<AddGoldOp> sharded_ops_{AppRuntimeTraits::logic_count};
+    af::ShardedOps<AddGoldOp> sharded_ops_{player_logic_shard_count};
     std::atomic<int>* completed_{nullptr};
     std::atomic<int>* total_gold_{nullptr};
-    std::array<std::atomic<int>, AppRuntimeTraits::logic_count>* shard_hits_{nullptr};
+    std::array<std::atomic<int>, player_logic_shard_count>* shard_hits_{nullptr};
 };
 
 } // namespace
@@ -80,7 +80,7 @@ int main() {
 
     std::atomic<int> completed{0};
     std::atomic<int> total_gold{0};
-    std::array<std::atomic<int>, AppRuntimeTraits::logic_count> shard_hits{};
+    std::array<std::atomic<int>, player_logic_shard_count> shard_hits{};
 
     std::vector<AddGoldOp> ops{
         {1001, 10},
@@ -99,7 +99,7 @@ int main() {
     wait_completed(completed, 1);
 
     std::cout << "parallel total gold: " << total_gold.load(std::memory_order_relaxed) << '\n';
-    for (std::uint16_t shard = 0; shard < AppRuntimeTraits::logic_count; ++shard) {
+    for (std::uint16_t shard = 0; shard < player_logic_shard_count; ++shard) {
         std::cout << "shard " << shard << " hits: "
                   << shard_hits[shard].load(std::memory_order_relaxed) << '\n';
     }
