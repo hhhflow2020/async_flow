@@ -41,7 +41,7 @@ private:
         switch (state_) {
         case State::Apply:
             state_ = State::Finish;
-            Runtime::parallel_shards_ordered(
+            Flow::parallel_shards_ordered(
                 player_logic_begin,
                 sharded_deltas_,
                 batch_.batch_id,
@@ -73,18 +73,18 @@ private:
 } // namespace
 
 int main() {
-    Runtime::init();
+    Flow::init();
 
     std::atomic<int> completed{0};
     std::atomic<int> total_delta{0};
     std::array<std::atomic<std::uint64_t>, player_logic_shard_count> shard_batch_seen{};
 
     [[maybe_unused]] const bool second_started =
-        Runtime::start_ordered_task<PlayerDeltaStream, ApplyPlayerDeltaBatchTask>(
+        Flow::start_ordered_task<PlayerDeltaStream, ApplyPlayerDeltaBatchTask>(
             AppThread::Logic_0,
             PlayerDeltaBatch{2, {5, 6}, &completed, &total_delta, &shard_batch_seen});
     [[maybe_unused]] const bool first_started =
-        Runtime::start_ordered_task<PlayerDeltaStream, ApplyPlayerDeltaBatchTask>(
+        Flow::start_ordered_task<PlayerDeltaStream, ApplyPlayerDeltaBatchTask>(
             AppThread::Logic_0,
             PlayerDeltaBatch{1, {1, 2, 3, 4}, &completed, &total_delta, &shard_batch_seen});
     AF_ASSERT(second_started);
@@ -98,6 +98,6 @@ int main() {
                   << shard_batch_seen[shard].load(std::memory_order_acquire) << '\n';
     }
 
-    Runtime::shutdown();
+    Flow::shutdown();
     return 0;
 }

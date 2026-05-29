@@ -18,7 +18,7 @@ public:
 private:
     af::TaskResult run() override {
         std::cout << "add " << gold_ << " gold to player " << player_id_
-                  << " on logic thread " << Runtime::current_thread_index() << '\n';
+                  << " on logic thread " << Flow::current_thread_index() << '\n';
         completed_->fetch_add(1, std::memory_order_release);
         completed_->notify_one();
         return done();
@@ -79,20 +79,20 @@ private:
 };
 
 int main() {
-    Runtime::init();
+    Flow::init();
 
     std::atomic<int> completed{0};
     bool add_started = false;
     {
-        auto add_task = Runtime::make_task<AddGoldTask>();
+        auto add_task = Flow::make_task<AddGoldTask>();
         add_started = add_task->do_it(1001U, 100, &completed);
     }
-    [[maybe_unused]] const bool login_started = Runtime::start_task<LoginTask>(1002U, &completed);
+    [[maybe_unused]] const bool login_started = Flow::start_task<LoginTask>(1002U, &completed);
     AF_ASSERT(add_started);
     AF_ASSERT(login_started);
 
     wait_completed(completed, 2);
 
-    Runtime::shutdown();
+    Flow::shutdown();
     return 0;
 }
