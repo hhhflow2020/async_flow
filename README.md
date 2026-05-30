@@ -129,6 +129,8 @@ if (!started) {
 
 traits 可通过 `thread_kind()` 把固定线程声明为 IO 线程。Linux 上 `ThreadKind::Epoll` 会在该 executor 内创建 epoll + eventfd，其他线程投递任务时通过合并唤醒写 eventfd；IO 线程空闲时直接阻塞在 `epoll_wait()`，任务和 fd readiness 都在同一个固定线程恢复。`ThreadKind::IoUring` 会优先创建 io_uring，并保留 epoll + eventfd 作为 completion wake 和 socket readiness fallback；如果内核或容器环境不支持 io_uring，该线程仍可退化为 epoll readiness 线程。
 
+提示：某些容器运行时默认 seccomp/apparmor profile 可能拦截 `io_uring_setup/enter/register`，导致 `ThreadKind::IoUring` 退化为 epoll 并跳过 io_uring tests；在 OrbStack/Docker 下可尝试容器启动参数 `--security-opt seccomp=unconfined --security-opt apparmor=unconfined` 或使用自定义 seccomp profile 放通相关 syscall。
+
 ```cpp
 static constexpr af::ThreadKind thread_kind(AppThread thread) noexcept {
     return thread == AppThread::IO_0 ? af::ThreadKind::Epoll : af::ThreadKind::Worker;
@@ -272,6 +274,7 @@ ASYNCFLOW_STRESS_MS=1500 ctest --test-dir build-tsan/build/Debug -R RuntimeStres
 - `examples/io_timer.cpp`：使用 `af::IoTimer` 和 Linux timerfd 完成异步定时器恢复。
 - `examples/io_timeout.cpp`：使用 `af::IoDeadline` 为单次 pending read 组合 timeout/cancel。
 - `examples/io_adapters.cpp`：使用 `af::TcpStream` 和 `af::UdpSocket` 编写业务状态机。
+- `examples/io_pollable_client.cpp`：第三方 client 暴露 fd 的接入模板：`step()` 返回 WANT_READ/WANT_WRITE，由框架驱动 readiness 并恢复状态机。
 - `examples/io_sendfile_static.cpp`：使用 `af::TcpStream::sendfile_some()` 将静态文件内容通过 TCP socket 发送给 peer。
 - `examples/io_shutdown.cpp`：使用 `af::TcpStream::shutdown()` 在绑定 IO 线程完成 TCP half-close。
 - `examples/io_socket_lifecycle.cpp`：在指定 IO 线程完成 TCP listener 的 socket、setsockopt、bind、listen 和 accept 生命周期。
