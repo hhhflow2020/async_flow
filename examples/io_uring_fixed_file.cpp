@@ -57,13 +57,17 @@ public:
 
     bool do_it(
         int fd,
+        int updated_fd,
         std::atomic<int>* completed,
         std::atomic<int>* error,
-        std::atomic<char>* byte_read) {
+        std::atomic<char>* byte_read,
+        std::atomic<char>* updated_byte_read) {
         fd_ = fd;
+        updated_fd_ = updated_fd;
         completed_ = completed;
         error_ = error;
         byte_read_ = byte_read;
+        updated_byte_read_ = updated_byte_read;
         file_.reset(FixedFileThread::IO_0, 0);
         return schedule(FixedFileThread::IO_0);
     }
@@ -74,6 +78,8 @@ private:
         Write,
         Fsync,
         Read,
+        Update,
+        ReadUpdated,
         Unregister,
     };
 
@@ -90,6 +96,12 @@ private:
 
         case State::Read:
             return read_value();
+
+        case State::Update:
+            return update_file();
+
+        case State::ReadUpdated:
+            return read_updated_value();
 
         case State::Unregister:
             return unregister_file();
@@ -152,6 +164,37 @@ private:
         if (!status.ready() || status.bytes != 1U) {
             return complete(status.failed() ? status.error : EIO);
         }
+        state_ = State::Update;
+        return again();
+    }
+
+    af::TaskResult update_file() {
+        int error = 0;
+        if (!fixed_file_async::io_update_registered_files(
+                FixedFileThread::IO_0,
+                0,
+                &updated_fd_,
+                1,
+                &error)) {
+            return complete(error == 0 ? EIO : error);
+        }
+        state_ = State::ReadUpdated;
+        return again();
+    }
+
+    af::TaskResult read_updated_value() {
+        const af::IoStatus status = file_.read_at(
+            *this,
+            &updated_read_,
+            sizeof(updated_read_),
+            0,
+            updated_read_state_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(updated_read_)) {
+            return complete(status.failed() ? status.error : EIO);
+        }
         state_ = State::Unregister;
         return again();
     }
@@ -165,6 +208,7 @@ private:
             return complete(error == 0 ? EIO : error);
         }
         byte_read_->store(buffer_[0], std::memory_order_release);
+        updated_byte_read_->store(updated_read_, std::memory_order_release);
         return complete(0);
     }
 
@@ -176,15 +220,19 @@ private:
 
     State state_{State::Register};
     int fd_{-1};
+    int updated_fd_{-1};
     af::IoFixedFile<FixedFileThread> file_{};
     alignas(64) char buffer_[64]{};
     char value_{'F'};
+    char updated_read_{0};
     af::IoOpState write_{};
     af::IoOpState fsync_{};
     af::IoOpState read_state_{};
+    af::IoOpState updated_read_state_{};
     std::atomic<int>* completed_{nullptr};
     std::atomic<int>* error_{nullptr};
     std::atomic<char>* byte_read_{nullptr};
+    std::atomic<char>* updated_byte_read_{nullptr};
 };
 #endif
 
@@ -207,20 +255,46 @@ int main() {
         return 1;
     }
     af::UniqueFd file(fd);
+    char updated_path[] = "/tmp/asyncflow-fixed-file-update-XXXXXX";
+    const int updated_fd = ::mkstemp(updated_path);
+    if (updated_fd < 0) {
+        std::cout << "mkstemp update failed\n";
+        file.reset();
+        static_cast<void>(::unlink(path));
+        fixed_file_async::shutdown();
+        return 1;
+    }
+    af::UniqueFd updated_file(updated_fd);
+    const char updated_payload = 'U';
+    if (::write(updated_file.get(), &updated_payload, sizeof(updated_payload)) !=
+        static_cast<ssize_t>(sizeof(updated_payload))) {
+        std::cout << "write update file failed\n";
+        updated_file.reset();
+        file.reset();
+        static_cast<void>(::unlink(updated_path));
+        static_cast<void>(::unlink(path));
+        fixed_file_async::shutdown();
+        return 1;
+    }
 
     std::atomic<int> completed{0};
     std::atomic<int> error{0};
     std::atomic<char> byte_read{0};
+    std::atomic<char> updated_byte_read{0};
     const bool started = fixed_file_async::start_task<FixedFileRoundTripTask>(
         file.get(),
+        updated_file.get(),
         &completed,
         &error,
-        &byte_read);
+        &byte_read,
+        &updated_byte_read);
     AF_ASSERT(started);
 
     if (!started || !wait_until(completed, 1)) {
         std::cout << "io_uring fixed file task timed out\n";
+        updated_file.reset();
         file.reset();
+        static_cast<void>(::unlink(updated_path));
         static_cast<void>(::unlink(path));
         fixed_file_async::shutdown();
         return 1;
@@ -229,15 +303,21 @@ int main() {
     if (error.load(std::memory_order_acquire) != 0) {
         std::cout << "io_uring fixed file failed error="
                   << error.load(std::memory_order_acquire) << '\n';
+        updated_file.reset();
         file.reset();
+        static_cast<void>(::unlink(updated_path));
         static_cast<void>(::unlink(path));
         fixed_file_async::shutdown();
         return 1;
     }
 
     std::cout << "io_uring fixed file byte="
-              << byte_read.load(std::memory_order_acquire) << '\n';
+              << byte_read.load(std::memory_order_acquire)
+              << " updated="
+              << updated_byte_read.load(std::memory_order_acquire) << '\n';
+    updated_file.reset();
     file.reset();
+    static_cast<void>(::unlink(updated_path));
     static_cast<void>(::unlink(path));
     fixed_file_async::shutdown();
     return 0;

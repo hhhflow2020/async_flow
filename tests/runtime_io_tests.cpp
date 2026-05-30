@@ -1457,6 +1457,22 @@ private:
         if (registered || register_error != ENOSYS) {
             return failed();
         }
+        int update_error = 0;
+        const bool updated =
+            IoRuntime::io_update_registered_files(IoTestThread::IO_0, 0, &fd, 1, &update_error);
+        if (updated || update_error != ENOSYS) {
+            return failed();
+        }
+        int null_update_error = 0;
+        const bool null_update = IoRuntime::io_update_registered_files(
+            IoTestThread::IO_0,
+            0,
+            nullptr,
+            1,
+            &null_update_error);
+        if (null_update || null_update_error != EINVAL) {
+            return failed();
+        }
 
         af::IoFixedFile<IoTestThread> missing(IoTestThread::IO_0, 0);
         af::IoFixedFile<IoTestThread> invalid(IoTestThread::IO_0, -1);
@@ -2151,6 +2167,155 @@ private:
     af::IoOpState read_state_{};
     std::atomic<int>* completed_{nullptr};
     std::atomic<char>* byte_read_{nullptr};
+};
+
+class UringFixedFileUpdateTask final : public UringIoTaskBase {
+public:
+    explicit UringFixedFileUpdateTask(UringIoTaskBase::FactoryToken token)
+        : UringIoTaskBase(token) {}
+
+    bool do_it(
+        int first_fd,
+        int second_fd,
+        std::atomic<int>* completed,
+        std::atomic<int>* packed_read) {
+        first_fd_ = first_fd;
+        second_fd_ = second_fd;
+        completed_ = completed;
+        packed_read_ = packed_read;
+        file_.reset(IoTestThread::IO_0, 0);
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Register,
+        ReadFirst,
+        Update,
+        ReadSecond,
+        Unregister,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Register:
+            return register_file();
+
+        case State::ReadFirst:
+            return read_first();
+
+        case State::Update:
+            return update_file();
+
+        case State::ReadSecond:
+            return read_second();
+
+        case State::Unregister:
+            return unregister_file();
+        }
+        return failed();
+    }
+
+    af::TaskResult register_file() {
+        int error = 0;
+        if (UringIoRuntime::io_update_registered_files(
+                IoTestThread::IO_0,
+                0,
+                &second_fd_,
+                1,
+                &error) ||
+            error != ENOENT) {
+            return failed();
+        }
+        if (!UringIoRuntime::io_register_files(IoTestThread::IO_0, &first_fd_, 1, &error)) {
+            return failed();
+        }
+        if (UringIoRuntime::io_update_registered_files(
+                IoTestThread::IO_0,
+                1,
+                &second_fd_,
+                1,
+                &error) ||
+            error != EINVAL) {
+            return failed();
+        }
+        state_ = State::ReadFirst;
+        return again();
+    }
+
+    af::TaskResult read_first() {
+        const af::IoStatus status = file_.read_at(
+            *this,
+            &first_read_,
+            sizeof(first_read_),
+            0,
+            first_read_state_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(first_read_) || first_read_ != first_value_) {
+            return failed();
+        }
+        state_ = State::Update;
+        return again();
+    }
+
+    af::TaskResult update_file() {
+        int error = 0;
+        if (!UringIoRuntime::io_update_registered_files(
+                IoTestThread::IO_0,
+                0,
+                &second_fd_,
+                1,
+                &error)) {
+            return failed();
+        }
+        state_ = State::ReadSecond;
+        return again();
+    }
+
+    af::TaskResult read_second() {
+        const af::IoStatus status = file_.read_at(
+            *this,
+            &second_read_,
+            sizeof(second_read_),
+            0,
+            second_read_state_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(second_read_) || second_read_ != second_value_) {
+            return failed();
+        }
+        state_ = State::Unregister;
+        return again();
+    }
+
+    af::TaskResult unregister_file() {
+        int error = 0;
+        if (!UringIoRuntime::io_unregister_files(IoTestThread::IO_0, &error)) {
+            return failed();
+        }
+        const int packed =
+            (static_cast<int>(static_cast<unsigned char>(first_read_)) << 8) |
+            static_cast<int>(static_cast<unsigned char>(second_read_));
+        packed_read_->store(packed, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    State state_{State::Register};
+    int first_fd_{-1};
+    int second_fd_{-1};
+    af::IoFixedFile<IoTestThread> file_{};
+    char first_value_{'1'};
+    char second_value_{'2'};
+    char first_read_{0};
+    char second_read_{0};
+    af::IoOpState first_read_state_{};
+    af::IoOpState second_read_state_{};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* packed_read_{nullptr};
 };
 
 class UringBatchedFileWriteTask final : public UringIoTaskBase {
@@ -5701,6 +5866,47 @@ TEST_F(UringIoRuntimeFixture, IoUringFixedFileWritesFsyncsAndReadsAtOffset) {
 
     file.reset();
     static_cast<void>(::unlink(path));
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringFixedFileTableUpdatesRegisteredSlot) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io_uring backend unavailable";
+    }
+
+    char first_path[] = "/tmp/asyncflow-uring-fixed-update-a-XXXXXX";
+    const int first_fd = ::mkstemp(first_path);
+    ASSERT_GE(first_fd, 0);
+    af::UniqueFd first(first_fd);
+    char second_path[] = "/tmp/asyncflow-uring-fixed-update-b-XXXXXX";
+    const int second_fd = ::mkstemp(second_path);
+    ASSERT_GE(second_fd, 0);
+    af::UniqueFd second(second_fd);
+
+    const char first_payload = '1';
+    const char second_payload = '2';
+    ASSERT_EQ(::write(first.get(), &first_payload, sizeof(first_payload)), 1);
+    ASSERT_EQ(::write(second.get(), &second_payload, sizeof(second_payload)), 1);
+
+    std::atomic<int> completed{0};
+    std::atomic<int> packed_read{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringFixedFileUpdateTask>(
+        first.get(),
+        second.get(),
+        &completed,
+        &packed_read));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(
+        packed_read.load(std::memory_order_acquire),
+        (static_cast<int>('1') << 8) | static_cast<int>('2'));
+
+    first.reset();
+    second.reset();
+    static_cast<void>(::unlink(first_path));
+    static_cast<void>(::unlink(second_path));
 #else
     GTEST_SKIP() << "io_uring backend is Linux-only";
 #endif
