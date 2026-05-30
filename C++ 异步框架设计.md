@@ -517,7 +517,7 @@ auto sharded = af::split_change_batch(batch, shard_count);
 - Linux IO executor 使用 epoll + eventfd，任务先调度到指定 IO 线程后再注册 fd readiness，避免所有 IO 都通过 MPMC 队列跨线程搬运。
 - `ThreadKind::IoUring` 优先初始化 io_uring，并通过 eventfd 唤醒 completion；如果 io_uring 不可用，线程仍保留 epoll readiness fallback。
 - io_uring submit 在 executor tick 内合并，多个 SQE 尽量一次 `io_uring_enter` 提交；SQ 接近阈值或线程准备阻塞前会强制 flush，兼顾吞吐和尾延迟。
-- `af::io_openat()` / `io_close()` / `io_statx()` / `io_fallocate()` / `io_renameat()` / `io_unlinkat()` 和 `af::IoFile::read_at()` / `write_at()` / `readv_at()` / `writev_at()` / `fsync()` 通过 io_uring 提交真正的文件生命周期操作，completion 后恢复原 task。
+- `af::io_openat()` / `io_openat2()` / `io_mkdirat()` / `io_close()` / `io_statx()` / `io_fallocate()` / `io_ftruncate()` / `io_linkat()` / `io_symlinkat()` / `io_renameat()` / `io_unlinkat()` 和 `af::IoFile::read_at()` / `write_at()` / `readv_at()` / `writev_at()` / `fsync()` 通过 io_uring 提交真正的文件生命周期操作，completion 后恢复原 task。
 - `af::io_sendfile_some()` 通过 Linux `sendfile(2)` 做文件到 socket 的内核态搬运，遇到 socket buffer 满时等待 out fd writable；`af::io_splice_some()` 在 `ThreadKind::IoUring` 优先提交 `IORING_OP_SPLICE`，不可用时退回 `splice(2)` + readiness。
 - `af::io_send_zc_some()` / `af::TcpStream::send_zc_some()` 在 `ThreadKind::IoUring` 线程上优先提交 `IORING_OP_SEND_ZC`，runtime 通过 probe 避免在不支持的内核上反复提交失败；主 CQE 恢复业务 task，notification CQE 只用于释放内部 operation，避免复用 `IoOpState` 时出现悬挂写入。
 - `af::TcpListener::accept_some()` / `af::TcpStream::connect()` / `recv_some()` / `send_some()` / `send_zc_some()` / `recvv_some()` / `sendv_some()` 在 `ThreadKind::IoUring` 线程上优先提交 `IORING_OP_ACCEPT` / `IORING_OP_CONNECT` / `IORING_OP_RECV` / `IORING_OP_SEND` / `IORING_OP_SEND_ZC` 或 `IORING_OP_RECVMSG` / `IORING_OP_SENDMSG`；`af::UdpSocket::recv_from_some()` / `send_to_some()` / `recvv_from_some()` / `sendv_to_some()` 优先提交 `IORING_OP_RECVMSG` / `IORING_OP_SENDMSG`，ring 不可用或 would-block 时退回 epoll readiness。
@@ -739,6 +739,22 @@ async::parallel_shards_ordered(
 ./build-conan/build/Release/asyncflow_io_uring_file_lifecycle_example
 ```
 
+### 11.10 io_uring_filesystem_ops.cpp：目录和文件生命周期业务模板
+
+文件：`examples/io_uring_filesystem_ops.cpp`
+
+该示例展示：
+
+- `af::io_openat2()` / `io_mkdirat()` / `io_ftruncate()` / `io_linkat()` / `io_symlinkat()` / `io_unlinkat()` 在指定 IO 线程上完成目录和文件操作。
+- 新增 filesystem helper 通过独立 `af/io_filesystem.hpp` 暴露，公共 API 仍由 `af/io.hpp` 引入，runtime 侧使用窄 SQE submit 路径减少无关分支。
+- 示例 task 的每个状态拆成成员函数，并用 `runtime::wait_for_idle()` 等待任务结束，避免示例层显式定义 atomic 只为了判断 task 是否完成。
+
+运行：
+
+```sh
+./build-conan/build/Release/asyncflow_io_uring_filesystem_ops_example
+```
+
 ### 11.10 io_sendfile_static.cpp：TCP 静态文件少拷贝发送模板
 
 文件：`examples/io_sendfile_static.cpp`
@@ -861,7 +877,7 @@ async::parallel_shards_ordered(
 - `tests/runtime_parallel_tests.cpp`：parallel shards、失败汇总、有序 batch、ordered start 边界、retryable ordered apply。
 - `tests/runtime_stress_tests.cpp`：高并发 init/shutdown/start_task stress，可配合 TSAN 拉长运行。
 - `tests/utility_tests.cpp`：SPSC/MPSC/MPMC 队列、对象池、分片工具、CRUD helper、BatchSequencer、ordered retry/skip policy。
-- `tests/runtime_io_tests.cpp`：IO 线程、epoll readiness、eventfd、timerfd、io_uring 文件生命周期、sendfile/splice/send_zc 少拷贝传输、stream 和 datagram vectored 操作、io_uring TCP accept/connect/stream 与 UDP datagram 操作、read/write/TCP/UDP helper 与 adapter、重复 fd wait、HUP/EOF、非法 fd、worker 误用和 pending IO shutdown。
+- `tests/runtime_io_tests.cpp`：IO 线程、epoll readiness、eventfd、timerfd、io_uring 文件和目录生命周期、sendfile/splice/send_zc 少拷贝传输、stream 和 datagram vectored 操作、io_uring TCP accept/connect/stream 与 UDP datagram 操作、read/write/TCP/UDP helper 与 adapter、重复 fd wait、HUP/EOF、非法 fd、worker 误用和 pending IO shutdown。
 
 重点覆盖：
 

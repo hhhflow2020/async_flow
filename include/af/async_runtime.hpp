@@ -34,6 +34,7 @@
 
 #if defined(__linux__)
 #include <algorithm>
+#include <linux/openat2.h>
 #include <poll.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
@@ -43,6 +44,7 @@
 #endif
 
 #if !defined(__linux__)
+struct open_how;
 struct statx;
 #endif
 
@@ -1342,6 +1344,37 @@ public:
             result);
     }
 
+    [[nodiscard]] static bool io_submit_openat2(
+        Thread thread,
+        int dir_fd,
+        const char* path,
+        const struct open_how* how,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || path == nullptr || how == nullptr) {
+            if (result != nullptr) {
+                result->fd = dir_fd;
+                result->events = io_error;
+                result->error = EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = dir_fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_openat2(
+            dir_fd,
+            path,
+            how,
+            task,
+            result);
+    }
+
     [[nodiscard]] static bool io_submit_close(
         Thread thread,
         int fd,
@@ -1523,6 +1556,123 @@ public:
             flags,
             task,
             result);
+    }
+
+    [[nodiscard]] static bool io_submit_mkdirat(
+        Thread thread,
+        int dir_fd,
+        const char* path,
+        std::uint32_t mode,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || path == nullptr) {
+            if (result != nullptr) {
+                result->fd = dir_fd;
+                result->events = io_error;
+                result->error = EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = dir_fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_mkdirat(dir_fd, path, mode, task, result);
+    }
+
+    [[nodiscard]] static bool io_submit_symlinkat(
+        Thread thread,
+        const char* target,
+        int new_dir_fd,
+        const char* link_path,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || target == nullptr || link_path == nullptr) {
+            if (result != nullptr) {
+                result->fd = new_dir_fd;
+                result->events = io_error;
+                result->error = EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = new_dir_fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_symlinkat(
+            target,
+            new_dir_fd,
+            link_path,
+            task,
+            result);
+    }
+
+    [[nodiscard]] static bool io_submit_linkat(
+        Thread thread,
+        int old_dir_fd,
+        const char* old_path,
+        int new_dir_fd,
+        const char* new_path,
+        std::uint32_t flags,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || old_path == nullptr || new_path == nullptr) {
+            if (result != nullptr) {
+                result->fd = old_dir_fd;
+                result->events = io_error;
+                result->error = EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = old_dir_fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_linkat(
+            old_dir_fd,
+            old_path,
+            new_dir_fd,
+            new_path,
+            flags,
+            task,
+            result);
+    }
+
+    [[nodiscard]] static bool io_submit_ftruncate(
+        Thread thread,
+        int fd,
+        std::uint64_t length,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || fd < 0) {
+            if (result != nullptr) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = fd < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_ftruncate(fd, length, task, result);
     }
 
     [[nodiscard]] static bool io_submit_splice(
@@ -4199,6 +4349,37 @@ private:
 #endif
         }
 
+        [[nodiscard]] bool submit_io_uring_openat2(
+            int dir_fd,
+            const char* path,
+            const struct open_how* how,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_fast_sqe(
+                io_uring_op_openat2,
+                dir_fd,
+                io_readable,
+                task,
+                result,
+                [&](io_uring_sqe& sqe) noexcept {
+                    sqe.fd = dir_fd;
+                    sqe.addr = reinterpret_cast<std::uint64_t>(path);
+                    sqe.len = static_cast<unsigned>(sizeof(*how));
+                    sqe.off = reinterpret_cast<std::uint64_t>(how);
+                });
+#else
+            static_cast<void>(dir_fd);
+            static_cast<void>(path);
+            static_cast<void>(how);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
         [[nodiscard]] bool submit_io_uring_close(
             int fd,
             Task* task,
@@ -4260,16 +4441,19 @@ private:
             Task* task,
             IoResult* result) noexcept {
 #if defined(__linux__)
-            return submit_io_uring_op(
+            return submit_io_uring_fast_sqe(
                 IORING_OP_STATX,
                 dir_fd,
-                const_cast<char*>(path),
-                mask,
-                reinterpret_cast<std::uint64_t>(output),
-                static_cast<std::uint32_t>(flags),
                 io_readable,
                 task,
-                result);
+                result,
+                [&](io_uring_sqe& sqe) noexcept {
+                    sqe.fd = dir_fd;
+                    sqe.addr = reinterpret_cast<std::uint64_t>(path);
+                    sqe.len = mask;
+                    sqe.off = reinterpret_cast<std::uint64_t>(output);
+                    sqe.statx_flags = static_cast<std::uint32_t>(flags);
+                });
 #else
             static_cast<void>(dir_fd);
             static_cast<void>(path);
@@ -4292,26 +4476,18 @@ private:
             Task* task,
             IoResult* result) noexcept {
 #if defined(__linux__)
-            return submit_io_uring_op(
+            return submit_io_uring_fast_sqe(
                 IORING_OP_FALLOCATE,
                 fd,
-                nullptr,
-                static_cast<std::uint32_t>(mode),
-                offset,
-                0,
                 io_writable,
                 task,
                 result,
-                nullptr,
-                0,
-                nullptr,
-                nullptr,
-                0,
-                nullptr,
-                nullptr,
-                nullptr,
-                0,
-                length);
+                [&](io_uring_sqe& sqe) noexcept {
+                    sqe.fd = fd;
+                    sqe.addr = length;
+                    sqe.len = static_cast<unsigned>(mode);
+                    sqe.off = offset;
+                });
 #else
             static_cast<void>(fd);
             static_cast<void>(mode);
@@ -4334,16 +4510,19 @@ private:
             Task* task,
             IoResult* result) noexcept {
 #if defined(__linux__)
-            return submit_io_uring_op(
+            return submit_io_uring_fast_sqe(
                 IORING_OP_RENAMEAT,
                 old_dir_fd,
-                const_cast<char*>(old_path),
-                static_cast<std::uint32_t>(new_dir_fd),
-                reinterpret_cast<std::uint64_t>(new_path),
-                flags,
                 io_writable,
                 task,
-                result);
+                result,
+                [&](io_uring_sqe& sqe) noexcept {
+                    sqe.fd = old_dir_fd;
+                    sqe.addr = reinterpret_cast<std::uint64_t>(old_path);
+                    sqe.len = static_cast<unsigned>(new_dir_fd);
+                    sqe.off = reinterpret_cast<std::uint64_t>(new_path);
+                    sqe.rename_flags = flags;
+                });
 #else
             static_cast<void>(old_dir_fd);
             static_cast<void>(old_path);
@@ -4365,20 +4544,144 @@ private:
             Task* task,
             IoResult* result) noexcept {
 #if defined(__linux__)
-            return submit_io_uring_op(
+            return submit_io_uring_fast_sqe(
                 IORING_OP_UNLINKAT,
                 dir_fd,
-                const_cast<char*>(path),
-                0,
-                0,
-                static_cast<std::uint32_t>(flags),
                 io_writable,
                 task,
-                result);
+                result,
+                [&](io_uring_sqe& sqe) noexcept {
+                    sqe.fd = dir_fd;
+                    sqe.addr = reinterpret_cast<std::uint64_t>(path);
+                    sqe.unlink_flags = static_cast<std::uint32_t>(flags);
+                });
 #else
             static_cast<void>(dir_fd);
             static_cast<void>(path);
             static_cast<void>(flags);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
+        [[nodiscard]] bool submit_io_uring_mkdirat(
+            int dir_fd,
+            const char* path,
+            std::uint32_t mode,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_fast_sqe(
+                io_uring_op_mkdirat,
+                dir_fd,
+                io_writable,
+                task,
+                result,
+                [&](io_uring_sqe& sqe) noexcept {
+                    sqe.fd = dir_fd;
+                    sqe.addr = reinterpret_cast<std::uint64_t>(path);
+                    sqe.len = mode;
+                });
+#else
+            static_cast<void>(dir_fd);
+            static_cast<void>(path);
+            static_cast<void>(mode);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
+        [[nodiscard]] bool submit_io_uring_symlinkat(
+            const char* target,
+            int new_dir_fd,
+            const char* link_path,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_fast_sqe(
+                io_uring_op_symlinkat,
+                new_dir_fd,
+                io_writable,
+                task,
+                result,
+                [&](io_uring_sqe& sqe) noexcept {
+                    sqe.fd = new_dir_fd;
+                    sqe.addr = reinterpret_cast<std::uint64_t>(target);
+                    sqe.off = reinterpret_cast<std::uint64_t>(link_path);
+                });
+#else
+            static_cast<void>(target);
+            static_cast<void>(new_dir_fd);
+            static_cast<void>(link_path);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
+        [[nodiscard]] bool submit_io_uring_linkat(
+            int old_dir_fd,
+            const char* old_path,
+            int new_dir_fd,
+            const char* new_path,
+            std::uint32_t flags,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_fast_sqe(
+                io_uring_op_linkat,
+                old_dir_fd,
+                io_writable,
+                task,
+                result,
+                [&](io_uring_sqe& sqe) noexcept {
+                    sqe.fd = old_dir_fd;
+                    sqe.addr = reinterpret_cast<std::uint64_t>(old_path);
+                    sqe.len = static_cast<unsigned>(new_dir_fd);
+                    sqe.off = reinterpret_cast<std::uint64_t>(new_path);
+                    sqe.rw_flags = flags;
+                });
+#else
+            static_cast<void>(old_dir_fd);
+            static_cast<void>(old_path);
+            static_cast<void>(new_dir_fd);
+            static_cast<void>(new_path);
+            static_cast<void>(flags);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
+        [[nodiscard]] bool submit_io_uring_ftruncate(
+            int fd,
+            std::uint64_t length,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_fast_sqe(
+                io_uring_op_ftruncate,
+                fd,
+                io_writable,
+                task,
+                result,
+                [&](io_uring_sqe& sqe) noexcept {
+                    sqe.fd = fd;
+                    sqe.off = length;
+                });
+#else
+            static_cast<void>(fd);
+            static_cast<void>(length);
             static_cast<void>(task);
             if (result != nullptr) {
                 result->error = ENOSYS;
@@ -5381,6 +5684,11 @@ private:
         static constexpr std::uint8_t io_uring_op_send_zc = 47U;
         static constexpr std::uint8_t io_uring_op_sendmsg_zc = 48U;
         static constexpr std::uint8_t io_uring_op_socket = 45U;
+        static constexpr std::uint8_t io_uring_op_openat2 = 28U;
+        static constexpr std::uint8_t io_uring_op_mkdirat = 37U;
+        static constexpr std::uint8_t io_uring_op_symlinkat = 38U;
+        static constexpr std::uint8_t io_uring_op_linkat = 39U;
+        static constexpr std::uint8_t io_uring_op_ftruncate = 55U;
 
         enum class IoUringPollSubmitResult : std::uint8_t {
             Submitted,
@@ -5579,6 +5887,96 @@ private:
                 reinterpret_cast<std::uint64_t>(operation));
 
             result->fd = fd;
+            result->events = 0;
+            result->error = 0;
+            result->result = 0;
+            result->completion_token = operation;
+
+            if (io_uring_pending_submissions_ >= io_uring_submit_batch_threshold) {
+                const int submit_error = flush_io_uring_submissions();
+                if (submit_error == 0) {
+                    return true;
+                }
+                result->events = io_error;
+                result->error = submit_error;
+                result->result = -submit_error;
+                fail_io_uring_backend(submit_error, operation);
+                return false;
+            }
+
+            return true;
+        }
+
+        template <typename FillSqe>
+        [[nodiscard]] bool submit_io_uring_fast_sqe(
+            std::uint8_t opcode,
+            int result_fd,
+            std::uint32_t complete_events,
+            Task* task,
+            IoResult* result,
+            FillSqe&& fill_sqe) noexcept {
+            AF_ASSERT(current_thread_index_ == index_ && "io_uring submit must be called from its IO thread");
+            if (result != nullptr) {
+                result->completion_token = nullptr;
+            }
+            if (current_thread_index_ != index_ || task == nullptr || result == nullptr) {
+                if (result != nullptr) {
+                    result->fd = result_fd;
+                    result->events = io_error;
+                    result->error = EINVAL;
+                }
+                return false;
+            }
+            if (io_uring_fd_ < 0) {
+                result->fd = result_fd;
+                result->events = io_error;
+                result->error = ENOSYS;
+                return false;
+            }
+
+            IoUringOperation* operation = nullptr;
+            try {
+                operation = io_uring_op_pool_.create();
+            } catch (...) {
+                result->fd = result_fd;
+                result->events = io_error;
+                result->error = ENOMEM;
+                return false;
+            }
+
+            operation->task = task;
+            operation->result = result;
+            operation->complete_events = complete_events;
+            operation->direct_file_index = -1;
+            operation->opcode = opcode;
+            operation->cancel_requested = false;
+            operation->multishot = false;
+            operation->poll_wait = false;
+            operation->zero_copy_send = false;
+            operation->zero_copy_primary_done = false;
+            operation->zero_copy_notification_done = false;
+            operation->msg = nullptr;
+            operation->socket_address = nullptr;
+            operation->wait_registration = nullptr;
+
+            int reserve_error = 0;
+            io_uring_sqe* sqe = reserve_io_uring_sqe(reserve_error);
+            if (sqe == nullptr) {
+                io_uring_op_pool_.destroy(operation);
+                result->fd = result_fd;
+                result->events = io_error;
+                result->error = reserve_error == 0 ? EBUSY : reserve_error;
+                return false;
+            }
+
+            track_io_uring_operation(operation);
+
+            *sqe = io_uring_sqe{};
+            sqe->opcode = opcode;
+            sqe->user_data = reinterpret_cast<std::uint64_t>(operation);
+            fill_sqe(*sqe);
+
+            result->fd = result_fd;
             result->events = 0;
             result->error = 0;
             result->result = 0;
@@ -6873,6 +7271,7 @@ private:
         [[nodiscard]] static bool io_uring_result_is_fd(std::uint8_t opcode) noexcept {
             return opcode == IORING_OP_OPENAT ||
                    opcode == IORING_OP_ACCEPT ||
+                   opcode == io_uring_op_openat2 ||
                    opcode == io_uring_op_socket;
         }
 

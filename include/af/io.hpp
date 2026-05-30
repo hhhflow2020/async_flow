@@ -5416,3 +5416,5 @@ public:
 };
 
 } // namespace af
+
+#include "af/io_filesystem.hpp"

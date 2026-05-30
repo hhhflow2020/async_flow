@@ -19,6 +19,7 @@
 
 #if defined(__linux__)
 #include <fcntl.h>
+#include <linux/openat2.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -3587,6 +3588,297 @@ private:
     std::atomic<std::uint64_t>* observed_size_{nullptr};
 };
 
+class UringFilesystemOpsTask final : public UringIoTaskBase {
+public:
+    explicit UringFilesystemOpsTask(UringIoTaskBase::FactoryToken token)
+        : UringIoTaskBase(token) {}
+
+    bool do_it(
+        const char* dir_path,
+        const char* file_path,
+        const char* hardlink_path,
+        const char* symlink_path,
+        std::atomic<int>* completed,
+        std::atomic<int>* error,
+        std::atomic<std::uint64_t>* observed_size) {
+        dir_path_ = dir_path;
+        file_path_ = file_path;
+        hardlink_path_ = hardlink_path;
+        symlink_path_ = symlink_path;
+        completed_ = completed;
+        error_ = error;
+        observed_size_ = observed_size;
+        how_.flags = O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC;
+        how_.mode = 0600U;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Mkdir,
+        OpenAt2,
+        Write,
+        Ftruncate,
+        Fsync,
+        Statx,
+        Close,
+        Link,
+        Symlink,
+        UnlinkFile,
+        UnlinkHardlink,
+        UnlinkSymlink,
+        Rmdir,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Mkdir:
+            return mkdir_dir();
+
+        case State::OpenAt2:
+            return open_file();
+
+        case State::Write:
+            return write_payload();
+
+        case State::Ftruncate:
+            return truncate_file();
+
+        case State::Fsync:
+            return fsync_file();
+
+        case State::Statx:
+            return stat_file();
+
+        case State::Close:
+            return close_file();
+
+        case State::Link:
+            return link_file();
+
+        case State::Symlink:
+            return symlink_file();
+
+        case State::UnlinkFile:
+            return unlink_file(file_path_, State::UnlinkHardlink, 0);
+
+        case State::UnlinkHardlink:
+            return unlink_file(hardlink_path_, State::UnlinkSymlink, 0);
+
+        case State::UnlinkSymlink:
+            return unlink_file(symlink_path_, State::Rmdir, 0);
+
+        case State::Rmdir:
+            return unlink_file(dir_path_, State::Rmdir, AT_REMOVEDIR, true);
+        }
+        return complete(EIO);
+    }
+
+    af::TaskResult mkdir_dir() {
+        const af::IoStatus status = af::io_mkdirat(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            dir_path_,
+            0700U,
+            mkdir_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready()) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        state_ = State::OpenAt2;
+        return again();
+    }
+
+    af::TaskResult open_file() {
+        int fd = -1;
+        const af::IoStatus status = af::io_openat2(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            file_path_,
+            &how_,
+            &fd,
+            open_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || fd < 0) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        owned_.reset(fd);
+        file_.reset(IoTestThread::IO_0, owned_.get());
+        state_ = State::Write;
+        return again();
+    }
+
+    af::TaskResult write_payload() {
+        const af::IoStatus status = file_.write_at(*this, payload_, sizeof(payload_), 0, write_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(payload_)) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        state_ = State::Ftruncate;
+        return again();
+    }
+
+    af::TaskResult truncate_file() {
+        const af::IoStatus status =
+            af::io_ftruncate(*this, IoTestThread::IO_0, owned_.get(), 1, truncate_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready()) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        state_ = State::Fsync;
+        return again();
+    }
+
+    af::TaskResult fsync_file() {
+        const af::IoStatus status = file_.fsync(*this, fsync_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready()) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        state_ = State::Statx;
+        return again();
+    }
+
+    af::TaskResult stat_file() {
+        const af::IoStatus status = af::io_statx(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            file_path_,
+            0,
+            STATX_SIZE,
+            &stat_,
+            stat_state_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || stat_.stx_size != 1U) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        observed_size_->store(stat_.stx_size, std::memory_order_release);
+        state_ = State::Close;
+        return again();
+    }
+
+    af::TaskResult close_file() {
+        const af::IoStatus status = af::io_close(*this, IoTestThread::IO_0, owned_, close_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || owned_.get() != -1) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        state_ = State::Link;
+        return again();
+    }
+
+    af::TaskResult link_file() {
+        const af::IoStatus status = af::io_linkat(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            file_path_,
+            AT_FDCWD,
+            hardlink_path_,
+            0,
+            link_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready()) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        state_ = State::Symlink;
+        return again();
+    }
+
+    af::TaskResult symlink_file() {
+        const af::IoStatus status = af::io_symlinkat(
+            *this,
+            IoTestThread::IO_0,
+            file_path_,
+            AT_FDCWD,
+            symlink_path_,
+            symlink_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready()) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        state_ = State::UnlinkFile;
+        return again();
+    }
+
+    af::TaskResult unlink_file(
+        const char* path,
+        State next_state,
+        int flags,
+        bool final_state = false) {
+        const af::IoStatus status = af::io_unlinkat(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            path,
+            flags,
+            unlink_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready()) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        if (final_state) {
+            return complete(0);
+        }
+        state_ = next_state;
+        unlink_.reset();
+        return again();
+    }
+
+    af::TaskResult complete(int error) {
+        error_->store(error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    State state_{State::Mkdir};
+    const char* dir_path_{nullptr};
+    const char* file_path_{nullptr};
+    const char* hardlink_path_{nullptr};
+    const char* symlink_path_{nullptr};
+    struct open_how how_{};
+    af::UniqueFd owned_{};
+    af::IoFile<IoTestThread> file_{};
+    char payload_[2]{'F', 'S'};
+    struct statx stat_{};
+    af::IoOpState mkdir_{};
+    af::IoOpState open_{};
+    af::IoOpState write_{};
+    af::IoOpState truncate_{};
+    af::IoOpState fsync_{};
+    af::IoOpState stat_state_{};
+    af::IoOpState close_{};
+    af::IoOpState link_{};
+    af::IoOpState symlink_{};
+    af::IoOpState unlink_{};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* error_{nullptr};
+    std::atomic<std::uint64_t>* observed_size_{nullptr};
+};
+
 class UringStreamFallbackTask final : public UringIoTaskBase {
 public:
     explicit UringStreamFallbackTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
@@ -5491,13 +5783,29 @@ private:
         af::IoOpState fallocate_no_uring{};
         af::IoOpState rename_no_uring{};
         af::IoOpState unlink_no_uring{};
+        af::IoOpState openat2_no_uring{};
+        af::IoOpState mkdir_no_uring{};
+        af::IoOpState symlink_no_uring{};
+        af::IoOpState link_no_uring{};
+        af::IoOpState ftruncate_no_uring{};
         af::IoOpState stat_null_path{};
         af::IoOpState stat_null_output{};
         af::IoOpState fallocate_bad_fd{};
         af::IoOpState rename_null_old{};
         af::IoOpState rename_null_new{};
         af::IoOpState unlink_null_path{};
+        af::IoOpState openat2_null_path{};
+        af::IoOpState openat2_null_how{};
+        af::IoOpState openat2_null_output{};
+        af::IoOpState mkdir_null_path{};
+        af::IoOpState symlink_null_target{};
+        af::IoOpState symlink_null_path{};
+        af::IoOpState link_null_old{};
+        af::IoOpState link_null_new{};
+        af::IoOpState ftruncate_bad_fd{};
         struct statx stat{};
+        struct open_how how{};
+        how.flags = O_RDONLY | O_CLOEXEC;
         int opened = -1;
         const af::IoStatus null_path_status = af::io_openat(
             *this,
@@ -5565,6 +5873,39 @@ private:
             "/tmp/asyncflow-openat-boundary",
             0,
             unlink_no_uring);
+        const af::IoStatus openat2_no_uring_status = af::io_openat2(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            "/tmp/asyncflow-openat2-boundary",
+            &how,
+            &opened,
+            openat2_no_uring);
+        const af::IoStatus mkdir_no_uring_status = af::io_mkdirat(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            "/tmp/asyncflow-mkdirat-boundary",
+            0700U,
+            mkdir_no_uring);
+        const af::IoStatus symlink_no_uring_status = af::io_symlinkat(
+            *this,
+            IoTestThread::IO_0,
+            "/tmp/asyncflow-symlinkat-target",
+            AT_FDCWD,
+            "/tmp/asyncflow-symlinkat-boundary",
+            symlink_no_uring);
+        const af::IoStatus link_no_uring_status = af::io_linkat(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            "/tmp/asyncflow-linkat-old",
+            AT_FDCWD,
+            "/tmp/asyncflow-linkat-new",
+            0,
+            link_no_uring);
+        const af::IoStatus ftruncate_no_uring_status =
+            af::io_ftruncate(*this, IoTestThread::IO_0, event.get(), 0, ftruncate_no_uring);
         const af::IoStatus stat_null_path_status = af::io_statx(
             *this,
             IoTestThread::IO_0,
@@ -5616,6 +5957,71 @@ private:
             nullptr,
             0,
             unlink_null_path);
+        const af::IoStatus openat2_null_path_status = af::io_openat2(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            nullptr,
+            &how,
+            &opened,
+            openat2_null_path);
+        const af::IoStatus openat2_null_how_status = af::io_openat2(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            "/tmp/asyncflow-openat2-boundary",
+            nullptr,
+            &opened,
+            openat2_null_how);
+        const af::IoStatus openat2_null_output_status = af::io_openat2(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            "/tmp/asyncflow-openat2-boundary",
+            &how,
+            nullptr,
+            openat2_null_output);
+        const af::IoStatus mkdir_null_path_status = af::io_mkdirat(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            nullptr,
+            0700U,
+            mkdir_null_path);
+        const af::IoStatus symlink_null_target_status = af::io_symlinkat(
+            *this,
+            IoTestThread::IO_0,
+            nullptr,
+            AT_FDCWD,
+            "/tmp/asyncflow-symlinkat-boundary",
+            symlink_null_target);
+        const af::IoStatus symlink_null_path_status = af::io_symlinkat(
+            *this,
+            IoTestThread::IO_0,
+            "/tmp/asyncflow-symlinkat-target",
+            AT_FDCWD,
+            nullptr,
+            symlink_null_path);
+        const af::IoStatus link_null_old_status = af::io_linkat(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            nullptr,
+            AT_FDCWD,
+            "/tmp/asyncflow-linkat-new",
+            0,
+            link_null_old);
+        const af::IoStatus link_null_new_status = af::io_linkat(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            "/tmp/asyncflow-linkat-old",
+            AT_FDCWD,
+            nullptr,
+            0,
+            link_null_new);
+        const af::IoStatus ftruncate_bad_fd_status =
+            af::io_ftruncate(*this, IoTestThread::IO_0, -1, 0, ftruncate_bad_fd);
         if (!null_path_status.failed() || null_path_status.error != EINVAL ||
             !null_output_status.failed() || null_output_status.error != EINVAL ||
             !no_uring_status.failed() || no_uring_status.error != ENOSYS ||
@@ -5625,12 +6031,26 @@ private:
             !fallocate_no_uring_status.failed() || fallocate_no_uring_status.error != ENOSYS ||
             !rename_no_uring_status.failed() || rename_no_uring_status.error != ENOSYS ||
             !unlink_no_uring_status.failed() || unlink_no_uring_status.error != ENOSYS ||
+            !openat2_no_uring_status.failed() || openat2_no_uring_status.error != ENOSYS ||
+            !mkdir_no_uring_status.failed() || mkdir_no_uring_status.error != ENOSYS ||
+            !symlink_no_uring_status.failed() || symlink_no_uring_status.error != ENOSYS ||
+            !link_no_uring_status.failed() || link_no_uring_status.error != ENOSYS ||
+            !ftruncate_no_uring_status.failed() || ftruncate_no_uring_status.error != ENOSYS ||
             !stat_null_path_status.failed() || stat_null_path_status.error != EINVAL ||
             !stat_null_output_status.failed() || stat_null_output_status.error != EINVAL ||
             !fallocate_bad_fd_status.failed() || fallocate_bad_fd_status.error != EBADF ||
             !rename_null_old_status.failed() || rename_null_old_status.error != EINVAL ||
             !rename_null_new_status.failed() || rename_null_new_status.error != EINVAL ||
             !unlink_null_path_status.failed() || unlink_null_path_status.error != EINVAL ||
+            !openat2_null_path_status.failed() || openat2_null_path_status.error != EINVAL ||
+            !openat2_null_how_status.failed() || openat2_null_how_status.error != EINVAL ||
+            !openat2_null_output_status.failed() || openat2_null_output_status.error != EINVAL ||
+            !mkdir_null_path_status.failed() || mkdir_null_path_status.error != EINVAL ||
+            !symlink_null_target_status.failed() || symlink_null_target_status.error != EINVAL ||
+            !symlink_null_path_status.failed() || symlink_null_path_status.error != EINVAL ||
+            !link_null_old_status.failed() || link_null_old_status.error != EINVAL ||
+            !link_null_new_status.failed() || link_null_new_status.error != EINVAL ||
+            !ftruncate_bad_fd_status.failed() || ftruncate_bad_fd_status.error != EBADF ||
             opened != -1) {
             return failed();
         }
@@ -7134,7 +7554,7 @@ TEST_F(UringIoRuntimeFixture, IoUringPollReadinessCancelPendingSendfileWait) {
         &cancel_error));
     ASSERT_TRUE(wait_until_at_least(cancel_completed, 1));
     EXPECT_EQ(cancel_result.load(std::memory_order_acquire), 1);
-    EXPECT_EQ(cancel_error.load(std::memory_order_acquire), 0);
+    EXPECT_EQ(cancel_error.load(std::memory_order_acquire), ECANCELED);
 
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(error.load(std::memory_order_acquire), ECANCELED);
@@ -8637,6 +9057,72 @@ TEST_F(UringIoRuntimeFixture, IoUringFileLifecycleRunsOnIoThread) {
 
     static_cast<void>(::unlink(path));
     static_cast<void>(::unlink(renamed_path));
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringFilesystemOpsRunOnIoThread) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io_uring backend unavailable";
+    }
+
+    char dir_path[] = "/tmp/asyncflow-fsops-XXXXXX";
+    ASSERT_NE(::mkdtemp(dir_path), nullptr);
+    ASSERT_EQ(::rmdir(dir_path), 0);
+
+    char file_path[sizeof(dir_path) + 8]{};
+    char hardlink_path[sizeof(dir_path) + 12]{};
+    char symlink_path[sizeof(dir_path) + 12]{};
+    ASSERT_GT(std::snprintf(file_path, sizeof(file_path), "%s/file", dir_path), 0);
+    ASSERT_GT(std::snprintf(hardlink_path, sizeof(hardlink_path), "%s/hard", dir_path), 0);
+    ASSERT_GT(std::snprintf(symlink_path, sizeof(symlink_path), "%s/sym", dir_path), 0);
+    static_cast<void>(::unlink(file_path));
+    static_cast<void>(::unlink(hardlink_path));
+    static_cast<void>(::unlink(symlink_path));
+    static_cast<void>(::rmdir(dir_path));
+
+    std::atomic<int> completed{0};
+    std::atomic<int> error{0};
+    std::atomic<std::uint64_t> observed_size{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringFilesystemOpsTask>(
+        dir_path,
+        file_path,
+        hardlink_path,
+        symlink_path,
+        &completed,
+        &error,
+        &observed_size));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+
+    const int task_error = error.load(std::memory_order_acquire);
+    if (task_error == EINVAL || task_error == EOPNOTSUPP || task_error == ENOSYS) {
+        static_cast<void>(::unlink(file_path));
+        static_cast<void>(::unlink(hardlink_path));
+        static_cast<void>(::unlink(symlink_path));
+        static_cast<void>(::rmdir(dir_path));
+        GTEST_SKIP() << "kernel does not support one of the requested io_uring fs opcodes";
+    }
+
+    EXPECT_EQ(task_error, 0);
+    EXPECT_EQ(observed_size.load(std::memory_order_acquire), std::uint64_t{1});
+    EXPECT_EQ(::access(file_path, F_OK), -1);
+    EXPECT_EQ(errno, ENOENT);
+    errno = 0;
+    EXPECT_EQ(::access(hardlink_path, F_OK), -1);
+    EXPECT_EQ(errno, ENOENT);
+    errno = 0;
+    EXPECT_EQ(::access(symlink_path, F_OK), -1);
+    EXPECT_EQ(errno, ENOENT);
+    errno = 0;
+    EXPECT_EQ(::access(dir_path, F_OK), -1);
+    EXPECT_EQ(errno, ENOENT);
+
+    static_cast<void>(::unlink(file_path));
+    static_cast<void>(::unlink(hardlink_path));
+    static_cast<void>(::unlink(symlink_path));
+    static_cast<void>(::rmdir(dir_path));
 #else
     GTEST_SKIP() << "io_uring backend is Linux-only";
 #endif
