@@ -51,6 +51,9 @@ if(ASYNCFLOW_BUILD_EXAMPLES)
     add_executable(asyncflow_io_event_example examples/io_event.cpp)
     target_link_libraries(asyncflow_io_event_example PRIVATE AsyncFlow::AsyncFlow)
 
+    add_executable(asyncflow_io_sendfile_static_example examples/io_sendfile_static.cpp)
+    target_link_libraries(asyncflow_io_sendfile_static_example PRIVATE AsyncFlow::AsyncFlow)
+
     add_executable(asyncflow_io_adapters_example examples/io_adapters.cpp)
     target_link_libraries(asyncflow_io_adapters_example PRIVATE AsyncFlow::AsyncFlow)
 

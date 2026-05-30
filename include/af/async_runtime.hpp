@@ -899,6 +899,43 @@ public:
             result);
     }
 
+    [[nodiscard]] static bool io_submit_splice(
+        Thread thread,
+        int in_fd,
+        std::int64_t off_in,
+        int out_fd,
+        std::int64_t off_out,
+        std::size_t count,
+        unsigned int flags,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || in_fd < 0 || out_fd < 0) {
+            if (result != nullptr) {
+                result->fd = out_fd;
+                result->events = io_error;
+                result->error = in_fd < 0 || out_fd < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = out_fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_splice(
+            in_fd,
+            off_in,
+            out_fd,
+            off_out,
+            count,
+            flags,
+            task,
+            result);
+    }
+
     [[nodiscard]] static bool io_submit_recv(
         Thread thread,
         int fd,
@@ -2056,6 +2093,52 @@ private:
 #endif
         }
 
+        [[nodiscard]] bool submit_io_uring_splice(
+            int in_fd,
+            std::int64_t off_in,
+            int out_fd,
+            std::int64_t off_out,
+            std::size_t count,
+            unsigned int flags,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_SPLICE,
+                out_fd,
+                nullptr,
+                count,
+                static_cast<std::uint64_t>(off_out),
+                flags,
+                io_writable,
+                task,
+                result,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                nullptr,
+                0,
+                static_cast<std::uint64_t>(off_in),
+                in_fd);
+#else
+            static_cast<void>(in_fd);
+            static_cast<void>(off_in);
+            static_cast<void>(out_fd);
+            static_cast<void>(off_out);
+            static_cast<void>(count);
+            static_cast<void>(flags);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
         [[nodiscard]] bool submit_io_uring_recv(
             int fd,
             void* data,
@@ -2487,7 +2570,8 @@ private:
             socklen_t* socket_address_size_out = nullptr,
             const iovec* message_iov = nullptr,
             std::size_t message_iov_count = 0,
-            std::uint64_t extra = 0) noexcept {
+            std::uint64_t extra = 0,
+            std::int32_t extra_fd = -1) noexcept {
             AF_ASSERT(current_thread_index_ == index_ && "io_uring submit must be called from its IO thread");
             if (current_thread_index_ != index_ || task == nullptr || result == nullptr) {
                 if (result != nullptr) {
@@ -2510,6 +2594,7 @@ private:
             }
             const bool close_op = opcode == IORING_OP_CLOSE;
             const bool fallocate_op = opcode == IORING_OP_FALLOCATE;
+            const bool splice_op = opcode == IORING_OP_SPLICE;
             const bool message_op = opcode == IORING_OP_RECVMSG || opcode == IORING_OP_SENDMSG;
             const bool accept_op = opcode == IORING_OP_ACCEPT;
             const bool connect_op = opcode == IORING_OP_CONNECT;
@@ -2519,7 +2604,7 @@ private:
                 accept_op && socket_address_out != nullptr && socket_address_size_out != nullptr;
             const bool needs_socket_address = connect_op || accept_address_op;
             const bool data_optional_op =
-                opcode == IORING_OP_FSYNC || close_op || fallocate_op;
+                opcode == IORING_OP_FSYNC || close_op || fallocate_op || splice_op;
             if (!data_optional_op && !address_op && data == nullptr && !message_iov_op) {
                 result->fd = fd;
                 result->events = io_error;
@@ -2644,6 +2729,12 @@ private:
                 sqe->addr = extra;
                 sqe->len = static_cast<unsigned>(size);
                 sqe->off = offset;
+            } else if (splice_op) {
+                sqe->addr = extra;
+                sqe->len = static_cast<unsigned>(size);
+                sqe->off = offset;
+                sqe->splice_fd_in = extra_fd;
+                sqe->splice_flags = op_flags;
             } else if (openat_op) {
                 sqe->addr = reinterpret_cast<std::uint64_t>(data);
                 sqe->len = static_cast<unsigned>(size);

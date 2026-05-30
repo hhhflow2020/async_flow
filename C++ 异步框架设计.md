@@ -517,10 +517,11 @@ auto sharded = af::split_change_batch(batch, shard_count);
 - Linux IO executor 使用 epoll + eventfd，任务先调度到指定 IO 线程后再注册 fd readiness，避免所有 IO 都通过 MPMC 队列跨线程搬运。
 - `ThreadKind::IoUring` 优先初始化 io_uring，并通过 eventfd 唤醒 completion；如果 io_uring 不可用，线程仍保留 epoll readiness fallback。
 - `af::io_openat()` / `io_close()` / `io_statx()` / `io_fallocate()` / `io_renameat()` / `io_unlinkat()` 和 `af::IoFile::read_at()` / `write_at()` / `readv_at()` / `writev_at()` / `fsync()` 通过 io_uring 提交真正的文件生命周期操作，completion 后恢复原 task。
+- `af::io_sendfile_some()` 通过 Linux `sendfile(2)` 做文件到 socket 的内核态搬运，遇到 socket buffer 满时等待 out fd writable；`af::io_splice_some()` 在 `ThreadKind::IoUring` 优先提交 `IORING_OP_SPLICE`，不可用时退回 `splice(2)` + readiness。
 - `af::TcpListener::accept_some()` / `af::TcpStream::connect()` / `recv_some()` / `send_some()` / `recvv_some()` / `sendv_some()` 在 `ThreadKind::IoUring` 线程上优先提交 `IORING_OP_ACCEPT` / `IORING_OP_CONNECT` / `IORING_OP_RECV` / `IORING_OP_SEND` 或 `IORING_OP_RECVMSG` / `IORING_OP_SENDMSG`；`af::UdpSocket::recv_from_some()` / `send_to_some()` / `recvv_from_some()` / `sendv_to_some()` 优先提交 `IORING_OP_RECVMSG` / `IORING_OP_SENDMSG`，ring 不可用或 would-block 时退回 epoll readiness。
 - `af::IoEvent` 使用 Linux `eventfd` readiness，适合业务侧异步通知、轻量计数器和跨组件唤醒，`ThreadKind::IoUring` 线程也可复用 epoll fallback。
 - `af::IoTimer` 使用 Linux `timerfd` readiness，适合超时、重试、心跳和连接保活，`ThreadKind::IoUring` 线程也可复用 epoll fallback。
-- `af::IoFile` / `af::TcpListener` / `af::TcpStream` / `af::UdpSocket` / `af::IoEvent` / `af::IoTimer` 仅保存 `thread + fd`，内联转发到 IO helper，不拥有 fd、不分配堆内存、不增加额外分支表。
+- `af::IoFile` / `af::TcpListener` / `af::TcpStream` / `af::UdpSocket` / `af::IoEvent` / `af::IoTimer` 仅保存 `thread + fd`，内联转发到 IO helper，不拥有 fd、不分配堆内存、不增加额外分支表；`af::TcpStream::sendfile_some()` 只是 thin adapter，不接管文件 fd 或 socket fd 所有权。
 
 仍需注意：
 
@@ -736,7 +737,23 @@ async::parallel_shards_ordered(
 ./build-conan/build/Release/asyncflow_io_uring_file_lifecycle_example
 ```
 
-### 11.10 io_uring_datagram.cpp：UDP io_uring 业务模板
+### 11.10 io_sendfile_static.cpp：TCP 静态文件少拷贝发送模板
+
+文件：`examples/io_sendfile_static.cpp`
+
+该示例展示：
+
+- `af::TcpStream::sendfile_some()` 在指定 IO 线程上通过 `sendfile(2)` 把文件内容发送到 TCP peer。
+- sendfile offset 保存为 task 成员；offset 为 `nullptr` 时使用文件当前偏移，业务需要自己保证文件 offset 正确。
+- socket buffer 满时 helper 返回 pending，runtime 等待 out fd writable 后恢复同一个 task 继续推进。
+
+运行：
+
+```sh
+./build-conan/build/Release/asyncflow_io_sendfile_static_example
+```
+
+### 11.11 io_uring_datagram.cpp：UDP io_uring 业务模板
 
 文件：`examples/io_uring_datagram.cpp`
 
@@ -752,7 +769,7 @@ async::parallel_shards_ordered(
 ./build-conan/build/Release/asyncflow_io_uring_datagram_example
 ```
 
-### 11.11 io_tcp_connect_accept.cpp：TCP accept/connect 业务模板
+### 11.12 io_tcp_connect_accept.cpp：TCP accept/connect 业务模板
 
 文件：`examples/io_tcp_connect_accept.cpp`
 
@@ -768,7 +785,7 @@ async::parallel_shards_ordered(
 ./build-conan/build/Release/asyncflow_io_tcp_connect_accept_example
 ```
 
-### 11.12 io_vectored.cpp：scatter/gather stream/datagram 业务模板
+### 11.13 io_vectored.cpp：scatter/gather stream/datagram 业务模板
 
 文件：`examples/io_vectored.cpp`
 
@@ -784,7 +801,7 @@ async::parallel_shards_ordered(
 ./build-conan/build/Release/asyncflow_io_vectored_example
 ```
 
-### 11.13 io_timer.cpp：timerfd 异步定时器业务模板
+### 11.14 io_timer.cpp：timerfd 异步定时器业务模板
 
 文件：`examples/io_timer.cpp`
 
@@ -800,7 +817,7 @@ async::parallel_shards_ordered(
 ./build-conan/build/Release/asyncflow_io_timer_example
 ```
 
-### 11.14 io_event.cpp：eventfd 异步通知业务模板
+### 11.15 io_event.cpp：eventfd 异步通知业务模板
 
 文件：`examples/io_event.cpp`
 
@@ -826,7 +843,7 @@ async::parallel_shards_ordered(
 - `tests/runtime_parallel_tests.cpp`：parallel shards、失败汇总、有序 batch、ordered start 边界、retryable ordered apply。
 - `tests/runtime_stress_tests.cpp`：高并发 init/shutdown/start_task stress，可配合 TSAN 拉长运行。
 - `tests/utility_tests.cpp`：SPSC/MPSC/MPMC 队列、对象池、分片工具、CRUD helper、BatchSequencer、ordered retry/skip policy。
-- `tests/runtime_io_tests.cpp`：IO 线程、epoll readiness、eventfd、timerfd、io_uring 文件生命周期、stream 和 datagram vectored 操作、io_uring TCP accept/connect/stream 与 UDP datagram 操作、read/write/TCP/UDP helper 与 adapter、重复 fd wait、HUP/EOF、非法 fd、worker 误用和 pending IO shutdown。
+- `tests/runtime_io_tests.cpp`：IO 线程、epoll readiness、eventfd、timerfd、io_uring 文件生命周期、sendfile/splice 少拷贝传输、stream 和 datagram vectored 操作、io_uring TCP accept/connect/stream 与 UDP datagram 操作、read/write/TCP/UDP helper 与 adapter、重复 fd wait、HUP/EOF、非法 fd、worker 误用和 pending IO shutdown。
 
 重点覆盖：
 

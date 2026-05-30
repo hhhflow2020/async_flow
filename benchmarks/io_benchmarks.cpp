@@ -207,6 +207,19 @@ struct FakeRuntime {
         af::IoResult*) noexcept {
         return false;
     }
+
+    static bool io_submit_splice(
+        BenchIoThread,
+        int,
+        std::int64_t,
+        int,
+        std::int64_t,
+        std::size_t,
+        unsigned int,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
 };
 
 struct FakeTask {
@@ -319,6 +332,40 @@ void BM_IoCloseInvalidFd(benchmark::State& state) {
     }
 }
 
+void BM_IoSendfileZeroCount(benchmark::State& state) {
+    FakeTask task;
+    af::IoOpState op;
+    af::IoOffset offset = 0;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(af::io_sendfile_some(
+            task,
+            BenchIoThread::IO_0,
+            -1,
+            -1,
+            &offset,
+            0,
+            op));
+    }
+}
+
+void BM_IoSpliceZeroCount(benchmark::State& state) {
+    FakeTask task;
+    af::IoOpState op;
+    af::IoOffset input_offset = 0;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(af::io_splice_some(
+            task,
+            BenchIoThread::IO_0,
+            -1,
+            &input_offset,
+            -1,
+            nullptr,
+            0,
+            0,
+            op));
+    }
+}
+
 #if !defined(_WIN32)
 void BM_IoFileAdapterZeroIovReadvAt(benchmark::State& state) {
     FakeTask task;
@@ -367,6 +414,8 @@ BENCHMARK(BM_IoEventAdapterNullValue);
 BENCHMARK(BM_IoOpenAtNullPath);
 BENCHMARK(BM_IoStatxNullPath);
 BENCHMARK(BM_IoCloseInvalidFd);
+BENCHMARK(BM_IoSendfileZeroCount);
+BENCHMARK(BM_IoSpliceZeroCount);
 #if !defined(_WIN32)
 BENCHMARK(BM_IoFileAdapterZeroIovReadvAt);
 BENCHMARK(BM_IoStreamAdapterZeroIovSendv);

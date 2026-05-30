@@ -1,8 +1,10 @@
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <thread>
 #include <type_traits>
@@ -761,6 +763,243 @@ private:
     std::atomic<int>* armed_{nullptr};
     std::atomic<int>* completed_{nullptr};
     std::atomic<int>* request_seen_{nullptr};
+};
+
+class ZeroCopyBoundaryTask final : public IoTaskBase {
+public:
+    explicit ZeroCopyBoundaryTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(std::atomic<int>* completed, std::atomic<int>* error) {
+        completed_ = completed;
+        error_ = error;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        af::IoOpState sendfile_zero{};
+        af::IoOpState sendfile_bad{};
+        af::IoOpState splice_zero{};
+        af::IoOpState splice_bad{};
+        af::IoOffset offset = 0;
+
+        const af::IoStatus sendfile_zero_status = af::io_sendfile_some(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            -1,
+            nullptr,
+            0,
+            sendfile_zero);
+        const af::IoStatus sendfile_bad_status = af::io_sendfile_some(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            -1,
+            &offset,
+            1,
+            sendfile_bad);
+        const af::IoStatus splice_zero_status = af::io_splice_some(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            nullptr,
+            -1,
+            nullptr,
+            0,
+            0,
+            splice_zero);
+        const af::IoStatus splice_bad_status = af::io_splice_some(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            nullptr,
+            -1,
+            nullptr,
+            1,
+            0,
+            splice_bad);
+        if (!sendfile_zero_status.ready() || sendfile_zero_status.bytes != 0U ||
+            !splice_zero_status.ready() || splice_zero_status.bytes != 0U ||
+            !sendfile_bad_status.failed() || sendfile_bad_status.error != EBADF ||
+            !splice_bad_status.failed() || splice_bad_status.error != EBADF) {
+            return failed();
+        }
+        error_->store(sendfile_bad_status.error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* error_{nullptr};
+};
+
+class SendfileSocketTask final : public IoTaskBase {
+public:
+    explicit SendfileSocketTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(
+        int socket_fd,
+        int file_fd,
+        std::size_t total_size,
+        std::size_t chunk_size,
+        bool use_null_offset,
+        std::atomic<int>* completed,
+        std::atomic<int>* calls,
+        std::atomic<std::size_t>* bytes_sent) {
+        stream_.reset(IoTestThread::IO_0, socket_fd);
+        file_fd_ = file_fd;
+        total_size_ = total_size;
+        chunk_size_ = chunk_size == 0U ? total_size : chunk_size;
+        use_null_offset_ = use_null_offset;
+        completed_ = completed;
+        calls_ = calls;
+        bytes_sent_ = bytes_sent;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        return send_next();
+    }
+
+    af::TaskResult send_next() {
+        if (sent_ >= total_size_) {
+            completed_->fetch_add(1, std::memory_order_release);
+            return done();
+        }
+
+        const std::size_t remaining = total_size_ - sent_;
+        const std::size_t count = remaining < chunk_size_ ? remaining : chunk_size_;
+        af::IoOffset* offset = use_null_offset_ ? nullptr : &offset_;
+        const af::IoStatus status = stream_.sendfile_some(*this, file_fd_, offset, count, send_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes == 0U || status.bytes > remaining) {
+            return failed();
+        }
+        sent_ += status.bytes;
+        calls_->fetch_add(1, std::memory_order_release);
+        bytes_sent_->store(sent_, std::memory_order_release);
+        return again();
+    }
+
+    af::TcpStream<IoTestThread> stream_{};
+    int file_fd_{-1};
+    af::IoOffset offset_{0};
+    std::size_t total_size_{0};
+    std::size_t chunk_size_{0};
+    std::size_t sent_{0};
+    bool use_null_offset_{false};
+    af::IoOpState send_{};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* calls_{nullptr};
+    std::atomic<std::size_t>* bytes_sent_{nullptr};
+};
+
+class PendingSendfileTask final : public IoTaskBase {
+public:
+    explicit PendingSendfileTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(
+        int socket_fd,
+        int file_fd,
+        std::atomic<int>* pending_seen,
+        std::atomic<int>* completed,
+        std::atomic<std::size_t>* bytes_sent) {
+        stream_.reset(IoTestThread::IO_0, socket_fd);
+        file_fd_ = file_fd;
+        pending_seen_ = pending_seen;
+        completed_ = completed;
+        bytes_sent_ = bytes_sent;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        return send_byte();
+    }
+
+    af::TaskResult send_byte() {
+        const af::IoStatus status = stream_.sendfile_some(*this, file_fd_, &offset_, 1, send_);
+        if (status.pending()) {
+            pending_seen_->fetch_add(1, std::memory_order_release);
+            return pending();
+        }
+        if (!status.ready() || status.bytes != 1U || offset_ != 1) {
+            return failed();
+        }
+        bytes_sent_->store(status.bytes, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    af::TcpStream<IoTestThread> stream_{};
+    int file_fd_{-1};
+    af::IoOffset offset_{0};
+    af::IoOpState send_{};
+    std::atomic<int>* pending_seen_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<std::size_t>* bytes_sent_{nullptr};
+};
+
+class SplicePipeTask final : public IoTaskBase {
+public:
+    explicit SplicePipeTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(
+        int input_fd,
+        int output_fd,
+        std::size_t total_size,
+        std::atomic<int>* completed,
+        std::atomic<std::size_t>* bytes_spliced) {
+        input_fd_ = input_fd;
+        output_fd_ = output_fd;
+        total_size_ = total_size;
+        completed_ = completed;
+        bytes_spliced_ = bytes_spliced;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        return splice_next();
+    }
+
+    af::TaskResult splice_next() {
+        if (spliced_ >= total_size_) {
+            completed_->fetch_add(1, std::memory_order_release);
+            return done();
+        }
+        const af::IoStatus status = af::io_splice_some(
+            *this,
+            IoTestThread::IO_0,
+            input_fd_,
+            nullptr,
+            output_fd_,
+            nullptr,
+            total_size_ - spliced_,
+            SPLICE_F_NONBLOCK,
+            splice_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes == 0U || status.bytes > total_size_ - spliced_) {
+            return failed();
+        }
+        spliced_ += status.bytes;
+        bytes_spliced_->store(spliced_, std::memory_order_release);
+        return again();
+    }
+
+    int input_fd_{-1};
+    int output_fd_{-1};
+    std::size_t total_size_{0};
+    std::size_t spliced_{0};
+    af::IoOpState splice_{};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<std::size_t>* bytes_spliced_{nullptr};
 };
 
 class FileAdapterBoundaryTask final : public IoTaskBase {
@@ -2252,6 +2491,32 @@ void drain_available(int fd) {
     }
 }
 
+bool read_exact_until(int fd, char* output, std::size_t size) {
+    std::size_t offset = 0;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (offset < size) {
+        const ssize_t n = ::read(fd, output + offset, size - offset);
+        if (n > 0) {
+            offset += static_cast<std::size_t>(n);
+            continue;
+        }
+        if (n == 0) {
+            return false;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            return false;
+        }
+        if (std::chrono::steady_clock::now() > deadline) {
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+}
+
 bool create_tcp_listener(int& listener, sockaddr_in& address, socklen_t& address_size) {
     listener = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     if (listener < 0) {
@@ -2368,6 +2633,22 @@ TEST_F(IoRuntimeFixture, IoHelpersHandleInvalidAndZeroByteOperations) {
     ASSERT_TRUE(wait_until_at_least(zero_completed, 1));
 #else
     GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, ZeroCopyHelpersHandleInvalidAndZeroCountOperations) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    std::atomic<int> completed{0};
+    std::atomic<int> error{0};
+    ASSERT_TRUE(IoRuntime::start_task<ZeroCopyBoundaryTask>(&completed, &error));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(error.load(std::memory_order_acquire), EBADF);
+#else
+    GTEST_SKIP() << "zero-copy helpers are Linux-only";
 #endif
 }
 
@@ -2589,6 +2870,127 @@ TEST_F(IoRuntimeFixture, StreamAdapterReceivesAndSendsVectoredSocketBytes) {
     close_pair(fds);
 #else
     GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, StreamAdapterSendfileSendsFileToSocket) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    char path[] = "/tmp/asyncflow-sendfile-XXXXXX";
+    int file = ::mkstemp(path);
+    ASSERT_GE(file, 0);
+    static_cast<void>(::unlink(path));
+    const char payload[] = "asyncflow-sendfile";
+    constexpr std::size_t payload_size = sizeof(payload) - 1U;
+    ASSERT_EQ(::write(file, payload, payload_size), static_cast<ssize_t>(payload_size));
+    ASSERT_EQ(::lseek(file, 0, SEEK_SET), 0);
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+
+    std::atomic<int> completed{0};
+    std::atomic<int> calls{0};
+    std::atomic<std::size_t> bytes_sent{0};
+    ASSERT_TRUE(IoRuntime::start_task<SendfileSocketTask>(
+        fds[0],
+        file,
+        payload_size,
+        3,
+        true,
+        &completed,
+        &calls,
+        &bytes_sent));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), payload_size);
+    EXPECT_GT(calls.load(std::memory_order_acquire), 1);
+
+    char received[payload_size]{};
+    ASSERT_TRUE(read_exact_until(fds[1], received, payload_size));
+    EXPECT_EQ(std::memcmp(received, payload, payload_size), 0);
+
+    close_pair(fds);
+    close_fd(file);
+#else
+    GTEST_SKIP() << "sendfile is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, SendfileWaitsForSocketWritableWhenBufferIsFull) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    char path[] = "/tmp/asyncflow-sendfile-pending-XXXXXX";
+    int file = ::mkstemp(path);
+    ASSERT_GE(file, 0);
+    static_cast<void>(::unlink(path));
+    const char payload = 'P';
+    ASSERT_EQ(::write(file, &payload, sizeof(payload)), static_cast<ssize_t>(sizeof(payload)));
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+    ASSERT_TRUE(fill_until_blocked(fds[0]));
+
+    std::atomic<int> pending_seen{0};
+    std::atomic<int> completed{0};
+    std::atomic<std::size_t> bytes_sent{0};
+    ASSERT_TRUE(IoRuntime::start_task<PendingSendfileTask>(
+        fds[0],
+        file,
+        &pending_seen,
+        &completed,
+        &bytes_sent));
+    ASSERT_TRUE(wait_until_at_least(pending_seen, 1));
+
+    drain_available(fds[1]);
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), 1U);
+
+    close_pair(fds);
+    close_fd(file);
+#else
+    GTEST_SKIP() << "sendfile is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, SpliceTransfersPipeContentWithNullOffsets) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int input[2]{-1, -1};
+    int output[2]{-1, -1};
+    ASSERT_EQ(::pipe2(input, O_NONBLOCK | O_CLOEXEC), 0);
+    ASSERT_EQ(::pipe2(output, O_NONBLOCK | O_CLOEXEC), 0);
+
+    const char payload[] = "splice-through-kernel";
+    constexpr std::size_t payload_size = sizeof(payload) - 1U;
+    ASSERT_EQ(::write(input[1], payload, payload_size), static_cast<ssize_t>(payload_size));
+
+    std::atomic<int> completed{0};
+    std::atomic<std::size_t> bytes_spliced{0};
+    ASSERT_TRUE(IoRuntime::start_task<SplicePipeTask>(
+        input[0],
+        output[1],
+        payload_size,
+        &completed,
+        &bytes_spliced));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(bytes_spliced.load(std::memory_order_acquire), payload_size);
+
+    char received[payload_size]{};
+    ASSERT_TRUE(read_exact_until(output[0], received, payload_size));
+    EXPECT_EQ(std::memcmp(received, payload, payload_size), 0);
+
+    close_pair(input);
+    close_pair(output);
+#else
+    GTEST_SKIP() << "splice is Linux-only";
 #endif
 }
 

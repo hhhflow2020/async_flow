@@ -22,7 +22,9 @@
 #endif
 
 #if defined(__linux__)
+#include <poll.h>
 #include <sys/eventfd.h>
+#include <sys/sendfile.h>
 #include <sys/timerfd.h>
 #endif
 
@@ -31,6 +33,12 @@ struct statx;
 #endif
 
 namespace af {
+
+#if defined(_WIN32)
+using IoOffset = std::int64_t;
+#else
+using IoOffset = off_t;
+#endif
 
 enum class IoStep : std::uint8_t {
     Ready,
@@ -249,6 +257,32 @@ namespace detail {
     return true;
 }
 
+#if defined(__linux__)
+[[nodiscard]] inline bool io_fd_can_wait(int fd) noexcept {
+    struct stat status {};
+    if (::fstat(fd, &status) != 0) {
+        return false;
+    }
+    return S_ISSOCK(status.st_mode) || S_ISFIFO(status.st_mode) || S_ISCHR(status.st_mode);
+}
+
+[[nodiscard]] inline bool io_poll_ready(int fd, short events) noexcept {
+    pollfd descriptor{fd, events, 0};
+    for (;;) {
+        const int ready = ::poll(&descriptor, 1, 0);
+        if (ready > 0) {
+            return (descriptor.revents & (events | POLLERR | POLLHUP | POLLNVAL)) != 0;
+        }
+        if (ready == 0) {
+            return false;
+        }
+        if (errno != EINTR) {
+            return false;
+        }
+    }
+}
+#endif
+
 template <typename TaskT>
 [[nodiscard]] IoStatus arm_io_wait(
     TaskT& task,
@@ -267,6 +301,32 @@ template <typename TaskT>
     state.wait_kind = IoWaitKind::None;
     return IoStatus::failed(state.wait.error == 0 ? EINVAL : state.wait.error);
 }
+
+#if defined(__linux__)
+template <typename TaskT>
+[[nodiscard]] IoStatus arm_splice_wait(
+    TaskT& task,
+    typename TaskT::Thread thread,
+    int in_fd,
+    int out_fd,
+    IoOpState& state) noexcept {
+    const bool out_waitable = io_fd_can_wait(out_fd);
+    const bool in_waitable = io_fd_can_wait(in_fd);
+    if (out_waitable && !io_poll_ready(out_fd, POLLOUT)) {
+        return arm_io_wait(task, thread, out_fd, io_writable, state);
+    }
+    if (in_waitable && !io_poll_ready(in_fd, POLLIN)) {
+        return arm_io_wait(task, thread, in_fd, io_readable, state);
+    }
+    if (out_waitable) {
+        return arm_io_wait(task, thread, out_fd, io_writable, state);
+    }
+    if (in_waitable) {
+        return arm_io_wait(task, thread, in_fd, io_readable, state);
+    }
+    return IoStatus::failed(EAGAIN);
+}
+#endif
 
 [[nodiscard]] inline bool waiting_for_completion(const IoOpState& state) noexcept {
     return state.waiting && state.wait_kind == IoWaitKind::Completion;
@@ -743,6 +803,164 @@ template <typename TaskT>
     }
 #endif
 }
+
+#if defined(__linux__)
+template <typename TaskT>
+[[nodiscard]] IoStatus io_sendfile_some(
+    TaskT& task,
+    typename TaskT::Thread thread,
+    int out_fd,
+    int in_fd,
+    IoOffset* offset,
+    std::size_t count,
+    IoOpState& state) noexcept {
+    if (count == 0U) {
+        return IoStatus::ready(0);
+    }
+    if (out_fd < 0 || in_fd < 0) {
+        return IoStatus::failed(EBADF);
+    }
+
+    detail::clear_waiting(state);
+    for (;;) {
+        const ssize_t n = ::sendfile(out_fd, in_fd, offset, count);
+        if (n >= 0) {
+            return IoStatus::ready(static_cast<std::size_t>(n));
+        }
+
+        const int error = errno;
+        if (error == EINTR) {
+            continue;
+        }
+        if (detail::io_would_block(error)) {
+            return detail::arm_io_wait(task, thread, out_fd, io_writable, state);
+        }
+        return IoStatus::failed(error);
+    }
+}
+
+template <typename TaskT>
+[[nodiscard]] IoStatus io_splice_some(
+    TaskT& task,
+    typename TaskT::Thread thread,
+    int in_fd,
+    IoOffset* off_in,
+    int out_fd,
+    IoOffset* off_out,
+    std::size_t count,
+    unsigned int flags,
+    IoOpState& state) noexcept {
+    if (count == 0U) {
+        return IoStatus::ready(0);
+    }
+    if (in_fd < 0 || out_fd < 0) {
+        return IoStatus::failed(EBADF);
+    }
+
+    if (detail::waiting_for_completion(state)) {
+        IoStatus completion = detail::completed_uring_status(state);
+        if (completion.failed() && detail::io_would_block(completion.error)) {
+            return detail::arm_splice_wait(task, thread, in_fd, out_fd, state);
+        }
+        if (completion.ready() && completion.bytes != 0U) {
+            if (off_in != nullptr) {
+                *off_in += static_cast<IoOffset>(completion.bytes);
+            }
+            if (off_out != nullptr) {
+                *off_out += static_cast<IoOffset>(completion.bytes);
+            }
+        }
+        return completion;
+    }
+
+    const bool resumed_from_readiness = state.waiting && state.wait_kind == IoWaitKind::Readiness;
+    detail::clear_waiting(state);
+    if (!resumed_from_readiness && TaskT::Runtime::io_uring_backend_available(thread)) {
+        const std::int64_t input_offset = off_in == nullptr ? -1 : static_cast<std::int64_t>(*off_in);
+        const std::int64_t output_offset = off_out == nullptr ? -1 : static_cast<std::int64_t>(*off_out);
+        state.wait = IoResult{out_fd, 0, 0, 0};
+        if (TaskT::Runtime::io_submit_splice(
+                thread,
+                in_fd,
+                input_offset,
+                out_fd,
+                output_offset,
+                count,
+                flags,
+                &task,
+                &state.wait)) {
+            state.waiting = true;
+            state.wait_kind = IoWaitKind::Completion;
+            return IoStatus::make_pending();
+        }
+        if (!detail::uring_submit_error_can_fallback(state.wait.error)) {
+            return IoStatus::failed(state.wait.error);
+        }
+    }
+
+    for (;;) {
+        const ssize_t n = ::splice(in_fd, off_in, out_fd, off_out, count, flags);
+        if (n >= 0) {
+            return IoStatus::ready(static_cast<std::size_t>(n));
+        }
+
+        const int error = errno;
+        if (error == EINTR) {
+            continue;
+        }
+        if (detail::io_would_block(error)) {
+            return detail::arm_splice_wait(task, thread, in_fd, out_fd, state);
+        }
+        return IoStatus::failed(error);
+    }
+}
+#else
+template <typename TaskT>
+[[nodiscard]] IoStatus io_sendfile_some(
+    TaskT& task,
+    typename TaskT::Thread thread,
+    int out_fd,
+    int in_fd,
+    IoOffset* offset,
+    std::size_t count,
+    IoOpState& state) noexcept {
+    if (count == 0U) {
+        return IoStatus::ready(0);
+    }
+    static_cast<void>(task);
+    static_cast<void>(thread);
+    static_cast<void>(out_fd);
+    static_cast<void>(in_fd);
+    static_cast<void>(offset);
+    static_cast<void>(state);
+    return IoStatus::failed(ENOSYS);
+}
+
+template <typename TaskT>
+[[nodiscard]] IoStatus io_splice_some(
+    TaskT& task,
+    typename TaskT::Thread thread,
+    int in_fd,
+    IoOffset* off_in,
+    int out_fd,
+    IoOffset* off_out,
+    std::size_t count,
+    unsigned int flags,
+    IoOpState& state) noexcept {
+    if (count == 0U) {
+        return IoStatus::ready(0);
+    }
+    static_cast<void>(task);
+    static_cast<void>(thread);
+    static_cast<void>(in_fd);
+    static_cast<void>(off_in);
+    static_cast<void>(out_fd);
+    static_cast<void>(off_out);
+    static_cast<void>(flags);
+    static_cast<void>(state);
+    return IoStatus::failed(ENOSYS);
+}
+#endif
 
 #if !defined(_WIN32)
 template <typename TaskT>
@@ -1974,6 +2192,26 @@ public:
             std::is_same_v<typename TaskT::Thread, ThreadT>,
             "IoStream thread type must match the task runtime thread type");
         return af::io_send_some(task, this->thread_, this->fd_, data, size, state);
+    }
+
+    template <typename TaskT>
+    [[nodiscard]] IoStatus sendfile_some(
+        TaskT& task,
+        int file_fd,
+        IoOffset* offset,
+        std::size_t count,
+        IoOpState& state) const noexcept {
+        static_assert(
+            std::is_same_v<typename TaskT::Thread, ThreadT>,
+            "IoStream thread type must match the task runtime thread type");
+        return af::io_sendfile_some(
+            task,
+            this->thread_,
+            this->fd_,
+            file_fd,
+            offset,
+            count,
+            state);
     }
 
 #if !defined(_WIN32)
