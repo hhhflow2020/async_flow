@@ -1255,6 +1255,39 @@ public:
             result);
     }
 
+    [[nodiscard]] static bool io_submit_socket(
+        Thread thread,
+        int domain,
+        int type,
+        int protocol,
+        std::uint32_t flags,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr) {
+            if (result != nullptr) {
+                result->fd = -1;
+                result->events = io_error;
+                result->error = EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = -1;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_socket(
+            domain,
+            type,
+            protocol,
+            flags,
+            task,
+            result);
+    }
+
     [[nodiscard]] static bool io_submit_openat_direct(
         Thread thread,
         int dir_fd,
@@ -5181,6 +5214,16 @@ private:
         }
 #endif
 
+        [[nodiscard]] bool submit_io_uring_socket(
+            int domain,
+            int type,
+            int protocol,
+            std::uint32_t flags,
+            Task* task,
+            IoResult* result) noexcept {
+            return submit_io_uring_socket_impl(domain, type, protocol, flags, task, result);
+        }
+
         void mark_ready(std::uint16_t source) noexcept {
             if constexpr (thread_count <= 64U) {
                 const std::uint64_t bit = 1ULL << source;
@@ -5322,6 +5365,7 @@ private:
 
         static constexpr std::uint8_t io_uring_op_send_zc = 47U;
         static constexpr std::uint8_t io_uring_op_sendmsg_zc = 48U;
+        static constexpr std::uint8_t io_uring_op_socket = 45U;
 
         enum class IoUringPollSubmitResult : std::uint8_t {
             Submitted,
@@ -5520,6 +5564,98 @@ private:
                 reinterpret_cast<std::uint64_t>(operation));
 
             result->fd = fd;
+            result->events = 0;
+            result->error = 0;
+            result->result = 0;
+            result->completion_token = operation;
+
+            if (io_uring_pending_submissions_ >= io_uring_submit_batch_threshold_) {
+                const int submit_error = flush_io_uring_submissions();
+                if (submit_error == 0) {
+                    return true;
+                }
+                result->events = io_error;
+                result->error = submit_error;
+                result->result = -submit_error;
+                fail_io_uring_backend(submit_error, operation);
+                return false;
+            }
+
+            return true;
+        }
+
+        [[nodiscard]] bool submit_io_uring_socket_impl(
+            int domain,
+            int type,
+            int protocol,
+            std::uint32_t flags,
+            Task* task,
+            IoResult* result) noexcept {
+            AF_ASSERT(current_thread_index_ == index_ && "io_uring socket submit must be called from its IO thread");
+            if (result != nullptr) {
+                result->completion_token = nullptr;
+            }
+            if (current_thread_index_ != index_ || task == nullptr || result == nullptr) {
+                if (result != nullptr) {
+                    result->fd = -1;
+                    result->events = io_error;
+                    result->error = EINVAL;
+                }
+                return false;
+            }
+            if (io_uring_fd_ < 0 || !io_uring_socket_available_) {
+                result->fd = -1;
+                result->events = io_error;
+                result->error = ENOSYS;
+                return false;
+            }
+
+            IoUringOperation* operation = nullptr;
+            try {
+                operation = io_uring_op_pool_.create();
+            } catch (...) {
+                result->fd = -1;
+                result->events = io_error;
+                result->error = ENOMEM;
+                return false;
+            }
+
+            operation->task = task;
+            operation->result = result;
+            operation->complete_events = io_readable;
+            operation->direct_file_index = -1;
+            operation->opcode = io_uring_op_socket;
+            operation->cancel_requested = false;
+            operation->multishot = false;
+            operation->poll_wait = false;
+            operation->zero_copy_send = false;
+            operation->zero_copy_primary_done = false;
+            operation->zero_copy_notification_done = false;
+            operation->msg = nullptr;
+            operation->socket_address = nullptr;
+            operation->wait_registration = nullptr;
+
+            int reserve_error = 0;
+            io_uring_sqe* sqe = reserve_io_uring_sqe(reserve_error);
+            if (sqe == nullptr) {
+                io_uring_op_pool_.destroy(operation);
+                result->fd = -1;
+                result->events = io_error;
+                result->error = reserve_error == 0 ? EBUSY : reserve_error;
+                return false;
+            }
+
+            track_io_uring_operation(operation);
+
+            *sqe = io_uring_sqe{};
+            sqe->opcode = io_uring_op_socket;
+            sqe->fd = domain;
+            sqe->off = static_cast<std::uint64_t>(type);
+            sqe->len = static_cast<unsigned>(protocol);
+            sqe->rw_flags = flags;
+            sqe->user_data = reinterpret_cast<std::uint64_t>(operation);
+
+            result->fd = -1;
             result->events = 0;
             result->error = 0;
             result->result = 0;
@@ -6367,6 +6503,7 @@ private:
             io_uring_send_zc_available_ = false;
             io_uring_sendmsg_zc_available_ = false;
             io_uring_poll_add_available_ = false;
+            io_uring_socket_available_ = false;
 
             constexpr unsigned probe_count = 64;
             std::array<
@@ -6395,6 +6532,9 @@ private:
                 } else if (ops[i].op == IORING_OP_POLL_ADD &&
                            (ops[i].flags & IO_URING_OP_SUPPORTED) != 0U) {
                     io_uring_poll_add_available_ = true;
+                } else if (ops[i].op == io_uring_op_socket &&
+                           (ops[i].flags & IO_URING_OP_SUPPORTED) != 0U) {
+                    io_uring_socket_available_ = true;
                 }
             }
         }
@@ -6450,6 +6590,7 @@ private:
             io_uring_send_zc_available_ = false;
             io_uring_sendmsg_zc_available_ = false;
             io_uring_poll_add_available_ = false;
+            io_uring_socket_available_ = false;
             io_uring_buffers_registered_ = false;
             io_uring_registered_buffer_count_ = 0;
             io_uring_provided_buffer_groups_.clear();
@@ -6683,7 +6824,9 @@ private:
         }
 
         [[nodiscard]] static bool io_uring_result_is_fd(std::uint8_t opcode) noexcept {
-            return opcode == IORING_OP_OPENAT || opcode == IORING_OP_ACCEPT;
+            return opcode == IORING_OP_OPENAT ||
+                   opcode == IORING_OP_ACCEPT ||
+                   opcode == io_uring_op_socket;
         }
 
         [[nodiscard]] static bool io_uring_operation_result_is_fd(
@@ -7009,6 +7152,7 @@ private:
         bool io_uring_send_zc_available_{false};
         bool io_uring_sendmsg_zc_available_{false};
         bool io_uring_poll_add_available_{false};
+        bool io_uring_socket_available_{false};
         bool io_uring_buffers_registered_{false};
         unsigned io_uring_registered_buffer_count_{0};
         std::vector<std::uint16_t> io_uring_provided_buffer_groups_;

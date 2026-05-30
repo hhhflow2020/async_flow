@@ -13,7 +13,32 @@ enum class BenchIoThread : std::int16_t {
 };
 
 struct FakeRuntime {
+    static constexpr std::uint16_t invalid_thread_index = 1;
+
+    static bool is_runtime_thread() noexcept {
+        return false;
+    }
+
+    static std::uint16_t current_thread_index() noexcept {
+        return invalid_thread_index;
+    }
+
+    static constexpr std::uint16_t thread_index(BenchIoThread thread) noexcept {
+        return static_cast<std::uint16_t>(thread);
+    }
+
     static bool io_uring_backend_available(BenchIoThread) noexcept {
+        return false;
+    }
+
+    static bool io_submit_socket(
+        BenchIoThread,
+        int,
+        int,
+        int,
+        std::uint32_t,
+        void*,
+        af::IoResult*) noexcept {
         return false;
     }
 
@@ -690,6 +715,21 @@ void BM_IoOpenAtNullPath(benchmark::State& state) {
     }
 }
 
+void BM_IoSocketNullOutput(benchmark::State& state) {
+    FakeTask task;
+    af::IoOpState op;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(af::io_socket(
+            task,
+            BenchIoThread::IO_0,
+            0,
+            0,
+            0,
+            nullptr,
+            op));
+    }
+}
+
 void BM_IoOpenAtDirectInvalidIndex(benchmark::State& state) {
     FakeTask task;
     af::IoOpState op;
@@ -957,6 +997,7 @@ BENCHMARK(BM_IoTimerAdapterNullExpiration);
 BENCHMARK(BM_IoEventAdapterNullValue);
 BENCHMARK(BM_IoTimeoutInvalidDelay);
 BENCHMARK(BM_IoOpenAtNullPath);
+BENCHMARK(BM_IoSocketNullOutput);
 BENCHMARK(BM_IoOpenAtDirectInvalidIndex);
 BENCHMARK(BM_IoStatxNullPath);
 BENCHMARK(BM_IoCloseInvalidFd);

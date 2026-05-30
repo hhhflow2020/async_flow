@@ -5564,6 +5564,316 @@ private:
     std::atomic<int>* error_{nullptr};
 };
 
+class SocketLifecycleSetupTask final : public IoTaskBase {
+public:
+    explicit SocketLifecycleSetupTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(
+        std::atomic<int>* completed,
+        std::atomic<int>* error,
+        std::atomic<int>* reuse_value,
+        std::atomic<std::uint16_t>* ran_on) {
+        completed_ = completed;
+        error_ = error;
+        reuse_value_ = reuse_value;
+        ran_on_ = ran_on;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        CreateSocket,
+        FinishSocket,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::CreateSocket:
+            return create_socket();
+        case State::FinishSocket:
+            return finish_socket();
+        }
+        return failed();
+    }
+
+    af::TaskResult create_socket() {
+        state_ = State::FinishSocket;
+        return consume_socket_status(af::io_socket(
+            *this,
+            IoTestThread::IO_0,
+            AF_INET,
+            SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
+            0,
+            &opened_fd_,
+            socket_));
+    }
+
+    af::TaskResult finish_socket() {
+        return consume_socket_status(af::io_socket(
+            *this,
+            IoTestThread::IO_0,
+            AF_INET,
+            SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
+            0,
+            &opened_fd_,
+            socket_));
+    }
+
+    af::TaskResult consume_socket_status(const af::IoStatus status) {
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || opened_fd_ < 0) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        owned_.reset(opened_fd_);
+        opened_fd_ = -1;
+        listener_.reset(IoTestThread::IO_0, owned_.get());
+        return configure_listener();
+    }
+
+    af::TaskResult configure_listener() {
+        ran_on_->store(IoRuntime::current_thread_index(), std::memory_order_release);
+
+        const int one = 1;
+        const af::IoStatus set_status = listener_.setsockopt(
+            *this,
+            SOL_SOCKET,
+            SO_REUSEADDR,
+            &one,
+            sizeof(one));
+        if (!set_status.ready()) {
+            return complete(set_status.error);
+        }
+
+        int reuse = 0;
+        socklen_t reuse_size = sizeof(reuse);
+        const af::IoStatus get_status = listener_.getsockopt(
+            *this,
+            SOL_SOCKET,
+            SO_REUSEADDR,
+            &reuse,
+            &reuse_size);
+        if (!get_status.ready()) {
+            return complete(get_status.error);
+        }
+        reuse_value_->store(reuse, std::memory_order_release);
+
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        address.sin_port = 0;
+        const af::IoStatus bind_status = listener_.bind(
+            *this,
+            reinterpret_cast<const sockaddr*>(&address),
+            sizeof(address));
+        if (!bind_status.ready()) {
+            return complete(bind_status.error);
+        }
+
+        const af::IoStatus listen_status = listener_.listen(*this, 16);
+        return listen_status.ready() ? complete(0) : complete(listen_status.error);
+    }
+
+    af::TaskResult complete(int error) {
+        error_->store(error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    State state_{State::CreateSocket};
+    af::IoOpState socket_{};
+    int opened_fd_{-1};
+    af::UniqueFd owned_{};
+    af::TcpListener<IoTestThread> listener_{};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* error_{nullptr};
+    std::atomic<int>* reuse_value_{nullptr};
+    std::atomic<std::uint16_t>* ran_on_{nullptr};
+};
+
+class SocketLifecycleBoundaryTask final : public IoTaskBase {
+public:
+    explicit SocketLifecycleBoundaryTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(std::atomic<int>* completed, std::atomic<int>* error) {
+        completed_ = completed;
+        error_ = error;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        af::IoOpState null_socket{};
+        int one = 1;
+        int opened = -1;
+        int value = 0;
+        socklen_t value_size = sizeof(value);
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        address.sin_port = 0;
+
+        const af::IoStatus null_socket_status = af::io_socket(
+            *this,
+            IoTestThread::IO_0,
+            AF_INET,
+            SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
+            0,
+            nullptr,
+            null_socket);
+        const af::IoStatus bad_setsockopt_status = af::io_setsockopt(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            SOL_SOCKET,
+            SO_REUSEADDR,
+            &one,
+            sizeof(one));
+        const af::IoStatus null_setsockopt_status = af::io_setsockopt(
+            *this,
+            IoTestThread::IO_0,
+            0,
+            SOL_SOCKET,
+            SO_REUSEADDR,
+            nullptr,
+            sizeof(one));
+        const af::IoStatus bad_getsockopt_status = af::io_getsockopt(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            SOL_SOCKET,
+            SO_REUSEADDR,
+            &value,
+            &value_size);
+        const af::IoStatus null_getsockopt_status = af::io_getsockopt(
+            *this,
+            IoTestThread::IO_0,
+            0,
+            SOL_SOCKET,
+            SO_REUSEADDR,
+            nullptr,
+            &value_size);
+        const af::IoStatus bad_bind_status = af::io_bind(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            reinterpret_cast<const sockaddr*>(&address),
+            sizeof(address));
+        const af::IoStatus null_bind_status = af::io_bind(
+            *this,
+            IoTestThread::IO_0,
+            0,
+            nullptr,
+            sizeof(address));
+        const af::IoStatus bad_listen_status =
+            af::io_listen(*this, IoTestThread::IO_0, -1, 16);
+
+        af::UniqueFd temp(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
+        if (!temp) {
+            return complete(EIO);
+        }
+        const af::IoStatus wrong_thread_status =
+            af::io_listen(*this, IoTestThread::Logic_0, temp.get(), 16);
+
+        const bool ok =
+            null_socket_status.failed() && null_socket_status.error == EINVAL &&
+            bad_setsockopt_status.failed() && bad_setsockopt_status.error == EBADF &&
+            null_setsockopt_status.failed() && null_setsockopt_status.error == EINVAL &&
+            bad_getsockopt_status.failed() && bad_getsockopt_status.error == EBADF &&
+            null_getsockopt_status.failed() && null_getsockopt_status.error == EINVAL &&
+            bad_bind_status.failed() && bad_bind_status.error == EBADF &&
+            null_bind_status.failed() && null_bind_status.error == EINVAL &&
+            bad_listen_status.failed() && bad_listen_status.error == EBADF &&
+            wrong_thread_status.failed() && wrong_thread_status.error == EINVAL &&
+            opened == -1;
+        return complete(ok ? 0 : EIO);
+    }
+
+    af::TaskResult complete(int error) {
+        error_->store(error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* error_{nullptr};
+};
+
+class UringSocketCreateTask final : public UringIoTaskBase {
+public:
+    explicit UringSocketCreateTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
+
+    bool do_it(std::atomic<int>* completed, std::atomic<int>* error) {
+        completed_ = completed;
+        error_ = error;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        CreateSocket,
+        FinishSocket,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::CreateSocket:
+            return create_socket();
+        case State::FinishSocket:
+            return finish_socket();
+        }
+        return failed();
+    }
+
+    af::TaskResult create_socket() {
+        state_ = State::FinishSocket;
+        return consume_socket_status(af::io_socket(
+            *this,
+            IoTestThread::IO_0,
+            AF_INET,
+            SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
+            0,
+            &opened_fd_,
+            socket_));
+    }
+
+    af::TaskResult finish_socket() {
+        return consume_socket_status(af::io_socket(
+            *this,
+            IoTestThread::IO_0,
+            AF_INET,
+            SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
+            0,
+            &opened_fd_,
+            socket_));
+    }
+
+    af::TaskResult consume_socket_status(const af::IoStatus status) {
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || opened_fd_ < 0) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        af::UniqueFd fd(opened_fd_);
+        opened_fd_ = -1;
+        return complete(0);
+    }
+
+    af::TaskResult complete(int error) {
+        error_->store(error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    State state_{State::CreateSocket};
+    af::IoOpState socket_{};
+    int opened_fd_{-1};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* error_{nullptr};
+};
+
 class PendingSocketWaitTask final : public FastIoTaskBase {
 public:
     explicit PendingSocketWaitTask(FastIoTaskBase::FactoryToken token) : FastIoTaskBase(token) {}
@@ -6210,6 +6520,46 @@ TEST_F(IoRuntimeFixture, OpenAtHelperHandlesInvalidOperations) {
     EXPECT_EQ(error.load(std::memory_order_acquire), ENOSYS);
 #else
     GTEST_SKIP() << "openat helper is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, SocketLifecycleHelpersRunOnIoThread) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    std::atomic<int> completed{0};
+    std::atomic<int> error{-1};
+    std::atomic<int> reuse_value{0};
+    std::atomic<std::uint16_t> ran_on{IoRuntime::invalid_thread_index};
+    ASSERT_TRUE(IoRuntime::start_task<SocketLifecycleSetupTask>(
+        &completed,
+        &error,
+        &reuse_value,
+        &ran_on));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(error.load(std::memory_order_acquire), 0);
+    EXPECT_NE(reuse_value.load(std::memory_order_acquire), 0);
+    EXPECT_EQ(ran_on.load(std::memory_order_acquire), IoRuntime::thread_index(IoTestThread::IO_0));
+#else
+    GTEST_SKIP() << "socket lifecycle helpers are Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, SocketLifecycleHelpersHandleInvalidOperations) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    std::atomic<int> completed{0};
+    std::atomic<int> error{-1};
+    ASSERT_TRUE(IoRuntime::start_task<SocketLifecycleBoundaryTask>(&completed, &error));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(error.load(std::memory_order_acquire), 0);
+#else
+    GTEST_SKIP() << "socket lifecycle helpers are Linux-only";
 #endif
 }
 
@@ -7007,6 +7357,22 @@ TEST_F(UringIoRuntimeFixture, IoUringThreadSendsStreamBytesOrFallsBackToEpoll) {
     EXPECT_EQ(value, 'S');
 
     close_pair(fds);
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringThreadCreatesSocketOrFallsBack) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io backend unavailable";
+    }
+
+    std::atomic<int> completed{0};
+    std::atomic<int> error{-1};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringSocketCreateTask>(&completed, &error));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(error.load(std::memory_order_acquire), 0);
 #else
     GTEST_SKIP() << "io_uring backend is Linux-only";
 #endif

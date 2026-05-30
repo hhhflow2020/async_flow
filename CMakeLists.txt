@@ -60,6 +60,9 @@ if(ASYNCFLOW_BUILD_EXAMPLES)
     add_executable(asyncflow_io_shutdown_example examples/io_shutdown.cpp)
     target_link_libraries(asyncflow_io_shutdown_example PRIVATE AsyncFlow::AsyncFlow)
 
+    add_executable(asyncflow_io_socket_lifecycle_example examples/io_socket_lifecycle.cpp)
+    target_link_libraries(asyncflow_io_socket_lifecycle_example PRIVATE AsyncFlow::AsyncFlow)
+
     add_executable(asyncflow_io_adapters_example examples/io_adapters.cpp)
     target_link_libraries(asyncflow_io_adapters_example PRIVATE AsyncFlow::AsyncFlow)
 
