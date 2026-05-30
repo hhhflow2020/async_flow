@@ -35,6 +35,10 @@ deactivate_conanrun.*
 conandeps_legacy.cmake
 conan_toolchain.cmake
 
+# Python bytecode cache (scripts)
+__pycache__/
+*.pyc
+
 # Native build outputs
 *.a
 *.dylib

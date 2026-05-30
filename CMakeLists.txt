@@ -72,6 +72,9 @@ if(ASYNCFLOW_BUILD_EXAMPLES)
     add_executable(asyncflow_io_uring_file_lifecycle_example examples/io_uring_file_lifecycle.cpp)
     target_link_libraries(asyncflow_io_uring_file_lifecycle_example PRIVATE AsyncFlow::AsyncFlow)
 
+    add_executable(asyncflow_io_uring_tuned_setup_example examples/io_uring_tuned_setup.cpp)
+    target_link_libraries(asyncflow_io_uring_tuned_setup_example PRIVATE AsyncFlow::AsyncFlow)
+
     add_executable(asyncflow_io_uring_fixed_buffer_example examples/io_uring_fixed_buffer.cpp)
     target_link_libraries(asyncflow_io_uring_fixed_buffer_example PRIVATE AsyncFlow::AsyncFlow)
 

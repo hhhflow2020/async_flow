@@ -39,7 +39,42 @@
 #define IORING_CQE_F_NOTIF (1U << 3U)
 #endif
 
+#ifndef IORING_SETUP_SQPOLL
+#define IORING_SETUP_SQPOLL (1U << 1U)
+#endif
+
+#ifndef IORING_SETUP_SQ_AFF
+#define IORING_SETUP_SQ_AFF (1U << 2U)
+#endif
+
+#ifndef IORING_SETUP_CQSIZE
+#define IORING_SETUP_CQSIZE (1U << 3U)
+#endif
+
+#ifndef IORING_SETUP_SUBMIT_ALL
+#define IORING_SETUP_SUBMIT_ALL (1U << 7U)
+#endif
+
+#ifndef IORING_SETUP_COOP_TASKRUN
+#define IORING_SETUP_COOP_TASKRUN (1U << 8U)
+#endif
+
+#ifndef IORING_SETUP_SINGLE_ISSUER
+#define IORING_SETUP_SINGLE_ISSUER (1U << 12U)
+#endif
+
+#ifndef IORING_SETUP_DEFER_TASKRUN
+#define IORING_SETUP_DEFER_TASKRUN (1U << 13U)
+#endif
+
 namespace af::detail {
+
+struct IoUringSetupRequest {
+    unsigned flags{0};
+    unsigned cq_entries{0};
+    unsigned sqpoll_idle_ms{0};
+    int sqpoll_cpu{-1};
+};
 
 struct IoUringFixedFileRwSqe {
     std::uint8_t opcode{0};
@@ -62,6 +97,23 @@ struct IoUringBufferSqe {
 
 [[nodiscard]] inline constexpr bool io_uring_sqe_len_fits(std::size_t size) noexcept {
     return size <= static_cast<std::size_t>(std::numeric_limits<unsigned>::max());
+}
+
+inline void configure_io_uring_params(
+    io_uring_params& params,
+    const IoUringSetupRequest& request) noexcept {
+    params.flags = request.flags;
+    if (request.cq_entries != 0U) {
+        params.flags |= IORING_SETUP_CQSIZE;
+        params.cq_entries = request.cq_entries;
+    }
+    if ((params.flags & IORING_SETUP_SQPOLL) != 0U) {
+        params.sq_thread_idle = request.sqpoll_idle_ms;
+        if (request.sqpoll_cpu >= 0) {
+            params.flags |= IORING_SETUP_SQ_AFF;
+            params.sq_thread_cpu = static_cast<unsigned>(request.sqpoll_cpu);
+        }
+    }
 }
 
 inline void fill_buffer_sqe(

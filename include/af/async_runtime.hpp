@@ -151,6 +151,19 @@ public:
     static constexpr unsigned io_uring_entries = TraitConfig::io_uring_entries;
     static constexpr unsigned io_uring_submit_batch_threshold =
         TraitConfig::io_uring_submit_batch_threshold;
+    static constexpr unsigned io_uring_cq_entries = TraitConfig::io_uring_cq_entries;
+    static constexpr unsigned io_uring_setup_flags = TraitConfig::io_uring_setup_flags;
+    static constexpr bool io_uring_setup_sqpoll = TraitConfig::io_uring_setup_sqpoll;
+    static constexpr unsigned io_uring_sqpoll_idle_ms =
+        TraitConfig::io_uring_sqpoll_idle_ms;
+    static constexpr int io_uring_sqpoll_cpu = TraitConfig::io_uring_sqpoll_cpu;
+    static constexpr bool io_uring_setup_submit_all = TraitConfig::io_uring_setup_submit_all;
+    static constexpr bool io_uring_setup_coop_taskrun =
+        TraitConfig::io_uring_setup_coop_taskrun;
+    static constexpr bool io_uring_setup_single_issuer =
+        TraitConfig::io_uring_setup_single_issuer;
+    static constexpr bool io_uring_setup_defer_taskrun =
+        TraitConfig::io_uring_setup_defer_taskrun;
     static constexpr std::size_t io_wait_reserve = TraitConfig::io_wait_reserve;
     static constexpr std::size_t io_deferred_delete_reserve =
         TraitConfig::io_deferred_delete_reserve;
@@ -168,6 +181,15 @@ public:
     static_assert(
         io_uring_submit_batch_threshold <= io_uring_entries,
         "io_uring_submit_batch_threshold must not exceed io_uring_entries");
+    static_assert(
+        io_uring_cq_entries == 0U || std::has_single_bit(io_uring_cq_entries),
+        "io_uring_cq_entries must be zero or a power of two");
+    static_assert(
+        io_uring_cq_entries == 0U || io_uring_cq_entries >= io_uring_entries,
+        "io_uring_cq_entries must be zero or not less than io_uring_entries");
+    static_assert(
+        !(io_uring_setup_sqpoll || io_uring_sqpoll_cpu >= 0) || io_uring_sqpoll_idle_ms > 0U,
+        "io_uring_sqpoll_idle_ms must be greater than zero when SQPOLL is enabled");
 
     [[nodiscard]] static constexpr ThreadKind thread_kind(Thread thread) noexcept {
         if constexpr (requires { Traits::thread_kind(thread); }) {
@@ -6411,6 +6433,29 @@ private:
             }
 
             io_uring_params params{};
+            unsigned requested_setup_flags = io_uring_setup_flags;
+            if constexpr (io_uring_setup_sqpoll || io_uring_sqpoll_cpu >= 0) {
+                requested_setup_flags |= IORING_SETUP_SQPOLL;
+            }
+            if constexpr (io_uring_setup_submit_all) {
+                requested_setup_flags |= IORING_SETUP_SUBMIT_ALL;
+            }
+            if constexpr (io_uring_setup_coop_taskrun) {
+                requested_setup_flags |= IORING_SETUP_COOP_TASKRUN;
+            }
+            if constexpr (io_uring_setup_single_issuer || io_uring_setup_defer_taskrun) {
+                requested_setup_flags |= IORING_SETUP_SINGLE_ISSUER;
+            }
+            if constexpr (io_uring_setup_defer_taskrun) {
+                requested_setup_flags |= IORING_SETUP_DEFER_TASKRUN;
+            }
+            detail::configure_io_uring_params(
+                params,
+                detail::IoUringSetupRequest{
+                    requested_setup_flags,
+                    io_uring_cq_entries,
+                    io_uring_sqpoll_idle_ms,
+                    io_uring_sqpoll_cpu});
             io_uring_fd_ = sys_io_uring_setup(io_uring_entries, &params);
             if (io_uring_fd_ < 0) {
                 return;

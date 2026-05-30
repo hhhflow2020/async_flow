@@ -108,6 +108,14 @@ struct TunedIoRuntimeTraits {
     static constexpr std::size_t external_queue_capacity = 4096;
     static constexpr unsigned io_uring_entries = 512;
     static constexpr unsigned io_uring_submit_batch_threshold = 128;
+    static constexpr unsigned io_uring_cq_entries = 1024;
+    static constexpr bool io_uring_setup_sqpoll = true;
+    static constexpr unsigned io_uring_sqpoll_idle_ms = 2500;
+    static constexpr int io_uring_sqpoll_cpu = 0;
+    static constexpr bool io_uring_setup_submit_all = true;
+    static constexpr bool io_uring_setup_coop_taskrun = true;
+    static constexpr bool io_uring_setup_single_issuer = true;
+    static constexpr bool io_uring_setup_defer_taskrun = true;
     static constexpr std::size_t io_wait_reserve = 256;
     static constexpr std::size_t io_deferred_delete_reserve = 64;
     static constexpr std::size_t io_uring_provided_buffer_group_reserve = 8;
@@ -118,9 +126,45 @@ static_assert(TunedIoRuntime::spsc_queue_capacity == 2048U);
 static_assert(TunedIoRuntime::external_queue_capacity == 4096U);
 static_assert(TunedIoRuntime::io_uring_entries == 512U);
 static_assert(TunedIoRuntime::io_uring_submit_batch_threshold == 128U);
+static_assert(TunedIoRuntime::io_uring_cq_entries == 1024U);
+static_assert(TunedIoRuntime::io_uring_setup_sqpoll);
+static_assert(TunedIoRuntime::io_uring_sqpoll_idle_ms == 2500U);
+static_assert(TunedIoRuntime::io_uring_sqpoll_cpu == 0);
+static_assert(TunedIoRuntime::io_uring_setup_submit_all);
+static_assert(TunedIoRuntime::io_uring_setup_coop_taskrun);
+static_assert(TunedIoRuntime::io_uring_setup_single_issuer);
+static_assert(TunedIoRuntime::io_uring_setup_defer_taskrun);
 static_assert(TunedIoRuntime::io_wait_reserve == 256U);
 static_assert(TunedIoRuntime::io_deferred_delete_reserve == 64U);
 static_assert(TunedIoRuntime::io_uring_provided_buffer_group_reserve == 8U);
+
+TEST(IoUringSetupConfig, PopulatesRequestedSetupParams) {
+#if defined(__linux__)
+    io_uring_params params{};
+    af::detail::configure_io_uring_params(
+        params,
+        af::detail::IoUringSetupRequest{
+            IORING_SETUP_SQPOLL | IORING_SETUP_SUBMIT_ALL |
+                IORING_SETUP_COOP_TASKRUN | IORING_SETUP_SINGLE_ISSUER |
+                IORING_SETUP_DEFER_TASKRUN,
+            2048U,
+            2500U,
+            3});
+
+    EXPECT_NE(params.flags & IORING_SETUP_SQPOLL, 0U);
+    EXPECT_NE(params.flags & IORING_SETUP_SQ_AFF, 0U);
+    EXPECT_NE(params.flags & IORING_SETUP_CQSIZE, 0U);
+    EXPECT_NE(params.flags & IORING_SETUP_SUBMIT_ALL, 0U);
+    EXPECT_NE(params.flags & IORING_SETUP_COOP_TASKRUN, 0U);
+    EXPECT_NE(params.flags & IORING_SETUP_SINGLE_ISSUER, 0U);
+    EXPECT_NE(params.flags & IORING_SETUP_DEFER_TASKRUN, 0U);
+    EXPECT_EQ(params.cq_entries, 2048U);
+    EXPECT_EQ(params.sq_thread_idle, 2500U);
+    EXPECT_EQ(params.sq_thread_cpu, 3U);
+#else
+    GTEST_SKIP() << "io_uring setup params are Linux-only";
+#endif
+}
 
 TEST(IoAdapterTraits, AdaptersAreThinTriviallyCopyableViews) {
     EXPECT_TRUE(std::is_trivially_copyable_v<af::IoFile<IoTestThread>>);
