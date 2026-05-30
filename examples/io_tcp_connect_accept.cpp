@@ -1,8 +1,5 @@
-#include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <iostream>
-#include <thread>
 
 #include "af/async_flow.hpp"
 
@@ -28,6 +25,7 @@ struct TcpRuntimeTraits {
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 
     static constexpr af::ThreadKind thread_kind(TcpThread thread) noexcept {
         return thread == TcpThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
@@ -37,25 +35,14 @@ struct TcpRuntimeTraits {
 using tcp_async = af::AsyncRuntime<TcpRuntimeTraits>;
 using TcpTask = tcp_async::Task;
 
-bool wait_until(std::atomic<int>& value, int expected) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (value.load(std::memory_order_acquire) < expected) {
-        if (std::chrono::steady_clock::now() > deadline) {
-            return false;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    return true;
-}
-
 #if defined(__linux__)
 class TcpServerTask final : public TcpTask {
 public:
     explicit TcpServerTask(TcpTask::FactoryToken token) : TcpTask(token) {}
 
-    bool do_it(int fd, std::atomic<int>* completed, std::atomic<char>* request_seen) {
+    bool do_it(int fd, bool* ok, char* request_seen) {
         listener_.reset(TcpThread::IO_0, fd);
-        completed_ = completed;
+        ok_ = ok;
         request_seen_ = request_seen;
         return schedule(TcpThread::IO_0);
     }
@@ -112,7 +99,7 @@ private:
             return failed();
         }
 
-        request_seen_->store(request_, std::memory_order_release);
+        *request_seen_ = request_;
         state_ = State::SendResponse;
         return again();
     }
@@ -126,7 +113,7 @@ private:
             return failed();
         }
 
-        completed_->fetch_add(1, std::memory_order_release);
+        *ok_ = true;
         return done();
     }
 
@@ -141,8 +128,8 @@ private:
     af::IoOpState accept_{};
     af::IoOpState read_{};
     af::IoOpState write_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<char>* request_seen_{nullptr};
+    bool* ok_{nullptr};
+    char* request_seen_{nullptr};
 };
 
 class TcpClientTask final : public TcpTask {
@@ -153,12 +140,12 @@ public:
         int fd,
         sockaddr_in server,
         socklen_t server_size,
-        std::atomic<int>* completed,
-        std::atomic<char>* response_seen) {
+        bool* ok,
+        char* response_seen) {
         stream_.reset(TcpThread::IO_0, fd);
         server_ = server;
         server_size_ = server_size;
-        completed_ = completed;
+        ok_ = ok;
         response_seen_ = response_seen;
         return schedule(TcpThread::IO_0);
     }
@@ -223,8 +210,8 @@ private:
             return failed();
         }
 
-        response_seen_->store(response_, std::memory_order_release);
-        completed_->fetch_add(1, std::memory_order_release);
+        *response_seen_ = response_;
+        *ok_ = true;
         return done();
     }
 
@@ -237,8 +224,8 @@ private:
     af::IoOpState connect_{};
     af::IoOpState write_{};
     af::IoOpState read_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<char>* response_seen_{nullptr};
+    bool* ok_{nullptr};
+    char* response_seen_{nullptr};
 };
 #endif
 
@@ -285,35 +272,37 @@ int main() {
         return 1;
     }
 
-    std::atomic<int> server_done{0};
-    std::atomic<int> client_done{0};
-    std::atomic<char> request_seen{0};
-    std::atomic<char> response_seen{0};
+    bool server_ok = false;
+    bool client_ok = false;
+    char request_seen = 0;
+    char response_seen = 0;
 
     const bool server_started = tcp_async::start_task<TcpServerTask>(
         listener.get(),
-        &server_done,
+        &server_ok,
         &request_seen);
     const bool client_started = tcp_async::start_task<TcpClientTask>(
         client.get(),
         address,
         address_size,
-        &client_done,
+        &client_ok,
         &response_seen);
     AF_ASSERT(server_started && client_started);
 
-    if (!server_started || !client_started ||
-        !wait_until(server_done, 1) ||
-        !wait_until(client_done, 1)) {
-        std::cout << "tcp connect/accept round trip timed out\n";
+    if (!server_started || !client_started) {
+        std::cout << "tcp connect/accept task start failed\n";
         tcp_async::shutdown();
         return 1;
     }
 
-    std::cout << "server request=" << request_seen.load(std::memory_order_acquire)
-              << " client response=" << response_seen.load(std::memory_order_acquire) << '\n';
-
     tcp_async::shutdown();
+    if (!server_ok || !client_ok) {
+        std::cout << "tcp connect/accept round trip failed\n";
+        return 1;
+    }
+
+    std::cout << "server request=" << request_seen
+              << " client response=" << response_seen << '\n';
     return 0;
 #else
     std::cout << "tcp connect/accept example is Linux-only\n";

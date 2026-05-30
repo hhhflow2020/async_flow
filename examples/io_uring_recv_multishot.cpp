@@ -29,6 +29,7 @@ struct RecvRuntimeTraits {
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 
     static constexpr af::ThreadKind thread_kind(RecvThread thread) noexcept {
         return thread == RecvThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
@@ -38,9 +39,10 @@ struct RecvRuntimeTraits {
 using recv_async = af::AsyncRuntime<RecvRuntimeTraits>;
 using RecvTaskBase = recv_async::Task;
 
-bool wait_until_at_least(std::atomic<int>& value, int expected) {
+bool wait_until_armed_or_error(std::atomic<int>& armed, std::atomic<int>& error) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (value.load(std::memory_order_acquire) < expected) {
+    while (armed.load(std::memory_order_acquire) == 0 &&
+           error.load(std::memory_order_acquire) == 0) {
         if (std::chrono::steady_clock::now() > deadline) {
             return false;
         }
@@ -57,12 +59,10 @@ public:
     bool do_it(
         int fd,
         std::atomic<int>* armed,
-        std::atomic<int>* completed,
-        std::atomic<int>* packed_read,
+        int* packed_read,
         std::atomic<int>* error) {
         stream_.reset(RecvThread::IO_0, fd);
         armed_ = armed;
-        completed_ = completed;
         packed_read_ = packed_read;
         error_ = error;
         return schedule(RecvThread::IO_0);
@@ -138,9 +138,8 @@ private:
         }
 
         const int shifted = received_ == 0 ? 8 : 0;
-        packed_read_->fetch_or(
-            static_cast<int>(static_cast<unsigned char>(buffers_[buffer_id])) << shifted,
-            std::memory_order_acq_rel);
+        *packed_read_ |= static_cast<int>(
+            static_cast<unsigned char>(buffers_[buffer_id])) << shifted;
         ++received_;
 
         const af::IoProvidedBuffer buffer{
@@ -206,7 +205,6 @@ private:
             }
         }
         error_->store(error, std::memory_order_release);
-        completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
 
@@ -237,8 +235,7 @@ private:
     bool registered_{false};
     af::IoOpState recv_{};
     std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* packed_read_{nullptr};
+    int* packed_read_{nullptr};
     std::atomic<int>* error_{nullptr};
 };
 #endif
@@ -264,21 +261,25 @@ int main() {
     af::UniqueFd sender(fds[1]);
 
     std::atomic<int> armed{0};
-    std::atomic<int> completed{0};
-    std::atomic<int> packed_read{0};
+    int packed_read = 0;
     std::atomic<int> error{0};
     const bool started = recv_async::start_task<RecvMultishotTask>(
         receiver.get(),
         &armed,
-        &completed,
         &packed_read,
         &error);
     AF_ASSERT(started);
 
-    if (!started || !wait_until_at_least(armed, 1)) {
-        if (wait_until_at_least(completed, 1)) {
+    if (!started || !wait_until_armed_or_error(armed, error)) {
+        std::cout << "io_uring recv_multishot arm timed out\n";
+        recv_async::shutdown();
+        return 1;
+    }
+    if (armed.load(std::memory_order_acquire) == 0) {
+        const int task_error = error.load(std::memory_order_acquire);
+        if (task_error != 0) {
             std::cout << "io_uring recv_multishot unsupported error="
-                      << error.load(std::memory_order_acquire) << '\n';
+                      << task_error << '\n';
             recv_async::shutdown();
             return 0;
         }
@@ -294,24 +295,18 @@ int main() {
         return 1;
     }
 
-    if (!wait_until_at_least(completed, 1)) {
-        std::cout << "io_uring recv_multishot task timed out\n";
-        recv_async::shutdown();
-        return 1;
-    }
+    recv_async::shutdown();
 
     const int task_error = error.load(std::memory_order_acquire);
     if (task_error != 0) {
         std::cout << "io_uring recv_multishot unsupported error=" << task_error << '\n';
-        recv_async::shutdown();
         return 0;
     }
 
-    const int packed = packed_read.load(std::memory_order_acquire);
+    const int packed = packed_read;
     std::cout << "io_uring recv_multishot bytes="
               << static_cast<char>((packed >> 8) & 0xff)
               << static_cast<char>(packed & 0xff) << '\n';
-    recv_async::shutdown();
     return 0;
 #else
     std::cout << "io_uring recv_multishot example is Linux-only\n";

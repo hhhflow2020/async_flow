@@ -1,10 +1,7 @@
 #include <array>
-#include <atomic>
-#include <chrono>
 #include <cstdio>
 #include <cstdint>
 #include <iostream>
-#include <thread>
 
 #include "af/async_flow.hpp"
 
@@ -31,6 +28,7 @@ struct LifecycleRuntimeTraits {
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 
     static constexpr af::ThreadKind thread_kind(LifecycleThread thread) noexcept {
         return thread == LifecycleThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
@@ -39,17 +37,6 @@ struct LifecycleRuntimeTraits {
 
 using lifecycle_async = af::AsyncRuntime<LifecycleRuntimeTraits>;
 using LifecycleTaskBase = lifecycle_async::Task;
-
-bool wait_until(std::atomic<int>& value, int expected) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (value.load(std::memory_order_acquire) < expected) {
-        if (std::chrono::steady_clock::now() > deadline) {
-            return false;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    return true;
-}
 
 #if defined(__linux__)
 class FileLifecycleTask final : public LifecycleTaskBase {
@@ -60,13 +47,11 @@ public:
     bool do_it(
         const char* path,
         const char* renamed_path,
-        std::atomic<int>* completed,
-        std::atomic<std::uint64_t>* observed_size) {
+        std::uint64_t* observed_size) {
         if (!copy_path(path_.data(), path_.size(), path) ||
             !copy_path(renamed_path_.data(), renamed_path_.size(), renamed_path)) {
             return false;
         }
-        completed_ = completed;
         observed_size_ = observed_size;
         return schedule(LifecycleThread::IO_0);
     }
@@ -215,7 +200,7 @@ private:
         if (!status.ready() || stat_.stx_size != sizeof(value_)) {
             return failed();
         }
-        observed_size_->store(stat_.stx_size, std::memory_order_release);
+        *observed_size_ = stat_.stx_size;
         state_ = State::Rename;
         return again();
     }
@@ -266,7 +251,6 @@ private:
         if (!status.ready() || owned_.get() != -1) {
             return failed();
         }
-        completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
 
@@ -287,8 +271,7 @@ private:
     af::IoOpState rename_{};
     af::IoOpState unlink_{};
     af::IoOpState close_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<std::uint64_t>* observed_size_{nullptr};
+    std::uint64_t* observed_size_{nullptr};
 };
 #endif
 
@@ -323,24 +306,21 @@ int main() {
     static_cast<void>(::unlink(path.data()));
     static_cast<void>(::unlink(renamed_path.data()));
 
-    std::atomic<int> completed{0};
-    std::atomic<std::uint64_t> observed_size{0};
+    std::uint64_t observed_size = 0;
     const bool started = lifecycle_async::start_task<FileLifecycleTask>(
         path.data(),
         renamed_path.data(),
-        &completed,
         &observed_size);
-    if (!started || !wait_until(completed, 1)) {
-        std::cerr << "io_uring lifecycle task timed out\n";
+    if (!started) {
+        std::cerr << "io_uring lifecycle task start failed\n";
         static_cast<void>(::unlink(path.data()));
         static_cast<void>(::unlink(renamed_path.data()));
         lifecycle_async::shutdown();
         return 1;
     }
 
-    std::cout << "io_uring lifecycle size="
-              << observed_size.load(std::memory_order_acquire) << '\n';
     lifecycle_async::shutdown();
+    std::cout << "io_uring lifecycle size=" << observed_size << '\n';
     return 0;
 #else
     std::cout << "io_uring lifecycle example is Linux-only\n";

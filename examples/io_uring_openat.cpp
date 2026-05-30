@@ -1,10 +1,7 @@
 #include <array>
-#include <atomic>
-#include <chrono>
 #include <cstdio>
 #include <cstdint>
 #include <iostream>
-#include <thread>
 
 #include "af/async_flow.hpp"
 
@@ -30,6 +27,7 @@ struct OpenAtRuntimeTraits {
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 
     static constexpr af::ThreadKind thread_kind(OpenAtThread thread) noexcept {
         return thread == OpenAtThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
@@ -39,17 +37,6 @@ struct OpenAtRuntimeTraits {
 using openat_async = af::AsyncRuntime<OpenAtRuntimeTraits>;
 using OpenAtTaskBase = openat_async::Task;
 
-bool wait_until(std::atomic<int>& value, int expected) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (value.load(std::memory_order_acquire) < expected) {
-        if (std::chrono::steady_clock::now() > deadline) {
-            return false;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    return true;
-}
-
 #if defined(__linux__)
 class OpenAtRoundTripTask final : public OpenAtTaskBase {
 public:
@@ -57,13 +44,11 @@ public:
 
     bool do_it(
         const char* path,
-        std::atomic<int>* completed,
-        std::atomic<char>* byte_read) {
+        char* byte_read) {
         const int written = std::snprintf(path_.data(), path_.size(), "%s", path);
         if (written < 0 || static_cast<std::size_t>(written) >= path_.size()) {
             return false;
         }
-        completed_ = completed;
         byte_read_ = byte_read;
         return schedule(OpenAtThread::IO_0);
     }
@@ -148,8 +133,7 @@ private:
         if (!status.ready() || status.bytes != sizeof(read_) || read_ != value_) {
             return failed();
         }
-        byte_read_->store(read_, std::memory_order_release);
-        completed_->fetch_add(1, std::memory_order_release);
+        *byte_read_ = read_;
         return done();
     }
 
@@ -163,8 +147,7 @@ private:
     af::IoOpState write_{};
     af::IoOpState fsync_{};
     af::IoOpState read_state_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<char>* byte_read_{nullptr};
+    char* byte_read_{nullptr};
 };
 #endif
 
@@ -192,22 +175,20 @@ int main() {
     }
     static_cast<void>(::unlink(path.data()));
 
-    std::atomic<int> completed{0};
-    std::atomic<char> byte_read{0};
+    char byte_read{0};
     const bool started = openat_async::start_task<OpenAtRoundTripTask>(
         path.data(),
-        &completed,
         &byte_read);
-    if (!started || !wait_until(completed, 1)) {
-        std::cerr << "io_uring openat task timed out\n";
+    if (!started) {
+        std::cerr << "io_uring openat task did not start\n";
         static_cast<void>(::unlink(path.data()));
         openat_async::shutdown();
         return 1;
     }
 
-    std::cout << "io_uring openat byte=" << byte_read.load(std::memory_order_acquire) << '\n';
-    static_cast<void>(::unlink(path.data()));
     openat_async::shutdown();
+    std::cout << "io_uring openat byte=" << byte_read << '\n';
+    static_cast<void>(::unlink(path.data()));
     return 0;
 #else
     std::cout << "io_uring openat example is Linux-only\n";

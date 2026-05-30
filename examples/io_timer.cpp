@@ -27,11 +27,9 @@ public:
     bool do_it(
         int fd,
         std::atomic<int>* armed,
-        std::atomic<int>* completed,
-        std::atomic<std::uint64_t>* expirations) {
+        std::uint64_t* expirations) {
         timer_.reset(AppThread::IO_0, fd);
         armed_ = armed;
-        completed_ = completed;
         expirations_ = expirations;
         return schedule(AppThread::IO_0);
     }
@@ -51,16 +49,14 @@ private:
         if (!status.ready() || status.bytes != sizeof(count) || count == 0U) {
             return failed();
         }
-        expirations_->store(count, std::memory_order_release);
-        completed_->fetch_add(1, std::memory_order_release);
+        *expirations_ = count;
         return done();
     }
 
     af::IoTimer<AppThread> timer_{};
     af::IoOpState wait_{};
     std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<std::uint64_t>* expirations_{nullptr};
+    std::uint64_t* expirations_{nullptr};
 };
 
 } // namespace
@@ -84,9 +80,8 @@ int main() {
     }
 
     std::atomic<int> armed{0};
-    std::atomic<int> completed{0};
-    std::atomic<std::uint64_t> expirations{0};
-    if (!async::start_task<TimerTask>(timer.get(), &armed, &completed, &expirations) ||
+    std::uint64_t expirations{0};
+    if (!async::start_task<TimerTask>(timer.get(), &armed, &expirations) ||
         !wait_until(armed, 1)) {
         std::cerr << "timer task did not arm\n";
         async::shutdown();
@@ -100,14 +95,8 @@ int main() {
         return 1;
     }
 
-    if (!wait_until(completed, 1)) {
-        std::cerr << "timer task timed out\n";
-        async::shutdown();
-        return 1;
-    }
-
-    std::cout << "timer expirations=" << expirations.load(std::memory_order_acquire) << '\n';
     async::shutdown();
+    std::cout << "timer expirations=" << expirations << '\n';
     return 0;
 #else
     std::cout << "timerfd example is Linux-only\n";

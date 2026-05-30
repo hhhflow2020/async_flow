@@ -1,9 +1,6 @@
-#include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
-#include <thread>
 
 #include "af/async_flow.hpp"
 
@@ -28,6 +25,7 @@ struct FileRuntimeTraits {
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 
     static constexpr af::ThreadKind thread_kind(FileThread thread) noexcept {
         return thread == FileThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
@@ -37,25 +35,13 @@ struct FileRuntimeTraits {
 using file_async = af::AsyncRuntime<FileRuntimeTraits>;
 using FileTask = file_async::Task;
 
-bool wait_until(std::atomic<int>& value, int expected) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (value.load(std::memory_order_acquire) < expected) {
-        if (std::chrono::steady_clock::now() > deadline) {
-            return false;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    return true;
-}
-
 #if defined(__linux__)
 class FileRoundTripTask final : public FileTask {
 public:
     explicit FileRoundTripTask(FileTask::FactoryToken token) : FileTask(token) {}
 
-    bool do_it(int fd, std::atomic<int>* completed, std::atomic<char>* byte_read) {
+    bool do_it(int fd, char* byte_read) {
         file_.reset(FileThread::IO_0, fd);
-        completed_ = completed;
         byte_read_ = byte_read;
         return schedule(FileThread::IO_0);
     }
@@ -125,8 +111,7 @@ private:
         if (!status.ready() || status.bytes != sizeof(read_)) {
             return failed();
         }
-        byte_read_->store(read_, std::memory_order_release);
-        completed_->fetch_add(1, std::memory_order_release);
+        *byte_read_ = read_;
         return done();
     }
 
@@ -137,8 +122,7 @@ private:
     af::IoOpState write_{};
     af::IoOpState fsync_{};
     af::IoOpState read_state_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<char>* byte_read_{nullptr};
+    char* byte_read_{nullptr};
 };
 #endif
 
@@ -162,26 +146,24 @@ int main() {
     }
     af::UniqueFd file(fd);
 
-    std::atomic<int> completed{0};
-    std::atomic<char> byte_read{0};
+    char byte_read{0};
     const bool started = file_async::start_task<FileRoundTripTask>(
         file.get(),
-        &completed,
         &byte_read);
     AF_ASSERT(started);
 
-    if (!started || !wait_until(completed, 1)) {
-        std::cout << "io_uring file task timed out\n";
+    if (!started) {
+        std::cout << "io_uring file task did not start\n";
         file.reset();
         static_cast<void>(::unlink(path));
         file_async::shutdown();
         return 1;
     }
 
-    std::cout << "io_uring file byte=" << byte_read.load(std::memory_order_acquire) << '\n';
+    file_async::shutdown();
+    std::cout << "io_uring file byte=" << byte_read << '\n';
     file.reset();
     static_cast<void>(::unlink(path));
-    file_async::shutdown();
     return 0;
 #else
     std::cout << "io_uring file example is Linux-only\n";

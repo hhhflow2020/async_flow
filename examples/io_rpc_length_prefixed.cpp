@@ -1,10 +1,7 @@
-#include <atomic>
 #include <cerrno>
-#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
-#include <thread>
 
 #include "af/async_flow.hpp"
 
@@ -42,17 +39,6 @@ struct RpcRuntimeTraits {
 using rpc_async = af::AsyncRuntime<RpcRuntimeTraits>;
 using RpcTask = rpc_async::Task;
 
-bool wait_until(std::atomic<int>& value, int expected) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (value.load(std::memory_order_acquire) < expected) {
-        if (std::chrono::steady_clock::now() > deadline) {
-            return false;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    return true;
-}
-
 #if defined(__linux__)
 static constexpr std::size_t kMaxFrameBytes = 4096;
 
@@ -74,9 +60,9 @@ class RpcServerTask final : public RpcTask {
 public:
     explicit RpcServerTask(RpcTask::FactoryToken token) : RpcTask(token) {}
 
-    bool do_it(int listener_fd, std::atomic<int>* completed, std::atomic<int>* error) {
+    bool do_it(int listener_fd, bool* ok, int* error) {
         listener_.reset(RpcThread::IO_0, listener_fd);
-        completed_ = completed;
+        ok_ = ok;
         error_ = error;
         return schedule(RpcThread::IO_0);
     }
@@ -259,8 +245,8 @@ private:
     }
 
     af::TaskResult complete(int error) {
-        error_->store(error, std::memory_order_release);
-        completed_->fetch_add(1, std::memory_order_release);
+        *error_ = error;
+        *ok_ = true;
         return done();
     }
 
@@ -285,8 +271,8 @@ private:
     std::size_t response_size_{0};
     std::size_t response_written_{0};
 
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* error_{nullptr};
+    bool* ok_{nullptr};
+    int* error_{nullptr};
 };
 
 bool RpcProcessTask::do_it(RpcServerTask* server) {
@@ -321,13 +307,13 @@ public:
         int fd,
         sockaddr_in server,
         socklen_t server_size,
-        std::atomic<int>* completed,
-        std::atomic<int>* error,
-        std::atomic<int>* response_ok) {
+        bool* ok,
+        int* error,
+        bool* response_ok) {
         stream_.reset(RpcThread::IO_0, fd);
         server_ = server;
         server_size_ = server_size;
-        completed_ = completed;
+        ok_ = ok;
         error_ = error;
         response_ok_ = response_ok;
         return schedule(RpcThread::IO_0);
@@ -476,13 +462,13 @@ private:
         }
 
         const bool ok = response_size_ == 4U && std::memcmp(response_, "PONG", 4U) == 0;
-        response_ok_->store(ok ? 1 : 0, std::memory_order_release);
+        *response_ok_ = ok;
         return complete(0);
     }
 
     af::TaskResult complete(int error) {
-        error_->store(error, std::memory_order_release);
-        completed_->fetch_add(1, std::memory_order_release);
+        *error_ = error;
+        *ok_ = true;
         return done();
     }
 
@@ -507,9 +493,9 @@ private:
     std::size_t response_size_{0};
     std::size_t response_read_{0};
 
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* error_{nullptr};
-    std::atomic<int>* response_ok_{nullptr};
+    bool* ok_{nullptr};
+    int* error_{nullptr};
+    bool* response_ok_{nullptr};
 };
 #endif
 
@@ -556,43 +542,46 @@ int main() {
         return 1;
     }
 
-    std::atomic<int> server_done{0};
-    std::atomic<int> client_done{0};
-    std::atomic<int> server_error{0};
-    std::atomic<int> client_error{0};
-    std::atomic<int> response_ok{0};
+    bool server_ok = false;
+    bool client_ok = false;
+    int server_error = 0;
+    int client_error = 0;
+    bool response_ok = false;
 
     const bool server_started = rpc_async::start_task<RpcServerTask>(
         listener.get(),
-        &server_done,
+        &server_ok,
         &server_error);
     const bool client_started = rpc_async::start_task<RpcClientTask>(
         client.get(),
         address,
         address_size,
-        &client_done,
+        &client_ok,
         &client_error,
         &response_ok);
     AF_ASSERT(server_started && client_started);
 
-    if (!server_started || !client_started ||
-        !wait_until(server_done, 1) ||
-        !wait_until(client_done, 1)) {
-        std::cout << "rpc round trip timed out\n";
+    if (!server_started || !client_started) {
+        std::cout << "rpc task start failed\n";
         rpc_async::shutdown();
         return 1;
     }
 
-    const int server_err = server_error.load(std::memory_order_acquire);
-    const int client_err = client_error.load(std::memory_order_acquire);
-    if (server_err != 0 || client_err != 0) {
-        std::cout << "rpc failed: server_error=" << server_err << " client_error=" << client_err << '\n';
-        rpc_async::shutdown();
-        return 1;
-    }
-
-    std::cout << "rpc response_ok=" << response_ok.load(std::memory_order_acquire) << '\n';
+    rpc_async::wait_for_idle();
     rpc_async::shutdown();
+
+    if (!server_ok || !client_ok) {
+        std::cout << "rpc round trip failed\n";
+        return 1;
+    }
+
+    if (server_error != 0 || client_error != 0) {
+        std::cout << "rpc failed: server_error=" << server_error
+                  << " client_error=" << client_error << '\n';
+        return 1;
+    }
+
+    std::cout << "rpc response_ok=" << (response_ok ? 1 : 0) << '\n';
     return 0;
 #else
     std::cout << "rpc length-prefixed example is Linux-only\n";

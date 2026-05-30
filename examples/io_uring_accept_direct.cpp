@@ -33,6 +33,7 @@ struct DirectAcceptRuntimeTraits {
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 
     static constexpr af::ThreadKind thread_kind(DirectAcceptThread thread) noexcept {
         return thread == DirectAcceptThread::IO_0 ? af::ThreadKind::IoUring
@@ -43,9 +44,10 @@ struct DirectAcceptRuntimeTraits {
 using direct_accept_async = af::AsyncRuntime<DirectAcceptRuntimeTraits>;
 using DirectAcceptTask = direct_accept_async::Task;
 
-bool wait_until(std::atomic<int>& value, int expected) {
+bool wait_until_armed_or_error(std::atomic<int>& armed, std::atomic<int>& error) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (value.load(std::memory_order_acquire) < expected) {
+    while (armed.load(std::memory_order_acquire) == 0 &&
+           error.load(std::memory_order_acquire) == 0) {
         if (std::chrono::steady_clock::now() > deadline) {
             return false;
         }
@@ -142,12 +144,10 @@ public:
     bool do_it(
         int listener_fd,
         std::atomic<int>* armed,
-        std::atomic<int>* completed,
         std::atomic<int>* error,
-        std::atomic<int>* packed_read) {
+        int* packed_read) {
         listener_.reset(DirectAcceptThread::IO_0, listener_fd);
         armed_ = armed;
-        completed_ = completed;
         error_ = error;
         packed_read_ = packed_read;
         return schedule(DirectAcceptThread::IO_0);
@@ -233,7 +233,7 @@ private:
         if (!status.ready() || status.bytes != sizeof(request_)) {
             return complete(status.failed() ? status.error : EIO);
         }
-        packed_read_->store(pack_request(), std::memory_order_release);
+        *packed_read_ = pack_request();
         state_ = State::Send;
         return again();
     }
@@ -265,7 +265,6 @@ private:
             registered_ = false;
         }
         error_->store(error, std::memory_order_release);
-        completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
 
@@ -287,9 +286,8 @@ private:
     af::IoOpState recv_{};
     af::IoOpState send_{};
     std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
     std::atomic<int>* error_{nullptr};
-    std::atomic<int>* packed_read_{nullptr};
+    int* packed_read_{nullptr};
 };
 #endif
 
@@ -313,13 +311,11 @@ int main() {
     }
 
     std::atomic<int> armed{0};
-    std::atomic<int> completed{0};
     std::atomic<int> error{0};
-    std::atomic<int> packed_read{0};
+    int packed_read = 0;
     const bool started = direct_accept_async::start_task<DirectAcceptRoundTripTask>(
         listener.get(),
         &armed,
-        &completed,
         &error,
         &packed_read);
     AF_ASSERT(started);
@@ -328,12 +324,12 @@ int main() {
         return 1;
     }
 
-    if (!wait_until(armed, 1)) {
-        if (!wait_until(completed, 1)) {
-            std::cerr << "io_uring accept direct task did not arm\n";
-            direct_accept_async::shutdown();
-            return 1;
-        }
+    if (!wait_until_armed_or_error(armed, error)) {
+        std::cerr << "io_uring accept direct task did not arm\n";
+        direct_accept_async::shutdown();
+        return 1;
+    }
+    if (armed.load(std::memory_order_acquire) == 0) {
         const int task_error = error.load(std::memory_order_acquire);
         std::cout << "io_uring accept direct "
                   << (unsupported_direct_accept_error(task_error) ? "unsupported" : "failed")
@@ -365,32 +361,25 @@ int main() {
         return 1;
     }
 
-    if (!wait_until(completed, 1)) {
-        std::cerr << "io_uring accept direct task timed out\n";
-        direct_accept_async::shutdown();
-        return 1;
-    }
+    direct_accept_async::shutdown();
 
     const int task_error = error.load(std::memory_order_acquire);
     if (task_error != 0) {
         std::cout << "io_uring accept direct "
                   << (unsupported_direct_accept_error(task_error) ? "unsupported" : "failed")
                   << " error=" << task_error << '\n';
-        direct_accept_async::shutdown();
         return unsupported_direct_accept_error(task_error) ? 0 : 1;
     }
 
     char response[2]{};
     if (!read_exact_until(client.get(), response, sizeof(response))) {
         std::cerr << "client read failed\n";
-        direct_accept_async::shutdown();
         return 1;
     }
 
     std::cout << "io_uring accept direct packed="
-              << packed_read.load(std::memory_order_acquire)
+              << packed_read
               << " response=" << response[0] << response[1] << '\n';
-    direct_accept_async::shutdown();
     return 0;
 #else
     std::cout << "io_uring accept direct example is Linux-only\n";

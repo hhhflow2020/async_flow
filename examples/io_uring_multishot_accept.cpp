@@ -32,6 +32,7 @@ struct AcceptRuntimeTraits {
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 
     static constexpr af::ThreadKind thread_kind(AcceptThread thread) noexcept {
         return thread == AcceptThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
@@ -41,9 +42,10 @@ struct AcceptRuntimeTraits {
 using accept_async = af::AsyncRuntime<AcceptRuntimeTraits>;
 using AcceptTask = accept_async::Task;
 
-bool wait_until_at_least(std::atomic<int>& value, int expected) {
+bool wait_until_armed_or_error(std::atomic<int>& armed, std::atomic<int>& error) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (value.load(std::memory_order_acquire) < expected) {
+    while (armed.load(std::memory_order_acquire) == 0 &&
+           error.load(std::memory_order_acquire) == 0) {
         if (std::chrono::steady_clock::now() > deadline) {
             return false;
         }
@@ -68,13 +70,11 @@ public:
         int fd,
         int target_accepts,
         std::atomic<int>* armed,
-        std::atomic<int>* completed,
-        std::atomic<int>* accepted_count,
+        int* accepted_count,
         std::atomic<int>* error) {
         listener_.reset(AcceptThread::IO_0, fd);
         target_accepts_ = target_accepts;
         armed_ = armed;
-        completed_ = completed;
         accepted_count_ = accepted_count;
         error_ = error;
         return schedule(AcceptThread::IO_0);
@@ -115,7 +115,7 @@ private:
         }
 
         close_fd(accepted_fd_);
-        const int accepted = accepted_count_->fetch_add(1, std::memory_order_acq_rel) + 1;
+        const int accepted = ++*accepted_count_;
         if (accepted < target_accepts_) {
             return pending();
         }
@@ -141,7 +141,6 @@ private:
 
     af::TaskResult complete(int error) {
         error_->store(error, std::memory_order_release);
-        completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
 
@@ -152,8 +151,7 @@ private:
     bool armed_once_{false};
     af::IoOpState accept_{};
     std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* accepted_count_{nullptr};
+    int* accepted_count_{nullptr};
     std::atomic<int>* error_{nullptr};
 };
 #endif
@@ -192,21 +190,26 @@ int main() {
 
     constexpr int target_accepts = 2;
     std::atomic<int> armed{0};
-    std::atomic<int> completed{0};
-    std::atomic<int> accepted_count{0};
+    int accepted_count = 0;
     std::atomic<int> error{0};
     const bool started = accept_async::start_task<MultishotAcceptTask>(
         listener,
         target_accepts,
         &armed,
-        &completed,
         &accepted_count,
         &error);
     AF_ASSERT(started);
-    if (!started || !wait_until_at_least(armed, 1)) {
-        if (completed.load(std::memory_order_acquire) != 0) {
+    if (!started || !wait_until_armed_or_error(armed, error)) {
+        std::cout << "io_uring multishot accept arm timed out\n";
+        close_fd(listener);
+        accept_async::shutdown();
+        return 1;
+    }
+    if (armed.load(std::memory_order_acquire) == 0) {
+        const int task_error = error.load(std::memory_order_acquire);
+        if (task_error != 0) {
             std::cout << "io_uring multishot accept unsupported error="
-                      << error.load(std::memory_order_acquire) << '\n';
+                      << task_error << '\n';
             close_fd(listener);
             accept_async::shutdown();
             return 0;
@@ -235,24 +238,23 @@ int main() {
         }
     }
 
-    if (!wait_until_at_least(completed, 1) || error.load(std::memory_order_acquire) != 0) {
+    accept_async::shutdown();
+
+    if (error.load(std::memory_order_acquire) != 0) {
         std::cout << "io_uring multishot accept failed error="
                   << error.load(std::memory_order_acquire) << '\n';
         for (int& client : clients) {
             close_fd(client);
         }
         close_fd(listener);
-        accept_async::shutdown();
         return 1;
     }
 
-    std::cout << "io_uring multishot accepted="
-              << accepted_count.load(std::memory_order_acquire) << '\n';
+    std::cout << "io_uring multishot accepted=" << accepted_count << '\n';
     for (int& client : clients) {
         close_fd(client);
     }
     close_fd(listener);
-    accept_async::shutdown();
     return 0;
 #else
     std::cout << "io_uring multishot accept example is Linux-only\n";

@@ -28,10 +28,9 @@ class ReadOneByteTask final : public Task {
 public:
     explicit ReadOneByteTask(Task::FactoryToken token) : Task(token) {}
 
-    bool do_it(int fd, std::atomic<int>* armed, std::atomic<int>* completed) {
+    bool do_it(int fd, std::atomic<int>* armed) {
         fd_ = fd;
         armed_ = armed;
-        completed_ = completed;
         return schedule(AppThread::IO_0);
     }
 
@@ -80,7 +79,6 @@ private:
             return failed();
         }
         std::cout << "IO_0 received byte: " << value_ << '\n';
-        completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
 
@@ -89,7 +87,6 @@ private:
     char value_{0};
     af::IoOpState read_{};
     std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
 };
 #endif
 
@@ -112,22 +109,23 @@ int main() {
     }
 
     std::atomic<int> armed{0};
-    std::atomic<int> completed{0};
-    const bool started = async::start_task<ReadOneByteTask>(fds[0], &armed, &completed);
+    const bool started = async::start_task<ReadOneByteTask>(fds[0], &armed);
     AF_ASSERT(started);
 
-    if (started && wait_until(armed, 1)) {
-        const char value = 'A';
-        static_cast<void>(::write(fds[1], &value, sizeof(value)));
+    if (!started || !wait_until(armed, 1)) {
+        std::cout << "read task did not arm\n";
+        ::close(fds[0]);
+        ::close(fds[1]);
+        async::shutdown();
+        return 1;
     }
 
-    if (!wait_until(completed, 1)) {
-        std::cout << "read task timed out\n";
-    }
+    const char value = 'A';
+    static_cast<void>(::write(fds[1], &value, sizeof(value)));
 
+    async::shutdown();
     ::close(fds[0]);
     ::close(fds[1]);
-    async::shutdown();
     return 0;
 #else
     std::cout << "epoll IO example is Linux-only\n";

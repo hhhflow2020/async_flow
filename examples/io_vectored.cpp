@@ -29,6 +29,7 @@ struct VectoredRuntimeTraits {
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 
     static constexpr af::ThreadKind thread_kind(VectoredThread thread) noexcept {
         return thread == VectoredThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
@@ -54,9 +55,9 @@ class ServerTask final : public VectoredTask {
 public:
     explicit ServerTask(VectoredTask::FactoryToken token) : VectoredTask(token) {}
 
-    bool do_it(int fd, std::atomic<int>* completed, std::atomic<int>* request_seen) {
+    bool do_it(int fd, bool* ok, int* request_seen) {
         stream_.reset(VectoredThread::IO_0, fd);
-        completed_ = completed;
+        ok_ = ok;
         request_seen_ = request_seen;
         return schedule(VectoredThread::IO_0);
     }
@@ -91,7 +92,7 @@ private:
 
         const int combined =
             (static_cast<int>(request_[0]) << 8) | static_cast<unsigned char>(request_[1]);
-        request_seen_->store(combined, std::memory_order_release);
+        *request_seen_ = combined;
         state_ = State::SendResponse;
         return again();
     }
@@ -107,7 +108,7 @@ private:
             return failed();
         }
 
-        completed_->fetch_add(1, std::memory_order_release);
+        *ok_ = true;
         return done();
     }
 
@@ -119,17 +120,17 @@ private:
     iovec response_iov_[2]{};
     af::IoOpState read_{};
     af::IoOpState write_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* request_seen_{nullptr};
+    bool* ok_{nullptr};
+    int* request_seen_{nullptr};
 };
 
 class ClientTask final : public VectoredTask {
 public:
     explicit ClientTask(VectoredTask::FactoryToken token) : VectoredTask(token) {}
 
-    bool do_it(int fd, std::atomic<int>* completed, std::atomic<int>* response_seen) {
+    bool do_it(int fd, bool* ok, int* response_seen) {
         stream_.reset(VectoredThread::IO_0, fd);
-        completed_ = completed;
+        ok_ = ok;
         response_seen_ = response_seen;
         return schedule(VectoredThread::IO_0);
     }
@@ -179,8 +180,8 @@ private:
 
         const int combined =
             (static_cast<int>(response_[0]) << 8) | static_cast<unsigned char>(response_[1]);
-        response_seen_->store(combined, std::memory_order_release);
-        completed_->fetch_add(1, std::memory_order_release);
+        *response_seen_ = combined;
+        *ok_ = true;
         return done();
     }
 
@@ -192,8 +193,8 @@ private:
     iovec response_iov_[2]{};
     af::IoOpState write_{};
     af::IoOpState read_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* response_seen_{nullptr};
+    bool* ok_{nullptr};
+    int* response_seen_{nullptr};
 };
 
 class DatagramReceiverTask final : public VectoredTask {
@@ -203,11 +204,11 @@ public:
     bool do_it(
         int fd,
         std::atomic<int>* armed,
-        std::atomic<int>* completed,
-        std::atomic<int>* payload_seen) {
+        bool* ok,
+        int* payload_seen) {
         socket_.reset(VectoredThread::IO_0, fd);
         armed_ = armed;
-        completed_ = completed;
+        ok_ = ok;
         payload_seen_ = payload_seen;
         return schedule(VectoredThread::IO_0);
     }
@@ -235,8 +236,8 @@ private:
         const int combined =
             (static_cast<unsigned char>(payload_[0]) << 8) |
             static_cast<unsigned char>(payload_[1]);
-        payload_seen_->store(combined, std::memory_order_release);
-        completed_->fetch_add(1, std::memory_order_release);
+        *payload_seen_ = combined;
+        *ok_ = true;
         return done();
     }
 
@@ -247,8 +248,8 @@ private:
     socklen_t peer_size_{sizeof(peer_)};
     af::IoOpState read_{};
     std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* payload_seen_{nullptr};
+    bool* ok_{nullptr};
+    int* payload_seen_{nullptr};
 };
 
 class DatagramSenderTask final : public VectoredTask {
@@ -259,12 +260,12 @@ public:
         int fd,
         sockaddr_in address,
         socklen_t address_size,
-        std::atomic<int>* completed,
-        std::atomic<int>* bytes_sent) {
+        bool* ok,
+        int* bytes_sent) {
         socket_.reset(VectoredThread::IO_0, fd);
         address_ = address;
         address_size_ = address_size;
-        completed_ = completed;
+        ok_ = ok;
         bytes_sent_ = bytes_sent;
         return schedule(VectoredThread::IO_0);
     }
@@ -287,8 +288,8 @@ private:
             return failed();
         }
 
-        bytes_sent_->store(static_cast<int>(status.bytes), std::memory_order_release);
-        completed_->fetch_add(1, std::memory_order_release);
+        *bytes_sent_ = static_cast<int>(status.bytes);
+        *ok_ = true;
         return done();
     }
 
@@ -298,8 +299,8 @@ private:
     char payload_[2]{'U', 'D'};
     iovec iov_[2]{};
     af::IoOpState write_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* bytes_sent_{nullptr};
+    bool* ok_{nullptr};
+    int* bytes_sent_{nullptr};
 };
 #endif
 
@@ -318,19 +319,17 @@ int main() {
     af::UniqueFd server_fd(fds[0]);
     af::UniqueFd client_fd(fds[1]);
 
-    std::atomic<int> server_done{0};
-    std::atomic<int> client_done{0};
-    std::atomic<int> request_seen{0};
-    std::atomic<int> response_seen{0};
+    bool server_ok = false;
+    bool client_ok = false;
+    int request_seen = 0;
+    int response_seen = 0;
 
     const bool server_started =
-        vectored_async::start_task<ServerTask>(server_fd.get(), &server_done, &request_seen);
+        vectored_async::start_task<ServerTask>(server_fd.get(), &server_ok, &request_seen);
     const bool client_started =
-        vectored_async::start_task<ClientTask>(client_fd.get(), &client_done, &response_seen);
-    if (!server_started || !client_started ||
-        !wait_until(server_done, 1) ||
-        !wait_until(client_done, 1)) {
-        std::cerr << "vectored io round trip timed out\n";
+        vectored_async::start_task<ClientTask>(client_fd.get(), &client_ok, &response_seen);
+    if (!server_started || !client_started) {
+        std::cerr << "vectored io task start failed\n";
         vectored_async::shutdown();
         return 1;
     }
@@ -340,8 +339,6 @@ int main() {
             ? "io_uring"
             : "epoll-fallback";
     std::cout << "vectored stream backend=" << backend << '\n';
-    std::cout << "request=0x" << std::hex << request_seen.load(std::memory_order_acquire)
-              << " response=0x" << response_seen.load(std::memory_order_acquire) << '\n';
 
     af::UniqueFd udp_receiver(::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
     af::UniqueFd udp_sender(::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
@@ -368,34 +365,37 @@ int main() {
     }
 
     std::atomic<int> datagram_armed{0};
-    std::atomic<int> datagram_recv_done{0};
-    std::atomic<int> datagram_send_done{0};
-    std::atomic<int> datagram_seen{0};
-    std::atomic<int> datagram_bytes_sent{0};
+    bool datagram_recv_ok = false;
+    bool datagram_send_ok = false;
+    int datagram_seen = 0;
+    int datagram_bytes_sent = 0;
     if (!vectored_async::start_task<DatagramReceiverTask>(
             udp_receiver.get(),
             &datagram_armed,
-            &datagram_recv_done,
+            &datagram_recv_ok,
             &datagram_seen) ||
         !wait_until(datagram_armed, 1) ||
         !vectored_async::start_task<DatagramSenderTask>(
             udp_sender.get(),
             address,
             address_size,
-            &datagram_send_done,
-            &datagram_bytes_sent) ||
-        !wait_until(datagram_send_done, 1) ||
-        !wait_until(datagram_recv_done, 1)) {
-        std::cerr << "vectored datagram round trip timed out\n";
+            &datagram_send_ok,
+            &datagram_bytes_sent)) {
+        std::cerr << "vectored datagram task start/arm failed\n";
         vectored_async::shutdown();
         return 1;
     }
 
-    std::cout << "datagram=0x" << datagram_seen.load(std::memory_order_acquire)
-              << " bytes_sent=" << std::dec
-              << datagram_bytes_sent.load(std::memory_order_acquire) << '\n';
-
     vectored_async::shutdown();
+    if (!server_ok || !client_ok || !datagram_recv_ok || !datagram_send_ok) {
+        std::cerr << "vectored io round trip failed\n";
+        return 1;
+    }
+
+    std::cout << "request=0x" << std::hex << request_seen
+              << " response=0x" << response_seen << '\n';
+    std::cout << "datagram=0x" << datagram_seen
+              << " bytes_sent=" << std::dec << datagram_bytes_sent << '\n';
     return 0;
 #else
     std::cout << "vectored io example is Linux-only\n";

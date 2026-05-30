@@ -1,10 +1,7 @@
-#include <atomic>
 #include <cerrno>
-#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
-#include <thread>
 
 #include "af/async_flow.hpp"
 
@@ -30,6 +27,7 @@ struct DirectOpenRuntimeTraits {
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 
     static constexpr af::ThreadKind thread_kind(DirectOpenThread thread) noexcept {
         return thread == DirectOpenThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
@@ -38,17 +36,6 @@ struct DirectOpenRuntimeTraits {
 
 using direct_open_async = af::AsyncRuntime<DirectOpenRuntimeTraits>;
 using DirectOpenTask = direct_open_async::Task;
-
-bool wait_until(std::atomic<int>& value, int expected) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (value.load(std::memory_order_acquire) < expected) {
-        if (std::chrono::steady_clock::now() > deadline) {
-            return false;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    return true;
-}
 
 #if defined(__linux__)
 [[nodiscard]] bool unsupported_direct_open_error(int error) noexcept {
@@ -65,11 +52,9 @@ public:
 
     bool do_it(
         const char* path,
-        std::atomic<int>* completed,
-        std::atomic<int>* error,
-        std::atomic<char>* byte_read) {
+        int* error,
+        char* byte_read) {
         path_ = path;
-        completed_ = completed;
         error_ = error;
         byte_read_ = byte_read;
         return schedule(DirectOpenThread::IO_0);
@@ -185,9 +170,8 @@ private:
             }
             registered_ = false;
         }
-        byte_read_->store(read_, std::memory_order_release);
-        error_->store(error, std::memory_order_release);
-        completed_->fetch_add(1, std::memory_order_release);
+        *byte_read_ = read_;
+        *error_ = error;
         return done();
     }
 
@@ -201,9 +185,8 @@ private:
     af::IoOpState write_{};
     af::IoOpState fsync_{};
     af::IoOpState read_state_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* error_{nullptr};
-    std::atomic<char>* byte_read_{nullptr};
+    int* error_{nullptr};
+    char* byte_read_{nullptr};
 };
 #endif
 
@@ -228,37 +211,32 @@ int main() {
     ::close(seed);
     static_cast<void>(::unlink(path));
 
-    std::atomic<int> completed{0};
-    std::atomic<int> error{0};
-    std::atomic<char> byte_read{0};
+    int error{0};
+    char byte_read{0};
     const bool started = direct_open_async::start_task<DirectOpenRoundTripTask>(
         path,
-        &completed,
         &error,
         &byte_read);
     AF_ASSERT(started);
 
-    if (!started || !wait_until(completed, 1)) {
-        std::cout << "io_uring openat direct task timed out\n";
+    if (!started) {
+        std::cout << "io_uring openat direct task did not start\n";
         static_cast<void>(::unlink(path));
         direct_open_async::shutdown();
         return 1;
     }
+    direct_open_async::shutdown();
 
-    const int task_error = error.load(std::memory_order_acquire);
-    if (task_error != 0) {
+    if (error != 0) {
         std::cout << "io_uring openat direct "
-                  << (unsupported_direct_open_error(task_error) ? "unsupported" : "failed")
-                  << " error=" << task_error << '\n';
+                  << (unsupported_direct_open_error(error) ? "unsupported" : "failed")
+                  << " error=" << error << '\n';
         static_cast<void>(::unlink(path));
-        direct_open_async::shutdown();
-        return unsupported_direct_open_error(task_error) ? 0 : 1;
+        return unsupported_direct_open_error(error) ? 0 : 1;
     }
 
-    std::cout << "io_uring openat direct byte="
-              << byte_read.load(std::memory_order_acquire) << '\n';
+    std::cout << "io_uring openat direct byte=" << byte_read << '\n';
     static_cast<void>(::unlink(path));
-    direct_open_async::shutdown();
     return 0;
 #else
     std::cout << "io_uring openat direct example is Linux-only\n";

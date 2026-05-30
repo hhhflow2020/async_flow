@@ -1,4 +1,3 @@
-#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <iostream>
@@ -30,6 +29,7 @@ struct SendZcRuntimeTraits {
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 
     static constexpr af::ThreadKind thread_kind(SendZcThread thread) noexcept {
         return thread == SendZcThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
@@ -38,17 +38,6 @@ struct SendZcRuntimeTraits {
 
 using send_zc_async = af::AsyncRuntime<SendZcRuntimeTraits>;
 using SendZcTaskBase = send_zc_async::Task;
-
-bool wait_until(std::atomic<int>& value, int expected) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (value.load(std::memory_order_acquire) < expected) {
-        if (std::chrono::steady_clock::now() > deadline) {
-            return false;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    return true;
-}
 
 #if defined(__linux__)
 class SendZcTask final : public SendZcTaskBase {
@@ -59,12 +48,10 @@ public:
         int socket_fd,
         const char* payload,
         std::size_t payload_size,
-        std::atomic<int>* completed,
-        std::atomic<std::size_t>* bytes_sent) {
+        std::size_t* bytes_sent) {
         stream_.reset(SendZcThread::IO_0, socket_fd);
         payload_ = payload;
         payload_size_ = payload_size;
-        completed_ = completed;
         bytes_sent_ = bytes_sent;
         return schedule(SendZcThread::IO_0);
     }
@@ -76,7 +63,6 @@ private:
 
     af::TaskResult send_next() {
         if (sent_ >= payload_size_) {
-            completed_->fetch_add(1, std::memory_order_release);
             return done();
         }
 
@@ -92,7 +78,7 @@ private:
         }
 
         sent_ += status.bytes;
-        bytes_sent_->store(sent_, std::memory_order_release);
+        *bytes_sent_ = sent_;
         return again();
     }
 
@@ -102,8 +88,7 @@ private:
     std::size_t sent_{0};
     std::size_t chunk_size_{4096};
     af::IoOpState send_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<std::size_t>* bytes_sent_{nullptr};
+    std::size_t* bytes_sent_{nullptr};
 };
 
 bool create_loopback_listener(af::UniqueFd& listener, sockaddr_in& address) {
@@ -209,31 +194,28 @@ int main() {
 
     send_zc_async::init();
     const bool has_uring = send_zc_async::io_uring_backend_available(SendZcThread::IO_0);
-    std::atomic<int> completed{0};
-    std::atomic<std::size_t> bytes_sent{0};
+    std::size_t bytes_sent{0};
     const bool started = send_zc_async::start_task<SendZcTask>(
         accepted.get(),
         payload,
         payload_size,
-        &completed,
         &bytes_sent);
-    if (!started || !wait_until(completed, 1)) {
-        std::cerr << "send_zc task timed out\n";
+    if (!started) {
+        std::cerr << "send_zc task did not start\n";
         send_zc_async::shutdown();
         return 1;
     }
+    send_zc_async::shutdown();
 
     char received[payload_size]{};
     if (!read_exact_until(client.get(), received, payload_size) ||
         std::memcmp(received, payload, payload_size) != 0) {
         std::cerr << "payload mismatch\n";
-        send_zc_async::shutdown();
         return 1;
     }
 
-    std::cout << "send_zc bytes=" << bytes_sent.load(std::memory_order_acquire)
+    std::cout << "send_zc bytes=" << bytes_sent
               << " io_uring=" << (has_uring ? "available" : "fallback") << '\n';
-    send_zc_async::shutdown();
     return 0;
 #else
     std::cout << "send_zc example is Linux-only\n";

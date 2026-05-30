@@ -1,4 +1,3 @@
-#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <iostream>
@@ -29,6 +28,7 @@ struct SendmsgZcRuntimeTraits {
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 
     static constexpr af::ThreadKind thread_kind(SendmsgZcThread thread) noexcept {
         return thread == SendmsgZcThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
@@ -37,17 +37,6 @@ struct SendmsgZcRuntimeTraits {
 
 using sendmsg_zc_async = af::AsyncRuntime<SendmsgZcRuntimeTraits>;
 using SendmsgZcTaskBase = sendmsg_zc_async::Task;
-
-bool wait_until(std::atomic<int>& value, int expected) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (value.load(std::memory_order_acquire) < expected) {
-        if (std::chrono::steady_clock::now() > deadline) {
-            return false;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    return true;
-}
 
 #if defined(__linux__)
 class SendmsgZcTask final : public SendmsgZcTaskBase {
@@ -60,14 +49,12 @@ public:
         std::size_t first_size,
         const char* second,
         std::size_t second_size,
-        std::atomic<int>* completed,
-        std::atomic<std::size_t>* bytes_sent) {
+        std::size_t* bytes_sent) {
         stream_.reset(SendmsgZcThread::IO_0, socket_fd);
         first_ = first;
         first_size_ = first_size;
         second_ = second;
         second_size_ = second_size;
-        completed_ = completed;
         bytes_sent_ = bytes_sent;
         return schedule(SendmsgZcThread::IO_0);
     }
@@ -76,7 +63,6 @@ private:
     af::TaskResult run() override {
         const std::size_t total_size = first_size_ + second_size_;
         if (sent_ >= total_size) {
-            completed_->fetch_add(1, std::memory_order_release);
             return done();
         }
 
@@ -102,7 +88,7 @@ private:
         }
 
         sent_ += status.bytes;
-        bytes_sent_->store(sent_, std::memory_order_release);
+        *bytes_sent_ = sent_;
         return again();
     }
 
@@ -114,8 +100,7 @@ private:
     std::size_t sent_{0};
     iovec iov_[2]{};
     af::IoOpState send_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<std::size_t>* bytes_sent_{nullptr};
+    std::size_t* bytes_sent_{nullptr};
 };
 
 bool read_exact_until(int fd, char* output, std::size_t size) {
@@ -165,34 +150,31 @@ int main() {
 
     sendmsg_zc_async::init();
     const bool has_uring = sendmsg_zc_async::io_uring_backend_available(SendmsgZcThread::IO_0);
-    std::atomic<int> completed{0};
-    std::atomic<std::size_t> bytes_sent{0};
+    std::size_t bytes_sent{0};
     const bool started = sendmsg_zc_async::start_task<SendmsgZcTask>(
         sender.get(),
         first,
         first_size,
         second,
         second_size,
-        &completed,
         &bytes_sent);
-    if (!started || !wait_until(completed, 1)) {
-        std::cerr << "sendmsg_zc task timed out\n";
+    if (!started) {
+        std::cerr << "sendmsg_zc task did not start\n";
         sendmsg_zc_async::shutdown();
         return 1;
     }
+    sendmsg_zc_async::shutdown();
 
     char received[payload_size]{};
     if (!read_exact_until(receiver.get(), received, payload_size) ||
         std::memcmp(received, first, first_size) != 0 ||
         std::memcmp(received + first_size, second, second_size) != 0) {
         std::cerr << "payload mismatch\n";
-        sendmsg_zc_async::shutdown();
         return 1;
     }
 
-    std::cout << "sendmsg_zc bytes=" << bytes_sent.load(std::memory_order_acquire)
+    std::cout << "sendmsg_zc bytes=" << bytes_sent
               << " io_uring=" << (has_uring ? "available" : "fallback") << '\n';
-    sendmsg_zc_async::shutdown();
     return 0;
 #else
     std::cout << "sendmsg_zc example is Linux-only\n";

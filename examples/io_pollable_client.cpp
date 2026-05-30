@@ -1,4 +1,3 @@
-#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -29,6 +28,7 @@ struct ClientRuntimeTraits {
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 
     static constexpr af::ThreadKind thread_kind(ClientThread thread) noexcept {
         return thread == ClientThread::IO_0 ? af::ThreadKind::Epoll : af::ThreadKind::Worker;
@@ -37,17 +37,6 @@ struct ClientRuntimeTraits {
 
 using client_async = af::AsyncRuntime<ClientRuntimeTraits>;
 using Task = client_async::Task;
-
-bool wait_until(std::atomic<int>& value, int expected) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (value.load(std::memory_order_acquire) < expected) {
-        if (std::chrono::steady_clock::now() > deadline) {
-            return false;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    return true;
-}
 
 #if defined(__linux__)
 struct PollableStep {
@@ -192,9 +181,8 @@ class PollableClientTask final : public Task {
 public:
     explicit PollableClientTask(Task::FactoryToken token) : Task(token) {}
 
-    bool do_it(int fd, std::atomic<int>* completed) {
+    bool do_it(int fd) {
         client_.reset(fd);
-        completed_ = completed;
         state_ = State::Drive;
         wait_.reset();
         return schedule(ClientThread::IO_0);
@@ -227,7 +215,6 @@ private:
                 std::cout << "pollable client response="
                           << std::string_view(client_.response_data(), client_.response_size())
                           << '\n';
-                completed_->fetch_add(1, std::memory_order_release);
                 return done();
             }
             if (step.want == 0U) {
@@ -248,7 +235,6 @@ private:
     State state_{State::Drive};
     PollableEchoClient client_{};
     af::IoOpState wait_{};
-    std::atomic<int>* completed_{nullptr};
 };
 #endif
 
@@ -270,9 +256,14 @@ int main() {
         return 1;
     }
 
-    std::atomic<int> completed{0};
-    const bool started = client_async::start_task<PollableClientTask>(fds[0], &completed);
+    const bool started = client_async::start_task<PollableClientTask>(fds[0]);
     AF_ASSERT(started);
+    if (!started) {
+        ::close(fds[0]);
+        ::close(fds[1]);
+        client_async::shutdown();
+        return 1;
+    }
 
     // Peer side: echo exactly 4 bytes back.
     char request[4]{};
@@ -316,13 +307,10 @@ int main() {
         }
     }
 
-    if (!wait_until(completed, 1)) {
-        std::cout << "pollable client task timed out\n";
-    }
+    client_async::shutdown();
 
     ::close(fds[0]);
     ::close(fds[1]);
-    client_async::shutdown();
     return 0;
 #else
     std::cout << "pollable client example is Linux-only\n";

@@ -1,8 +1,5 @@
-#include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <iostream>
-#include <thread>
 
 #include "af/async_flow.hpp"
 
@@ -26,6 +23,7 @@ struct ShutdownRuntimeTraits {
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 
     static constexpr af::ThreadKind thread_kind(ShutdownThread thread) noexcept {
         return thread == ShutdownThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
@@ -39,9 +37,8 @@ class ShutdownWriteTask final : public ShutdownTaskBase {
 public:
     explicit ShutdownWriteTask(ShutdownTaskBase::FactoryToken token) : ShutdownTaskBase(token) {}
 
-    bool do_it(int fd, std::atomic<int>* completed, std::atomic<int>* error) {
+    bool do_it(int fd, int* error) {
         stream_.reset(ShutdownThread::IO_0, fd);
-        completed_ = completed;
         error_ = error;
         return schedule(ShutdownThread::IO_0);
     }
@@ -56,15 +53,13 @@ private:
         if (status.pending()) {
             return pending();
         }
-        error_->store(status.ready() ? 0 : status.error, std::memory_order_release);
-        completed_->store(1, std::memory_order_release);
+        *error_ = status.ready() ? 0 : status.error;
         return done();
     }
 
     af::TcpStream<ShutdownThread> stream_{};
     af::IoOpState shutdown_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* error_{nullptr};
+    int* error_{nullptr};
 };
 
 void close_pair(int (&fds)[2]) {
@@ -95,30 +90,19 @@ int main() {
         return 1;
     }
 
-    std::atomic<int> completed{0};
-    std::atomic<int> error{0};
-    if (!shutdown_async::start_task<ShutdownWriteTask>(fds[0], &completed, &error)) {
+    int error = 0;
+    if (!shutdown_async::start_task<ShutdownWriteTask>(fds[0], &error)) {
         std::cerr << "shutdown task start failed\n";
         close_pair(fds);
         shutdown_async::shutdown();
         return 1;
     }
 
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (completed.load(std::memory_order_acquire) == 0) {
-        if (std::chrono::steady_clock::now() > deadline) {
-            std::cerr << "shutdown task timed out\n";
-            close_pair(fds);
-            shutdown_async::shutdown();
-            return 1;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+    shutdown_async::shutdown();
 
-    if (error.load(std::memory_order_acquire) != 0) {
-        std::cerr << "shutdown failed error=" << error.load(std::memory_order_acquire) << '\n';
+    if (error != 0) {
+        std::cerr << "shutdown failed error=" << error << '\n';
         close_pair(fds);
-        shutdown_async::shutdown();
         return 1;
     }
 
@@ -127,7 +111,6 @@ int main() {
     if (read_result != 0) {
         std::cerr << "peer did not observe EOF\n";
         close_pair(fds);
-        shutdown_async::shutdown();
         return 1;
     }
 
@@ -135,7 +118,6 @@ int main() {
               << (shutdown_async::io_uring_backend_available(ShutdownThread::IO_0) ? "io_uring" : "fallback")
               << " eof=1\n";
     close_pair(fds);
-    shutdown_async::shutdown();
     return 0;
 #else
     std::cout << "io shutdown example is Linux-only\n";

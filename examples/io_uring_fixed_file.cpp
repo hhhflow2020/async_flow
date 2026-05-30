@@ -1,10 +1,7 @@
-#include <atomic>
 #include <cerrno>
-#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
-#include <thread>
 
 #include "af/async_flow.hpp"
 
@@ -30,6 +27,7 @@ struct FixedFileRuntimeTraits {
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 
     static constexpr af::ThreadKind thread_kind(FixedFileThread thread) noexcept {
         return thread == FixedFileThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
@@ -39,17 +37,6 @@ struct FixedFileRuntimeTraits {
 using fixed_file_async = af::AsyncRuntime<FixedFileRuntimeTraits>;
 using FixedFileTask = fixed_file_async::Task;
 
-bool wait_until(std::atomic<int>& value, int expected) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (value.load(std::memory_order_acquire) < expected) {
-        if (std::chrono::steady_clock::now() > deadline) {
-            return false;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    return true;
-}
-
 #if defined(__linux__)
 class FixedFileRoundTripTask final : public FixedFileTask {
 public:
@@ -58,14 +45,12 @@ public:
     bool do_it(
         int fd,
         int updated_fd,
-        std::atomic<int>* completed,
-        std::atomic<int>* error,
-        std::atomic<char>* byte_read,
-        std::atomic<int>* vectored_read,
-        std::atomic<char>* updated_byte_read) {
+        int* error,
+        char* byte_read,
+        int* vectored_read,
+        char* updated_byte_read) {
         fd_ = fd;
         updated_fd_ = updated_fd;
-        completed_ = completed;
         error_ = error;
         byte_read_ = byte_read;
         vectored_read_ = vectored_read;
@@ -215,7 +200,7 @@ private:
             vector_read_[1] != vector_write_[1]) {
             return complete(status.failed() ? status.error : EIO);
         }
-        vectored_read_->store(pack_vectored_read(), std::memory_order_release);
+        *vectored_read_ = pack_vectored_read();
         state_ = State::Update;
         return again();
     }
@@ -259,14 +244,13 @@ private:
         if (!fixed_file_async::io_unregister_files(FixedFileThread::IO_0, &error)) {
             return complete(error == 0 ? EIO : error);
         }
-        byte_read_->store(buffer_[0], std::memory_order_release);
-        updated_byte_read_->store(updated_read_, std::memory_order_release);
+        *byte_read_ = buffer_[0];
+        *updated_byte_read_ = updated_read_;
         return complete(0);
     }
 
     af::TaskResult complete(int error) {
-        error_->store(error, std::memory_order_release);
-        completed_->fetch_add(1, std::memory_order_release);
+        *error_ = error;
         return done();
     }
 
@@ -292,11 +276,10 @@ private:
     af::IoOpState read_state_{};
     af::IoOpState readv_{};
     af::IoOpState updated_read_state_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* error_{nullptr};
-    std::atomic<char>* byte_read_{nullptr};
-    std::atomic<int>* vectored_read_{nullptr};
-    std::atomic<char>* updated_byte_read_{nullptr};
+    int* error_{nullptr};
+    char* byte_read_{nullptr};
+    int* vectored_read_{nullptr};
+    char* updated_byte_read_{nullptr};
 };
 #endif
 
@@ -341,23 +324,21 @@ int main() {
         return 1;
     }
 
-    std::atomic<int> completed{0};
-    std::atomic<int> error{0};
-    std::atomic<char> byte_read{0};
-    std::atomic<int> vectored_read{0};
-    std::atomic<char> updated_byte_read{0};
+    int error = 0;
+    char byte_read = 0;
+    int vectored_read = 0;
+    char updated_byte_read = 0;
     const bool started = fixed_file_async::start_task<FixedFileRoundTripTask>(
         file.get(),
         updated_file.get(),
-        &completed,
         &error,
         &byte_read,
         &vectored_read,
         &updated_byte_read);
     AF_ASSERT(started);
 
-    if (!started || !wait_until(completed, 1)) {
-        std::cout << "io_uring fixed file task timed out\n";
+    if (!started) {
+        std::cout << "io_uring fixed file task start failed\n";
         updated_file.reset();
         file.reset();
         static_cast<void>(::unlink(updated_path));
@@ -366,30 +347,28 @@ int main() {
         return 1;
     }
 
-    if (error.load(std::memory_order_acquire) != 0) {
-        std::cout << "io_uring fixed file failed error="
-                  << error.load(std::memory_order_acquire) << '\n';
+    fixed_file_async::shutdown();
+
+    if (error != 0) {
+        std::cout << "io_uring fixed file failed error=" << error << '\n';
         updated_file.reset();
         file.reset();
         static_cast<void>(::unlink(updated_path));
         static_cast<void>(::unlink(path));
-        fixed_file_async::shutdown();
         return 1;
     }
 
-    const int vectored = vectored_read.load(std::memory_order_acquire);
+    const int vectored = vectored_read;
     std::cout << "io_uring fixed file byte="
-              << byte_read.load(std::memory_order_acquire)
+              << byte_read
               << " vectored="
               << static_cast<char>((vectored >> 8) & 0xff)
               << static_cast<char>(vectored & 0xff)
-              << " updated="
-              << updated_byte_read.load(std::memory_order_acquire) << '\n';
+              << " updated=" << updated_byte_read << '\n';
     updated_file.reset();
     file.reset();
     static_cast<void>(::unlink(updated_path));
     static_cast<void>(::unlink(path));
-    fixed_file_async::shutdown();
     return 0;
 #else
     std::cout << "io_uring fixed file example is Linux-only\n";

@@ -29,10 +29,9 @@ class StreamEchoTask final : public Task {
 public:
     explicit StreamEchoTask(Task::FactoryToken token) : Task(token) {}
 
-    bool do_it(int fd, std::atomic<int>* armed, std::atomic<int>* completed) {
+    bool do_it(int fd, std::atomic<int>* armed) {
         stream_.reset(AppThread::IO_0, fd);
         armed_ = armed;
-        completed_ = completed;
         return schedule(AppThread::IO_0);
     }
 
@@ -77,7 +76,6 @@ private:
         }
 
         std::cout << "stream request=" << request_ << " response=" << response_ << '\n';
-        completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
 
@@ -88,17 +86,15 @@ private:
     af::IoOpState read_{};
     af::IoOpState write_{};
     std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
 };
 
 class UdpReceiveTask final : public Task {
 public:
     explicit UdpReceiveTask(Task::FactoryToken token) : Task(token) {}
 
-    bool do_it(int fd, std::atomic<int>* armed, std::atomic<int>* completed) {
+    bool do_it(int fd, std::atomic<int>* armed) {
         socket_.reset(AppThread::IO_0, fd);
         armed_ = armed;
-        completed_ = completed;
         return schedule(AppThread::IO_0);
     }
 
@@ -121,7 +117,6 @@ private:
         }
 
         std::cout << "udp datagram=" << value_ << '\n';
-        completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
 
@@ -131,7 +126,6 @@ private:
     socklen_t peer_size_{sizeof(peer_)};
     af::IoOpState recv_{};
     std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
 };
 #endif
 
@@ -156,24 +150,17 @@ int main() {
     af::UniqueFd stream_client(stream_fds[1]);
 
     std::atomic<int> stream_armed{0};
-    std::atomic<int> stream_done{0};
-    const bool stream_started = async::start_task<StreamEchoTask>(
-        stream_server.get(),
-        &stream_armed,
-        &stream_done);
+    const bool stream_started = async::start_task<StreamEchoTask>(stream_server.get(), &stream_armed);
     AF_ASSERT(stream_started);
 
     if (stream_started && wait_until(stream_armed, 1)) {
         const char value = 'T';
         static_cast<void>(::write(stream_client.get(), &value, sizeof(value)));
+    } else {
+        std::cout << "stream adapter task did not arm\n";
+        async::shutdown();
+        return 1;
     }
-    if (!wait_until(stream_done, 1)) {
-        std::cout << "stream adapter task timed out\n";
-    }
-
-    char response = 0;
-    static_cast<void>(::read(stream_client.get(), &response, sizeof(response)));
-    std::cout << "stream peer received=" << response << '\n';
 
     af::UniqueFd udp_receiver(::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
     af::UniqueFd udp_sender(::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
@@ -204,11 +191,7 @@ int main() {
     }
 
     std::atomic<int> udp_armed{0};
-    std::atomic<int> udp_done{0};
-    const bool udp_started = async::start_task<UdpReceiveTask>(
-        udp_receiver.get(),
-        &udp_armed,
-        &udp_done);
+    const bool udp_started = async::start_task<UdpReceiveTask>(udp_receiver.get(), &udp_armed);
     AF_ASSERT(udp_started);
 
     if (udp_started && wait_until(udp_armed, 1)) {
@@ -220,12 +203,17 @@ int main() {
             0,
             reinterpret_cast<sockaddr*>(&address),
             address_size));
-    }
-    if (!wait_until(udp_done, 1)) {
-        std::cout << "udp adapter task timed out\n";
+    } else {
+        std::cout << "udp adapter task did not arm\n";
+        async::shutdown();
+        return 1;
     }
 
     async::shutdown();
+
+    char response = 0;
+    static_cast<void>(::read(stream_client.get(), &response, sizeof(response)));
+    std::cout << "stream peer received=" << response << '\n';
     return 0;
 #else
     std::cout << "IO adapter example is Linux-only\n";

@@ -27,11 +27,9 @@ public:
     bool do_it(
         int fd,
         std::atomic<int>* armed,
-        std::atomic<int>* completed,
-        std::atomic<std::uint64_t>* value) {
+        std::uint64_t* value) {
         event_.reset(AppThread::IO_0, fd);
         armed_ = armed;
-        completed_ = completed;
         value_ = value;
         return schedule(AppThread::IO_0);
     }
@@ -51,16 +49,14 @@ private:
         if (!status.ready() || status.bytes != sizeof(counter) || counter == 0U) {
             return failed();
         }
-        value_->store(counter, std::memory_order_release);
-        completed_->fetch_add(1, std::memory_order_release);
+        *value_ = counter;
         return done();
     }
 
     af::IoEvent<AppThread> event_{};
     af::IoOpState wait_{};
     std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<std::uint64_t>* value_{nullptr};
+    std::uint64_t* value_{nullptr};
 };
 
 } // namespace
@@ -84,9 +80,8 @@ int main() {
     }
 
     std::atomic<int> armed{0};
-    std::atomic<int> completed{0};
-    std::atomic<std::uint64_t> value{0};
-    if (!async::start_task<EventTask>(event.get(), &armed, &completed, &value) ||
+    std::uint64_t value{0};
+    if (!async::start_task<EventTask>(event.get(), &armed, &value) ||
         !wait_until(armed, 1)) {
         std::cerr << "event task did not arm\n";
         async::shutdown();
@@ -100,14 +95,8 @@ int main() {
         return 1;
     }
 
-    if (!wait_until(completed, 1)) {
-        std::cerr << "event task timed out\n";
-        async::shutdown();
-        return 1;
-    }
-
-    std::cout << "event value=" << value.load(std::memory_order_acquire) << '\n';
     async::shutdown();
+    std::cout << "event value=" << value << '\n';
     return 0;
 #else
     std::cout << "eventfd example is Linux-only\n";

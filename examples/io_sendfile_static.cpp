@@ -1,4 +1,3 @@
-#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -32,6 +31,7 @@ struct SendfileRuntimeTraits {
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 
     static constexpr af::ThreadKind thread_kind(SendfileThread thread) noexcept {
         return thread == SendfileThread::IO_0 ? af::ThreadKind::Epoll : af::ThreadKind::Worker;
@@ -40,17 +40,6 @@ struct SendfileRuntimeTraits {
 
 using sendfile_async = af::AsyncRuntime<SendfileRuntimeTraits>;
 using SendfileTaskBase = sendfile_async::Task;
-
-bool wait_until(std::atomic<int>& value, int expected) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (value.load(std::memory_order_acquire) < expected) {
-        if (std::chrono::steady_clock::now() > deadline) {
-            return false;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    return true;
-}
 
 #if defined(__linux__)
 class StaticSendfileTask final : public SendfileTaskBase {
@@ -62,12 +51,10 @@ public:
         int socket_fd,
         int file_fd,
         std::size_t total_size,
-        std::atomic<int>* completed,
-        std::atomic<std::size_t>* bytes_sent) {
+        std::size_t* bytes_sent) {
         stream_.reset(SendfileThread::IO_0, socket_fd);
         file_fd_ = file_fd;
         total_size_ = total_size;
-        completed_ = completed;
         bytes_sent_ = bytes_sent;
         return schedule(SendfileThread::IO_0);
     }
@@ -79,7 +66,6 @@ private:
 
     af::TaskResult send_next_chunk() {
         if (sent_ >= total_size_) {
-            completed_->fetch_add(1, std::memory_order_release);
             return done();
         }
 
@@ -95,7 +81,7 @@ private:
         }
 
         sent_ += status.bytes;
-        bytes_sent_->store(sent_, std::memory_order_release);
+        *bytes_sent_ = sent_;
         return again();
     }
 
@@ -106,8 +92,7 @@ private:
     std::size_t sent_{0};
     std::size_t chunk_size_{4096};
     af::IoOpState send_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<std::size_t>* bytes_sent_{nullptr};
+    std::size_t* bytes_sent_{nullptr};
 };
 
 bool create_loopback_listener(af::UniqueFd& listener, sockaddr_in& address) {
@@ -234,30 +219,27 @@ int main() {
     }
 
     sendfile_async::init();
-    std::atomic<int> completed{0};
-    std::atomic<std::size_t> bytes_sent{0};
+    std::size_t bytes_sent{0};
     const bool started = sendfile_async::start_task<StaticSendfileTask>(
         accepted.get(),
         file.get(),
         payload_size,
-        &completed,
         &bytes_sent);
-    if (!started || !wait_until(completed, 1)) {
-        std::cerr << "sendfile task timed out\n";
+    if (!started) {
+        std::cerr << "sendfile task did not start\n";
         sendfile_async::shutdown();
         return 1;
     }
+    sendfile_async::shutdown();
 
     char received[payload_size]{};
     if (!read_exact_until(client.get(), received, payload_size) ||
         std::memcmp(received, payload, payload_size) != 0) {
         std::cerr << "payload mismatch\n";
-        sendfile_async::shutdown();
         return 1;
     }
 
-    std::cout << "sendfile bytes=" << bytes_sent.load(std::memory_order_acquire) << '\n';
-    sendfile_async::shutdown();
+    std::cout << "sendfile bytes=" << bytes_sent << '\n';
     return 0;
 #else
     std::cout << "sendfile example is Linux-only\n";

@@ -747,7 +747,7 @@ async::parallel_shards_ordered(
 
 - `af::io_openat2()` / `io_mkdirat()` / `io_ftruncate()` / `io_linkat()` / `io_symlinkat()` / `io_unlinkat()` 在指定 IO 线程上完成目录和文件操作。
 - 新增 filesystem helper 通过独立 `af/io_filesystem.hpp` 暴露，公共 API 仍由 `af/io.hpp` 引入，runtime 侧使用窄 SQE submit 路径减少无关分支。
-- 示例 task 的每个状态拆成成员函数，并用 `runtime::wait_for_idle()` 等待任务结束，避免示例层显式定义 atomic 只为了判断 task 是否完成。
+- 示例 task 的每个状态拆成成员函数，完成等待交给 `ShutdownPolicy::WaitForTasks` 下的 `runtime::shutdown()`；需要在 shutdown 前继续派发子任务的示例先用 `runtime::wait_for_idle()` 自然清空，避免示例层显式定义 atomic 只为了判断 task 是否完成。
 
 运行：
 

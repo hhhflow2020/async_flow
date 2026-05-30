@@ -1,8 +1,6 @@
-#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <iostream>
-#include <thread>
 
 #include "af/async_flow.hpp"
 
@@ -23,6 +21,7 @@ struct TimeoutRuntimeTraits {
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 
     static constexpr af::ThreadKind thread_kind(TimeoutThread thread) noexcept {
         return thread == TimeoutThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
@@ -32,23 +31,11 @@ struct TimeoutRuntimeTraits {
 using timeout_async = af::AsyncRuntime<TimeoutRuntimeTraits>;
 using TimeoutTaskBase = timeout_async::Task;
 
-bool wait_until(std::atomic<int>& value, int expected) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (value.load(std::memory_order_acquire) < expected) {
-        if (std::chrono::steady_clock::now() > deadline) {
-            return false;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    return true;
-}
-
 class RingTimeoutTask final : public TimeoutTaskBase {
 public:
     explicit RingTimeoutTask(TimeoutTaskBase::FactoryToken token) : TimeoutTaskBase(token) {}
 
-    bool do_it(std::atomic<int>* completed, std::atomic<int>* error) {
-        completed_ = completed;
+    bool do_it(int* error) {
         error_ = error;
         return schedule(TimeoutThread::IO_0);
     }
@@ -63,14 +50,12 @@ private:
         if (status.pending()) {
             return pending();
         }
-        error_->store(status.failed() ? status.error : 0, std::memory_order_release);
-        completed_->fetch_add(1, std::memory_order_release);
+        *error_ = status.failed() ? status.error : 0;
         return done();
     }
 
     af::IoOpState wait_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* error_{nullptr};
+    int* error_{nullptr};
 };
 
 } // namespace
@@ -84,22 +69,19 @@ int main() {
         return 0;
     }
 
-    std::atomic<int> completed{0};
-    std::atomic<int> error{0};
-    if (!timeout_async::start_task<RingTimeoutTask>(&completed, &error) ||
-        !wait_until(completed, 1)) {
-        std::cout << "io_uring timeout task timed out\n";
+    int error = 0;
+    if (!timeout_async::start_task<RingTimeoutTask>(&error)) {
+        std::cout << "io_uring timeout task did not start\n";
         timeout_async::shutdown();
         return 1;
     }
 
     timeout_async::shutdown();
-    const int task_error = error.load(std::memory_order_acquire);
-    if (task_error == 0) {
-        std::cout << "io_uring timeout completed\n";
+    if (error == 0) {
+        std::cout << "io_uring timeout fired\n";
         return 0;
     }
-    std::cout << "io_uring timeout unsupported error=" << task_error << '\n';
+    std::cout << "io_uring timeout unsupported error=" << error << '\n';
     return 0;
 #else
     std::cout << "io_uring timeout example is Linux-only\n";
