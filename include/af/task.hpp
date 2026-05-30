@@ -49,6 +49,7 @@ inline constexpr std::uint32_t io_readable = 1U << 0U;
 inline constexpr std::uint32_t io_writable = 1U << 1U;
 inline constexpr std::uint32_t io_error = 1U << 2U;
 inline constexpr std::uint32_t io_hangup = 1U << 3U;
+inline constexpr std::uint32_t io_more = 1U << 4U;
 
 struct IoResult {
     int fd{-1};

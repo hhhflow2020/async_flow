@@ -72,6 +72,9 @@ if(ASYNCFLOW_BUILD_EXAMPLES)
     add_executable(asyncflow_io_uring_fixed_file_example examples/io_uring_fixed_file.cpp)
     target_link_libraries(asyncflow_io_uring_fixed_file_example PRIVATE AsyncFlow::AsyncFlow)
 
+    add_executable(asyncflow_io_uring_multishot_accept_example examples/io_uring_multishot_accept.cpp)
+    target_link_libraries(asyncflow_io_uring_multishot_accept_example PRIVATE AsyncFlow::AsyncFlow)
+
     add_executable(asyncflow_io_uring_openat_example examples/io_uring_openat.cpp)
     target_link_libraries(asyncflow_io_uring_openat_example PRIVATE AsyncFlow::AsyncFlow)
 

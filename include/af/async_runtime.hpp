@@ -36,6 +36,14 @@
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+
+#ifndef IORING_CQE_F_MORE
+#define IORING_CQE_F_MORE (1U << 1U)
+#endif
+
+#ifndef IORING_ACCEPT_MULTISHOT
+#define IORING_ACCEPT_MULTISHOT (1U << 0U)
+#endif
 #endif
 
 #if !defined(__linux__)
@@ -1546,6 +1554,51 @@ public:
             return false;
         }
         return executors_[index]->submit_io_uring_accept(
+            fd,
+            address,
+            address_size,
+            flags,
+            task,
+            result);
+#else
+        static_cast<void>(thread);
+        static_cast<void>(address);
+        static_cast<void>(address_size);
+        static_cast<void>(flags);
+        result->fd = fd;
+        result->events = io_error;
+        result->error = ENOSYS;
+        return false;
+#endif
+    }
+
+    [[nodiscard]] static bool io_submit_accept_multishot(
+        Thread thread,
+        int fd,
+        sockaddr* address,
+        socklen_t* address_size,
+        int flags,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || fd < 0 ||
+            address != nullptr || address_size != nullptr) {
+            if (result != nullptr) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = fd < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+#if defined(__linux__)
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_accept_multishot(
             fd,
             address,
             address_size,
@@ -3400,6 +3453,51 @@ private:
 #endif
         }
 
+        [[nodiscard]] bool submit_io_uring_accept_multishot(
+            int fd,
+            sockaddr* address,
+            socklen_t* address_size,
+            int flags,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_ACCEPT,
+                fd,
+                nullptr,
+                0,
+                0,
+                static_cast<std::uint32_t>(flags),
+                io_readable,
+                task,
+                result,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                0,
+                address,
+                address_size,
+                nullptr,
+                0,
+                0,
+                -1,
+                0,
+                false,
+                true);
+#else
+            static_cast<void>(fd);
+            static_cast<void>(address);
+            static_cast<void>(address_size);
+            static_cast<void>(flags);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
         [[nodiscard]] bool submit_io_uring_connect(
             int fd,
             const sockaddr* address,
@@ -3549,6 +3647,7 @@ private:
             std::uint32_t complete_events{0};
             std::uint8_t opcode{0};
             bool cancel_requested{false};
+            bool multishot{false};
         };
 #endif
 
@@ -3583,7 +3682,8 @@ private:
             std::uint64_t extra = 0,
             std::int32_t extra_fd = -1,
             std::uint16_t fixed_buffer_index = 0,
-            bool fixed_file = false) noexcept {
+            bool fixed_file = false,
+            bool multishot = false) noexcept {
             AF_ASSERT(current_thread_index_ == index_ && "io_uring submit must be called from its IO thread");
             if (current_thread_index_ != index_ || task == nullptr || result == nullptr) {
                 if (result != nullptr) {
@@ -3705,6 +3805,7 @@ private:
             operation->complete_events = complete_events;
             operation->opcode = opcode;
             operation->cancel_requested = false;
+            operation->multishot = multishot;
             operation->msg = nullptr;
             operation->socket_address = nullptr;
             if (message_op) {
@@ -3814,6 +3915,9 @@ private:
                     sqe->addr2 = reinterpret_cast<std::uint64_t>(&operation->socket_address->size);
                 }
                 sqe->accept_flags = op_flags;
+                if (multishot) {
+                    sqe->ioprio |= IORING_ACCEPT_MULTISHOT;
+                }
             } else if (connect_op) {
                 sqe->addr = reinterpret_cast<std::uint64_t>(&operation->socket_address->storage);
                 sqe->off = operation->socket_address->size;
@@ -4300,8 +4404,16 @@ private:
                 io_uring_cqe& cqe = io_uring_cqes_[head & *io_uring_cq_ring_mask_];
                 auto* operation = reinterpret_cast<IoUringOperation*>(cqe.user_data);
                 if (operation != nullptr) {
-                    complete_io_uring_operation(operation, cqe.res);
+                    const bool yield_to_task = complete_io_uring_operation(
+                        operation,
+                        cqe.res,
+                        cqe.flags);
                     did_work = true;
+                    ++head;
+                    if (yield_to_task) {
+                        break;
+                    }
+                    continue;
                 }
                 ++head;
             }
@@ -4309,8 +4421,18 @@ private:
             return did_work;
         }
 
-        void complete_io_uring_operation(IoUringOperation* operation, int result) noexcept {
-            untrack_io_uring_operation(operation);
+        [[nodiscard]] bool complete_io_uring_operation(
+            IoUringOperation* operation,
+            int result,
+            std::uint32_t cqe_flags) noexcept {
+            const bool more =
+                operation->multishot &&
+                !operation->cancel_requested &&
+                result >= 0 &&
+                (cqe_flags & IORING_CQE_F_MORE) != 0U;
+            if (!more) {
+                untrack_io_uring_operation(operation);
+            }
             operation->result->result = result;
             if (operation->cancel_requested) {
                 if (result >= 0 && io_uring_result_is_fd(operation->opcode)) {
@@ -4323,7 +4445,7 @@ private:
                 operation->result->events = io_error;
                 operation->result->error = -result;
             } else {
-                operation->result->events = operation->complete_events;
+                operation->result->events = operation->complete_events | (more ? io_more : 0U);
                 operation->result->error = 0;
                 if (operation->msg != nullptr && operation->msg->address_size != nullptr) {
                     *operation->msg->address_size = operation->msg->header.msg_namelen;
@@ -4344,7 +4466,11 @@ private:
                 }
             }
             enqueue_pending_blocking(index_, operation->task);
+            if (more) {
+                return true;
+            }
             destroy_io_uring_operation(operation);
+            return false;
         }
 
         [[nodiscard]] static bool io_uring_result_is_fd(std::uint8_t opcode) noexcept {
@@ -4412,6 +4538,7 @@ private:
                 IoUringOperation* next = operation->next;
                 operation->prev = nullptr;
                 operation->next = nullptr;
+                close_pending_io_uring_fd_result(operation);
                 destroy_io_uring_operation(operation);
                 operation = next;
             }
@@ -4432,11 +4559,13 @@ private:
                 operation->prev = nullptr;
                 operation->next = nullptr;
                 if (operation == running_operation) {
+                    close_pending_io_uring_fd_result(operation);
                     destroy_io_uring_operation(operation);
                     operation = next;
                     continue;
                 }
 
+                close_pending_io_uring_fd_result(operation);
                 operation->result->events = io_error;
                 operation->result->error = operation->cancel_requested ? ECANCELED : error;
                 operation->result->result = operation->cancel_requested ? -ECANCELED : -error;
@@ -4444,6 +4573,21 @@ private:
                 destroy_io_uring_operation(operation);
                 operation = next;
             }
+        }
+
+        void close_pending_io_uring_fd_result(IoUringOperation* operation) noexcept {
+            if (operation == nullptr ||
+                operation->result == nullptr ||
+                !io_uring_result_is_fd(operation->opcode) ||
+                operation->result->error != 0 ||
+                (operation->result->events & operation->complete_events) == 0U ||
+                operation->result->result < 0) {
+                return;
+            }
+            ::close(static_cast<int>(operation->result->result));
+            operation->result->events = io_error;
+            operation->result->error = ECANCELED;
+            operation->result->result = -ECANCELED;
         }
 
         void destroy_io_uring_operation(IoUringOperation* operation) noexcept {

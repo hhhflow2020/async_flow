@@ -664,6 +664,72 @@ private:
     std::atomic<int>* completed_{nullptr};
 };
 
+class TcpAcceptMultishotBoundaryTask final : public IoTaskBase {
+public:
+    explicit TcpAcceptMultishotBoundaryTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(
+        int fd,
+        std::atomic<int>* completed,
+        std::atomic<int>* invalid_error,
+        std::atomic<int>* null_error,
+        std::atomic<int>* address_error,
+        std::atomic<int>* unavailable_error) {
+        listener_.reset(IoTestThread::IO_0, fd);
+        completed_ = completed;
+        invalid_error_ = invalid_error;
+        null_error_ = null_error;
+        address_error_ = address_error;
+        unavailable_error_ = unavailable_error;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        af::TcpListener<IoTestThread> invalid_listener(IoTestThread::IO_0, -1);
+        af::IoOpState invalid_state{};
+        af::IoOpState null_state{};
+        af::IoOpState address_state{};
+        af::IoOpState unavailable_state{};
+        sockaddr_storage peer{};
+        socklen_t peer_size = sizeof(peer);
+        int accepted = -1;
+
+        const af::IoStatus invalid_status =
+            invalid_listener.accept_multishot(*this, nullptr, nullptr, &accepted, invalid_state);
+        const af::IoStatus null_status =
+            listener_.accept_multishot(*this, nullptr, nullptr, nullptr, null_state);
+        const af::IoStatus address_status = listener_.accept_multishot(
+            *this,
+            reinterpret_cast<sockaddr*>(&peer),
+            &peer_size,
+            &accepted,
+            address_state);
+        const af::IoStatus unavailable_status =
+            listener_.accept_multishot(*this, nullptr, nullptr, &accepted, unavailable_state);
+        if (!invalid_status.failed() || invalid_status.error != EBADF ||
+            !null_status.failed() || null_status.error != EINVAL ||
+            !address_status.failed() || address_status.error != EINVAL ||
+            !unavailable_status.failed() || unavailable_status.error != ENOSYS) {
+            return failed();
+        }
+
+        invalid_error_->store(invalid_status.error, std::memory_order_release);
+        null_error_->store(null_status.error, std::memory_order_release);
+        address_error_->store(address_status.error, std::memory_order_release);
+        unavailable_error_->store(unavailable_status.error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    af::TcpListener<IoTestThread> listener_{};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* invalid_error_{nullptr};
+    std::atomic<int>* null_error_{nullptr};
+    std::atomic<int>* address_error_{nullptr};
+    std::atomic<int>* unavailable_error_{nullptr};
+};
+
 class TcpConnectTask final : public IoTaskBase {
 public:
     explicit TcpConnectTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
@@ -2510,6 +2576,113 @@ private:
     std::atomic<int>* completed_{nullptr};
 };
 
+class UringTcpAcceptMultishotTask final : public UringIoTaskBase {
+public:
+    explicit UringTcpAcceptMultishotTask(UringIoTaskBase::FactoryToken token)
+        : UringIoTaskBase(token) {}
+
+    bool do_it(
+        int fd,
+        int target_accepts,
+        std::atomic<int>* armed,
+        std::atomic<int>* completed,
+        std::atomic<int>* accepted_count,
+        std::atomic<int>* error) {
+        listener_.reset(IoTestThread::IO_0, fd);
+        target_accepts_ = target_accepts;
+        armed_ = armed;
+        completed_ = completed;
+        accepted_count_ = accepted_count;
+        error_ = error;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Accept,
+        Cancel,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Accept:
+            return accept_one();
+        case State::Cancel:
+            return finish_cancel();
+        }
+        return failed();
+    }
+
+    af::TaskResult accept_one() {
+        const af::IoStatus status = listener_.accept_multishot(
+            *this,
+            nullptr,
+            nullptr,
+            &accepted_fd_,
+            accept_);
+        if (status.pending()) {
+            if (!armed_once_) {
+                armed_once_ = true;
+                armed_->fetch_add(1, std::memory_order_release);
+            }
+            return pending();
+        }
+        if (status.failed()) {
+            error_->store(status.error, std::memory_order_release);
+            completed_->fetch_add(1, std::memory_order_release);
+            return done();
+        }
+        if (!status.ready() || accepted_fd_ < 0) {
+            return failed();
+        }
+
+        ::close(accepted_fd_);
+        accepted_fd_ = -1;
+        const int accepted = accepted_count_->fetch_add(1, std::memory_order_acq_rel) + 1;
+        if (accepted < target_accepts_) {
+            return pending();
+        }
+
+        if (!accept_.waiting) {
+            completed_->fetch_add(1, std::memory_order_release);
+            return done();
+        }
+        if (!UringIoRuntime::cancel_io(IoTestThread::IO_0, accept_)) {
+            error_->store(accept_.wait.error == 0 ? EIO : accept_.wait.error, std::memory_order_release);
+            completed_->fetch_add(1, std::memory_order_release);
+            return done();
+        }
+        state_ = State::Cancel;
+        return pending();
+    }
+
+    af::TaskResult finish_cancel() {
+        int ignored = -1;
+        const af::IoStatus status =
+            listener_.accept_multishot(*this, nullptr, nullptr, &ignored, accept_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.failed() || status.error != ECANCELED) {
+            return failed();
+        }
+        error_->store(0, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    State state_{State::Accept};
+    af::TcpListener<IoTestThread> listener_{};
+    int accepted_fd_{-1};
+    int target_accepts_{0};
+    bool armed_once_{false};
+    af::IoOpState accept_{};
+    std::atomic<int>* armed_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* accepted_count_{nullptr};
+    std::atomic<int>* error_{nullptr};
+};
+
 class UringTcpConnectTask final : public UringIoTaskBase {
 public:
     explicit UringTcpConnectTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
@@ -4228,6 +4401,41 @@ TEST_F(IoRuntimeFixture, EpollIoThreadAcceptsTcpConnectionFromHelper) {
 #endif
 }
 
+TEST_F(IoRuntimeFixture, AcceptMultishotReportsInvalidAndUnavailableBackend) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int listener = -1;
+    sockaddr_in address{};
+    socklen_t address_size = sizeof(address);
+    ASSERT_TRUE(create_tcp_listener(listener, address, address_size));
+
+    std::atomic<int> completed{0};
+    std::atomic<int> invalid_error{0};
+    std::atomic<int> null_error{0};
+    std::atomic<int> address_error{0};
+    std::atomic<int> unavailable_error{0};
+    ASSERT_TRUE(IoRuntime::start_task<TcpAcceptMultishotBoundaryTask>(
+        listener,
+        &completed,
+        &invalid_error,
+        &null_error,
+        &address_error,
+        &unavailable_error));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(invalid_error.load(std::memory_order_acquire), EBADF);
+    EXPECT_EQ(null_error.load(std::memory_order_acquire), EINVAL);
+    EXPECT_EQ(address_error.load(std::memory_order_acquire), EINVAL);
+    EXPECT_EQ(unavailable_error.load(std::memory_order_acquire), ENOSYS);
+
+    close_fd(listener);
+#else
+    GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
 TEST_F(IoRuntimeFixture, EpollIoThreadConnectsTcpStreamFromHelper) {
 #if defined(__linux__)
     if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
@@ -4484,6 +4692,61 @@ TEST_F(UringIoRuntimeFixture, IoUringThreadAcceptsTcpConnectionOrFallsBackToEpol
 
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     close_fd(client);
+    close_fd(listener);
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringAcceptMultishotAcceptsMultipleConnections) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io_uring backend unavailable";
+    }
+
+    int listener = -1;
+    sockaddr_in address{};
+    socklen_t address_size = sizeof(address);
+    ASSERT_TRUE(create_tcp_listener(listener, address, address_size));
+
+    constexpr int target_accepts = 2;
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<int> accepted_count{0};
+    std::atomic<int> error{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringTcpAcceptMultishotTask>(
+        listener,
+        target_accepts,
+        &armed,
+        &completed,
+        &accepted_count,
+        &error));
+
+    if (!wait_until_at_least(armed, 1)) {
+        ASSERT_TRUE(wait_until_at_least(completed, 1));
+        const int submit_error = error.load(std::memory_order_acquire);
+        if (submit_error == EINVAL || submit_error == EOPNOTSUPP || submit_error == ENOSYS) {
+            close_fd(listener);
+            GTEST_SKIP() << "io_uring multishot accept unsupported";
+        }
+        FAIL() << "multishot accept was not armed, error=" << submit_error;
+    }
+
+    int clients[target_accepts]{-1, -1};
+    for (int& client : clients) {
+        client = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+        ASSERT_GE(client, 0);
+        const int rc = ::connect(client, reinterpret_cast<sockaddr*>(&address), address_size);
+        ASSERT_TRUE(rc == 0 || errno == EINPROGRESS);
+    }
+
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(error.load(std::memory_order_acquire), 0);
+    EXPECT_EQ(accepted_count.load(std::memory_order_acquire), target_accepts);
+
+    for (int client : clients) {
+        close_fd(client);
+    }
     close_fd(listener);
 #else
     GTEST_SKIP() << "io_uring backend is Linux-only";
