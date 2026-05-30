@@ -1483,6 +1483,39 @@ public:
         return executors_[index]->submit_io_uring_recv(fd, data, size, flags, task, result);
     }
 
+    [[nodiscard]] static bool io_submit_recv_fixed_file(
+        Thread thread,
+        int file_index,
+        void* data,
+        std::size_t size,
+        std::uint32_t flags,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || file_index < 0 || data == nullptr) {
+            if (result != nullptr) {
+                result->fd = file_index;
+                result->events = io_error;
+                result->error = file_index < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = file_index;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_recv_fixed_file(
+            file_index,
+            data,
+            size,
+            flags,
+            task,
+            result);
+    }
+
 #if defined(__linux__)
     [[nodiscard]] static bool io_submit_recv_multishot(
         Thread thread,
@@ -1576,6 +1609,39 @@ public:
             return false;
         }
         return executors_[index]->submit_io_uring_send(fd, data, size, flags, task, result);
+    }
+
+    [[nodiscard]] static bool io_submit_send_fixed_file(
+        Thread thread,
+        int file_index,
+        const void* data,
+        std::size_t size,
+        std::uint32_t flags,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || file_index < 0 || data == nullptr) {
+            if (result != nullptr) {
+                result->fd = file_index;
+                result->events = io_error;
+                result->error = file_index < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = file_index;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_send_fixed_file(
+            file_index,
+            data,
+            size,
+            flags,
+            task,
+            result);
     }
 
 #if defined(__linux__)
@@ -1917,6 +1983,59 @@ public:
         result->fd = fd;
         result->events = io_error;
         result->error = ENOSYS;
+        return false;
+#endif
+    }
+
+    [[nodiscard]] static bool io_submit_accept_direct(
+        Thread thread,
+        int fd,
+        sockaddr* address,
+        socklen_t* address_size,
+        int flags,
+        int file_index,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || fd < 0 || file_index < 0 ||
+            ((address == nullptr) != (address_size == nullptr))) {
+            if (result != nullptr) {
+                result->fd = file_index;
+                result->events = io_error;
+                result->error = fd < 0 || file_index < 0 ? EBADF : EINVAL;
+                result->result = -result->error;
+                result->completion_token = nullptr;
+            }
+            return false;
+        }
+
+#if defined(__linux__)
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = file_index;
+            result->events = io_error;
+            result->error = EINVAL;
+            result->result = -EINVAL;
+            result->completion_token = nullptr;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_accept_direct(
+            fd,
+            address,
+            address_size,
+            flags,
+            file_index,
+            task,
+            result);
+#else
+        static_cast<void>(thread);
+        static_cast<void>(address);
+        static_cast<void>(address_size);
+        static_cast<void>(flags);
+        result->fd = file_index;
+        result->events = io_error;
+        result->error = ENOSYS;
+        result->result = -ENOSYS;
+        result->completion_token = nullptr;
         return false;
 #endif
     }
@@ -4102,6 +4221,50 @@ private:
 #endif
         }
 
+        [[nodiscard]] bool submit_io_uring_recv_fixed_file(
+            int file_index,
+            void* data,
+            std::size_t size,
+            std::uint32_t flags,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_RECV,
+                file_index,
+                data,
+                size,
+                0,
+                flags,
+                io_readable,
+                task,
+                result,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                nullptr,
+                0,
+                0,
+                -1,
+                0,
+                true);
+#else
+            static_cast<void>(file_index);
+            static_cast<void>(data);
+            static_cast<void>(size);
+            static_cast<void>(flags);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
 #if defined(__linux__)
         [[nodiscard]] bool submit_io_uring_recv_multishot(
             int fd,
@@ -4212,6 +4375,50 @@ private:
                 result);
 #else
             static_cast<void>(fd);
+            static_cast<void>(data);
+            static_cast<void>(size);
+            static_cast<void>(flags);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
+        [[nodiscard]] bool submit_io_uring_send_fixed_file(
+            int file_index,
+            const void* data,
+            std::size_t size,
+            std::uint32_t flags,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_SEND,
+                file_index,
+                const_cast<void*>(data),
+                size,
+                0,
+                flags,
+                io_writable,
+                task,
+                result,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                nullptr,
+                0,
+                0,
+                -1,
+                0,
+                true);
+#else
+            static_cast<void>(file_index);
             static_cast<void>(data);
             static_cast<void>(size);
             static_cast<void>(flags);
@@ -4550,6 +4757,57 @@ private:
             static_cast<void>(address);
             static_cast<void>(address_size);
             static_cast<void>(flags);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
+        [[nodiscard]] bool submit_io_uring_accept_direct(
+            int fd,
+            sockaddr* address,
+            socklen_t* address_size,
+            int flags,
+            int file_index,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_ACCEPT,
+                fd,
+                nullptr,
+                0,
+                0,
+                static_cast<std::uint32_t>(flags),
+                io_readable,
+                task,
+                result,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                0,
+                address,
+                address_size,
+                nullptr,
+                0,
+                0,
+                -1,
+                0,
+                false,
+                false,
+                false,
+                0,
+                false,
+                file_index);
+#else
+            static_cast<void>(fd);
+            static_cast<void>(address);
+            static_cast<void>(address_size);
+            static_cast<void>(flags);
+            static_cast<void>(file_index);
             static_cast<void>(task);
             if (result != nullptr) {
                 result->error = ENOSYS;

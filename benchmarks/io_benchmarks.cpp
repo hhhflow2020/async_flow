@@ -57,6 +57,28 @@ struct FakeRuntime {
         return false;
     }
 
+    static bool io_submit_recv_fixed_file(
+        BenchIoThread,
+        int,
+        void*,
+        std::size_t,
+        std::uint32_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
+    static bool io_submit_send_fixed_file(
+        BenchIoThread,
+        int,
+        const void*,
+        std::size_t,
+        std::uint32_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
     static bool io_submit_read_at(
         BenchIoThread,
         int,
@@ -305,6 +327,18 @@ struct FakeRuntime {
         return false;
     }
 
+    static bool io_submit_accept_direct(
+        BenchIoThread,
+        int,
+        sockaddr*,
+        socklen_t*,
+        int,
+        int,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
     static bool io_submit_accept_multishot(
         BenchIoThread,
         int,
@@ -507,6 +541,22 @@ void BM_IoListenerAdapterInvalidAccept(benchmark::State& state) {
     }
 }
 
+void BM_IoListenerAdapterInvalidAcceptDirect(benchmark::State& state) {
+    FakeTask task;
+    af::TcpListener<BenchIoThread> listener(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    af::IoFixedFile<BenchIoThread> accepted;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(listener.accept_direct(
+            task,
+            nullptr,
+            nullptr,
+            0,
+            &accepted,
+            op));
+    }
+}
+
 void BM_IoListenerAdapterInvalidAcceptMultishot(benchmark::State& state) {
     FakeTask task;
     af::TcpListener<BenchIoThread> listener(BenchIoThread::IO_0, -1);
@@ -701,6 +751,24 @@ void BM_IoFixedFileAdapterZeroByteWriteAt(benchmark::State& state) {
     }
 }
 
+void BM_IoFixedFileAdapterZeroByteRecv(benchmark::State& state) {
+    FakeTask task;
+    af::IoFixedFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(file.recv_some(task, nullptr, 0, op));
+    }
+}
+
+void BM_IoFixedFileAdapterZeroByteSend(benchmark::State& state) {
+    FakeTask task;
+    af::IoFixedFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(file.send_some(task, nullptr, 0, op));
+    }
+}
+
 void BM_IoFixedFileAdapterZeroByteReadFixedAt(benchmark::State& state) {
     FakeTask task;
     af::IoFixedFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
@@ -783,6 +851,7 @@ BENCHMARK(BM_IoDatagramAdapterInvalidRecvFromMultishot);
 #endif
 BENCHMARK(BM_IoDatagramAdapterZeroByteRecv);
 BENCHMARK(BM_IoListenerAdapterInvalidAccept);
+BENCHMARK(BM_IoListenerAdapterInvalidAcceptDirect);
 BENCHMARK(BM_IoListenerAdapterInvalidAcceptMultishot);
 BENCHMARK(BM_IoStreamAdapterInvalidConnect);
 BENCHMARK(BM_IoTimerAdapterNullExpiration);
@@ -800,6 +869,8 @@ BENCHMARK(BM_IoFileAdapterZeroByteReadFixedAt);
 BENCHMARK(BM_IoFileAdapterZeroByteWriteFixedAt);
 BENCHMARK(BM_IoFixedFileAdapterZeroByteReadAt);
 BENCHMARK(BM_IoFixedFileAdapterZeroByteWriteAt);
+BENCHMARK(BM_IoFixedFileAdapterZeroByteRecv);
+BENCHMARK(BM_IoFixedFileAdapterZeroByteSend);
 BENCHMARK(BM_IoFixedFileAdapterZeroByteReadFixedAt);
 BENCHMARK(BM_IoFixedFileAdapterZeroByteWriteFixedAt);
 BENCHMARK(BM_IoStreamAdapterZeroIovSendv);

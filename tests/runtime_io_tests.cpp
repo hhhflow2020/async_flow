@@ -1837,6 +1837,19 @@ private:
         af::IoOpState direct_null_output{};
         af::IoOpState direct_bad_index{};
         af::IoOpState direct_unavailable{};
+        af::IoOpState accept_bad_fd{};
+        af::IoOpState accept_null_output{};
+        af::IoOpState accept_bad_address{};
+        af::IoOpState accept_bad_index{};
+        af::IoOpState accept_unavailable{};
+        af::IoOpState fixed_recv_unavailable{};
+        af::IoOpState fixed_recv_zero{};
+        af::IoOpState fixed_recv_bad{};
+        af::IoOpState fixed_recv_null{};
+        af::IoOpState fixed_send_unavailable{};
+        af::IoOpState fixed_send_zero{};
+        af::IoOpState fixed_send_bad{};
+        af::IoOpState fixed_send_null{};
         char value = 0;
         af::IoFixedBuffer buffer{&value, sizeof(value), 0};
 
@@ -1896,6 +1909,76 @@ private:
             0,
             &direct_file,
             direct_unavailable);
+        af::IoFixedFile<IoTestThread> accepted_direct{};
+        sockaddr_storage peer{};
+        socklen_t peer_size = sizeof(peer);
+        const int placeholder_fd = STDIN_FILENO;
+        const af::IoStatus accept_bad_fd_status = af::io_accept_direct(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            nullptr,
+            nullptr,
+            SOCK_NONBLOCK | SOCK_CLOEXEC,
+            0,
+            &accepted_direct,
+            accept_bad_fd);
+        const af::IoStatus accept_null_output_status = af::io_accept_direct(
+            *this,
+            IoTestThread::IO_0,
+            placeholder_fd,
+            nullptr,
+            nullptr,
+            SOCK_NONBLOCK | SOCK_CLOEXEC,
+            0,
+            nullptr,
+            accept_null_output);
+        const af::IoStatus accept_bad_address_status = af::io_accept_direct(
+            *this,
+            IoTestThread::IO_0,
+            placeholder_fd,
+            reinterpret_cast<sockaddr*>(&peer),
+            nullptr,
+            SOCK_NONBLOCK | SOCK_CLOEXEC,
+            0,
+            &accepted_direct,
+            accept_bad_address);
+        const af::IoStatus accept_bad_index_status = af::io_accept_direct(
+            *this,
+            IoTestThread::IO_0,
+            placeholder_fd,
+            nullptr,
+            nullptr,
+            SOCK_NONBLOCK | SOCK_CLOEXEC,
+            -1,
+            &accepted_direct,
+            accept_bad_index);
+        const af::IoStatus accept_unavailable_status = af::io_accept_direct(
+            *this,
+            IoTestThread::IO_0,
+            placeholder_fd,
+            nullptr,
+            nullptr,
+            SOCK_NONBLOCK | SOCK_CLOEXEC,
+            0,
+            &accepted_direct,
+            accept_unavailable);
+        const af::IoStatus fixed_recv_unavailable_status =
+            missing.recv_some(*this, &value, sizeof(value), fixed_recv_unavailable);
+        const af::IoStatus fixed_recv_zero_status =
+            invalid.recv_some(*this, nullptr, 0, fixed_recv_zero);
+        const af::IoStatus fixed_recv_bad_status =
+            invalid.recv_some(*this, &value, sizeof(value), fixed_recv_bad);
+        const af::IoStatus fixed_recv_null_status =
+            missing.recv_some(*this, nullptr, sizeof(value), fixed_recv_null);
+        const af::IoStatus fixed_send_unavailable_status =
+            missing.send_some(*this, &value, sizeof(value), fixed_send_unavailable);
+        const af::IoStatus fixed_send_zero_status =
+            invalid.send_some(*this, nullptr, 0, fixed_send_zero);
+        const af::IoStatus fixed_send_bad_status =
+            invalid.send_some(*this, &value, sizeof(value), fixed_send_bad);
+        const af::IoStatus fixed_send_null_status =
+            missing.send_some(*this, nullptr, sizeof(value), fixed_send_null);
         if (!unavailable_read.failed() || unavailable_read.error != ENOSYS ||
             !zero_read.ready() || zero_read.bytes != 0U ||
             !bad_read.failed() || bad_read.error != EBADF ||
@@ -1907,7 +1990,20 @@ private:
             !direct_null_output_status.failed() || direct_null_output_status.error != EINVAL ||
             !direct_bad_index_status.failed() || direct_bad_index_status.error != EBADF ||
             !direct_unavailable_status.failed() || direct_unavailable_status.error != ENOSYS ||
-            direct_file.valid()) {
+            !accept_bad_fd_status.failed() || accept_bad_fd_status.error != EBADF ||
+            !accept_null_output_status.failed() || accept_null_output_status.error != EINVAL ||
+            !accept_bad_address_status.failed() || accept_bad_address_status.error != EINVAL ||
+            !accept_bad_index_status.failed() || accept_bad_index_status.error != EBADF ||
+            !accept_unavailable_status.failed() || accept_unavailable_status.error != ENOSYS ||
+            !fixed_recv_unavailable_status.failed() || fixed_recv_unavailable_status.error != ENOSYS ||
+            !fixed_recv_zero_status.ready() || fixed_recv_zero_status.bytes != 0U ||
+            !fixed_recv_bad_status.failed() || fixed_recv_bad_status.error != EBADF ||
+            !fixed_recv_null_status.failed() || fixed_recv_null_status.error != EINVAL ||
+            !fixed_send_unavailable_status.failed() || fixed_send_unavailable_status.error != ENOSYS ||
+            !fixed_send_zero_status.ready() || fixed_send_zero_status.bytes != 0U ||
+            !fixed_send_bad_status.failed() || fixed_send_bad_status.error != EBADF ||
+            !fixed_send_null_status.failed() || fixed_send_null_status.error != EINVAL ||
+            direct_file.valid() || accepted_direct.valid()) {
             return failed();
         }
 
@@ -3671,6 +3767,127 @@ private:
     std::atomic<int>* completed_{nullptr};
 };
 
+class UringTcpAcceptDirectTask final : public UringIoTaskBase {
+public:
+    explicit UringTcpAcceptDirectTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
+
+    bool do_it(
+        int fd,
+        std::atomic<int>* armed,
+        std::atomic<int>* completed,
+        std::atomic<int>* error,
+        std::atomic<char>* byte_read) {
+        listener_.reset(IoTestThread::IO_0, fd);
+        armed_ = armed;
+        completed_ = completed;
+        error_ = error;
+        byte_read_ = byte_read;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Register,
+        Accept,
+        Recv,
+        Unregister,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Register:
+            return register_sparse_slot();
+
+        case State::Accept:
+            return accept_direct();
+
+        case State::Recv:
+            return recv_byte();
+
+        case State::Unregister:
+            return complete(0);
+        }
+        return complete(EIO);
+    }
+
+    af::TaskResult register_sparse_slot() {
+        const int sparse = -1;
+        int error = 0;
+        if (!UringIoRuntime::io_register_files(IoTestThread::IO_0, &sparse, 1, &error)) {
+            return complete(error == 0 ? EIO : error);
+        }
+        registered_ = true;
+        state_ = State::Accept;
+        return again();
+    }
+
+    af::TaskResult accept_direct() {
+        const af::IoStatus status = listener_.accept_direct(
+            *this,
+            nullptr,
+            nullptr,
+            0,
+            &accepted_,
+            accept_);
+        if (status.pending()) {
+            if (!armed_once_) {
+                armed_once_ = true;
+                armed_->fetch_add(1, std::memory_order_release);
+            }
+            return pending();
+        }
+        if (!status.ready()) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        if (!accepted_.valid()) {
+            return complete(EIO);
+        }
+        state_ = State::Recv;
+        return again();
+    }
+
+    af::TaskResult recv_byte() {
+        const af::IoStatus status =
+            accepted_.recv_some(*this, &byte_, sizeof(byte_), recv_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(byte_)) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        state_ = State::Unregister;
+        return again();
+    }
+
+    af::TaskResult complete(int error) {
+        if (registered_) {
+            int unregister_error = 0;
+            if (!UringIoRuntime::io_unregister_files(IoTestThread::IO_0, &unregister_error) &&
+                error == 0) {
+                error = unregister_error == 0 ? EIO : unregister_error;
+            }
+            registered_ = false;
+        }
+        byte_read_->store(byte_, std::memory_order_release);
+        error_->store(error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    State state_{State::Register};
+    af::TcpListener<IoTestThread> listener_{};
+    af::IoFixedFile<IoTestThread> accepted_{};
+    char byte_{0};
+    bool registered_{false};
+    bool armed_once_{false};
+    af::IoOpState accept_{};
+    af::IoOpState recv_{};
+    std::atomic<int>* armed_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* error_{nullptr};
+    std::atomic<char>* byte_read_{nullptr};
+};
+
 class UringTcpAcceptMultishotTask final : public UringIoTaskBase {
 public:
     explicit UringTcpAcceptMultishotTask(UringIoTaskBase::FactoryToken token)
@@ -5270,6 +5487,29 @@ bool read_exact_until(int fd, char* output, std::size_t size) {
     return true;
 }
 
+bool write_exact_until(int fd, const char* input, std::size_t size) {
+    std::size_t offset = 0;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (offset < size) {
+        const ssize_t n = ::write(fd, input + offset, size - offset);
+        if (n > 0) {
+            offset += static_cast<std::size_t>(n);
+            continue;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        if (errno != EAGAIN && errno != EWOULDBLOCK && errno != ENOTCONN) {
+            return false;
+        }
+        if (std::chrono::steady_clock::now() > deadline) {
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+}
+
 bool create_tcp_listener(int& listener, sockaddr_in& address, socklen_t& address_size) {
     listener = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     if (listener < 0) {
@@ -6642,6 +6882,73 @@ TEST_F(UringIoRuntimeFixture, IoUringThreadAcceptsTcpConnectionOrFallsBackToEpol
     ASSERT_TRUE(rc == 0 || errno == EINPROGRESS);
 
     ASSERT_TRUE(wait_until_at_least(completed, 1));
+    close_fd(client);
+    close_fd(listener);
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringAcceptDirectReceivesThroughFixedFile) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io_uring backend unavailable";
+    }
+
+    int listener = -1;
+    sockaddr_in address{};
+    socklen_t address_size = sizeof(address);
+    ASSERT_TRUE(create_tcp_listener(listener, address, address_size));
+
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<int> error{0};
+    std::atomic<char> byte_read{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringTcpAcceptDirectTask>(
+        listener,
+        &armed,
+        &completed,
+        &error,
+        &byte_read));
+
+    if (!wait_until_at_least(armed, 1)) {
+        ASSERT_TRUE(wait_until_at_least(completed, 1));
+        const int submit_error = error.load(std::memory_order_acquire);
+        if (submit_error == EINVAL || submit_error == EBADF || submit_error == ENOSYS ||
+            submit_error == ENXIO
+#ifdef EOPNOTSUPP
+            || submit_error == EOPNOTSUPP
+#endif
+        ) {
+            close_fd(listener);
+            GTEST_SKIP() << "io_uring direct accept unsupported";
+        }
+        close_fd(listener);
+        FAIL() << "direct accept was not armed, error=" << submit_error;
+    }
+
+    int client = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(client, 0);
+    const int rc = ::connect(client, reinterpret_cast<sockaddr*>(&address), address_size);
+    ASSERT_TRUE(rc == 0 || errno == EINPROGRESS);
+    const char request = 'A';
+    ASSERT_TRUE(write_exact_until(client, &request, sizeof(request)));
+
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    const int task_error = error.load(std::memory_order_acquire);
+    if (task_error == EINVAL || task_error == EBADF || task_error == ENOSYS ||
+        task_error == ENXIO
+#ifdef EOPNOTSUPP
+        || task_error == EOPNOTSUPP
+#endif
+    ) {
+        close_fd(client);
+        close_fd(listener);
+        GTEST_SKIP() << "io_uring direct accept unsupported";
+    }
+    EXPECT_EQ(task_error, 0);
+    EXPECT_EQ(byte_read.load(std::memory_order_acquire), request);
+
     close_fd(client);
     close_fd(listener);
 #else

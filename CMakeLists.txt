@@ -90,6 +90,9 @@ if(ASYNCFLOW_BUILD_EXAMPLES)
     add_executable(asyncflow_io_uring_openat_direct_example examples/io_uring_openat_direct.cpp)
     target_link_libraries(asyncflow_io_uring_openat_direct_example PRIVATE AsyncFlow::AsyncFlow)
 
+    add_executable(asyncflow_io_uring_accept_direct_example examples/io_uring_accept_direct.cpp)
+    target_link_libraries(asyncflow_io_uring_accept_direct_example PRIVATE AsyncFlow::AsyncFlow)
+
     add_executable(asyncflow_io_uring_datagram_example examples/io_uring_datagram.cpp)
     target_link_libraries(asyncflow_io_uring_datagram_example PRIVATE AsyncFlow::AsyncFlow)
 
