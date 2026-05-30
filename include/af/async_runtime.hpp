@@ -1808,7 +1808,9 @@ private:
             state.wait.events = io_error;
             state.wait.error = ECANCELED;
             state.wait.result = -ECANCELED;
-            enqueue_pending_blocking(index_, registration.task);
+            if (registration.task != running_task_) {
+                enqueue_pending_blocking(index_, registration.task);
+            }
             return true;
         }
 
@@ -2605,12 +2607,15 @@ private:
             }
 
             TaskResult result = TaskResult::Done;
+            Task* previous_running_task = running_task_;
+            running_task_ = task;
             try {
                 result = task->run();
             } catch (...) {
                 AF_ASSERT(false && "task::run must not throw");
                 result = TaskResult::Done;
             }
+            running_task_ = previous_running_task;
 
             switch (result) {
             case TaskResult::Done:
@@ -3584,6 +3589,7 @@ private:
         alignas(detail::hardware_cache_line_size) std::atomic<std::uint32_t> wake_epoch_{0};
         std::atomic<bool> sleeping_{false};
         std::atomic<bool> stop_requested_{false};
+        Task* running_task_{nullptr};
 #if defined(__linux__)
         struct IoWaitRegistration {
             Task* task{nullptr};
@@ -3810,13 +3816,16 @@ private:
 
     static void enqueue_pending_blocking(std::uint16_t index, Task* task) noexcept {
         TaskState expected = TaskState::Pending;
-        [[maybe_unused]] const bool ok = task->state_.compare_exchange_strong(
+        if (task->state_.compare_exchange_strong(
                 expected,
                 TaskState::Queued,
                 std::memory_order_acq_rel,
-                std::memory_order_acquire);
-        AF_ASSERT(ok);
-        enqueue_ready_blocking(index, task);
+                std::memory_order_acquire)) {
+            enqueue_ready_blocking(index, task);
+            return;
+        }
+        AF_ASSERT(expected == TaskState::Queued || expected == TaskState::Running);
+        static_cast<void>(index);
     }
 
     [[nodiscard]] static bool try_enter_post(std::uint16_t target) noexcept {

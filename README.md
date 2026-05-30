@@ -165,7 +165,7 @@ const af::IoStatus status = stream.recv_some(*this, buffer_, sizeof(buffer_), re
 
 `af::IoFile<Thread>` 面向非阻塞 fd/readiness，并提供 `readv_at/writev_at` 文件 scatter/gather；`af::TcpListener<Thread>` 使用 `accept`，`af::TcpStream<Thread>` 使用 `connect/recv/send/recvv/sendv/sendfile_some`，`af::UdpSocket<Thread>` 使用 `recvmsg/sendmsg`、`recvv_from/sendv_to` 或 `recvfrom/sendto` fallback，`af::IoEvent<Thread>` 使用 Linux `eventfd` readiness，`af::IoTimer<Thread>` 使用 Linux `timerfd` readiness。adapter 本身都是两个字段的小对象，不拥有 fd、不分配内存、不跨线程搬运 IO；任务仍然先调度到绑定的 IO 线程，syscall、io_uring submit/completion、eventfd/timerfd readiness 和后续恢复都在同一个 executor 上完成。需要所有权时可使用 `af::UniqueFd` 在业务侧管理 fd 生命周期。
 
-已经挂起的 IO 可在对应 IO 线程调用 `async::cancel_io(thread, state)` 取消；epoll readiness 会从 epoll 删除 fd wait，io_uring completion 会提交 `IORING_OP_ASYNC_CANCEL`，最终都用 `ECANCELED` 恢复原 pending task。为了避免跨线程改动 `IoOpState` 和 executor 内部 wait 表，业务侧应把取消动作也调度到 fd 所属 IO 线程执行；`io_close()` 提交成功后 fd 所有权已释放，因此不支持再取消 pending close。per-operation timeout 是后续补齐项。
+已经挂起的 IO 可在对应 IO 线程调用 `async::cancel_io(thread, state)` 取消；epoll readiness 会从 epoll 删除 fd wait，io_uring completion 会提交 `IORING_OP_ASYNC_CANCEL`，最终都用 `ECANCELED` 恢复原 pending task。为了避免跨线程改动 `IoOpState` 和 executor 内部 wait 表，业务侧应把取消动作也调度到 fd 所属 IO 线程执行；`io_close()` 提交成功后 fd 所有权已释放，因此不支持再取消 pending close。单次 IO 超时可使用 `af::IoDeadline` + `af::arm_io_timeout()` 组合：IO 先完成会取消 timerfd，timeout 先完成会取消 pending IO 并返回 `ETIMEDOUT`，用户 cancel 仍返回 `ECANCELED`。
 
 在 `ThreadKind::IoUring` 线程上，`af::io_openat()`、`af::io_close()`、`af::io_statx()`、`af::io_fallocate()`、`af::io_renameat()`、`af::io_unlinkat()`、`af::io_splice_some()` 和 `af::IoFile` 的 `read_at()` / `write_at()` / `readv_at()` / `writev_at()` / `fsync()` 通过 io_uring 提交真正的文件异步操作；`af::TcpListener`、`af::TcpStream` 和 `af::UdpSocket` 也会优先走 io_uring。业务可通过 `async::io_uring_backend_available(thread)` 判断是否启用。非 Linux 平台会保留接口但不创建 IO backend，业务可通过 `async::io_backend_available(thread)` 做降级判断。`iovec` 数组、buffer、路径字符串和 sendfile/splice offset 指针必须存活到 pending IO 恢复，建议作为 task 成员保存。`examples/io_epoll.cpp` 演示 socketpair readiness，`examples/io_event.cpp` 演示 eventfd 异步通知，`examples/io_timer.cpp` 演示 timerfd 异步定时器，`examples/io_adapters.cpp` 演示 TCP/UDP adapter，`examples/io_sendfile_static.cpp` 演示文件经 TCP socket 少拷贝发送，`examples/io_uring_file.cpp` 演示文件 write/fsync/read，`examples/io_uring_openat.cpp` 演示异步 openat + 文件 round trip，`examples/io_uring_file_lifecycle.cpp` 演示文件生命周期闭环，`examples/io_uring_datagram.cpp` 演示 UDP client/server 全异步 round trip，`examples/io_tcp_connect_accept.cpp` 演示 TCP accept/connect/send/recv round trip，`examples/io_vectored.cpp` 演示 stream scatter/gather round trip。
 
@@ -211,6 +211,7 @@ auto sharded = af::split_change_batch(batch, player_logic_shard_count);
 - `af::make_eventfd()` / `af::write_eventfd()` / `af::IoEvent::wait()` 封装 Linux eventfd，适合业务侧异步通知、轻量计数器和跨组件唤醒，event fd 仍然在绑定 IO 线程上恢复 task。
 - `af::make_timerfd()` / `af::arm_timerfd_after()` / `af::arm_timerfd_every()` / `af::IoTimer::wait()` 封装 Linux timerfd，适合超时、重试、心跳和连接保活，计时 fd 仍然在绑定 IO 线程上恢复 task。
 - `async::cancel_io(thread, state)` 可取消同 IO 线程内的 epoll readiness pending wait 和 io_uring completion op，并用 `ECANCELED` 恢复原 task；正常 readiness helper 热路径只增加一个 `[[unlikely]]` 取消分支。
+- `af::IoDeadline` / `af::arm_io_timeout()` 复用绑定 IO 线程上的 timerfd，不引入跨线程 MPMC hop；同一个 task 的 IO wait 和 timeout wait 同时 ready 时 runtime 会合并重复唤醒，task 自己在下一次 `run()` 中消费结果。
 - `ThreadKind::IoUring` 在同一个 IO executor 内用 raw io_uring syscall 提交 `read_at` / `write_at` / `readv_at` / `writev_at` / `fsync`、TCP `accept/connect/recv/send/recvv/sendv` 和 UDP `recvmsg/sendmsg/recvv_from/sendv_to`，同一 executor tick 内的多个 SQE 会合并提交以减少 `io_uring_enter`，completion 通过 eventfd 唤醒，不把 IO completion 跨线程搬运。
 - `af::IoFile` / `af::TcpListener` / `af::TcpStream` / `af::UdpSocket` / `af::IoEvent` / `af::IoTimer` 是零堆分配 adapter，仅保存 `thread + fd` 并内联转发到 helper；它们不会引入额外队列或 MPMC hop。
 - `CrudOp<Key, Value>` / `ChangeBatch<Key, Value>` 是纯数据 helper，不引入额外运行期状态。
@@ -261,6 +262,7 @@ ASYNCFLOW_STRESS_MS=1500 ctest --test-dir build-tsan/build/Debug -R RuntimeStres
 - `examples/io_epoll.cpp`：Linux epoll IO 线程等待 fd readiness 并恢复 pending task。
 - `examples/io_event.cpp`：使用 `af::IoEvent` 和 Linux eventfd 完成异步通知恢复。
 - `examples/io_timer.cpp`：使用 `af::IoTimer` 和 Linux timerfd 完成异步定时器恢复。
+- `examples/io_timeout.cpp`：使用 `af::IoDeadline` 为单次 pending read 组合 timeout/cancel。
 - `examples/io_adapters.cpp`：使用 `af::TcpStream` 和 `af::UdpSocket` 编写业务状态机。
 - `examples/io_sendfile_static.cpp`：使用 `af::TcpStream::sendfile_some()` 将静态文件内容通过 TCP socket 发送给 peer。
 - `examples/io_uring_file.cpp`：使用 `af::IoFile::write_at()` / `fsync()` / `read_at()` 编写文件异步 IO 状态机。

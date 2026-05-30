@@ -323,6 +323,11 @@ inline void clear_waiting(IoOpState& state) noexcept {
     return state.waiting && state.wait.error == ECANCELED;
 }
 
+[[nodiscard]] inline bool io_wait_result_ready(const IoOpState& state) noexcept {
+    return state.waiting &&
+        (state.wait.events != 0U || state.wait.error != 0 || state.wait.result != 0);
+}
+
 [[nodiscard]] inline IoStatus consume_cancelled_wait(IoOpState& state) noexcept {
     clear_waiting(state);
     return IoStatus::failed(ECANCELED);
@@ -498,6 +503,37 @@ inline void clear_waiting(IoOpState& state) noexcept {
         error);
 }
 #endif
+
+struct IoDeadline {
+    std::chrono::nanoseconds delay{0};
+    UniqueFd timer{};
+    IoOpState wait{};
+    std::uint64_t expirations{0};
+    bool armed{false};
+    bool cancel_pending{false};
+
+    void set_after(std::chrono::nanoseconds timeout) noexcept {
+        delay = timeout;
+        reset_runtime();
+    }
+
+    void reset_runtime() noexcept {
+        wait.reset();
+        expirations = 0;
+        armed = false;
+        cancel_pending = false;
+    }
+
+    void reset() noexcept {
+        reset_runtime();
+        timer.reset();
+        delay = std::chrono::nanoseconds{0};
+    }
+
+    [[nodiscard]] bool configured() const noexcept {
+        return delay.count() > 0;
+    }
+};
 
 template <typename TaskT>
 [[nodiscard]] IoStatus io_accept_some(
@@ -2056,6 +2092,114 @@ template <typename TaskT>
         }
         return IoStatus::failed(error);
     }
+#endif
+}
+
+template <typename TaskT>
+[[nodiscard]] IoStatus arm_io_timeout(
+    TaskT& task,
+    typename TaskT::Thread thread,
+    IoDeadline& deadline,
+    IoOpState& io_state) noexcept {
+#if !defined(__linux__)
+    static_cast<void>(task);
+    static_cast<void>(thread);
+    static_cast<void>(deadline);
+    static_cast<void>(io_state);
+    return IoStatus::failed(ENOSYS);
+#else
+    if (!deadline.configured()) {
+        return IoStatus::failed(EINVAL);
+    }
+
+    if (deadline.cancel_pending) {
+        if (!detail::io_wait_result_ready(io_state)) {
+            return IoStatus::make_pending();
+        }
+        detail::clear_waiting(io_state);
+        deadline.reset_runtime();
+        return IoStatus::failed(ETIMEDOUT);
+    }
+
+    if (deadline.armed && detail::io_wait_result_ready(io_state)) {
+        if (detail::io_wait_result_ready(deadline.wait)) {
+            std::uint64_t ignored = 0;
+            static_cast<void>(io_wait_timerfd(
+                task,
+                thread,
+                deadline.timer.get(),
+                &ignored,
+                deadline.wait));
+        } else if (deadline.wait.waiting) {
+            static_cast<void>(TaskT::Runtime::cancel_io(thread, deadline.wait));
+        }
+        int error = 0;
+        static_cast<void>(disarm_timerfd(deadline.timer.get(), error));
+        deadline.reset_runtime();
+        return IoStatus::ready(0);
+    }
+
+    if (deadline.armed && detail::io_wait_result_ready(deadline.wait)) {
+        const IoStatus timeout = io_wait_timerfd(
+            task,
+            thread,
+            deadline.timer.get(),
+            &deadline.expirations,
+            deadline.wait);
+        if (!timeout.ready()) {
+            deadline.reset_runtime();
+            return timeout.failed() ? timeout : IoStatus::failed(EIO);
+        }
+
+        const IoWaitKind io_kind = io_state.wait_kind;
+        if (!TaskT::Runtime::cancel_io(thread, io_state)) {
+            const int error = io_state.wait.error == 0 ? EIO : io_state.wait.error;
+            deadline.reset_runtime();
+            return IoStatus::failed(error);
+        }
+
+        if (io_kind == IoWaitKind::Completion) {
+            deadline.cancel_pending = true;
+            deadline.armed = false;
+            return IoStatus::make_pending();
+        }
+
+        detail::clear_waiting(io_state);
+        deadline.reset_runtime();
+        return IoStatus::failed(ETIMEDOUT);
+    }
+
+    if (deadline.armed) {
+        return IoStatus::make_pending();
+    }
+    if (!io_state.waiting) {
+        return IoStatus::failed(EINVAL);
+    }
+
+    if (!deadline.timer) {
+        deadline.timer = make_timerfd();
+        if (!deadline.timer) {
+            return IoStatus::failed(errno == 0 ? EIO : errno);
+        }
+    }
+
+    int error = 0;
+    if (!arm_timerfd_after(deadline.timer.get(), deadline.delay, error)) {
+        return IoStatus::failed(error);
+    }
+
+    deadline.wait.reset();
+    deadline.expirations = 0;
+    const IoStatus status = io_wait_timerfd(
+        task,
+        thread,
+        deadline.timer.get(),
+        &deadline.expirations,
+        deadline.wait);
+    if (status.pending()) {
+        deadline.armed = true;
+    }
+    return status;
 #endif
 }
 

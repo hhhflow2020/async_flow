@@ -48,6 +48,9 @@ if(ASYNCFLOW_BUILD_EXAMPLES)
     add_executable(asyncflow_io_timer_example examples/io_timer.cpp)
     target_link_libraries(asyncflow_io_timer_example PRIVATE AsyncFlow::AsyncFlow)
 
+    add_executable(asyncflow_io_timeout_example examples/io_timeout.cpp)
+    target_link_libraries(asyncflow_io_timeout_example PRIVATE AsyncFlow::AsyncFlow)
+
     add_executable(asyncflow_io_event_example examples/io_event.cpp)
     target_link_libraries(asyncflow_io_event_example PRIVATE AsyncFlow::AsyncFlow)
 
