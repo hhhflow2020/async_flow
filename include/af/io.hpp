@@ -85,24 +85,6 @@ struct IoStatus {
     }
 };
 
-enum class IoWaitKind : std::uint8_t {
-    None,
-    Readiness,
-    Completion,
-};
-
-struct IoOpState {
-    IoResult wait{};
-    IoWaitKind wait_kind{IoWaitKind::None};
-    bool waiting{false};
-
-    void reset() noexcept {
-        wait = IoResult{};
-        wait_kind = IoWaitKind::None;
-        waiting = false;
-    }
-};
-
 class UniqueFd {
 public:
     UniqueFd() noexcept = default;
@@ -337,6 +319,15 @@ inline void clear_waiting(IoOpState& state) noexcept {
     state.wait_kind = IoWaitKind::None;
 }
 
+[[nodiscard]] inline bool cancelled_wait_ready(const IoOpState& state) noexcept {
+    return state.waiting && state.wait.error == ECANCELED;
+}
+
+[[nodiscard]] inline IoStatus consume_cancelled_wait(IoOpState& state) noexcept {
+    clear_waiting(state);
+    return IoStatus::failed(ECANCELED);
+}
+
 [[nodiscard]] inline bool uring_submit_error_can_fallback(int error) noexcept {
     return error == ENOSYS || error == EBUSY;
 }
@@ -518,6 +509,9 @@ template <typename TaskT>
     int* accepted_fd,
     IoOpState& state,
     int flags = detail::io_default_accept_flags()) noexcept {
+    if (detail::cancelled_wait_ready(state)) [[unlikely]] {
+        return detail::consume_cancelled_wait(state);
+    }
     if (accepted_fd == nullptr) {
         return IoStatus::failed(EINVAL);
     }
@@ -608,6 +602,9 @@ template <typename TaskT>
     const sockaddr* address,
     socklen_t address_size,
     IoOpState& state) noexcept {
+    if (detail::cancelled_wait_ready(state)) [[unlikely]] {
+        return detail::consume_cancelled_wait(state);
+    }
     if (address == nullptr || address_size == 0U) {
         return IoStatus::failed(EINVAL);
     }
@@ -682,6 +679,9 @@ template <typename TaskT>
     void* data,
     std::size_t size,
     IoOpState& state) noexcept {
+    if (detail::cancelled_wait_ready(state)) [[unlikely]] {
+        return detail::consume_cancelled_wait(state);
+    }
     if (size == 0U) {
         return IoStatus::ready(0);
     }
@@ -745,6 +745,9 @@ template <typename TaskT>
     const void* data,
     std::size_t size,
     IoOpState& state) noexcept {
+    if (detail::cancelled_wait_ready(state)) [[unlikely]] {
+        return detail::consume_cancelled_wait(state);
+    }
     if (size == 0U) {
         return IoStatus::ready(0);
     }
@@ -814,6 +817,9 @@ template <typename TaskT>
     IoOffset* offset,
     std::size_t count,
     IoOpState& state) noexcept {
+    if (detail::cancelled_wait_ready(state)) [[unlikely]] {
+        return detail::consume_cancelled_wait(state);
+    }
     if (count == 0U) {
         return IoStatus::ready(0);
     }
@@ -850,6 +856,9 @@ template <typename TaskT>
     std::size_t count,
     unsigned int flags,
     IoOpState& state) noexcept {
+    if (detail::cancelled_wait_ready(state)) [[unlikely]] {
+        return detail::consume_cancelled_wait(state);
+    }
     if (count == 0U) {
         return IoStatus::ready(0);
     }
@@ -971,6 +980,9 @@ template <typename TaskT>
     const iovec* iov,
     int iov_count,
     IoOpState& state) noexcept {
+    if (detail::cancelled_wait_ready(state)) [[unlikely]] {
+        return detail::consume_cancelled_wait(state);
+    }
     std::size_t total_size = 0;
     int validation_error = 0;
     if (!detail::io_validate_iov(iov, iov_count, total_size, validation_error)) {
@@ -1041,6 +1053,9 @@ template <typename TaskT>
     const iovec* iov,
     int iov_count,
     IoOpState& state) noexcept {
+    if (detail::cancelled_wait_ready(state)) [[unlikely]] {
+        return detail::consume_cancelled_wait(state);
+    }
     std::size_t total_size = 0;
     int validation_error = 0;
     if (!detail::io_validate_iov(iov, iov_count, total_size, validation_error)) {
@@ -1109,6 +1124,9 @@ template <typename TaskT>
     void* data,
     std::size_t size,
     IoOpState& state) noexcept {
+    if (detail::cancelled_wait_ready(state)) [[unlikely]] {
+        return detail::consume_cancelled_wait(state);
+    }
     if (size == 0U) {
         return IoStatus::ready(0);
     }
@@ -1123,7 +1141,7 @@ template <typename TaskT>
     static_cast<void>(state);
     return IoStatus::failed(ENOSYS);
 #else
-    state.waiting = false;
+    detail::clear_waiting(state);
     for (;;) {
         const ssize_t n = ::read(fd, data, size);
         if (n > 0) {
@@ -1154,6 +1172,9 @@ template <typename TaskT>
     const iovec* iov,
     int iov_count,
     IoOpState& state) noexcept {
+    if (detail::cancelled_wait_ready(state)) [[unlikely]] {
+        return detail::consume_cancelled_wait(state);
+    }
     std::size_t total_size = 0;
     int validation_error = 0;
     if (!detail::io_validate_iov(iov, iov_count, total_size, validation_error)) {
@@ -1561,6 +1582,9 @@ template <typename TaskT>
     const void* data,
     std::size_t size,
     IoOpState& state) noexcept {
+    if (detail::cancelled_wait_ready(state)) [[unlikely]] {
+        return detail::consume_cancelled_wait(state);
+    }
     if (size == 0U) {
         return IoStatus::ready(0);
     }
@@ -1603,6 +1627,9 @@ template <typename TaskT>
     const iovec* iov,
     int iov_count,
     IoOpState& state) noexcept {
+    if (detail::cancelled_wait_ready(state)) [[unlikely]] {
+        return detail::consume_cancelled_wait(state);
+    }
     std::size_t total_size = 0;
     int validation_error = 0;
     if (!detail::io_validate_iov(iov, iov_count, total_size, validation_error)) {
@@ -1641,6 +1668,9 @@ template <typename TaskT>
     sockaddr* address,
     socklen_t* address_size,
     IoOpState& state) noexcept {
+    if (detail::cancelled_wait_ready(state)) [[unlikely]] {
+        return detail::consume_cancelled_wait(state);
+    }
     if (size == 0U) {
         return IoStatus::ready(0);
     }
@@ -1714,6 +1744,9 @@ template <typename TaskT>
     const sockaddr* address,
     socklen_t address_size,
     IoOpState& state) noexcept {
+    if (detail::cancelled_wait_ready(state)) [[unlikely]] {
+        return detail::consume_cancelled_wait(state);
+    }
     if (size == 0U) {
         return IoStatus::ready(0);
     }
@@ -1794,6 +1827,9 @@ template <typename TaskT>
     sockaddr* address,
     socklen_t* address_size,
     IoOpState& state) noexcept {
+    if (detail::cancelled_wait_ready(state)) [[unlikely]] {
+        return detail::consume_cancelled_wait(state);
+    }
     std::size_t total_size = 0;
     int validation_error = 0;
     if (!detail::io_validate_iov(iov, iov_count, total_size, validation_error)) {
@@ -1868,6 +1904,9 @@ template <typename TaskT>
     const sockaddr* address,
     socklen_t address_size,
     IoOpState& state) noexcept {
+    if (detail::cancelled_wait_ready(state)) [[unlikely]] {
+        return detail::consume_cancelled_wait(state);
+    }
     std::size_t total_size = 0;
     int validation_error = 0;
     if (!detail::io_validate_iov(iov, iov_count, total_size, validation_error)) {
@@ -1937,6 +1976,9 @@ template <typename TaskT>
     int fd,
     std::uint64_t* value,
     IoOpState& state) noexcept {
+    if (detail::cancelled_wait_ready(state)) [[unlikely]] {
+        return detail::consume_cancelled_wait(state);
+    }
     if (value == nullptr) {
         return IoStatus::failed(EINVAL);
     }
@@ -1979,6 +2021,9 @@ template <typename TaskT>
     int fd,
     std::uint64_t* expirations,
     IoOpState& state) noexcept {
+    if (detail::cancelled_wait_ready(state)) [[unlikely]] {
+        return detail::consume_cancelled_wait(state);
+    }
     if (expirations == nullptr) {
         return IoStatus::failed(EINVAL);
     }

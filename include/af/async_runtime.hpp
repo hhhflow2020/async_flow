@@ -573,6 +573,18 @@ public:
         return executors_[index]->register_io_wait(fd, events, task, result);
     }
 
+    [[nodiscard]] static bool cancel_io(Thread thread, IoOpState& state) noexcept {
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            state.wait.fd = -1;
+            state.wait.events = io_error;
+            state.wait.error = EINVAL;
+            state.wait.result = -EINVAL;
+            return false;
+        }
+        return executors_[index]->cancel_io(state);
+    }
+
     [[nodiscard]] static bool io_submit_read_at(
         Thread thread,
         int fd,
@@ -1764,6 +1776,72 @@ private:
             result->error = ENOSYS;
             return false;
 #endif
+        }
+
+#if defined(__linux__)
+        [[nodiscard]] bool cancel_io_wait(IoOpState& state) noexcept {
+            if (io_epoll_fd_ < 0) {
+                state.wait.events = io_error;
+                state.wait.error = ENOSYS;
+                state.wait.result = -ENOSYS;
+                return false;
+            }
+
+            const int fd = state.wait.fd;
+            auto it = io_waits_.find(fd);
+            if (fd < 0 || it == io_waits_.end() || it->second.result != &state.wait) {
+                state.wait.events = io_error;
+                state.wait.error = ENOENT;
+                state.wait.result = -ENOENT;
+                return false;
+            }
+
+            IoWaitRegistration registration = it->second;
+            io_waits_.erase(it);
+            static_cast<void>(::epoll_ctl(io_epoll_fd_, EPOLL_CTL_DEL, fd, nullptr));
+
+            state.wait.fd = fd;
+            state.wait.events = io_error;
+            state.wait.error = ECANCELED;
+            state.wait.result = -ECANCELED;
+            enqueue_pending_blocking(index_, registration.task);
+            return true;
+        }
+#endif
+
+        [[nodiscard]] bool cancel_io(IoOpState& state) noexcept {
+            AF_ASSERT(current_thread_index_ == index_ && "cancel_io must be called from its IO thread");
+            if (state.waiting && state.wait.error == ECANCELED) {
+                return true;
+            }
+            if (current_thread_index_ != index_) {
+                state.wait.events = io_error;
+                state.wait.error = EINVAL;
+                state.wait.result = -EINVAL;
+                return false;
+            }
+            if (!state.waiting) {
+                state.wait.events = io_error;
+                state.wait.error = ENOENT;
+                state.wait.result = -ENOENT;
+                return false;
+            }
+
+#if defined(__linux__)
+            if (state.wait_kind == IoWaitKind::Readiness) {
+                return cancel_io_wait(state);
+            }
+            if (state.wait_kind == IoWaitKind::Completion) {
+                state.wait.events = io_error;
+                state.wait.error = ENOSYS;
+                state.wait.result = -ENOSYS;
+                return false;
+            }
+#endif
+            state.wait.events = io_error;
+            state.wait.error = ENOSYS;
+            state.wait.result = -ENOSYS;
+            return false;
         }
 
         [[nodiscard]] bool submit_io_uring_read(

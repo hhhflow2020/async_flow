@@ -69,6 +69,24 @@ struct IoResult {
     }
 };
 
+enum class IoWaitKind : std::uint8_t {
+    None,
+    Readiness,
+    Completion,
+};
+
+struct IoOpState {
+    IoResult wait{};
+    IoWaitKind wait_kind{IoWaitKind::None};
+    bool waiting{false};
+
+    void reset() noexcept {
+        wait = IoResult{};
+        wait_kind = IoWaitKind::None;
+        waiting = false;
+    }
+};
+
 namespace detail {
 
 enum class ScheduleAction : std::uint8_t {
