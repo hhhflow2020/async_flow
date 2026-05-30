@@ -686,6 +686,18 @@ private:
         if (!status.ready() || accepted_fd_ < 0 || peer_size_ == 0U) {
             return failed();
         }
+        af::TcpStream<IoTestThread> accepted(IoTestThread::IO_0, accepted_fd_);
+        sockaddr_storage observed_peer{};
+        socklen_t observed_peer_size = sizeof(observed_peer);
+        const af::IoStatus peer_status = accepted.getpeername(
+            *this,
+            reinterpret_cast<sockaddr*>(&observed_peer),
+            &observed_peer_size);
+        if (!peer_status.ready() || observed_peer_size == 0U) {
+            ::close(accepted_fd_);
+            accepted_fd_ = -1;
+            return failed();
+        }
         ::close(accepted_fd_);
         accepted_fd_ = -1;
         completed_->fetch_add(1, std::memory_order_release);
@@ -5595,10 +5607,12 @@ public:
         std::atomic<int>* completed,
         std::atomic<int>* error,
         std::atomic<int>* reuse_value,
+        std::atomic<int>* local_port,
         std::atomic<std::uint16_t>* ran_on) {
         completed_ = completed;
         error_ = error;
         reuse_value_ = reuse_value;
+        local_port_ = local_port;
         ran_on_ = ran_on;
         return schedule(IoTestThread::IO_0);
     }
@@ -5695,7 +5709,24 @@ private:
         }
 
         const af::IoStatus listen_status = listener_.listen(*this, 16);
-        return listen_status.ready() ? complete(0) : complete(listen_status.error);
+        if (!listen_status.ready()) {
+            return complete(listen_status.error);
+        }
+
+        sockaddr_in local{};
+        socklen_t local_size = sizeof(local);
+        const af::IoStatus name_status = listener_.getsockname(
+            *this,
+            reinterpret_cast<sockaddr*>(&local),
+            &local_size);
+        if (!name_status.ready()) {
+            return complete(name_status.error);
+        }
+        if (local.sin_family != AF_INET || local.sin_port == 0 || local_size == 0U) {
+            return complete(EIO);
+        }
+        local_port_->store(static_cast<int>(ntohs(local.sin_port)), std::memory_order_release);
+        return complete(0);
     }
 
     af::TaskResult complete(int error) {
@@ -5712,6 +5743,7 @@ private:
     std::atomic<int>* completed_{nullptr};
     std::atomic<int>* error_{nullptr};
     std::atomic<int>* reuse_value_{nullptr};
+    std::atomic<int>* local_port_{nullptr};
     std::atomic<std::uint16_t>* ran_on_{nullptr};
 };
 
@@ -5732,6 +5764,8 @@ private:
         int opened = -1;
         int value = 0;
         socklen_t value_size = sizeof(value);
+        sockaddr_storage name{};
+        socklen_t name_size = sizeof(name);
         sockaddr_in address{};
         address.sin_family = AF_INET;
         address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -5777,6 +5811,30 @@ private:
             SO_REUSEADDR,
             nullptr,
             &value_size);
+        const af::IoStatus bad_getsockname_status = af::io_getsockname(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            reinterpret_cast<sockaddr*>(&name),
+            &name_size);
+        const af::IoStatus null_getsockname_status = af::io_getsockname(
+            *this,
+            IoTestThread::IO_0,
+            0,
+            nullptr,
+            &name_size);
+        const af::IoStatus bad_getpeername_status = af::io_getpeername(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            reinterpret_cast<sockaddr*>(&name),
+            &name_size);
+        const af::IoStatus null_getpeername_status = af::io_getpeername(
+            *this,
+            IoTestThread::IO_0,
+            0,
+            reinterpret_cast<sockaddr*>(&name),
+            nullptr);
         const af::IoStatus bad_bind_status = af::io_bind(
             *this,
             IoTestThread::IO_0,
@@ -5798,6 +5856,12 @@ private:
         }
         const af::IoStatus wrong_thread_status =
             af::io_listen(*this, IoTestThread::Logic_0, temp.get(), 16);
+        const af::IoStatus wrong_name_thread_status = af::io_getsockname(
+            *this,
+            IoTestThread::Logic_0,
+            temp.get(),
+            reinterpret_cast<sockaddr*>(&name),
+            &name_size);
 
         const bool ok =
             null_socket_status.failed() && null_socket_status.error == EINVAL &&
@@ -5805,10 +5869,15 @@ private:
             null_setsockopt_status.failed() && null_setsockopt_status.error == EINVAL &&
             bad_getsockopt_status.failed() && bad_getsockopt_status.error == EBADF &&
             null_getsockopt_status.failed() && null_getsockopt_status.error == EINVAL &&
+            bad_getsockname_status.failed() && bad_getsockname_status.error == EBADF &&
+            null_getsockname_status.failed() && null_getsockname_status.error == EINVAL &&
+            bad_getpeername_status.failed() && bad_getpeername_status.error == EBADF &&
+            null_getpeername_status.failed() && null_getpeername_status.error == EINVAL &&
             bad_bind_status.failed() && bad_bind_status.error == EBADF &&
             null_bind_status.failed() && null_bind_status.error == EINVAL &&
             bad_listen_status.failed() && bad_listen_status.error == EBADF &&
             wrong_thread_status.failed() && wrong_thread_status.error == EINVAL &&
+            wrong_name_thread_status.failed() && wrong_name_thread_status.error == EINVAL &&
             opened == -1;
         return complete(ok ? 0 : EIO);
     }
@@ -6555,15 +6624,18 @@ TEST_F(IoRuntimeFixture, SocketLifecycleHelpersRunOnIoThread) {
     std::atomic<int> completed{0};
     std::atomic<int> error{-1};
     std::atomic<int> reuse_value{0};
+    std::atomic<int> local_port{0};
     std::atomic<std::uint16_t> ran_on{IoRuntime::invalid_thread_index};
     ASSERT_TRUE(IoRuntime::start_task<SocketLifecycleSetupTask>(
         &completed,
         &error,
         &reuse_value,
+        &local_port,
         &ran_on));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(error.load(std::memory_order_acquire), 0);
     EXPECT_NE(reuse_value.load(std::memory_order_acquire), 0);
+    EXPECT_GT(local_port.load(std::memory_order_acquire), 0);
     EXPECT_EQ(ran_on.load(std::memory_order_acquire), IoRuntime::thread_index(IoTestThread::IO_0));
 #else
     GTEST_SKIP() << "socket lifecycle helpers are Linux-only";

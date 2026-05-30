@@ -460,6 +460,36 @@ template <typename TaskT>
            TaskT::Runtime::current_thread_index() == TaskT::Runtime::thread_index(thread);
 }
 
+template <typename TaskT, typename NameFn>
+[[nodiscard]] IoStatus io_socket_name(
+    TaskT& task,
+    typename TaskT::Thread thread,
+    int fd,
+    sockaddr* address,
+    socklen_t* address_size,
+    NameFn name_fn) noexcept {
+    static_cast<void>(task);
+    if (fd < 0) {
+        return IoStatus::failed(EBADF);
+    }
+    if (address == nullptr || address_size == nullptr) {
+        return IoStatus::failed(EINVAL);
+    }
+    if (!io_on_target_thread<TaskT>(thread)) {
+        return IoStatus::failed(EINVAL);
+    }
+    for (;;) {
+        if (name_fn(fd, address, address_size) == 0) {
+            return IoStatus::ready(0);
+        }
+        const int error = errno == 0 ? EIO : errno;
+        if (error == EINTR) {
+            continue;
+        }
+        return IoStatus::failed(error);
+    }
+}
+
 template <typename TaskT>
 [[nodiscard]] IoStatus arm_io_wait(
     TaskT& task,
@@ -1012,6 +1042,44 @@ template <typename TaskT>
         }
         return IoStatus::failed(error);
     }
+#endif
+}
+
+template <typename TaskT>
+[[nodiscard]] IoStatus io_getsockname(
+    TaskT& task,
+    typename TaskT::Thread thread,
+    int fd,
+    sockaddr* address,
+    socklen_t* address_size) noexcept {
+#if defined(_WIN32)
+    static_cast<void>(task);
+    static_cast<void>(thread);
+    static_cast<void>(fd);
+    static_cast<void>(address);
+    static_cast<void>(address_size);
+    return IoStatus::failed(ENOSYS);
+#else
+    return detail::io_socket_name(task, thread, fd, address, address_size, ::getsockname);
+#endif
+}
+
+template <typename TaskT>
+[[nodiscard]] IoStatus io_getpeername(
+    TaskT& task,
+    typename TaskT::Thread thread,
+    int fd,
+    sockaddr* address,
+    socklen_t* address_size) noexcept {
+#if defined(_WIN32)
+    static_cast<void>(task);
+    static_cast<void>(thread);
+    static_cast<void>(fd);
+    static_cast<void>(address);
+    static_cast<void>(address_size);
+    return IoStatus::failed(ENOSYS);
+#else
+    return detail::io_socket_name(task, thread, fd, address, address_size, ::getpeername);
 #endif
 }
 
@@ -4378,6 +4446,28 @@ public:
             std::is_same_v<typename TaskT::Thread, ThreadT>,
             "IoDescriptor thread type must match the task runtime thread type");
         return af::io_getsockopt(task, thread_, fd_, level, option, value, value_size);
+    }
+
+    template <typename TaskT>
+    [[nodiscard]] IoStatus getsockname(
+        TaskT& task,
+        sockaddr* address,
+        socklen_t* address_size) const noexcept {
+        static_assert(
+            std::is_same_v<typename TaskT::Thread, ThreadT>,
+            "IoDescriptor thread type must match the task runtime thread type");
+        return af::io_getsockname(task, thread_, fd_, address, address_size);
+    }
+
+    template <typename TaskT>
+    [[nodiscard]] IoStatus getpeername(
+        TaskT& task,
+        sockaddr* address,
+        socklen_t* address_size) const noexcept {
+        static_assert(
+            std::is_same_v<typename TaskT::Thread, ThreadT>,
+            "IoDescriptor thread type must match the task runtime thread type");
+        return af::io_getpeername(task, thread_, fd_, address, address_size);
     }
 #endif
 

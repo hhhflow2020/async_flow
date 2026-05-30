@@ -147,11 +147,17 @@ private:
         }
 
         socklen_t address_size = sizeof(*bound_address_);
-        if (::getsockname(
-                listener_owned_.get(),
-                reinterpret_cast<sockaddr*>(bound_address_),
-                &address_size) != 0) {
-            return complete(errno == 0 ? EIO : errno);
+        status = listener_.getsockname(
+            *this,
+            reinterpret_cast<sockaddr*>(bound_address_),
+            &address_size);
+        if (!status.ready()) {
+            return complete(status.error);
+        }
+        if (bound_address_->sin_family != AF_INET ||
+            bound_address_->sin_port == 0 ||
+            address_size == 0U) {
+            return complete(EIO);
         }
 
         state_ = State::AcceptClient;
@@ -175,6 +181,16 @@ private:
 
         accepted_owned_.reset(accepted_fd_);
         accepted_fd_ = -1;
+        af::TcpStream<SocketThread> accepted_stream(SocketThread::IO_0, accepted_owned_.get());
+        sockaddr_storage peer{};
+        socklen_t peer_size = sizeof(peer);
+        const af::IoStatus peer_status = accepted_stream.getpeername(
+            *this,
+            reinterpret_cast<sockaddr*>(&peer),
+            &peer_size);
+        if (!peer_status.ready() || peer_size == 0U) {
+            return complete(peer_status.failed() ? peer_status.error : EIO);
+        }
         accepted_->fetch_add(1, std::memory_order_release);
         return complete(0);
     }
