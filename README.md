@@ -299,10 +299,10 @@ ASYNCFLOW_STRESS_MS=1500 ctest --test-dir build-tsan/build/Debug -R RuntimeStres
 - `examples/io_vectored.cpp`：使用 `af::TcpStream::sendv_some()` / `recvv_some()` 和 `af::UdpSocket::sendv_to_some()` / `recvv_from_some()` 完成 scatter/gather round trip。
 - `tests/utility_tests.cpp`：队列、对象池、分片工具和 batch sequencer。
 - `tests/runtime_lifecycle_tests.cpp`：任务生命周期、状态机、背压和 shutdown。
-- `tests/runtime_io_tests.cpp`：IO 线程调度、epoll readiness 恢复、eventfd、timerfd、io_uring 文件和目录生命周期、sendfile/splice zero-copy、TCP accept/connect/stream、vectored stream/file/datagram 和 UDP datagram helper、read/write/TCP/UDP helper 与 adapter、重复 fd wait 拒绝、HUP/EOF、非法 fd、worker 误用降级，以及 StopImmediately 清理 pending IO wait。
+- `tests/runtime_io_*_tests.cpp`：按 setup、epoll、stream/zero-copy、io_uring socket、io_uring file、datagram、shutdown 拆分 IO 覆盖；公共 fixture 和 task helper 放在 `tests/runtime_io_test_support.hpp`。
 - `tests/runtime_parallel_tests.cpp`：parallel shard、失败汇总、有序 batch 和 retryable ordered apply。
 - `tests/runtime_stress_tests.cpp`：高并发 init/shutdown/start_task stress，CI 中也用于 TSAN job。
-- `benchmarks/io_benchmarks.cpp`、`benchmarks/queue_benchmarks.cpp` 与 `benchmarks/runtime_benchmarks.cpp`：IO adapter、底层结构和 runtime 路径分开压测。
+- `benchmarks/io_*_benchmarks.cpp`、`benchmarks/queue_benchmarks.cpp` 与 `benchmarks/runtime_benchmarks.cpp`：IO adapter、文件系统、zero-copy、file/fixed-file、vectored、底层结构和 runtime 路径分开压测；公共 fake runtime 放在 `benchmarks/io_benchmark_support.hpp`。
 - `benchmarks/perf_baseline.json`：本地 runtime benchmark baseline。
 - `benchmarks/perf_baseline_github_ubuntu.json` 与 `scripts/check_benchmark_regression.py`：GitHub Ubuntu runner 性能 baseline 与回归阈值检查。
 

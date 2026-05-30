@@ -877,7 +877,7 @@ async::parallel_shards_ordered(
 - `tests/runtime_parallel_tests.cpp`：parallel shards、失败汇总、有序 batch、ordered start 边界、retryable ordered apply。
 - `tests/runtime_stress_tests.cpp`：高并发 init/shutdown/start_task stress，可配合 TSAN 拉长运行。
 - `tests/utility_tests.cpp`：SPSC/MPSC/MPMC 队列、对象池、分片工具、CRUD helper、BatchSequencer、ordered retry/skip policy。
-- `tests/runtime_io_tests.cpp`：IO 线程、epoll readiness、eventfd、timerfd、io_uring 文件和目录生命周期、sendfile/splice/send_zc 少拷贝传输、stream 和 datagram vectored 操作、io_uring TCP accept/connect/stream 与 UDP datagram 操作、read/write/TCP/UDP helper 与 adapter、重复 fd wait、HUP/EOF、非法 fd、worker 误用和 pending IO shutdown。
+- `tests/runtime_io_*_tests.cpp`：按 setup、epoll、stream/zero-copy、io_uring socket、io_uring file、datagram、shutdown 拆分 IO 覆盖；公共 fixture 和 task helper 放在 `tests/runtime_io_test_support.hpp`。
 
 重点覆盖：
 
@@ -914,7 +914,7 @@ Benchmark 使用 Google Benchmark，入口目标是 `asyncflow_runtime_benchmark
 
 文件布局：
 
-- `benchmarks/io_benchmarks.cpp`：IO adapter inline/zero-byte 快路径开销。
+- `benchmarks/io_*_benchmarks.cpp`：按 adapter、filesystem、zero-copy、file/fixed-file、vectored 拆分 IO 快路径压测；公共 fake runtime 放在 `benchmarks/io_benchmark_support.hpp`。
 - `benchmarks/queue_benchmarks.cpp`：SPSC、MPSC、对象池基础性能。
 - `benchmarks/runtime_benchmarks.cpp`：外部 start、跨线程 hop、parallel shards runtime 路径。
 

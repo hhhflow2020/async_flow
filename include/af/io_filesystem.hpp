@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <type_traits>
 
-#include "af/io.hpp"
+#include "af/io_common.hpp"
 
 #if defined(__linux__)
 #include <linux/openat2.h>

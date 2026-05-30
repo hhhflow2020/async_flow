@@ -138,7 +138,13 @@ if(ASYNCFLOW_BUILD_TESTS)
     add_executable(
         asyncflow_runtime_tests
         tests/runtime_lifecycle_tests.cpp
-        tests/runtime_io_tests.cpp
+        tests/runtime_io_setup_tests.cpp
+        tests/runtime_io_epoll_tests.cpp
+        tests/runtime_io_stream_tests.cpp
+        tests/runtime_io_uring_socket_tests.cpp
+        tests/runtime_io_uring_file_tests.cpp
+        tests/runtime_io_datagram_tests.cpp
+        tests/runtime_io_shutdown_tests.cpp
         tests/runtime_parallel_tests.cpp
         tests/runtime_stress_tests.cpp
         tests/utility_tests.cpp
@@ -154,7 +160,11 @@ if(ASYNCFLOW_BUILD_BENCHMARKS)
     add_executable(
         asyncflow_runtime_benchmarks
         benchmarks/benchmark_main.cpp
-        benchmarks/io_benchmarks.cpp
+        benchmarks/io_adapter_benchmarks.cpp
+        benchmarks/io_filesystem_benchmarks.cpp
+        benchmarks/io_zero_copy_benchmarks.cpp
+        benchmarks/io_file_benchmarks.cpp
+        benchmarks/io_vectored_benchmarks.cpp
         benchmarks/queue_benchmarks.cpp
         benchmarks/runtime_benchmarks.cpp
     )

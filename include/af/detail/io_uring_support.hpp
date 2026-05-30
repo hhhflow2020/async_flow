@@ -6,6 +6,10 @@
 
 #if defined(__linux__)
 #include <linux/io_uring.h>
+#include <sys/socket.h>
+#include <sys/syscall.h>
+#include <sys/uio.h>
+#include <unistd.h>
 
 #ifndef IORING_CQE_F_MORE
 #define IORING_CQE_F_MORE (1U << 1U)
@@ -69,11 +73,42 @@
 
 namespace af::detail {
 
+inline constexpr std::uint8_t io_uring_op_send_zc = 47U;
+inline constexpr std::uint8_t io_uring_op_sendmsg_zc = 48U;
+inline constexpr std::uint8_t io_uring_op_socket = 45U;
+inline constexpr std::uint8_t io_uring_op_openat2 = 28U;
+inline constexpr std::uint8_t io_uring_op_mkdirat = 37U;
+inline constexpr std::uint8_t io_uring_op_symlinkat = 38U;
+inline constexpr std::uint8_t io_uring_op_linkat = 39U;
+inline constexpr std::uint8_t io_uring_op_ftruncate = 55U;
+
 struct IoUringSetupRequest {
     unsigned flags{0};
     unsigned cq_entries{0};
     unsigned sqpoll_idle_ms{0};
     int sqpoll_cpu{-1};
+};
+
+struct IoUringMessage {
+    iovec iov{};
+    msghdr header{};
+    socklen_t* address_size{nullptr};
+};
+
+struct IoUringSocketAddress {
+    sockaddr_storage storage{};
+    socklen_t size{0};
+    sockaddr* output{nullptr};
+    socklen_t* output_size{nullptr};
+    socklen_t output_capacity{0};
+};
+
+struct IoUringBufferRingRegistration {
+    std::uint64_t ring_addr{0};
+    std::uint32_t ring_entries{0};
+    std::uint16_t bgid{0};
+    std::uint16_t pad{0};
+    std::uint64_t reserved[3]{};
 };
 
 struct IoUringFixedFileRwSqe {
@@ -97,6 +132,33 @@ struct IoUringBufferSqe {
 
 [[nodiscard]] inline constexpr bool io_uring_sqe_len_fits(std::size_t size) noexcept {
     return size <= static_cast<std::size_t>(std::numeric_limits<unsigned>::max());
+}
+
+[[nodiscard]] inline int sys_io_uring_setup(unsigned entries, io_uring_params* params) noexcept {
+    return static_cast<int>(::syscall(__NR_io_uring_setup, entries, params));
+}
+
+[[nodiscard]] inline int sys_io_uring_enter(
+    int ring_fd,
+    unsigned to_submit,
+    unsigned min_complete,
+    unsigned flags) noexcept {
+    return static_cast<int>(::syscall(
+        __NR_io_uring_enter,
+        ring_fd,
+        to_submit,
+        min_complete,
+        flags,
+        nullptr,
+        0));
+}
+
+[[nodiscard]] inline int sys_io_uring_register(
+    int ring_fd,
+    unsigned opcode,
+    const void* arg,
+    unsigned nr_args) noexcept {
+    return static_cast<int>(::syscall(__NR_io_uring_register, ring_fd, opcode, arg, nr_args));
 }
 
 inline void configure_io_uring_params(

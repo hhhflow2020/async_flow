@@ -39,7 +39,6 @@
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
-#include <sys/syscall.h>
 #include <unistd.h>
 #endif
 
@@ -3004,7 +3003,7 @@ private:
                 return false;
             }
 
-            if (sys_io_uring_register(
+            if (detail::sys_io_uring_register(
                     io_uring_fd_,
                     IORING_REGISTER_BUFFERS,
                     buffers,
@@ -3068,7 +3067,7 @@ private:
                 return false;
             }
 
-            if (sys_io_uring_register(
+            if (detail::sys_io_uring_register(
                     io_uring_fd_,
                     IORING_UNREGISTER_BUFFERS,
                     nullptr,
@@ -3124,11 +3123,11 @@ private:
                 return false;
             }
 
-            IoUringBufferRingRegistration registration{};
+            detail::IoUringBufferRingRegistration registration{};
             registration.ring_addr = reinterpret_cast<std::uint64_t>(ring);
             registration.ring_entries = ring_entries;
             registration.bgid = buffer_group;
-            if (sys_io_uring_register(
+            if (detail::sys_io_uring_register(
                     io_uring_fd_,
                     IORING_REGISTER_PBUF_RING,
                     &registration,
@@ -3142,9 +3141,9 @@ private:
             try {
                 io_uring_provided_buffer_groups_.push_back(buffer_group);
             } catch (...) {
-                IoUringBufferRingRegistration undo{};
+                detail::IoUringBufferRingRegistration undo{};
                 undo.bgid = buffer_group;
-                static_cast<void>(sys_io_uring_register(
+                static_cast<void>(detail::sys_io_uring_register(
                     io_uring_fd_,
                     IORING_UNREGISTER_PBUF_RING,
                     &undo,
@@ -3211,9 +3210,9 @@ private:
                 return false;
             }
 
-            IoUringBufferRingRegistration registration{};
+            detail::IoUringBufferRingRegistration registration{};
             registration.bgid = buffer_group;
-            if (sys_io_uring_register(
+            if (detail::sys_io_uring_register(
                     io_uring_fd_,
                     IORING_UNREGISTER_PBUF_RING,
                     &registration,
@@ -3269,7 +3268,7 @@ private:
                 return false;
             }
 
-            if (sys_io_uring_register(
+            if (detail::sys_io_uring_register(
                     io_uring_fd_,
                     IORING_REGISTER_FILES,
                     files,
@@ -3333,7 +3332,7 @@ private:
                 return false;
             }
 
-            if (sys_io_uring_register(
+            if (detail::sys_io_uring_register(
                     io_uring_fd_,
                     IORING_UNREGISTER_FILES,
                     nullptr,
@@ -3411,7 +3410,7 @@ private:
             io_uring_files_update update{};
             update.offset = offset;
             update.fds = reinterpret_cast<std::uint64_t>(files);
-            const int updated = sys_io_uring_register(
+            const int updated = detail::sys_io_uring_register(
                 io_uring_fd_,
                 IORING_REGISTER_FILES_UPDATE,
                 &update,
@@ -4357,7 +4356,7 @@ private:
             IoResult* result) noexcept {
 #if defined(__linux__)
             return submit_io_uring_fast_sqe(
-                io_uring_op_openat2,
+                detail::io_uring_op_openat2,
                 dir_fd,
                 io_readable,
                 task,
@@ -4575,7 +4574,7 @@ private:
             IoResult* result) noexcept {
 #if defined(__linux__)
             return submit_io_uring_fast_sqe(
-                io_uring_op_mkdirat,
+                detail::io_uring_op_mkdirat,
                 dir_fd,
                 io_writable,
                 task,
@@ -4605,7 +4604,7 @@ private:
             IoResult* result) noexcept {
 #if defined(__linux__)
             return submit_io_uring_fast_sqe(
-                io_uring_op_symlinkat,
+                detail::io_uring_op_symlinkat,
                 new_dir_fd,
                 io_writable,
                 task,
@@ -4637,7 +4636,7 @@ private:
             IoResult* result) noexcept {
 #if defined(__linux__)
             return submit_io_uring_fast_sqe(
-                io_uring_op_linkat,
+                detail::io_uring_op_linkat,
                 old_dir_fd,
                 io_writable,
                 task,
@@ -4670,7 +4669,7 @@ private:
             IoResult* result) noexcept {
 #if defined(__linux__)
             return submit_io_uring_fast_sqe(
-                io_uring_op_ftruncate,
+                detail::io_uring_op_ftruncate,
                 fd,
                 io_writable,
                 task,
@@ -4993,7 +4992,7 @@ private:
                 return false;
             }
             return submit_io_uring_op(
-                io_uring_op_send_zc,
+                detail::io_uring_op_send_zc,
                 fd,
                 const_cast<void*>(data),
                 size,
@@ -5037,7 +5036,7 @@ private:
                 return false;
             }
             return submit_io_uring_op(
-                io_uring_op_sendmsg_zc,
+                detail::io_uring_op_sendmsg_zc,
                 fd,
                 const_cast<void*>(data),
                 size,
@@ -5081,7 +5080,7 @@ private:
                 return false;
             }
             return submit_io_uring_op(
-                io_uring_op_sendmsg_zc,
+                detail::io_uring_op_sendmsg_zc,
                 fd,
                 nullptr,
                 0,
@@ -5637,36 +5636,14 @@ private:
             IoUringOperation* poll_operation{nullptr};
         };
 
-        struct IoUringMessage {
-            iovec iov{};
-            msghdr header{};
-            socklen_t* address_size{nullptr};
-        };
-
-        struct IoUringSocketAddress {
-            sockaddr_storage storage{};
-            socklen_t size{0};
-            sockaddr* output{nullptr};
-            socklen_t* output_size{nullptr};
-            socklen_t output_capacity{0};
-        };
-
-        struct IoUringBufferRingRegistration {
-            std::uint64_t ring_addr{0};
-            std::uint32_t ring_entries{0};
-            std::uint16_t bgid{0};
-            std::uint16_t pad{0};
-            std::uint64_t reserved[3]{};
-        };
-
         struct IoUringOperation {
             Task* task{nullptr};
             IoResult* result{nullptr};
             IoUringOperation* prev{nullptr};
             IoUringOperation* next{nullptr};
-            IoUringMessage* msg{nullptr};
+            detail::IoUringMessage* msg{nullptr};
             union {
-                IoUringSocketAddress* socket_address;
+                detail::IoUringSocketAddress* socket_address;
                 __kernel_timespec timeout;
             };
             IoWaitRegistration* wait_registration{nullptr};
@@ -5680,15 +5657,6 @@ private:
             bool zero_copy_primary_done{false};
             bool zero_copy_notification_done{false};
         };
-
-        static constexpr std::uint8_t io_uring_op_send_zc = 47U;
-        static constexpr std::uint8_t io_uring_op_sendmsg_zc = 48U;
-        static constexpr std::uint8_t io_uring_op_socket = 45U;
-        static constexpr std::uint8_t io_uring_op_openat2 = 28U;
-        static constexpr std::uint8_t io_uring_op_mkdirat = 37U;
-        static constexpr std::uint8_t io_uring_op_symlinkat = 38U;
-        static constexpr std::uint8_t io_uring_op_linkat = 39U;
-        static constexpr std::uint8_t io_uring_op_ftruncate = 55U;
 
         enum class IoUringPollSubmitResult : std::uint8_t {
             Submitted,
@@ -6037,7 +6005,7 @@ private:
             operation->result = result;
             operation->complete_events = io_readable;
             operation->direct_file_index = -1;
-            operation->opcode = io_uring_op_socket;
+            operation->opcode = detail::io_uring_op_socket;
             operation->cancel_requested = false;
             operation->multishot = false;
             operation->poll_wait = false;
@@ -6061,7 +6029,7 @@ private:
             track_io_uring_operation(operation);
 
             *sqe = io_uring_sqe{};
-            sqe->opcode = io_uring_op_socket;
+            sqe->opcode = detail::io_uring_op_socket;
             sqe->fd = domain;
             sqe->off = static_cast<std::uint64_t>(type);
             sqe->len = static_cast<unsigned>(protocol);
@@ -6287,7 +6255,7 @@ private:
             const bool message_op =
                 opcode == IORING_OP_RECVMSG ||
                 opcode == IORING_OP_SENDMSG ||
-                opcode == io_uring_op_sendmsg_zc;
+                opcode == detail::io_uring_op_sendmsg_zc;
             const bool accept_op = opcode == IORING_OP_ACCEPT;
             const bool connect_op = opcode == IORING_OP_CONNECT;
             const bool address_op = accept_op || connect_op;
@@ -6557,7 +6525,7 @@ private:
                 sqe->buf_index = fixed_buffer_index;
             } else if (opcode == IORING_OP_RECV ||
                        opcode == IORING_OP_SEND ||
-                       opcode == io_uring_op_send_zc) {
+                       opcode == detail::io_uring_op_send_zc) {
                 sqe->addr = reinterpret_cast<std::uint64_t>(data);
                 sqe->len = static_cast<unsigned>(size);
                 sqe->msg_flags = op_flags;
@@ -6789,35 +6757,6 @@ private:
             io_waits_.clear();
         }
 
-        [[nodiscard]] static int sys_io_uring_setup(
-            unsigned entries,
-            io_uring_params* params) noexcept {
-            return static_cast<int>(::syscall(__NR_io_uring_setup, entries, params));
-        }
-
-        [[nodiscard]] static int sys_io_uring_enter(
-            int ring_fd,
-            unsigned to_submit,
-            unsigned min_complete,
-            unsigned flags) noexcept {
-            return static_cast<int>(::syscall(
-                __NR_io_uring_enter,
-                ring_fd,
-                to_submit,
-                min_complete,
-                flags,
-                nullptr,
-                0));
-        }
-
-        [[nodiscard]] static int sys_io_uring_register(
-            int ring_fd,
-            unsigned opcode,
-            const void* arg,
-            unsigned nr_args) noexcept {
-            return static_cast<int>(::syscall(__NR_io_uring_register, ring_fd, opcode, arg, nr_args));
-        }
-
         void init_io_uring_backend() noexcept {
             if (io_uring_fd_ >= 0 || io_wake_fd_ < 0) {
                 return;
@@ -6847,7 +6786,7 @@ private:
                     io_uring_cq_entries,
                     io_uring_sqpoll_idle_ms,
                     io_uring_sqpoll_cpu});
-            io_uring_fd_ = sys_io_uring_setup(io_uring_entries, &params);
+            io_uring_fd_ = detail::sys_io_uring_setup(io_uring_entries, &params);
             if (io_uring_fd_ < 0) {
                 return;
             }
@@ -6914,7 +6853,7 @@ private:
             io_uring_cqes_ = ptr_at<io_uring_cqe>(io_uring_cq_ring_, params.cq_off.cqes);
             detect_io_uring_features();
 
-            if (sys_io_uring_register(
+            if (detail::sys_io_uring_register(
                     io_uring_fd_,
                     IORING_REGISTER_EVENTFD,
                     &io_wake_fd_,
@@ -6940,7 +6879,7 @@ private:
                 sizeof(io_uring_probe) + probe_count * sizeof(io_uring_probe_op)>
                 storage{};
             auto* probe = reinterpret_cast<io_uring_probe*>(storage.data());
-            if (sys_io_uring_register(
+            if (detail::sys_io_uring_register(
                     io_uring_fd_,
                     IORING_REGISTER_PROBE,
                     probe,
@@ -6952,16 +6891,16 @@ private:
                 storage.data() + sizeof(io_uring_probe));
             const unsigned op_count = std::min<unsigned>(probe->ops_len, probe_count);
             for (unsigned i = 0; i < op_count; ++i) {
-                if (ops[i].op == io_uring_op_send_zc &&
+                if (ops[i].op == detail::io_uring_op_send_zc &&
                     (ops[i].flags & IO_URING_OP_SUPPORTED) != 0U) {
                     io_uring_send_zc_available_ = true;
-                } else if (ops[i].op == io_uring_op_sendmsg_zc &&
+                } else if (ops[i].op == detail::io_uring_op_sendmsg_zc &&
                            (ops[i].flags & IO_URING_OP_SUPPORTED) != 0U) {
                     io_uring_sendmsg_zc_available_ = true;
                 } else if (ops[i].op == IORING_OP_POLL_ADD &&
                            (ops[i].flags & IO_URING_OP_SUPPORTED) != 0U) {
                     io_uring_poll_add_available_ = true;
-                } else if (ops[i].op == io_uring_op_socket &&
+                } else if (ops[i].op == detail::io_uring_op_socket &&
                            (ops[i].flags & IO_URING_OP_SUPPORTED) != 0U) {
                     io_uring_socket_available_ = true;
                 }
@@ -6971,14 +6910,14 @@ private:
         void close_io_uring_backend() noexcept {
             clear_io_uring_operations();
             if (io_uring_fd_ >= 0 && io_uring_files_registered_) {
-                static_cast<void>(sys_io_uring_register(
+                static_cast<void>(detail::sys_io_uring_register(
                     io_uring_fd_,
                     IORING_UNREGISTER_FILES,
                     nullptr,
                     0));
             }
             if (io_uring_fd_ >= 0 && io_uring_buffers_registered_) {
-                static_cast<void>(sys_io_uring_register(
+                static_cast<void>(detail::sys_io_uring_register(
                     io_uring_fd_,
                     IORING_UNREGISTER_BUFFERS,
                     nullptr,
@@ -7081,7 +7020,7 @@ private:
 
             unsigned remaining = io_uring_pending_submissions_;
             while (remaining != 0U) {
-                const int submitted = sys_io_uring_enter(io_uring_fd_, remaining, 0, 0);
+                const int submitted = detail::sys_io_uring_enter(io_uring_fd_, remaining, 0, 0);
                 if (submitted > 0) {
                     const auto submitted_count = static_cast<unsigned>(submitted);
                     if (submitted_count > remaining) {
@@ -7271,8 +7210,8 @@ private:
         [[nodiscard]] static bool io_uring_result_is_fd(std::uint8_t opcode) noexcept {
             return opcode == IORING_OP_OPENAT ||
                    opcode == IORING_OP_ACCEPT ||
-                   opcode == io_uring_op_openat2 ||
-                   opcode == io_uring_op_socket;
+                   opcode == detail::io_uring_op_openat2 ||
+                   opcode == detail::io_uring_op_socket;
         }
 
         [[nodiscard]] static bool io_uring_operation_result_is_fd(
@@ -7294,7 +7233,7 @@ private:
             io_uring_files_update update{};
             update.offset = static_cast<unsigned>(operation->direct_file_index);
             update.fds = reinterpret_cast<std::uint64_t>(&invalid_fd);
-            static_cast<void>(sys_io_uring_register(
+            static_cast<void>(detail::sys_io_uring_register(
                 io_uring_fd_,
                 IORING_REGISTER_FILES_UPDATE,
                 &update,
@@ -7604,8 +7543,8 @@ private:
         unsigned io_uring_registered_file_count_{0};
         IoUringOperation* io_uring_operations_{nullptr};
         detail::ObjectPool<IoWaitRegistration> io_wait_pool_;
-        detail::ObjectPool<IoUringMessage> io_uring_msg_pool_;
-        detail::ObjectPool<IoUringSocketAddress> io_uring_address_pool_;
+        detail::ObjectPool<detail::IoUringMessage> io_uring_msg_pool_;
+        detail::ObjectPool<detail::IoUringSocketAddress> io_uring_address_pool_;
         detail::ObjectPool<IoUringOperation> io_uring_op_pool_;
         CacheLineAtomic<bool> io_wake_pending_{false};
 #endif
