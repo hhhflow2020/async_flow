@@ -2368,6 +2368,31 @@ private:
                 return false;
             }
 
+            IoWaitRegistration* registration = nullptr;
+            try {
+                registration = io_wait_pool_.create();
+                auto [it, inserted] = io_waits_.emplace(fd, registration);
+                static_cast<void>(it);
+                if (!inserted) {
+                    io_wait_pool_.destroy(registration);
+                    result->fd = fd;
+                    result->events = io_error;
+                    result->error = EALREADY;
+                    return false;
+                }
+            } catch (...) {
+                if (registration != nullptr) {
+                    io_wait_pool_.destroy(registration);
+                }
+                result->fd = fd;
+                result->events = io_error;
+                result->error = ENOMEM;
+                return false;
+            }
+            registration->fd = fd;
+            registration->task = task;
+            registration->result = result;
+
             std::uint32_t native_events = EPOLLERR | EPOLLHUP | EPOLLONESHOT;
             if ((events & io_readable) != 0U) {
                 native_events |= EPOLLIN;
@@ -2378,7 +2403,7 @@ private:
 
             epoll_event event{};
             event.events = native_events;
-            event.data.fd = fd;
+            event.data.ptr = registration;
 
             const int first_op = prefer_rearm ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
             const int fallback_op = prefer_rearm ? EPOLL_CTL_ADD : EPOLL_CTL_MOD;
@@ -2387,6 +2412,8 @@ private:
                 const int first_error = errno;
                 if (first_error != fallback_error ||
                     ::epoll_ctl(io_epoll_fd_, fallback_op, fd, &event) != 0) {
+                    io_waits_.erase(fd);
+                    io_wait_pool_.destroy(registration);
                     result->fd = fd;
                     result->events = io_error;
                     result->error = errno;
@@ -2396,7 +2423,6 @@ private:
 
             forget_deferred_io_delete(fd);
             *result = IoResult{fd, 0, 0};
-            io_waits_.emplace(fd, IoWaitRegistration{task, result});
             return true;
 #else
             static_cast<void>(fd);
@@ -2418,14 +2444,14 @@ private:
 
             const int fd = state.wait.fd;
             auto it = io_waits_.find(fd);
-            if (fd < 0 || it == io_waits_.end() || it->second.result != &state.wait) {
+            if (fd < 0 || it == io_waits_.end() || it->second->result != &state.wait) {
                 state.wait.events = io_error;
                 state.wait.error = ENOENT;
                 state.wait.result = -ENOENT;
                 return false;
             }
 
-            IoWaitRegistration registration = it->second;
+            IoWaitRegistration* registration = it->second;
             io_waits_.erase(it);
             static_cast<void>(::epoll_ctl(io_epoll_fd_, EPOLL_CTL_DEL, fd, nullptr));
             forget_deferred_io_delete(fd);
@@ -2436,9 +2462,10 @@ private:
             state.wait.events = io_error;
             state.wait.error = ECANCELED;
             state.wait.result = -ECANCELED;
-            if (registration.task != running_task_) {
-                enqueue_pending_blocking(index_, registration.task);
+            if (registration->task != running_task_) {
+                enqueue_pending_blocking(index_, registration->task);
             }
+            io_wait_pool_.destroy(registration);
             return true;
         }
 
@@ -4047,7 +4074,7 @@ private:
 
             epoll_event event{};
             event.events = EPOLLIN;
-            event.data.fd = io_wake_fd_;
+            event.data.ptr = nullptr;
             if (::epoll_ctl(io_epoll_fd_, EPOLL_CTL_ADD, io_wake_fd_, &event) != 0) {
                 close_io_backend();
                 return;
@@ -4062,7 +4089,7 @@ private:
         void close_io_backend() noexcept {
 #if defined(__linux__)
             close_io_uring_backend();
-            io_waits_.clear();
+            clear_io_waits();
             io_deferred_deletes_.clear();
             if (io_wake_fd_ >= 0) {
                 ::close(io_wake_fd_);
@@ -4082,6 +4109,9 @@ private:
             if (io_epoll_fd_ < 0) {
                 return did_work;
             }
+            if (timeout_ms == 0 && io_waits_.empty()) {
+                return did_work;
+            }
 
             std::array<epoll_event, 64> events;
             const int count = ::epoll_wait(
@@ -4094,8 +4124,9 @@ private:
             }
 
             for (int i = 0; i < count; ++i) {
-                const int fd = events[static_cast<std::size_t>(i)].data.fd;
-                if (fd == io_wake_fd_) {
+                auto* registration = static_cast<IoWaitRegistration*>(
+                    events[static_cast<std::size_t>(i)].data.ptr);
+                if (registration == nullptr) {
                     drain_io_wake();
                     if (poll_io_uring_completions()) {
                         did_work = true;
@@ -4104,20 +4135,16 @@ private:
                     continue;
                 }
 
-                auto it = io_waits_.find(fd);
-                if (it == io_waits_.end()) {
-                    continue;
-                }
-
-                IoWaitRegistration registration = it->second;
-                io_waits_.erase(it);
+                const int fd = registration->fd;
+                io_waits_.erase(fd);
                 defer_io_delete(fd);
 
-                registration.result->fd = fd;
-                registration.result->events = io_events_from_native(
+                registration->result->fd = fd;
+                registration->result->events = io_events_from_native(
                     events[static_cast<std::size_t>(i)].events);
-                registration.result->error = 0;
-                enqueue_pending_blocking(index_, registration.task);
+                registration->result->error = 0;
+                enqueue_pending_blocking(index_, registration->task);
+                io_wait_pool_.destroy(registration);
                 did_work = true;
             }
             return did_work;
@@ -4152,6 +4179,13 @@ private:
                 static_cast<void>(::epoll_ctl(io_epoll_fd_, EPOLL_CTL_DEL, fd, nullptr));
             }
             io_deferred_deletes_.clear();
+        }
+
+        void clear_io_waits() noexcept {
+            for (auto& entry : io_waits_) {
+                io_wait_pool_.destroy(entry.second);
+            }
+            io_waits_.clear();
         }
 
         [[nodiscard]] static int sys_io_uring_setup(
@@ -4713,13 +4747,14 @@ private:
         Task* running_task_{nullptr};
 #if defined(__linux__)
         struct IoWaitRegistration {
+            int fd{-1};
             Task* task{nullptr};
             IoResult* result{nullptr};
         };
 
         int io_epoll_fd_{-1};
         int io_wake_fd_{-1};
-        absl::flat_hash_map<int, IoWaitRegistration> io_waits_;
+        absl::flat_hash_map<int, IoWaitRegistration*> io_waits_;
         std::vector<int> io_deferred_deletes_;
         static constexpr unsigned io_uring_entries_{256};
         static constexpr unsigned io_uring_submit_batch_threshold_{64};
@@ -4745,6 +4780,7 @@ private:
         bool io_uring_files_registered_{false};
         unsigned io_uring_registered_file_count_{0};
         IoUringOperation* io_uring_operations_{nullptr};
+        detail::ObjectPool<IoWaitRegistration> io_wait_pool_;
         detail::ObjectPool<IoUringMessage> io_uring_msg_pool_;
         detail::ObjectPool<IoUringSocketAddress> io_uring_address_pool_;
         detail::ObjectPool<IoUringOperation> io_uring_op_pool_;
