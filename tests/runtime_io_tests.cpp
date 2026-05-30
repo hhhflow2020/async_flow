@@ -796,34 +796,106 @@ private:
         af::UdpSocket<IoTestThread> invalid_datagram(IoTestThread::IO_0, -1);
         af::IoOpState invalid_state{};
         af::IoOpState invalid_datagram_state{};
+        af::IoOpState invalid_recvmsg_datagram_state{};
         af::IoOpState null_state{};
         af::IoOpState null_datagram_state{};
+        af::IoOpState null_recvmsg_datagram_state{};
         af::IoOpState unavailable_state{};
         af::IoOpState unavailable_datagram_state{};
+        af::IoOpState unavailable_recvmsg_datagram_state{};
         std::uint16_t buffer_id = 0;
         const af::IoStatus invalid_status =
             invalid_stream.recv_multishot(*this, 0, &buffer_id, invalid_state);
         const af::IoStatus invalid_datagram_status =
             invalid_datagram.recv_multishot(*this, 0, &buffer_id, invalid_datagram_state);
+        const af::IoStatus invalid_recvmsg_datagram_status =
+            invalid_datagram.recv_from_multishot(
+                *this,
+                0,
+                sizeof(sockaddr_storage),
+                0,
+                &buffer_id,
+                invalid_recvmsg_datagram_state);
         const af::IoStatus null_status =
             stream_.recv_multishot(*this, 0, nullptr, null_state);
         const af::IoStatus null_datagram_status =
             datagram_.recv_multishot(*this, 0, nullptr, null_datagram_state);
+        const af::IoStatus null_recvmsg_datagram_status =
+            datagram_.recv_from_multishot(
+                *this,
+                0,
+                sizeof(sockaddr_storage),
+                0,
+                nullptr,
+                null_recvmsg_datagram_state);
         const af::IoStatus unavailable_status =
             stream_.recv_multishot(*this, 0, &buffer_id, unavailable_state);
         const af::IoStatus unavailable_datagram_status =
             datagram_.recv_multishot(*this, 0, &buffer_id, unavailable_datagram_state);
+        const af::IoStatus unavailable_recvmsg_datagram_status =
+            datagram_.recv_from_multishot(
+                *this,
+                0,
+                sizeof(sockaddr_storage),
+                0,
+                &buffer_id,
+                unavailable_recvmsg_datagram_state);
         if (!invalid_status.failed() || invalid_status.error != EBADF ||
             !invalid_datagram_status.failed() || invalid_datagram_status.error != EBADF ||
+            !invalid_recvmsg_datagram_status.failed() ||
+            invalid_recvmsg_datagram_status.error != EBADF ||
             !null_status.failed() || null_status.error != EINVAL ||
             !null_datagram_status.failed() || null_datagram_status.error != EINVAL ||
+            !null_recvmsg_datagram_status.failed() ||
+            null_recvmsg_datagram_status.error != EINVAL ||
             !unavailable_status.failed() || unavailable_status.error != ENOSYS) {
             return failed();
         }
         if (!unavailable_datagram_status.failed() ||
-            unavailable_datagram_status.error != ENOSYS) {
+            unavailable_datagram_status.error != ENOSYS ||
+            !unavailable_recvmsg_datagram_status.failed() ||
+            unavailable_recvmsg_datagram_status.error != ENOSYS) {
             return failed();
         }
+
+#if defined(__linux__)
+        alignas(af::detail::IoUringRecvmsgOut) char raw_buffer[256]{};
+        auto* raw_header = reinterpret_cast<af::detail::IoUringRecvmsgOut*>(raw_buffer);
+        raw_header->namelen = sizeof(sockaddr_in);
+        raw_header->controllen = 0;
+        raw_header->payloadlen = 1;
+        raw_header->flags = 0;
+        af::IoRecvmsgMultishotView view{};
+        int parse_error = 0;
+        constexpr socklen_t name_capacity = sizeof(sockaddr_storage);
+        constexpr std::size_t received_size =
+            sizeof(af::detail::IoUringRecvmsgOut) + name_capacity + 1U;
+        if (!af::io_parse_recvmsg_multishot_buffer(
+                raw_buffer,
+                sizeof(raw_buffer),
+                received_size,
+                name_capacity,
+                0,
+                view,
+                parse_error) ||
+            view.name_offset != sizeof(af::detail::IoUringRecvmsgOut) ||
+            view.name_size != sizeof(sockaddr_in) ||
+            view.payload_offset != received_size - 1U ||
+            view.payload_size != 1U) {
+            return failed();
+        }
+        if (af::io_parse_recvmsg_multishot_buffer(
+                nullptr,
+                sizeof(raw_buffer),
+                received_size,
+                name_capacity,
+                0,
+                view,
+                parse_error) ||
+            parse_error != EINVAL) {
+            return failed();
+        }
+#endif
 
         invalid_error_->store(invalid_status.error, std::memory_order_release);
         null_error_->store(null_status.error, std::memory_order_release);
@@ -3564,6 +3636,240 @@ private:
     std::atomic<int>* packed_read_{nullptr};
     std::atomic<int>* error_{nullptr};
 };
+
+class UringUdpRecvmsgMultishotTask final : public UringIoTaskBase {
+public:
+    explicit UringUdpRecvmsgMultishotTask(UringIoTaskBase::FactoryToken token)
+        : UringIoTaskBase(token) {}
+
+    bool do_it(
+        int fd,
+        in_port_t expected_port,
+        std::atomic<int>* armed,
+        std::atomic<int>* completed,
+        std::atomic<int>* read_count,
+        std::atomic<int>* packed_read,
+        std::atomic<int>* peer_count,
+        std::atomic<int>* error) {
+        socket_.reset(IoTestThread::IO_0, fd);
+        expected_port_ = expected_port;
+        armed_ = armed;
+        completed_ = completed;
+        read_count_ = read_count;
+        packed_read_ = packed_read;
+        peer_count_ = peer_count;
+        error_ = error;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Register,
+        Recv,
+        Cancel,
+        Unregister,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Register:
+            return register_ring();
+        case State::Recv:
+            return recv_one();
+        case State::Cancel:
+            return finish_cancel();
+        case State::Unregister:
+            return unregister_ring();
+        }
+        return complete(EIO);
+    }
+
+    af::TaskResult register_ring() {
+        int init_error = 0;
+        if (!ring_.init(buffer_count, init_error)) {
+            return complete(init_error == 0 ? EIO : init_error);
+        }
+        af::IoProvidedBuffer buffers[buffer_count]{};
+        for (std::uint16_t i = 0; i < buffer_count; ++i) {
+            buffers[i] = af::IoProvidedBuffer{buffers_[i], buffer_size, i};
+        }
+        int add_error = 0;
+        if (!ring_.add(buffers, buffer_count, add_error)) {
+            return complete(add_error == 0 ? EIO : add_error);
+        }
+
+        int register_error = 0;
+        if (!UringIoRuntime::io_register_provided_buffer_ring(
+                IoTestThread::IO_0,
+                ring_.ring(),
+                ring_.entries(),
+                buffer_group,
+                &register_error)) {
+            return complete(register_error == 0 ? EIO : register_error);
+        }
+        registered_ = true;
+        state_ = State::Recv;
+        return again();
+    }
+
+    af::TaskResult recv_one() {
+        std::uint16_t buffer_id = 0;
+        const af::IoStatus status = socket_.recv_from_multishot(
+            *this,
+            buffer_group,
+            name_capacity,
+            0,
+            &buffer_id,
+            recv_);
+        if (status.pending()) {
+            if (!armed_once_) {
+                armed_once_ = true;
+                armed_->fetch_add(1, std::memory_order_release);
+            }
+            return pending();
+        }
+        if (status.failed()) {
+            return complete(status.error);
+        }
+        if (!status.ready() || buffer_id >= buffer_count) {
+            return complete(EIO);
+        }
+
+        af::IoRecvmsgMultishotView view{};
+        int parse_error = 0;
+        if (!af::io_parse_recvmsg_multishot_buffer(
+                buffers_[buffer_id],
+                buffer_size,
+                status.bytes,
+                name_capacity,
+                0,
+                view,
+                parse_error)) {
+            return stop_recv(parse_error == 0 ? EIO : parse_error);
+        }
+        if (view.name_size < sizeof(sockaddr_in) || view.payload_size != 1U) {
+            return stop_recv(EIO);
+        }
+
+        const auto* address = reinterpret_cast<const sockaddr_in*>(
+            buffers_[buffer_id] + view.name_offset);
+        if (address->sin_family != AF_INET || address->sin_port != expected_port_) {
+            return stop_recv(EIO);
+        }
+        peer_count_->fetch_add(1, std::memory_order_acq_rel);
+
+        const int previous = read_count_->fetch_add(1, std::memory_order_acq_rel);
+        const int shifted = previous == 0 ? 8 : 0;
+        packed_read_->fetch_or(
+            static_cast<int>(
+                static_cast<unsigned char>(buffers_[buffer_id][view.payload_offset])) << shifted,
+            std::memory_order_acq_rel);
+
+        const af::IoProvidedBuffer buffer{buffers_[buffer_id], buffer_size, buffer_id};
+        int add_error = 0;
+        if (!ring_.add(&buffer, 1, add_error)) {
+            return stop_recv(add_error == 0 ? EIO : add_error);
+        }
+
+        if (previous + 1 < target_reads) {
+            return pending();
+        }
+        if (!recv_.waiting) {
+            state_ = State::Unregister;
+            return again();
+        }
+        finish_error_ = 0;
+        if (!UringIoRuntime::cancel_io(IoTestThread::IO_0, recv_)) {
+            return complete(recv_.wait.error == 0 ? EIO : recv_.wait.error);
+        }
+        state_ = State::Cancel;
+        return pending();
+    }
+
+    af::TaskResult finish_cancel() {
+        std::uint16_t ignored = 0;
+        const af::IoStatus status = socket_.recv_from_multishot(
+            *this,
+            buffer_group,
+            name_capacity,
+            0,
+            &ignored,
+            recv_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.failed() || status.error != ECANCELED) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        state_ = State::Unregister;
+        return again();
+    }
+
+    af::TaskResult unregister_ring() {
+        if (registered_) {
+            int unregister_error = 0;
+            if (!UringIoRuntime::io_unregister_provided_buffer_ring(
+                    IoTestThread::IO_0,
+                    buffer_group,
+                    &unregister_error)) {
+                return complete(unregister_error == 0 ? EIO : unregister_error);
+            }
+            registered_ = false;
+        }
+        return complete(finish_error_);
+    }
+
+    af::TaskResult complete(int error) {
+        if (registered_) {
+            int unregister_error = 0;
+            if (UringIoRuntime::io_unregister_provided_buffer_ring(
+                    IoTestThread::IO_0,
+                    buffer_group,
+                    &unregister_error)) {
+                registered_ = false;
+            }
+        }
+        error_->store(error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    af::TaskResult stop_recv(int error) {
+        finish_error_ = error == 0 ? EIO : error;
+        if (!recv_.waiting) {
+            state_ = State::Unregister;
+            return again();
+        }
+        if (!UringIoRuntime::cancel_io(IoTestThread::IO_0, recv_)) {
+            return complete(recv_.wait.error == 0 ? finish_error_ : recv_.wait.error);
+        }
+        state_ = State::Cancel;
+        return pending();
+    }
+
+    static constexpr std::uint16_t buffer_group = 8;
+    static constexpr unsigned buffer_count = 2;
+    static constexpr int target_reads = 2;
+    static constexpr socklen_t name_capacity = sizeof(sockaddr_storage);
+    static constexpr std::size_t buffer_size =
+        sizeof(af::detail::IoUringRecvmsgOut) + name_capacity + 16U;
+
+    State state_{State::Register};
+    af::UdpSocket<IoTestThread> socket_{};
+    af::IoProvidedBufferRing ring_{};
+    alignas(64) char buffers_[buffer_count][buffer_size]{};
+    in_port_t expected_port_{0};
+    int finish_error_{0};
+    bool armed_once_{false};
+    bool registered_{false};
+    af::IoOpState recv_{};
+    std::atomic<int>* armed_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* read_count_{nullptr};
+    std::atomic<int>* packed_read_{nullptr};
+    std::atomic<int>* peer_count_{nullptr};
+    std::atomic<int>* error_{nullptr};
+};
 #endif
 
 class UringTcpConnectTask final : public UringIoTaskBase {
@@ -6026,6 +6332,114 @@ TEST_F(UringIoRuntimeFixture, IoUringConnectedUdpRecvMultishotUsesProvidedBuffer
     EXPECT_EQ(
         packed_read.load(std::memory_order_acquire),
         (static_cast<int>('U') << 8) | static_cast<int>('D'));
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringUdpRecvmsgMultishotReportsPeerAddress) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io_uring backend unavailable";
+    }
+
+    af::UniqueFd receiver(::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
+    ASSERT_TRUE(receiver);
+    af::UniqueFd sender(::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
+    ASSERT_TRUE(sender);
+
+    sockaddr_in receiver_address{};
+    receiver_address.sin_family = AF_INET;
+    receiver_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    receiver_address.sin_port = 0;
+    ASSERT_EQ(
+        ::bind(receiver.get(), reinterpret_cast<sockaddr*>(&receiver_address), sizeof(receiver_address)),
+        0);
+    socklen_t receiver_address_size = sizeof(receiver_address);
+    ASSERT_EQ(
+        ::getsockname(
+            receiver.get(),
+            reinterpret_cast<sockaddr*>(&receiver_address),
+            &receiver_address_size),
+        0);
+
+    sockaddr_in sender_address{};
+    sender_address.sin_family = AF_INET;
+    sender_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    sender_address.sin_port = 0;
+    ASSERT_EQ(
+        ::bind(sender.get(), reinterpret_cast<sockaddr*>(&sender_address), sizeof(sender_address)),
+        0);
+    socklen_t sender_address_size = sizeof(sender_address);
+    ASSERT_EQ(
+        ::getsockname(
+            sender.get(),
+            reinterpret_cast<sockaddr*>(&sender_address),
+            &sender_address_size),
+        0);
+
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<int> read_count{0};
+    std::atomic<int> packed_read{0};
+    std::atomic<int> peer_count{0};
+    std::atomic<int> error{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringUdpRecvmsgMultishotTask>(
+        receiver.get(),
+        sender_address.sin_port,
+        &armed,
+        &completed,
+        &read_count,
+        &packed_read,
+        &peer_count,
+        &error));
+
+    if (!wait_until_at_least(armed, 1)) {
+        ASSERT_TRUE(wait_until_at_least(completed, 1));
+        const int setup_error = error.load(std::memory_order_acquire);
+        if (setup_error == EINVAL ||
+            setup_error == EOPNOTSUPP ||
+            setup_error == ENOSYS ||
+            setup_error == ENOBUFS) {
+            GTEST_SKIP() << "io_uring UDP recvmsg_multishot unsupported";
+        }
+        FAIL() << "UDP recvmsg_multishot was not armed, error=" << setup_error;
+    }
+
+    const char payload[] = {'R', 'M'};
+    ASSERT_EQ(
+        ::sendto(
+            sender.get(),
+            payload,
+            1,
+            0,
+            reinterpret_cast<sockaddr*>(&receiver_address),
+            receiver_address_size),
+        1);
+    ASSERT_EQ(
+        ::sendto(
+            sender.get(),
+            payload + 1,
+            1,
+            0,
+            reinterpret_cast<sockaddr*>(&receiver_address),
+            receiver_address_size),
+        1);
+
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    const int task_error = error.load(std::memory_order_acquire);
+    if (task_error == EINVAL ||
+        task_error == EOPNOTSUPP ||
+        task_error == ENOSYS ||
+        task_error == ENOBUFS) {
+        GTEST_SKIP() << "io_uring UDP recvmsg_multishot unsupported";
+    }
+    EXPECT_EQ(task_error, 0);
+    EXPECT_EQ(read_count.load(std::memory_order_acquire), 2);
+    EXPECT_EQ(peer_count.load(std::memory_order_acquire), 2);
+    EXPECT_EQ(
+        packed_read.load(std::memory_order_acquire),
+        (static_cast<int>('R') << 8) | static_cast<int>('M'));
 #else
     GTEST_SKIP() << "io_uring backend is Linux-only";
 #endif

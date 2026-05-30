@@ -81,6 +81,9 @@ if(ASYNCFLOW_BUILD_EXAMPLES)
     add_executable(asyncflow_io_uring_udp_recv_multishot_example examples/io_uring_udp_recv_multishot.cpp)
     target_link_libraries(asyncflow_io_uring_udp_recv_multishot_example PRIVATE AsyncFlow::AsyncFlow)
 
+    add_executable(asyncflow_io_uring_udp_recvmsg_multishot_example examples/io_uring_udp_recvmsg_multishot.cpp)
+    target_link_libraries(asyncflow_io_uring_udp_recvmsg_multishot_example PRIVATE AsyncFlow::AsyncFlow)
+
     add_executable(asyncflow_io_uring_openat_example examples/io_uring_openat.cpp)
     target_link_libraries(asyncflow_io_uring_openat_example PRIVATE AsyncFlow::AsyncFlow)
 

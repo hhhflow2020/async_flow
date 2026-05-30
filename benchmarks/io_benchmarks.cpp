@@ -91,6 +91,18 @@ struct FakeRuntime {
         af::IoResult*) noexcept {
         return false;
     }
+
+    static bool io_submit_recvmsg_multishot(
+        BenchIoThread,
+        int,
+        std::uint16_t,
+        socklen_t,
+        std::size_t,
+        std::uint32_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
 #endif
 
 #if !defined(_WIN32)
@@ -421,6 +433,22 @@ void BM_IoDatagramAdapterInvalidRecvMultishot(benchmark::State& state) {
         benchmark::DoNotOptimize(socket.recv_multishot(task, 0, &buffer_id, op));
     }
 }
+
+void BM_IoDatagramAdapterInvalidRecvFromMultishot(benchmark::State& state) {
+    FakeTask task;
+    af::UdpSocket<BenchIoThread> socket(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    std::uint16_t buffer_id = 0;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(socket.recv_from_multishot(
+            task,
+            0,
+            sizeof(sockaddr_storage),
+            0,
+            &buffer_id,
+            op));
+    }
+}
 #endif
 
 void BM_IoListenerAdapterInvalidAccept(benchmark::State& state) {
@@ -656,6 +684,7 @@ BENCHMARK(BM_IoStreamAdapterZeroByteSend);
 BENCHMARK(BM_IoStreamAdapterZeroByteSendZc);
 BENCHMARK(BM_IoStreamAdapterInvalidRecvMultishot);
 BENCHMARK(BM_IoDatagramAdapterInvalidRecvMultishot);
+BENCHMARK(BM_IoDatagramAdapterInvalidRecvFromMultishot);
 #endif
 BENCHMARK(BM_IoDatagramAdapterZeroByteRecv);
 BENCHMARK(BM_IoListenerAdapterInvalidAccept);

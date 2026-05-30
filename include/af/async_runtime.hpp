@@ -1445,6 +1445,41 @@ public:
             task,
             result);
     }
+
+    [[nodiscard]] static bool io_submit_recvmsg_multishot(
+        Thread thread,
+        int fd,
+        std::uint16_t buffer_group,
+        socklen_t name_capacity,
+        std::size_t control_capacity,
+        std::uint32_t flags,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || fd < 0) {
+            if (result != nullptr) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = fd < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_recvmsg_multishot(
+            fd,
+            buffer_group,
+            name_capacity,
+            control_capacity,
+            flags,
+            task,
+            result);
+    }
 #endif
 
     [[nodiscard]] static bool io_submit_send(
@@ -3742,6 +3777,51 @@ private:
                 buffer_group,
                 true);
         }
+
+        [[nodiscard]] bool submit_io_uring_recvmsg_multishot(
+            int fd,
+            std::uint16_t buffer_group,
+            socklen_t name_capacity,
+            std::size_t control_capacity,
+            std::uint32_t flags,
+            Task* task,
+            IoResult* result) noexcept {
+            if (!provided_buffer_group_registered(buffer_group)) {
+                if (result != nullptr) {
+                    result->fd = fd;
+                    result->events = io_error;
+                    result->error = ENOBUFS;
+                }
+                return false;
+            }
+            return submit_io_uring_op(
+                IORING_OP_RECVMSG,
+                fd,
+                nullptr,
+                control_capacity,
+                0,
+                flags,
+                io_readable,
+                task,
+                result,
+                nullptr,
+                name_capacity,
+                nullptr,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                nullptr,
+                0,
+                0,
+                -1,
+                0,
+                false,
+                true,
+                false,
+                buffer_group,
+                true);
+        }
 #endif
 
         [[nodiscard]] bool submit_io_uring_send(
@@ -4487,10 +4567,12 @@ private:
                 return false;
             }
             if (buffer_select &&
-                (opcode != IORING_OP_RECV || !provided_buffer_group_registered(provided_buffer_group))) {
+                ((opcode != IORING_OP_RECV && opcode != IORING_OP_RECVMSG) ||
+                 !provided_buffer_group_registered(provided_buffer_group))) {
                 result->fd = fd;
                 result->events = io_error;
-                result->error = opcode == IORING_OP_RECV ? ENOBUFS : EINVAL;
+                result->error =
+                    (opcode == IORING_OP_RECV || opcode == IORING_OP_RECVMSG) ? ENOBUFS : EINVAL;
                 return false;
             }
 
@@ -4529,7 +4611,9 @@ private:
                 operation->msg->header = msghdr{};
                 operation->msg->header.msg_name = message_name;
                 operation->msg->header.msg_namelen = message_name_len;
-                if (message_iov_op) {
+                if (opcode == IORING_OP_RECVMSG && multishot && buffer_select) {
+                    operation->msg->header.msg_controllen = size;
+                } else if (message_iov_op) {
                     operation->msg->header.msg_iov = const_cast<iovec*>(message_iov);
                     operation->msg->header.msg_iovlen = message_iov_count;
                 } else {
@@ -4620,7 +4704,11 @@ private:
                 sqe->unlink_flags = op_flags;
             } else if (message_op) {
                 sqe->addr = reinterpret_cast<std::uint64_t>(&operation->msg->header);
+                sqe->len = 1U;
                 sqe->msg_flags = op_flags;
+                if (opcode == IORING_OP_RECVMSG && multishot) {
+                    sqe->ioprio |= IORING_RECV_MULTISHOT;
+                }
             } else if (accept_op) {
                 if (operation->socket_address != nullptr) {
                     sqe->addr = reinterpret_cast<std::uint64_t>(&operation->socket_address->storage);
