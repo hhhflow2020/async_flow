@@ -964,6 +964,119 @@ private:
     std::atomic<int>* bytes_read_{nullptr};
 };
 
+class UringOpenAtFileTask final : public UringIoTaskBase {
+public:
+    explicit UringOpenAtFileTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
+
+    bool do_it(
+        const char* path,
+        std::atomic<int>* completed,
+        std::atomic<char>* byte_read) {
+        path_ = path;
+        completed_ = completed;
+        byte_read_ = byte_read;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Open,
+        Write,
+        Fsync,
+        Read,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Open:
+            return open_file();
+
+        case State::Write:
+            return write_value();
+
+        case State::Fsync:
+            return fsync_value();
+
+        case State::Read:
+            return read_value();
+        }
+        return failed();
+    }
+
+    af::TaskResult open_file() {
+        int fd = -1;
+        const af::IoStatus status = af::io_openat(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            path_,
+            O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC,
+            0600U,
+            &fd,
+            open_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || fd < 0) {
+            return failed();
+        }
+        owned_.reset(fd);
+        file_.reset(IoTestThread::IO_0, owned_.get());
+        state_ = State::Write;
+        return again();
+    }
+
+    af::TaskResult write_value() {
+        const af::IoStatus status = file_.write_at(*this, &value_, sizeof(value_), 0, write_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(value_)) {
+            return failed();
+        }
+        state_ = State::Fsync;
+        return again();
+    }
+
+    af::TaskResult fsync_value() {
+        const af::IoStatus status = file_.fsync(*this, fsync_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready()) {
+            return failed();
+        }
+        state_ = State::Read;
+        return again();
+    }
+
+    af::TaskResult read_value() {
+        const af::IoStatus status = file_.read_at(*this, &read_, sizeof(read_), 0, read_state_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(read_) || read_ != value_) {
+            return failed();
+        }
+        byte_read_->store(read_, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    State state_{State::Open};
+    const char* path_{nullptr};
+    af::UniqueFd owned_{};
+    af::IoFile<IoTestThread> file_{};
+    char value_{'O'};
+    char read_{0};
+    af::IoOpState open_{};
+    af::IoOpState write_{};
+    af::IoOpState fsync_{};
+    af::IoOpState read_state_{};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<char>* byte_read_{nullptr};
+};
+
 class UringStreamFallbackTask final : public UringIoTaskBase {
 public:
     explicit UringStreamFallbackTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
@@ -1642,6 +1755,64 @@ private:
     std::atomic<int>* error_{nullptr};
 };
 
+class OpenAtBoundaryTask final : public IoTaskBase {
+public:
+    explicit OpenAtBoundaryTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(std::atomic<int>* completed, std::atomic<int>* error) {
+        completed_ = completed;
+        error_ = error;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        af::IoOpState null_path{};
+        af::IoOpState null_output{};
+        af::IoOpState no_uring{};
+        int opened = -1;
+        const af::IoStatus null_path_status = af::io_openat(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            nullptr,
+            O_RDONLY | O_CLOEXEC,
+            0,
+            &opened,
+            null_path);
+        const af::IoStatus null_output_status = af::io_openat(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            "/tmp/asyncflow-openat-boundary",
+            O_RDONLY | O_CLOEXEC,
+            0,
+            nullptr,
+            null_output);
+        const af::IoStatus no_uring_status = af::io_openat(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            "/tmp/asyncflow-openat-boundary",
+            O_RDONLY | O_CLOEXEC,
+            0,
+            &opened,
+            no_uring);
+        if (!null_path_status.failed() || null_path_status.error != EINVAL ||
+            !null_output_status.failed() || null_output_status.error != EINVAL ||
+            !no_uring_status.failed() || no_uring_status.error != ENOSYS ||
+            opened != -1) {
+            return failed();
+        }
+        error_->store(no_uring_status.error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* error_{nullptr};
+};
+
 class PendingSocketWaitTask final : public FastIoTaskBase {
 public:
     explicit PendingSocketWaitTask(FastIoTaskBase::FactoryToken token) : FastIoTaskBase(token) {}
@@ -1922,6 +2093,22 @@ TEST_F(IoRuntimeFixture, EventFdAdapterHandlesInvalidOperations) {
     EXPECT_EQ(task_error.load(std::memory_order_acquire), EBADF);
 #else
     GTEST_SKIP() << "eventfd is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, OpenAtHelperHandlesInvalidOperations) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    std::atomic<int> completed{0};
+    std::atomic<int> error{0};
+    ASSERT_TRUE(IoRuntime::start_task<OpenAtBoundaryTask>(&completed, &error));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(error.load(std::memory_order_acquire), ENOSYS);
+#else
+    GTEST_SKIP() << "openat helper is Linux-only";
 #endif
 }
 
@@ -2561,6 +2748,33 @@ TEST_F(UringIoRuntimeFixture, IoUringFileAdapterWritesAndReadsVectoredAtOffset) 
     EXPECT_EQ(bytes_read.load(std::memory_order_acquire), 2);
 
     file.reset();
+    static_cast<void>(::unlink(path));
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringThreadOpensFileWithOpenAt) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io_uring backend unavailable";
+    }
+
+    char path[] = "/tmp/asyncflow-openat-XXXXXX";
+    int seed = ::mkstemp(path);
+    ASSERT_GE(seed, 0);
+    close_fd(seed);
+    static_cast<void>(::unlink(path));
+
+    std::atomic<int> completed{0};
+    std::atomic<char> byte_read{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringOpenAtFileTask>(
+        path,
+        &completed,
+        &byte_read));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(byte_read.load(std::memory_order_acquire), 'O');
+
     static_cast<void>(::unlink(path));
 #else
     GTEST_SKIP() << "io_uring backend is Linux-only";

@@ -143,6 +143,17 @@ struct FakeRuntime {
         return false;
     }
 #endif
+
+    static bool io_submit_openat(
+        BenchIoThread,
+        int,
+        const char*,
+        int,
+        std::uint32_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
 };
 
 struct FakeTask {
@@ -213,6 +224,23 @@ void BM_IoEventAdapterNullValue(benchmark::State& state) {
     }
 }
 
+void BM_IoOpenAtNullPath(benchmark::State& state) {
+    FakeTask task;
+    af::IoOpState op;
+    int opened = -1;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(af::io_openat(
+            task,
+            BenchIoThread::IO_0,
+            -1,
+            nullptr,
+            0,
+            0,
+            &opened,
+            op));
+    }
+}
+
 #if !defined(_WIN32)
 void BM_IoFileAdapterZeroIovReadvAt(benchmark::State& state) {
     FakeTask task;
@@ -258,6 +286,7 @@ BENCHMARK(BM_IoListenerAdapterInvalidAccept);
 BENCHMARK(BM_IoStreamAdapterInvalidConnect);
 BENCHMARK(BM_IoTimerAdapterNullExpiration);
 BENCHMARK(BM_IoEventAdapterNullValue);
+BENCHMARK(BM_IoOpenAtNullPath);
 #if !defined(_WIN32)
 BENCHMARK(BM_IoFileAdapterZeroIovReadvAt);
 BENCHMARK(BM_IoStreamAdapterZeroIovSendv);
