@@ -96,6 +96,9 @@ if(ASYNCFLOW_BUILD_EXAMPLES)
     add_executable(asyncflow_io_uring_sendmsg_zc_example examples/io_uring_sendmsg_zc.cpp)
     target_link_libraries(asyncflow_io_uring_sendmsg_zc_example PRIVATE AsyncFlow::AsyncFlow)
 
+    add_executable(asyncflow_io_uring_timeout_example examples/io_uring_timeout.cpp)
+    target_link_libraries(asyncflow_io_uring_timeout_example PRIVATE AsyncFlow::AsyncFlow)
+
     add_executable(asyncflow_io_tcp_connect_accept_example examples/io_tcp_connect_accept.cpp)
     target_link_libraries(asyncflow_io_tcp_connect_accept_example PRIVATE AsyncFlow::AsyncFlow)
 

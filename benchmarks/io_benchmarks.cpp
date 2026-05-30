@@ -1,5 +1,6 @@
 #include <cstddef>
 #include <cstdint>
+#include <chrono>
 
 #include <benchmark/benchmark.h>
 
@@ -32,6 +33,14 @@ struct FakeRuntime {
         void*,
         std::size_t,
         std::uint32_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
+    static bool io_submit_timeout(
+        BenchIoThread,
+        std::chrono::nanoseconds,
         void*,
         af::IoResult*) noexcept {
         return false;
@@ -528,6 +537,18 @@ void BM_IoEventAdapterNullValue(benchmark::State& state) {
     }
 }
 
+void BM_IoTimeoutInvalidDelay(benchmark::State& state) {
+    FakeTask task;
+    af::IoOpState op;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(af::io_wait_timeout(
+            task,
+            BenchIoThread::IO_0,
+            std::chrono::nanoseconds{0},
+            op));
+    }
+}
+
 void BM_IoOpenAtNullPath(benchmark::State& state) {
     FakeTask task;
     af::IoOpState op;
@@ -736,6 +757,7 @@ BENCHMARK(BM_IoListenerAdapterInvalidAcceptMultishot);
 BENCHMARK(BM_IoStreamAdapterInvalidConnect);
 BENCHMARK(BM_IoTimerAdapterNullExpiration);
 BENCHMARK(BM_IoEventAdapterNullValue);
+BENCHMARK(BM_IoTimeoutInvalidDelay);
 BENCHMARK(BM_IoOpenAtNullPath);
 BENCHMARK(BM_IoStatxNullPath);
 BENCHMARK(BM_IoCloseInvalidFd);

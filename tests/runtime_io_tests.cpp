@@ -4610,6 +4610,45 @@ using TimerFdTask = BasicTimerFdTask<IoTaskBase>;
 using UringTimerFdTask = BasicTimerFdTask<UringIoTaskBase>;
 
 template <typename TaskBaseT>
+class BasicUringTimeoutTask final : public TaskBaseT {
+public:
+    explicit BasicUringTimeoutTask(typename TaskBaseT::FactoryToken token) : TaskBaseT(token) {}
+
+    bool do_it(
+        std::atomic<int>* armed,
+        std::atomic<int>* completed,
+        std::atomic<int>* error) {
+        armed_ = armed;
+        completed_ = completed;
+        error_ = error;
+        return this->schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        const af::IoStatus status = af::io_wait_timeout(
+            *this,
+            IoTestThread::IO_0,
+            std::chrono::milliseconds(1),
+            wait_);
+        if (status.pending()) {
+            armed_->fetch_add(1, std::memory_order_release);
+            return this->pending();
+        }
+        error_->store(status.failed() ? status.error : 0, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return this->done();
+    }
+
+    af::IoOpState wait_{};
+    std::atomic<int>* armed_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* error_{nullptr};
+};
+
+using UringTimeoutTask = BasicUringTimeoutTask<UringIoTaskBase>;
+
+template <typename TaskBaseT>
 class BasicEventFdTask final : public TaskBaseT {
 public:
     explicit BasicEventFdTask(typename TaskBaseT::FactoryToken token) : TaskBaseT(token) {}
@@ -4675,6 +4714,43 @@ private:
             return failed();
         }
         error_->store(bad_fd_status.error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* error_{nullptr};
+};
+
+class TimeoutBoundaryTask final : public IoTaskBase {
+public:
+    explicit TimeoutBoundaryTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(std::atomic<int>* completed, std::atomic<int>* error) {
+        completed_ = completed;
+        error_ = error;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        af::IoOpState invalid_delay{};
+        af::IoOpState no_uring{};
+        const af::IoStatus invalid_status = af::io_wait_timeout(
+            *this,
+            IoTestThread::IO_0,
+            std::chrono::nanoseconds{0},
+            invalid_delay);
+        const af::IoStatus no_uring_status = af::io_wait_timeout(
+            *this,
+            IoTestThread::IO_0,
+            std::chrono::milliseconds(1),
+            no_uring);
+        if (!invalid_status.failed() || invalid_status.error != EINVAL ||
+            !no_uring_status.failed() || no_uring_status.error != ENOSYS) {
+            return failed();
+        }
+        error_->store(no_uring_status.error, std::memory_order_release);
         completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
@@ -5452,6 +5528,22 @@ TEST_F(IoRuntimeFixture, TimerFdAdapterHandlesInvalidOperations) {
 #endif
 }
 
+TEST_F(IoRuntimeFixture, TimeoutHelperHandlesInvalidAndUnavailableBackend) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    std::atomic<int> completed{0};
+    std::atomic<int> task_error{0};
+    ASSERT_TRUE(IoRuntime::start_task<TimeoutBoundaryTask>(&completed, &task_error));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(task_error.load(std::memory_order_acquire), ENOSYS);
+#else
+    GTEST_SKIP() << "io_uring timeout helper is Linux-only";
+#endif
+}
+
 TEST_F(IoRuntimeFixture, EventFdAdapterHandlesInvalidOperations) {
 #if defined(__linux__)
     if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
@@ -6105,6 +6197,28 @@ TEST_F(UringIoRuntimeFixture, IoUringThreadFallsBackToEpollReadiness) {
     EXPECT_EQ(byte_read.load(std::memory_order_acquire), value);
 
     close_pair(fds);
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringTimeoutCompletesInRing) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io_uring backend unavailable";
+    }
+
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<int> error{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringTimeoutTask>(&armed, &completed, &error));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    if (error.load(std::memory_order_acquire) == ENOSYS ||
+        error.load(std::memory_order_acquire) == EINVAL) {
+        GTEST_SKIP() << "io_uring timeout operation unsupported";
+    }
+    EXPECT_EQ(error.load(std::memory_order_acquire), 0);
+    EXPECT_GE(armed.load(std::memory_order_acquire), 1);
 #else
     GTEST_SKIP() << "io_uring backend is Linux-only";
 #endif
