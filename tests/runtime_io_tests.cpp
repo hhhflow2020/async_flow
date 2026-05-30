@@ -101,12 +101,14 @@ using UringIoTaskBase = UringIoRuntime::Task;
 
 TEST(IoAdapterTraits, AdaptersAreThinTriviallyCopyableViews) {
     EXPECT_TRUE(std::is_trivially_copyable_v<af::IoFile<IoTestThread>>);
+    EXPECT_TRUE(std::is_trivially_copyable_v<af::IoFixedFile<IoTestThread>>);
     EXPECT_TRUE(std::is_trivially_copyable_v<af::TcpStream<IoTestThread>>);
     EXPECT_TRUE(std::is_trivially_copyable_v<af::TcpListener<IoTestThread>>);
     EXPECT_TRUE(std::is_trivially_copyable_v<af::UdpSocket<IoTestThread>>);
     EXPECT_TRUE(std::is_trivially_copyable_v<af::IoEvent<IoTestThread>>);
     EXPECT_TRUE(std::is_trivially_copyable_v<af::IoTimer<IoTestThread>>);
     EXPECT_LE(sizeof(af::IoFile<IoTestThread>), 8U);
+    EXPECT_LE(sizeof(af::IoFixedFile<IoTestThread>), 8U);
     EXPECT_LE(sizeof(af::TcpStream<IoTestThread>), 8U);
     EXPECT_LE(sizeof(af::TcpListener<IoTestThread>), 8U);
     EXPECT_LE(sizeof(af::UdpSocket<IoTestThread>), 8U);
@@ -1170,6 +1172,70 @@ private:
     std::atomic<int>* error_{nullptr};
 };
 
+class FixedFileBoundaryTask final : public IoTaskBase {
+public:
+    explicit FixedFileBoundaryTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(
+        std::atomic<int>* completed,
+        std::atomic<int>* register_error,
+        std::atomic<int>* unavailable_error,
+        std::atomic<int>* invalid_error,
+        std::atomic<int>* null_error) {
+        completed_ = completed;
+        register_error_ = register_error;
+        unavailable_error_ = unavailable_error;
+        invalid_error_ = invalid_error;
+        null_error_ = null_error;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        const int fd = -1;
+        int register_error = 0;
+        const bool registered =
+            IoRuntime::io_register_files(IoTestThread::IO_0, &fd, 1, &register_error);
+        if (registered || register_error != ENOSYS) {
+            return failed();
+        }
+
+        af::IoFixedFile<IoTestThread> missing(IoTestThread::IO_0, 0);
+        af::IoFixedFile<IoTestThread> invalid(IoTestThread::IO_0, -1);
+        af::IoOpState unavailable{};
+        af::IoOpState zero{};
+        af::IoOpState bad{};
+        af::IoOpState null_data{};
+        char value = 0;
+
+        const af::IoStatus unavailable_read =
+            missing.read_at(*this, &value, sizeof(value), 0, unavailable);
+        const af::IoStatus zero_read = invalid.read_at(*this, nullptr, 0, 0, zero);
+        const af::IoStatus bad_read = invalid.read_at(*this, &value, sizeof(value), 0, bad);
+        const af::IoStatus null_read =
+            missing.read_at(*this, nullptr, sizeof(value), 0, null_data);
+        if (!unavailable_read.failed() || unavailable_read.error != ENOSYS ||
+            !zero_read.ready() || zero_read.bytes != 0U ||
+            !bad_read.failed() || bad_read.error != EBADF ||
+            !null_read.failed() || null_read.error != EINVAL) {
+            return failed();
+        }
+
+        register_error_->store(register_error, std::memory_order_release);
+        unavailable_error_->store(unavailable_read.error, std::memory_order_release);
+        invalid_error_->store(bad_read.error, std::memory_order_release);
+        null_error_->store(null_read.error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* register_error_{nullptr};
+    std::atomic<int>* unavailable_error_{nullptr};
+    std::atomic<int>* invalid_error_{nullptr};
+    std::atomic<int>* null_error_{nullptr};
+};
+
 class UringFileReadWriteTask final : public UringIoTaskBase {
 public:
     explicit UringFileReadWriteTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
@@ -1480,6 +1546,158 @@ private:
     af::IoOpState write_{};
     af::IoOpState fsync_{};
     af::IoOpState read_{};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<char>* byte_read_{nullptr};
+};
+
+class UringFixedFileTask final : public UringIoTaskBase {
+public:
+    explicit UringFixedFileTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
+
+    bool do_it(int fd, std::atomic<int>* completed, std::atomic<char>* byte_read) {
+        fd_ = fd;
+        file_.reset(IoTestThread::IO_0, 0);
+        completed_ = completed;
+        byte_read_ = byte_read;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Register,
+        Write,
+        Fsync,
+        Read,
+        Unregister,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Register:
+            return register_file();
+
+        case State::Write:
+            return write_value();
+
+        case State::Fsync:
+            return fsync_value();
+
+        case State::Read:
+            return read_value();
+
+        case State::Unregister:
+            return unregister_file();
+        }
+        return failed();
+    }
+
+    af::TaskResult register_file() {
+        const af::IoStatus no_table = file_.write_at(
+            *this,
+            &value_,
+            sizeof(value_),
+            0,
+            no_table_);
+        if (!no_table.failed() || no_table.error != ENXIO) {
+            return failed();
+        }
+
+        int error = 0;
+        if (!UringIoRuntime::io_register_files(IoTestThread::IO_0, &fd_, 1, &error)) {
+            return failed();
+        }
+
+        int duplicate_error = 0;
+        if (UringIoRuntime::io_register_files(
+                IoTestThread::IO_0,
+                &fd_,
+                1,
+                &duplicate_error) ||
+            duplicate_error != EALREADY) {
+            return failed();
+        }
+
+        af::IoFixedFile<IoTestThread> bad_file(IoTestThread::IO_0, 1);
+        const af::IoStatus bad_index = bad_file.write_at(
+            *this,
+            &value_,
+            sizeof(value_),
+            0,
+            bad_index_);
+        if (!bad_index.failed() || bad_index.error != EINVAL) {
+            return failed();
+        }
+
+        state_ = State::Write;
+        return again();
+    }
+
+    af::TaskResult write_value() {
+        const af::IoStatus status = file_.write_at(
+            *this,
+            &value_,
+            sizeof(value_),
+            0,
+            write_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(value_)) {
+            return failed();
+        }
+        state_ = State::Fsync;
+        return again();
+    }
+
+    af::TaskResult fsync_value() {
+        const af::IoStatus status = file_.fsync(*this, fsync_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready()) {
+            return failed();
+        }
+        state_ = State::Read;
+        return again();
+    }
+
+    af::TaskResult read_value() {
+        const af::IoStatus status = file_.read_at(
+            *this,
+            &read_,
+            sizeof(read_),
+            0,
+            read_state_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(read_) || read_ != value_) {
+            return failed();
+        }
+        state_ = State::Unregister;
+        return again();
+    }
+
+    af::TaskResult unregister_file() {
+        int error = 0;
+        if (!UringIoRuntime::io_unregister_files(IoTestThread::IO_0, &error)) {
+            return failed();
+        }
+        byte_read_->store(read_, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    State state_{State::Register};
+    int fd_{-1};
+    af::IoFixedFile<IoTestThread> file_{};
+    char value_{'F'};
+    char read_{0};
+    af::IoOpState no_table_{};
+    af::IoOpState bad_index_{};
+    af::IoOpState write_{};
+    af::IoOpState fsync_{};
+    af::IoOpState read_state_{};
     std::atomic<int>* completed_{nullptr};
     std::atomic<char>* byte_read_{nullptr};
 };
@@ -3591,6 +3809,33 @@ TEST_F(IoRuntimeFixture, FixedBufferHelpersHandleInvalidAndUnavailableBackend) {
 #endif
 }
 
+TEST_F(IoRuntimeFixture, FixedFileHelpersHandleInvalidAndUnavailableBackend) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    std::atomic<int> completed{0};
+    std::atomic<int> register_error{0};
+    std::atomic<int> unavailable_error{0};
+    std::atomic<int> invalid_error{0};
+    std::atomic<int> null_error{0};
+    ASSERT_TRUE(IoRuntime::start_task<FixedFileBoundaryTask>(
+        &completed,
+        &register_error,
+        &unavailable_error,
+        &invalid_error,
+        &null_error));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(register_error.load(std::memory_order_acquire), ENOSYS);
+    EXPECT_EQ(unavailable_error.load(std::memory_order_acquire), ENOSYS);
+    EXPECT_EQ(invalid_error.load(std::memory_order_acquire), EBADF);
+    EXPECT_EQ(null_error.load(std::memory_order_acquire), EINVAL);
+#else
+    GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
 TEST_F(IoRuntimeFixture, VectoredHelpersHandleInvalidAndZeroLengthOperations) {
 #if defined(__linux__)
     if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
@@ -4514,6 +4759,33 @@ TEST_F(UringIoRuntimeFixture, IoUringRegisteredBufferReadsAndWritesAtOffset) {
         &byte_read));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(byte_read.load(std::memory_order_acquire), 'B');
+
+    file.reset();
+    static_cast<void>(::unlink(path));
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringFixedFileWritesFsyncsAndReadsAtOffset) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io_uring backend unavailable";
+    }
+
+    char path[] = "/tmp/asyncflow-uring-fixed-file-XXXXXX";
+    const int fd = ::mkstemp(path);
+    ASSERT_GE(fd, 0);
+    af::UniqueFd file(fd);
+
+    std::atomic<int> completed{0};
+    std::atomic<char> byte_read{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringFixedFileTask>(
+        file.get(),
+        &completed,
+        &byte_read));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(byte_read.load(std::memory_order_acquire), 'F');
 
     file.reset();
     static_cast<void>(::unlink(path));

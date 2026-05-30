@@ -125,6 +125,37 @@ struct FakeRuntime {
         return false;
     }
 
+    static bool io_submit_read_fixed_file_at(
+        BenchIoThread,
+        int,
+        void*,
+        std::size_t,
+        std::uint64_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
+    static bool io_submit_write_fixed_file_at(
+        BenchIoThread,
+        int,
+        const void*,
+        std::size_t,
+        std::uint64_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
+    static bool io_submit_fsync_fixed_file(
+        BenchIoThread,
+        int,
+        std::uint32_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
     static bool io_submit_readv_at(
         BenchIoThread,
         int,
@@ -419,6 +450,24 @@ void BM_IoFileAdapterZeroByteWriteFixedAt(benchmark::State& state) {
     }
 }
 
+void BM_IoFixedFileAdapterZeroByteReadAt(benchmark::State& state) {
+    FakeTask task;
+    af::IoFixedFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(file.read_at(task, nullptr, 0, 0, op));
+    }
+}
+
+void BM_IoFixedFileAdapterZeroByteWriteAt(benchmark::State& state) {
+    FakeTask task;
+    af::IoFixedFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(file.write_at(task, nullptr, 0, 0, op));
+    }
+}
+
 void BM_IoStreamAdapterZeroIovSendv(benchmark::State& state) {
     FakeTask task;
     af::TcpStream<BenchIoThread> stream(BenchIoThread::IO_0, -1);
@@ -463,6 +512,8 @@ BENCHMARK(BM_IoSpliceZeroCount);
 BENCHMARK(BM_IoFileAdapterZeroIovReadvAt);
 BENCHMARK(BM_IoFileAdapterZeroByteReadFixedAt);
 BENCHMARK(BM_IoFileAdapterZeroByteWriteFixedAt);
+BENCHMARK(BM_IoFixedFileAdapterZeroByteReadAt);
+BENCHMARK(BM_IoFixedFileAdapterZeroByteWriteAt);
 BENCHMARK(BM_IoStreamAdapterZeroIovSendv);
 BENCHMARK(BM_IoDatagramAdapterZeroIovRecvvFrom);
 BENCHMARK(BM_IoDatagramAdapterZeroIovSendvTo);

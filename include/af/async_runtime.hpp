@@ -592,6 +592,48 @@ public:
     }
 #endif
 
+    [[nodiscard]] static bool io_register_files(
+        Thread thread,
+        const int* files,
+        unsigned file_count,
+        int* error = nullptr) noexcept {
+        if (error != nullptr) {
+            *error = 0;
+        }
+        if (files == nullptr || file_count == 0U) {
+            if (error != nullptr) {
+                *error = EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            if (error != nullptr) {
+                *error = EINVAL;
+            }
+            return false;
+        }
+        return executors_[index]->register_io_uring_files(files, file_count, error);
+    }
+
+    [[nodiscard]] static bool io_unregister_files(
+        Thread thread,
+        int* error = nullptr) noexcept {
+        if (error != nullptr) {
+            *error = 0;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            if (error != nullptr) {
+                *error = EINVAL;
+            }
+            return false;
+        }
+        return executors_[index]->unregister_io_uring_files(error);
+    }
+
     [[nodiscard]] static bool io_wait(
         Thread thread,
         int fd,
@@ -682,6 +724,101 @@ public:
             return false;
         }
         return executors_[index]->submit_io_uring_write(fd, data, size, offset, task, result);
+    }
+
+    [[nodiscard]] static bool io_submit_read_fixed_file_at(
+        Thread thread,
+        int file_index,
+        void* data,
+        std::size_t size,
+        std::uint64_t offset,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || file_index < 0 || data == nullptr) {
+            if (result != nullptr) {
+                result->fd = file_index;
+                result->events = io_error;
+                result->error = file_index < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = file_index;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_read_fixed_file(
+            file_index,
+            data,
+            size,
+            offset,
+            task,
+            result);
+    }
+
+    [[nodiscard]] static bool io_submit_write_fixed_file_at(
+        Thread thread,
+        int file_index,
+        const void* data,
+        std::size_t size,
+        std::uint64_t offset,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || file_index < 0 || data == nullptr) {
+            if (result != nullptr) {
+                result->fd = file_index;
+                result->events = io_error;
+                result->error = file_index < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = file_index;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_write_fixed_file(
+            file_index,
+            data,
+            size,
+            offset,
+            task,
+            result);
+    }
+
+    [[nodiscard]] static bool io_submit_fsync_fixed_file(
+        Thread thread,
+        int file_index,
+        std::uint32_t flags,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || file_index < 0) {
+            if (result != nullptr) {
+                result->fd = file_index;
+                result->events = io_error;
+                result->error = file_index < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = file_index;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_fsync_fixed_file(
+            file_index,
+            flags,
+            task,
+            result);
     }
 
 #if !defined(_WIN32)
@@ -1955,6 +2092,127 @@ private:
         }
 #endif
 
+        [[nodiscard]] bool register_io_uring_files(
+            const int* files,
+            unsigned file_count,
+            int* error) noexcept {
+            AF_ASSERT(current_thread_index_ == index_ && "io_uring file registration must run on its IO thread");
+            if (error != nullptr) {
+                *error = 0;
+            }
+            if (current_thread_index_ != index_ || files == nullptr || file_count == 0U) {
+                if (error != nullptr) {
+                    *error = EINVAL;
+                }
+                return false;
+            }
+
+#if defined(__linux__)
+            if (io_uring_fd_ < 0) {
+                if (error != nullptr) {
+                    *error = ENOSYS;
+                }
+                return false;
+            }
+            if (io_uring_files_registered_) {
+                if (error != nullptr) {
+                    *error = EALREADY;
+                }
+                return false;
+            }
+            if (file_count > static_cast<unsigned>(std::numeric_limits<int>::max())) {
+                if (error != nullptr) {
+                    *error = EINVAL;
+                }
+                return false;
+            }
+
+            if (sys_io_uring_register(
+                    io_uring_fd_,
+                    IORING_REGISTER_FILES,
+                    files,
+                    file_count) != 0) {
+                if (error != nullptr) {
+                    *error = errno == 0 ? EIO : errno;
+                }
+                return false;
+            }
+
+            io_uring_files_registered_ = true;
+            io_uring_registered_file_count_ = file_count;
+            return true;
+#else
+            if (error != nullptr) {
+                *error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
+        [[nodiscard]] bool unregister_io_uring_files(int* error) noexcept {
+            AF_ASSERT(current_thread_index_ == index_ && "io_uring file unregistration must run on its IO thread");
+            if (error != nullptr) {
+                *error = 0;
+            }
+            if (current_thread_index_ != index_) {
+                if (error != nullptr) {
+                    *error = EINVAL;
+                }
+                return false;
+            }
+
+#if defined(__linux__)
+            if (io_uring_fd_ < 0) {
+                if (error != nullptr) {
+                    *error = ENOSYS;
+                }
+                return false;
+            }
+            if (!io_uring_files_registered_) {
+                if (error != nullptr) {
+                    *error = ENOENT;
+                }
+                return false;
+            }
+            if (io_uring_pending_submissions_ != 0U) {
+                const int submit_error = flush_io_uring_submissions();
+                if (submit_error != 0) {
+                    if (error != nullptr) {
+                        *error = submit_error;
+                    }
+                    fail_io_uring_backend(submit_error, nullptr);
+                    return false;
+                }
+            }
+            if (io_uring_operations_ != nullptr) {
+                if (error != nullptr) {
+                    *error = EBUSY;
+                }
+                return false;
+            }
+
+            if (sys_io_uring_register(
+                    io_uring_fd_,
+                    IORING_UNREGISTER_FILES,
+                    nullptr,
+                    0) != 0) {
+                if (error != nullptr) {
+                    *error = errno == 0 ? EIO : errno;
+                }
+                return false;
+            }
+
+            io_uring_files_registered_ = false;
+            io_uring_registered_file_count_ = 0;
+            return true;
+#else
+            if (error != nullptr) {
+                *error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
         [[nodiscard]] bool register_io_wait(
             int fd,
             std::uint32_t events,
@@ -2184,6 +2442,94 @@ private:
 #endif
         }
 
+        [[nodiscard]] bool submit_io_uring_read_fixed_file(
+            int file_index,
+            void* data,
+            std::size_t size,
+            std::uint64_t offset,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_READ,
+                file_index,
+                data,
+                size,
+                offset,
+                0,
+                io_readable,
+                task,
+                result,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                nullptr,
+                0,
+                0,
+                -1,
+                0,
+                true);
+#else
+            static_cast<void>(file_index);
+            static_cast<void>(data);
+            static_cast<void>(size);
+            static_cast<void>(offset);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
+        [[nodiscard]] bool submit_io_uring_write_fixed_file(
+            int file_index,
+            const void* data,
+            std::size_t size,
+            std::uint64_t offset,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_WRITE,
+                file_index,
+                const_cast<void*>(data),
+                size,
+                offset,
+                0,
+                io_writable,
+                task,
+                result,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                nullptr,
+                0,
+                0,
+                -1,
+                0,
+                true);
+#else
+            static_cast<void>(file_index);
+            static_cast<void>(data);
+            static_cast<void>(size);
+            static_cast<void>(offset);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
 #if !defined(_WIN32)
         [[nodiscard]] bool submit_io_uring_read_fixed(
             int fd,
@@ -2215,7 +2561,8 @@ private:
                 0,
                 0,
                 -1,
-                buffer_index);
+                buffer_index,
+                false);
 #else
             static_cast<void>(fd);
             static_cast<void>(data);
@@ -2260,7 +2607,8 @@ private:
                 0,
                 0,
                 -1,
-                buffer_index);
+                buffer_index,
+                false);
 #else
             static_cast<void>(fd);
             static_cast<void>(data);
@@ -2347,6 +2695,46 @@ private:
             return submit_io_uring_op(IORING_OP_FSYNC, fd, nullptr, 0, 0, flags, io_writable, task, result);
 #else
             static_cast<void>(fd);
+            static_cast<void>(flags);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
+        [[nodiscard]] bool submit_io_uring_fsync_fixed_file(
+            int file_index,
+            std::uint32_t flags,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_FSYNC,
+                file_index,
+                nullptr,
+                0,
+                0,
+                flags,
+                io_writable,
+                task,
+                result,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                nullptr,
+                0,
+                0,
+                -1,
+                0,
+                true);
+#else
+            static_cast<void>(file_index);
             static_cast<void>(flags);
             static_cast<void>(task);
             if (result != nullptr) {
@@ -3032,7 +3420,8 @@ private:
             std::size_t message_iov_count = 0,
             std::uint64_t extra = 0,
             std::int32_t extra_fd = -1,
-            std::uint16_t fixed_buffer_index = 0) noexcept {
+            std::uint16_t fixed_buffer_index = 0,
+            bool fixed_file = false) noexcept {
             AF_ASSERT(current_thread_index_ == index_ && "io_uring submit must be called from its IO thread");
             if (current_thread_index_ != index_ || task == nullptr || result == nullptr) {
                 if (result != nullptr) {
@@ -3073,6 +3462,26 @@ private:
                 result->events = io_error;
                 result->error = EINVAL;
                 return false;
+            }
+            if (fixed_file) {
+                if (path_fd_op) {
+                    result->fd = fd;
+                    result->events = io_error;
+                    result->error = EINVAL;
+                    return false;
+                }
+                if (!io_uring_files_registered_) {
+                    result->fd = fd;
+                    result->events = io_error;
+                    result->error = ENXIO;
+                    return false;
+                }
+                if (static_cast<unsigned>(fd) >= io_uring_registered_file_count_) {
+                    result->fd = fd;
+                    result->events = io_error;
+                    result->error = EINVAL;
+                    return false;
+                }
             }
             if (fixed_buffer_op) {
                 if (!io_uring_buffers_registered_) {
@@ -3200,6 +3609,9 @@ private:
             sqe->opcode = opcode;
             sqe->fd = fd;
             sqe->user_data = reinterpret_cast<std::uint64_t>(operation);
+            if (fixed_file) {
+                sqe->flags |= IOSQE_FIXED_FILE;
+            }
             if (opcode == IORING_OP_FSYNC) {
                 sqe->fsync_flags = op_flags;
             } else if (close_op) {
@@ -3593,6 +4005,13 @@ private:
 
         void close_io_uring_backend() noexcept {
             clear_io_uring_operations();
+            if (io_uring_fd_ >= 0 && io_uring_files_registered_) {
+                static_cast<void>(sys_io_uring_register(
+                    io_uring_fd_,
+                    IORING_UNREGISTER_FILES,
+                    nullptr,
+                    0));
+            }
             if (io_uring_fd_ >= 0 && io_uring_buffers_registered_) {
                 static_cast<void>(sys_io_uring_register(
                     io_uring_fd_,
@@ -3634,6 +4053,8 @@ private:
             io_uring_pending_submissions_ = 0;
             io_uring_buffers_registered_ = false;
             io_uring_registered_buffer_count_ = 0;
+            io_uring_files_registered_ = false;
+            io_uring_registered_file_count_ = 0;
         }
 
         [[nodiscard]] io_uring_sqe* reserve_io_uring_sqe(int& error) noexcept {
@@ -4015,6 +4436,8 @@ private:
         unsigned io_uring_pending_submissions_{0};
         bool io_uring_buffers_registered_{false};
         unsigned io_uring_registered_buffer_count_{0};
+        bool io_uring_files_registered_{false};
+        unsigned io_uring_registered_file_count_{0};
         IoUringOperation* io_uring_operations_{nullptr};
         detail::ObjectPool<IoUringMessage> io_uring_msg_pool_;
         detail::ObjectPool<IoUringSocketAddress> io_uring_address_pool_;
