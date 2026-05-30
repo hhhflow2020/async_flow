@@ -82,6 +82,32 @@ struct FakeRuntime {
         return false;
     }
 
+    static bool io_submit_sendmsg_zc(
+        BenchIoThread,
+        int,
+        const void*,
+        std::size_t,
+        const sockaddr*,
+        socklen_t,
+        std::uint32_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
+    static bool io_submit_sendmsg_zc_iov(
+        BenchIoThread,
+        int,
+        const iovec*,
+        int,
+        const sockaddr*,
+        socklen_t,
+        std::uint32_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
     static bool io_submit_recv_multishot(
         BenchIoThread,
         int,
@@ -659,6 +685,15 @@ void BM_IoStreamAdapterZeroIovSendv(benchmark::State& state) {
     }
 }
 
+void BM_IoStreamAdapterZeroIovSendvZc(benchmark::State& state) {
+    FakeTask task;
+    af::TcpStream<BenchIoThread> stream(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(stream.sendv_zc_some(task, nullptr, 0, op));
+    }
+}
+
 void BM_IoDatagramAdapterZeroIovRecvvFrom(benchmark::State& state) {
     FakeTask task;
     af::UdpSocket<BenchIoThread> socket(BenchIoThread::IO_0, -1);
@@ -674,6 +709,15 @@ void BM_IoDatagramAdapterZeroIovSendvTo(benchmark::State& state) {
     af::IoOpState op;
     for (auto _ : state) {
         benchmark::DoNotOptimize(socket.sendv_to_some(task, nullptr, 0, nullptr, 0, op));
+    }
+}
+
+void BM_IoDatagramAdapterZeroIovSendvZcTo(benchmark::State& state) {
+    FakeTask task;
+    af::UdpSocket<BenchIoThread> socket(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(socket.sendv_zc_to_some(task, nullptr, 0, nullptr, 0, op));
     }
 }
 #endif
@@ -706,8 +750,10 @@ BENCHMARK(BM_IoFixedFileAdapterZeroByteWriteAt);
 BENCHMARK(BM_IoFixedFileAdapterZeroByteReadFixedAt);
 BENCHMARK(BM_IoFixedFileAdapterZeroByteWriteFixedAt);
 BENCHMARK(BM_IoStreamAdapterZeroIovSendv);
+BENCHMARK(BM_IoStreamAdapterZeroIovSendvZc);
 BENCHMARK(BM_IoDatagramAdapterZeroIovRecvvFrom);
 BENCHMARK(BM_IoDatagramAdapterZeroIovSendvTo);
+BENCHMARK(BM_IoDatagramAdapterZeroIovSendvZcTo);
 #endif
 
 } // namespace

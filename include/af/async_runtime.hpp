@@ -1536,6 +1536,80 @@ public:
         }
         return executors_[index]->submit_io_uring_send_zc(fd, data, size, flags, task, result);
     }
+
+    [[nodiscard]] static bool io_submit_sendmsg_zc(
+        Thread thread,
+        int fd,
+        const void* data,
+        std::size_t size,
+        const sockaddr* address,
+        socklen_t address_size,
+        std::uint32_t flags,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || fd < 0 || data == nullptr) {
+            if (result != nullptr) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = fd < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_sendmsg_zc(
+            fd,
+            data,
+            size,
+            address,
+            address_size,
+            flags,
+            task,
+            result);
+    }
+
+    [[nodiscard]] static bool io_submit_sendmsg_zc_iov(
+        Thread thread,
+        int fd,
+        const iovec* iov,
+        int iov_count,
+        const sockaddr* address,
+        socklen_t address_size,
+        std::uint32_t flags,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || fd < 0 || iov == nullptr || iov_count <= 0) {
+            if (result != nullptr) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = fd < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_sendmsg_zc_iov(
+            fd,
+            iov,
+            iov_count,
+            address,
+            address_size,
+            flags,
+            task,
+            result);
+    }
 #endif
 
 #if !defined(_WIN32)
@@ -3897,6 +3971,94 @@ private:
                 false,
                 true);
         }
+
+        [[nodiscard]] bool submit_io_uring_sendmsg_zc(
+            int fd,
+            const void* data,
+            std::size_t size,
+            const sockaddr* address,
+            socklen_t address_size,
+            std::uint32_t flags,
+            Task* task,
+            IoResult* result) noexcept {
+            if (!io_uring_sendmsg_zc_available_) {
+                if (result != nullptr) {
+                    result->fd = fd;
+                    result->events = io_error;
+                    result->error = ENOSYS;
+                }
+                return false;
+            }
+            return submit_io_uring_op(
+                io_uring_op_sendmsg_zc,
+                fd,
+                const_cast<void*>(data),
+                size,
+                0,
+                flags,
+                io_writable,
+                task,
+                result,
+                const_cast<sockaddr*>(address),
+                address_size,
+                nullptr,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                nullptr,
+                0,
+                0,
+                -1,
+                0,
+                false,
+                false,
+                true);
+        }
+
+        [[nodiscard]] bool submit_io_uring_sendmsg_zc_iov(
+            int fd,
+            const iovec* iov,
+            int iov_count,
+            const sockaddr* address,
+            socklen_t address_size,
+            std::uint32_t flags,
+            Task* task,
+            IoResult* result) noexcept {
+            if (!io_uring_sendmsg_zc_available_) {
+                if (result != nullptr) {
+                    result->fd = fd;
+                    result->events = io_error;
+                    result->error = ENOSYS;
+                }
+                return false;
+            }
+            return submit_io_uring_op(
+                io_uring_op_sendmsg_zc,
+                fd,
+                nullptr,
+                0,
+                0,
+                flags,
+                io_writable,
+                task,
+                result,
+                const_cast<sockaddr*>(address),
+                address_size,
+                nullptr,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                iov,
+                static_cast<std::size_t>(iov_count),
+                0,
+                -1,
+                0,
+                false,
+                false,
+                true);
+        }
 #endif
 
 #if !defined(_WIN32)
@@ -4320,6 +4482,7 @@ private:
         };
 
         static constexpr std::uint8_t io_uring_op_send_zc = 47U;
+        static constexpr std::uint8_t io_uring_op_sendmsg_zc = 48U;
 
         enum class IoUringPollSubmitResult : std::uint8_t {
             Submitted,
@@ -4484,7 +4647,10 @@ private:
             const bool splice_op = opcode == IORING_OP_SPLICE;
             const bool fixed_buffer_op =
                 opcode == IORING_OP_READ_FIXED || opcode == IORING_OP_WRITE_FIXED;
-            const bool message_op = opcode == IORING_OP_RECVMSG || opcode == IORING_OP_SENDMSG;
+            const bool message_op =
+                opcode == IORING_OP_RECVMSG ||
+                opcode == IORING_OP_SENDMSG ||
+                opcode == io_uring_op_sendmsg_zc;
             const bool accept_op = opcode == IORING_OP_ACCEPT;
             const bool connect_op = opcode == IORING_OP_CONNECT;
             const bool address_op = accept_op || connect_op;
@@ -5084,6 +5250,7 @@ private:
 
         void detect_io_uring_features() noexcept {
             io_uring_send_zc_available_ = false;
+            io_uring_sendmsg_zc_available_ = false;
             io_uring_poll_add_available_ = false;
 
             constexpr unsigned probe_count = 64;
@@ -5107,6 +5274,9 @@ private:
                 if (ops[i].op == io_uring_op_send_zc &&
                     (ops[i].flags & IO_URING_OP_SUPPORTED) != 0U) {
                     io_uring_send_zc_available_ = true;
+                } else if (ops[i].op == io_uring_op_sendmsg_zc &&
+                           (ops[i].flags & IO_URING_OP_SUPPORTED) != 0U) {
+                    io_uring_sendmsg_zc_available_ = true;
                 } else if (ops[i].op == IORING_OP_POLL_ADD &&
                            (ops[i].flags & IO_URING_OP_SUPPORTED) != 0U) {
                     io_uring_poll_add_available_ = true;
@@ -5163,6 +5333,7 @@ private:
             io_uring_cqes_ = nullptr;
             io_uring_pending_submissions_ = 0;
             io_uring_send_zc_available_ = false;
+            io_uring_sendmsg_zc_available_ = false;
             io_uring_poll_add_available_ = false;
             io_uring_buffers_registered_ = false;
             io_uring_registered_buffer_count_ = 0;
@@ -5691,6 +5862,7 @@ private:
         io_uring_cqe* io_uring_cqes_{nullptr};
         unsigned io_uring_pending_submissions_{0};
         bool io_uring_send_zc_available_{false};
+        bool io_uring_sendmsg_zc_available_{false};
         bool io_uring_poll_add_available_{false};
         bool io_uring_buffers_registered_{false};
         unsigned io_uring_registered_buffer_count_{0};

@@ -561,7 +561,7 @@ private:
     std::atomic<int>* payload_seen_{nullptr};
 };
 
-template <typename TaskBaseT>
+template <typename TaskBaseT, bool ZeroCopy = false>
 class BasicUdpVectoredSendToTask final : public TaskBaseT {
 public:
     explicit BasicUdpVectoredSendToTask(typename TaskBaseT::FactoryToken token) : TaskBaseT(token) {}
@@ -588,13 +588,25 @@ private:
     af::TaskResult run() override {
         iov_[0] = iovec{&payload_[0], 1};
         iov_[1] = iovec{&payload_[1], 1};
-        const af::IoStatus status = socket_.sendv_to_some(
-            *this,
-            iov_,
-            2,
-            reinterpret_cast<const sockaddr*>(&address_),
-            address_size_,
-            send_);
+        const af::IoStatus status = [&]() {
+            if constexpr (ZeroCopy) {
+                return socket_.sendv_zc_to_some(
+                    *this,
+                    iov_,
+                    2,
+                    reinterpret_cast<const sockaddr*>(&address_),
+                    address_size_,
+                    send_);
+            } else {
+                return socket_.sendv_to_some(
+                    *this,
+                    iov_,
+                    2,
+                    reinterpret_cast<const sockaddr*>(&address_),
+                    address_size_,
+                    send_);
+            }
+        }();
         if (status.pending()) {
             return this->pending();
         }
@@ -619,8 +631,10 @@ private:
 
 using UdpVectoredRecvTask = BasicUdpVectoredRecvTask<IoTaskBase>;
 using UdpVectoredSendToTask = BasicUdpVectoredSendToTask<IoTaskBase>;
+using UdpVectoredZcSendToTask = BasicUdpVectoredSendToTask<IoTaskBase, true>;
 using UringUdpVectoredRecvTask = BasicUdpVectoredRecvTask<UringIoTaskBase>;
 using UringUdpVectoredSendToTask = BasicUdpVectoredSendToTask<UringIoTaskBase>;
+using UringUdpVectoredZcSendToTask = BasicUdpVectoredSendToTask<UringIoTaskBase, true>;
 
 class TcpAcceptTask final : public IoTaskBase {
 public:
@@ -1126,10 +1140,19 @@ private:
         af::IoOpState send_zc_zero{};
         af::IoOpState send_zc_null{};
         af::IoOpState send_zc_bad{};
+        af::IoOpState sendv_zc_zero{};
+        af::IoOpState sendv_zc_null{};
+        af::IoOpState sendv_zc_bad{};
+        af::IoOpState send_zc_to_zero{};
+        af::IoOpState send_zc_to_null{};
+        af::IoOpState send_zc_to_bad{};
+        af::IoOpState sendv_zc_to_zero{};
+        af::IoOpState sendv_zc_to_bad{};
         af::IoOpState splice_zero{};
         af::IoOpState splice_bad{};
         af::IoOffset offset = 0;
         const char value = 'Z';
+        iovec valid_iov{const_cast<char*>(&value), 1};
 
         const af::IoStatus sendfile_zero_status = af::io_sendfile_some(
             *this,
@@ -1168,6 +1191,72 @@ private:
             &value,
             sizeof(value),
             send_zc_bad);
+        const af::IoStatus sendv_zc_zero_status = af::io_sendv_zc_some(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            nullptr,
+            0,
+            sendv_zc_zero);
+        const af::IoStatus sendv_zc_null_status = af::io_sendv_zc_some(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            nullptr,
+            1,
+            sendv_zc_null);
+        const af::IoStatus sendv_zc_bad_status = af::io_sendv_zc_some(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            &valid_iov,
+            1,
+            sendv_zc_bad);
+        const af::IoStatus send_zc_to_zero_status = af::io_send_zc_to_some(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            nullptr,
+            0,
+            nullptr,
+            0,
+            send_zc_to_zero);
+        const af::IoStatus send_zc_to_null_status = af::io_send_zc_to_some(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            nullptr,
+            1,
+            nullptr,
+            0,
+            send_zc_to_null);
+        const af::IoStatus send_zc_to_bad_status = af::io_send_zc_to_some(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            &value,
+            sizeof(value),
+            nullptr,
+            0,
+            send_zc_to_bad);
+        const af::IoStatus sendv_zc_to_zero_status = af::io_sendv_zc_to_some(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            nullptr,
+            0,
+            nullptr,
+            0,
+            sendv_zc_to_zero);
+        const af::IoStatus sendv_zc_to_bad_status = af::io_sendv_zc_to_some(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            &valid_iov,
+            1,
+            nullptr,
+            0,
+            sendv_zc_to_bad);
         const af::IoStatus splice_zero_status = af::io_splice_some(
             *this,
             IoTestThread::IO_0,
@@ -1192,6 +1281,14 @@ private:
             !send_zc_zero_status.ready() || send_zc_zero_status.bytes != 0U ||
             !send_zc_null_status.failed() || send_zc_null_status.error != EINVAL ||
             !send_zc_bad_status.failed() || send_zc_bad_status.error != EBADF ||
+            !sendv_zc_zero_status.ready() || sendv_zc_zero_status.bytes != 0U ||
+            !sendv_zc_null_status.failed() || sendv_zc_null_status.error != EINVAL ||
+            !sendv_zc_bad_status.failed() || sendv_zc_bad_status.error != EBADF ||
+            !send_zc_to_zero_status.ready() || send_zc_to_zero_status.bytes != 0U ||
+            !send_zc_to_null_status.failed() || send_zc_to_null_status.error != EINVAL ||
+            !send_zc_to_bad_status.failed() || send_zc_to_bad_status.error != EBADF ||
+            !sendv_zc_to_zero_status.ready() || sendv_zc_to_zero_status.bytes != 0U ||
+            !sendv_zc_to_bad_status.failed() || sendv_zc_to_bad_status.error != EBADF ||
             !splice_zero_status.ready() || splice_zero_status.bytes != 0U ||
             !sendfile_bad_status.failed() || sendfile_bad_status.error != EBADF ||
             !splice_bad_status.failed() || splice_bad_status.error != EBADF) {
@@ -1264,6 +1361,74 @@ private:
     af::IoOpState send_{};
     std::atomic<int>* completed_{nullptr};
     std::atomic<int>* calls_{nullptr};
+    std::atomic<std::size_t>* bytes_sent_{nullptr};
+};
+
+class SendvZcSocketTask final : public IoTaskBase {
+public:
+    explicit SendvZcSocketTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(
+        int socket_fd,
+        const char* first,
+        std::size_t first_size,
+        const char* second,
+        std::size_t second_size,
+        std::atomic<int>* completed,
+        std::atomic<std::size_t>* bytes_sent) {
+        stream_.reset(IoTestThread::IO_0, socket_fd);
+        first_ = first;
+        first_size_ = first_size;
+        second_ = second;
+        second_size_ = second_size;
+        completed_ = completed;
+        bytes_sent_ = bytes_sent;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        const std::size_t total_size = first_size_ + second_size_;
+        if (sent_ >= total_size) {
+            completed_->fetch_add(1, std::memory_order_release);
+            return done();
+        }
+
+        int iov_count = 0;
+        if (sent_ < first_size_) {
+            iov_[iov_count++] = iovec{
+                const_cast<char*>(first_ + sent_),
+                first_size_ - sent_};
+            iov_[iov_count++] = iovec{const_cast<char*>(second_), second_size_};
+        } else {
+            const std::size_t second_offset = sent_ - first_size_;
+            iov_[iov_count++] = iovec{
+                const_cast<char*>(second_ + second_offset),
+                second_size_ - second_offset};
+        }
+
+        const af::IoStatus status = stream_.sendv_zc_some(*this, iov_, iov_count, send_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes == 0U || status.bytes > total_size - sent_) {
+            return failed();
+        }
+
+        sent_ += status.bytes;
+        bytes_sent_->store(sent_, std::memory_order_release);
+        return again();
+    }
+
+    af::TcpStream<IoTestThread> stream_{};
+    const char* first_{nullptr};
+    const char* second_{nullptr};
+    std::size_t first_size_{0};
+    std::size_t second_size_{0};
+    std::size_t sent_{0};
+    iovec iov_[2]{};
+    af::IoOpState send_{};
+    std::atomic<int>* completed_{nullptr};
     std::atomic<std::size_t>* bytes_sent_{nullptr};
 };
 
@@ -4332,12 +4497,16 @@ private:
         af::IoOpState writev_at{};
         af::IoOpState recvv{};
         af::IoOpState sendv{};
+        af::IoOpState sendv_zc{};
         af::IoOpState recv_from{};
         af::IoOpState send_to{};
+        af::IoOpState send_zc_to{};
         af::IoOpState bad_file{};
         af::IoOpState bad_iov_state{};
+        af::IoOpState bad_iov_zc_state{};
         af::IoOpState bad_count_state{};
         af::IoOpState bad_datagram_state{};
+        af::IoOpState bad_datagram_zc_state{};
 
         char value = 'v';
         iovec valid_iov{&value, 1};
@@ -4350,18 +4519,26 @@ private:
         const af::IoStatus zero_writev_at = file.writev_at(*this, nullptr, 0, 0, writev_at);
         const af::IoStatus zero_recvv = stream.recvv_some(*this, nullptr, 0, recvv);
         const af::IoStatus zero_sendv = stream.sendv_some(*this, nullptr, 0, sendv);
+        const af::IoStatus zero_sendv_zc =
+            stream.sendv_zc_some(*this, nullptr, 0, sendv_zc);
         const af::IoStatus zero_recvv_from =
             datagram.recvv_from_some(*this, nullptr, 0, nullptr, nullptr, recv_from);
         const af::IoStatus zero_sendv_to =
             datagram.sendv_to_some(*this, nullptr, 0, nullptr, 0, send_to);
+        const af::IoStatus zero_sendv_zc_to =
+            datagram.sendv_zc_to_some(*this, nullptr, 0, nullptr, 0, send_zc_to);
         const af::IoStatus bad_file_status =
             file.writev_at(*this, &valid_iov, 1, 0, bad_file);
         const af::IoStatus bad_iov =
             stream.sendv_some(*this, &invalid_iov, 1, bad_iov_state);
+        const af::IoStatus bad_iov_zc =
+            stream.sendv_zc_some(*this, &invalid_iov, 1, bad_iov_zc_state);
         const af::IoStatus bad_count =
             stream.recvv_some(*this, &valid_iov, -1, bad_count_state);
         const af::IoStatus bad_datagram =
             datagram.sendv_to_some(*this, &invalid_iov, 1, nullptr, 0, bad_datagram_state);
+        const af::IoStatus bad_datagram_zc =
+            datagram.sendv_zc_to_some(*this, &invalid_iov, 1, nullptr, 0, bad_datagram_zc_state);
 
         if (!zero_readv.ready() || zero_readv.bytes != 0U ||
             !zero_writev.ready() || zero_writev.bytes != 0U ||
@@ -4369,12 +4546,16 @@ private:
             !zero_writev_at.ready() || zero_writev_at.bytes != 0U ||
             !zero_recvv.ready() || zero_recvv.bytes != 0U ||
             !zero_sendv.ready() || zero_sendv.bytes != 0U ||
+            !zero_sendv_zc.ready() || zero_sendv_zc.bytes != 0U ||
             !zero_recvv_from.ready() || zero_recvv_from.bytes != 0U ||
             !zero_sendv_to.ready() || zero_sendv_to.bytes != 0U ||
+            !zero_sendv_zc_to.ready() || zero_sendv_zc_to.bytes != 0U ||
             !bad_file_status.failed() || bad_file_status.error != EBADF ||
             !bad_iov.failed() || bad_iov.error != EINVAL ||
+            !bad_iov_zc.failed() || bad_iov_zc.error != EINVAL ||
             !bad_count.failed() || bad_count.error != EINVAL ||
-            !bad_datagram.failed() || bad_datagram.error != EINVAL) {
+            !bad_datagram.failed() || bad_datagram.error != EINVAL ||
+            !bad_datagram_zc.failed() || bad_datagram_zc.error != EINVAL) {
             return failed();
         }
 
@@ -5473,6 +5654,44 @@ TEST_F(IoRuntimeFixture, StreamAdapterSendZcSendsSocketBytes) {
     close_pair(fds);
 #else
     GTEST_SKIP() << "send_zc helper is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, StreamAdapterSendvZcSendsSocketBytes) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+
+    const char first[] = "asyncflow-";
+    const char second[] = "sendmsg-zc";
+    constexpr std::size_t first_size = sizeof(first) - 1U;
+    constexpr std::size_t second_size = sizeof(second) - 1U;
+    constexpr std::size_t payload_size = first_size + second_size;
+    std::atomic<int> completed{0};
+    std::atomic<std::size_t> bytes_sent{0};
+    ASSERT_TRUE(IoRuntime::start_task<SendvZcSocketTask>(
+        fds[0],
+        first,
+        first_size,
+        second,
+        second_size,
+        &completed,
+        &bytes_sent));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), payload_size);
+
+    char received[payload_size]{};
+    ASSERT_TRUE(read_exact_until(fds[1], received, payload_size));
+    EXPECT_EQ(std::memcmp(received, first, first_size), 0);
+    EXPECT_EQ(std::memcmp(received + first_size, second, second_size), 0);
+
+    close_pair(fds);
+#else
+    GTEST_SKIP() << "sendmsg_zc helper is Linux-only";
 #endif
 }
 
@@ -6678,6 +6897,59 @@ TEST_F(UringIoRuntimeFixture, IoUringThreadSendsVectoredUdpDatagramOrFallsBackTo
 #endif
 }
 
+TEST_F(UringIoRuntimeFixture, IoUringThreadSendsVectoredUdpDatagramWithSendmsgZcOrFallback) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io backend unavailable";
+    }
+
+    af::UniqueFd receiver(::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
+    ASSERT_TRUE(receiver);
+    af::UniqueFd sender(::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
+    ASSERT_TRUE(sender);
+
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = 0;
+    ASSERT_EQ(::bind(receiver.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+
+    socklen_t address_size = sizeof(address);
+    ASSERT_EQ(
+        ::getsockname(receiver.get(), reinterpret_cast<sockaddr*>(&address), &address_size),
+        0);
+
+    std::atomic<int> completed{0};
+    std::atomic<int> bytes_sent{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringUdpVectoredZcSendToTask>(
+        sender.get(),
+        address,
+        address_size,
+        's',
+        'z',
+        &completed,
+        &bytes_sent));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), 2);
+
+    char received[2]{};
+    sockaddr_storage peer{};
+    socklen_t peer_size = sizeof(peer);
+    ASSERT_EQ(::recvfrom(
+                  receiver.get(),
+                  received,
+                  sizeof(received),
+                  0,
+                  reinterpret_cast<sockaddr*>(&peer),
+                  &peer_size),
+              2);
+    EXPECT_EQ(received[0], 's');
+    EXPECT_EQ(received[1], 'z');
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
 TEST_F(UringIoRuntimeFixture, IoUringFileAdapterWritesFsyncsAndReadsAtOffset) {
 #if defined(__linux__)
     if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
@@ -7263,6 +7535,60 @@ TEST_F(IoRuntimeFixture, EpollIoThreadSendsVectoredUdpDatagramFromHelper) {
     close_fd(receiver);
 #else
     GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, EpollIoThreadSendsVectoredUdpDatagramWithSendmsgZcHelper) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int receiver = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(receiver, 0);
+    int sender = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(sender, 0);
+
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = 0;
+    ASSERT_EQ(::bind(receiver, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+
+    socklen_t address_size = sizeof(address);
+    ASSERT_EQ(::getsockname(receiver, reinterpret_cast<sockaddr*>(&address), &address_size), 0);
+
+    std::atomic<int> completed{0};
+    std::atomic<int> bytes_sent{0};
+    ASSERT_TRUE(IoRuntime::start_task<UdpVectoredZcSendToTask>(
+        sender,
+        address,
+        address_size,
+        'z',
+        'c',
+        &completed,
+        &bytes_sent));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), 2);
+
+    char received[2]{};
+    sockaddr_storage peer{};
+    socklen_t peer_size = sizeof(peer);
+    ASSERT_EQ(::recvfrom(
+                  receiver,
+                  received,
+                  sizeof(received),
+                  0,
+                  reinterpret_cast<sockaddr*>(&peer),
+                  &peer_size),
+              2);
+    EXPECT_EQ(received[0], 'z');
+    EXPECT_EQ(received[1], 'c');
+
+    close_fd(sender);
+    close_fd(receiver);
+#else
+    GTEST_SKIP() << "sendmsg_zc helper is Linux-only";
 #endif
 }
 
