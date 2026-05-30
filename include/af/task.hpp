@@ -50,6 +50,9 @@ inline constexpr std::uint32_t io_writable = 1U << 1U;
 inline constexpr std::uint32_t io_error = 1U << 2U;
 inline constexpr std::uint32_t io_hangup = 1U << 3U;
 inline constexpr std::uint32_t io_more = 1U << 4U;
+inline constexpr std::uint32_t io_buffer_selected = 1U << 5U;
+inline constexpr std::uint32_t io_buffer_id_shift = 16U;
+inline constexpr std::uint32_t io_buffer_id_mask = 0xffff0000U;
 
 struct IoResult {
     int fd{-1};
@@ -67,6 +70,14 @@ struct IoResult {
 
     [[nodiscard]] bool failed() const noexcept {
         return error != 0 || (events & (io_error | io_hangup)) != 0U;
+    }
+
+    [[nodiscard]] bool buffer_selected() const noexcept {
+        return (events & io_buffer_selected) != 0U;
+    }
+
+    [[nodiscard]] std::uint16_t buffer_id() const noexcept {
+        return static_cast<std::uint16_t>((events & io_buffer_id_mask) >> io_buffer_id_shift);
     }
 };
 

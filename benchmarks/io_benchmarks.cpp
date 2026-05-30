@@ -81,6 +81,16 @@ struct FakeRuntime {
         af::IoResult*) noexcept {
         return false;
     }
+
+    static bool io_submit_recv_multishot(
+        BenchIoThread,
+        int,
+        std::uint16_t,
+        std::uint32_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
 #endif
 
 #if !defined(_WIN32)
@@ -380,6 +390,16 @@ void BM_IoStreamAdapterZeroByteSendZc(benchmark::State& state) {
         benchmark::DoNotOptimize(stream.send_zc_some(task, nullptr, 0, op));
     }
 }
+
+void BM_IoStreamAdapterInvalidRecvMultishot(benchmark::State& state) {
+    FakeTask task;
+    af::TcpStream<BenchIoThread> stream(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    std::uint16_t buffer_id = 0;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(stream.recv_multishot(task, 0, &buffer_id, op));
+    }
+}
 #endif
 
 void BM_IoDatagramAdapterZeroByteRecv(benchmark::State& state) {
@@ -622,6 +642,7 @@ BENCHMARK(BM_IoFileAdapterZeroByteRead);
 BENCHMARK(BM_IoStreamAdapterZeroByteSend);
 #if defined(__linux__)
 BENCHMARK(BM_IoStreamAdapterZeroByteSendZc);
+BENCHMARK(BM_IoStreamAdapterInvalidRecvMultishot);
 #endif
 BENCHMARK(BM_IoDatagramAdapterZeroByteRecv);
 BENCHMARK(BM_IoListenerAdapterInvalidAccept);

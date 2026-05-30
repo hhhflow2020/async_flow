@@ -730,6 +730,101 @@ private:
     std::atomic<int>* unavailable_error_{nullptr};
 };
 
+#if defined(__linux__)
+class RecvMultishotBoundaryTask final : public IoTaskBase {
+public:
+    explicit RecvMultishotBoundaryTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(
+        int fd,
+        std::atomic<int>* completed,
+        std::atomic<int>* invalid_error,
+        std::atomic<int>* null_error,
+        std::atomic<int>* unavailable_error,
+        std::atomic<int>* register_error) {
+        stream_.reset(IoTestThread::IO_0, fd);
+        completed_ = completed;
+        invalid_error_ = invalid_error;
+        null_error_ = null_error;
+        unavailable_error_ = unavailable_error;
+        register_error_ = register_error;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        int init_error = 0;
+        af::IoProvidedBufferRing ring;
+        if (ring.init(3, init_error) || init_error != EINVAL) {
+            return failed();
+        }
+        if (!ring.init(2, init_error)) {
+            return failed();
+        }
+        char first = 0;
+        char second = 0;
+        const af::IoProvidedBuffer buffers[] = {
+            af::IoProvidedBuffer{&first, sizeof(first), 0},
+            af::IoProvidedBuffer{&second, sizeof(second), 1},
+        };
+        int add_error = 0;
+        if (!ring.add(buffers, 2, add_error)) {
+            return failed();
+        }
+
+        int null_register_error = 0;
+        const bool null_registered = IoRuntime::io_register_provided_buffer_ring(
+            IoTestThread::IO_0,
+            nullptr,
+            2,
+            0,
+            &null_register_error);
+        int register_error = 0;
+        const bool registered = IoRuntime::io_register_provided_buffer_ring(
+            IoTestThread::IO_0,
+            ring.ring(),
+            ring.entries(),
+            0,
+            &register_error);
+        if (null_registered || null_register_error != EINVAL ||
+            registered || register_error != ENOSYS) {
+            return failed();
+        }
+
+        af::TcpStream<IoTestThread> invalid_stream(IoTestThread::IO_0, -1);
+        af::IoOpState invalid_state{};
+        af::IoOpState null_state{};
+        af::IoOpState unavailable_state{};
+        std::uint16_t buffer_id = 0;
+        const af::IoStatus invalid_status =
+            invalid_stream.recv_multishot(*this, 0, &buffer_id, invalid_state);
+        const af::IoStatus null_status =
+            stream_.recv_multishot(*this, 0, nullptr, null_state);
+        const af::IoStatus unavailable_status =
+            stream_.recv_multishot(*this, 0, &buffer_id, unavailable_state);
+        if (!invalid_status.failed() || invalid_status.error != EBADF ||
+            !null_status.failed() || null_status.error != EINVAL ||
+            !unavailable_status.failed() || unavailable_status.error != ENOSYS) {
+            return failed();
+        }
+
+        invalid_error_->store(invalid_status.error, std::memory_order_release);
+        null_error_->store(null_status.error, std::memory_order_release);
+        unavailable_error_->store(unavailable_status.error, std::memory_order_release);
+        register_error_->store(register_error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    af::TcpStream<IoTestThread> stream_{};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* invalid_error_{nullptr};
+    std::atomic<int>* null_error_{nullptr};
+    std::atomic<int>* unavailable_error_{nullptr};
+    std::atomic<int>* register_error_{nullptr};
+};
+#endif
+
 class TcpConnectTask final : public IoTaskBase {
 public:
     explicit TcpConnectTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
@@ -3230,6 +3325,206 @@ private:
     std::atomic<int>* error_{nullptr};
 };
 
+#if defined(__linux__)
+class UringRecvMultishotTask final : public UringIoTaskBase {
+public:
+    explicit UringRecvMultishotTask(UringIoTaskBase::FactoryToken token)
+        : UringIoTaskBase(token) {}
+
+    bool do_it(
+        int fd,
+        int target_reads,
+        std::atomic<int>* armed,
+        std::atomic<int>* completed,
+        std::atomic<int>* read_count,
+        std::atomic<int>* packed_read,
+        std::atomic<int>* error) {
+        stream_.reset(IoTestThread::IO_0, fd);
+        target_reads_ = target_reads;
+        armed_ = armed;
+        completed_ = completed;
+        read_count_ = read_count;
+        packed_read_ = packed_read;
+        error_ = error;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Register,
+        Recv,
+        Cancel,
+        Unregister,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Register:
+            return register_ring();
+        case State::Recv:
+            return recv_one();
+        case State::Cancel:
+            return finish_cancel();
+        case State::Unregister:
+            return unregister_ring();
+        }
+        return failed();
+    }
+
+    af::TaskResult register_ring() {
+        int init_error = 0;
+        if (!ring_.init(buffer_count, init_error)) {
+            return complete(init_error == 0 ? EIO : init_error);
+        }
+        af::IoProvidedBuffer buffers[buffer_count]{};
+        for (std::uint16_t i = 0; i < buffer_count; ++i) {
+            buffers[i] = af::IoProvidedBuffer{&buffers_[i], sizeof(buffers_[i]), i};
+        }
+        int add_error = 0;
+        if (!ring_.add(buffers, buffer_count, add_error)) {
+            return complete(add_error == 0 ? EIO : add_error);
+        }
+
+        int register_error = 0;
+        if (!UringIoRuntime::io_register_provided_buffer_ring(
+                IoTestThread::IO_0,
+                ring_.ring(),
+                ring_.entries(),
+                buffer_group,
+                &register_error)) {
+            return complete(register_error == 0 ? EIO : register_error);
+        }
+        registered_ = true;
+        state_ = State::Recv;
+        return again();
+    }
+
+    af::TaskResult recv_one() {
+        std::uint16_t buffer_id = 0;
+        const af::IoStatus status = stream_.recv_multishot(
+            *this,
+            buffer_group,
+            &buffer_id,
+            recv_);
+        if (status.pending()) {
+            if (!armed_once_) {
+                armed_once_ = true;
+                armed_->fetch_add(1, std::memory_order_release);
+            }
+            return pending();
+        }
+        if (status.failed()) {
+            return complete(status.error);
+        }
+        if (!status.ready() || status.bytes != 1U || buffer_id >= buffer_count) {
+            return complete(EIO);
+        }
+
+        const int previous = read_count_->fetch_add(1, std::memory_order_acq_rel);
+        const int shifted = previous == 0 ? 8 : 0;
+        packed_read_->fetch_or(
+            static_cast<int>(static_cast<unsigned char>(buffers_[buffer_id])) << shifted,
+            std::memory_order_acq_rel);
+
+        const af::IoProvidedBuffer buffer{
+            &buffers_[buffer_id],
+            sizeof(buffers_[buffer_id]),
+            buffer_id};
+        int add_error = 0;
+        if (!ring_.add(&buffer, 1, add_error)) {
+            return stop_recv(add_error == 0 ? EIO : add_error);
+        }
+
+        if (previous + 1 < target_reads_) {
+            return pending();
+        }
+        if (!recv_.waiting) {
+            state_ = State::Unregister;
+            return again();
+        }
+        finish_error_ = 0;
+        if (!UringIoRuntime::cancel_io(IoTestThread::IO_0, recv_)) {
+            return complete(recv_.wait.error == 0 ? EIO : recv_.wait.error);
+        }
+        state_ = State::Cancel;
+        return pending();
+    }
+
+    af::TaskResult finish_cancel() {
+        std::uint16_t ignored = 0;
+        const af::IoStatus status =
+            stream_.recv_multishot(*this, buffer_group, &ignored, recv_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.failed() || status.error != ECANCELED) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        state_ = State::Unregister;
+        return again();
+    }
+
+    af::TaskResult unregister_ring() {
+        if (registered_) {
+            int unregister_error = 0;
+            if (!UringIoRuntime::io_unregister_provided_buffer_ring(
+                    IoTestThread::IO_0,
+                    buffer_group,
+                    &unregister_error)) {
+                return complete(unregister_error == 0 ? EIO : unregister_error);
+            }
+            registered_ = false;
+        }
+        return complete(finish_error_);
+    }
+
+    af::TaskResult complete(int error) {
+        if (registered_) {
+            int unregister_error = 0;
+            if (UringIoRuntime::io_unregister_provided_buffer_ring(
+                    IoTestThread::IO_0,
+                    buffer_group,
+                    &unregister_error)) {
+                registered_ = false;
+            }
+        }
+        error_->store(error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    af::TaskResult stop_recv(int error) {
+        finish_error_ = error == 0 ? EIO : error;
+        if (!recv_.waiting) {
+            state_ = State::Unregister;
+            return again();
+        }
+        if (!UringIoRuntime::cancel_io(IoTestThread::IO_0, recv_)) {
+            return complete(recv_.wait.error == 0 ? finish_error_ : recv_.wait.error);
+        }
+        state_ = State::Cancel;
+        return pending();
+    }
+
+    static constexpr std::uint16_t buffer_group = 7;
+    static constexpr unsigned buffer_count = 2;
+    State state_{State::Register};
+    af::TcpStream<IoTestThread> stream_{};
+    af::IoProvidedBufferRing ring_{};
+    char buffers_[buffer_count]{};
+    int target_reads_{0};
+    int finish_error_{0};
+    bool armed_once_{false};
+    bool registered_{false};
+    af::IoOpState recv_{};
+    std::atomic<int>* armed_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* read_count_{nullptr};
+    std::atomic<int>* packed_read_{nullptr};
+    std::atomic<int>* error_{nullptr};
+};
+#endif
+
 class UringTcpConnectTask final : public UringIoTaskBase {
 public:
     explicit UringTcpConnectTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
@@ -5158,6 +5453,39 @@ TEST_F(IoRuntimeFixture, AcceptMultishotReportsInvalidAndUnavailableBackend) {
 #endif
 }
 
+TEST_F(IoRuntimeFixture, RecvMultishotReportsInvalidAndUnavailableBackend) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+
+    std::atomic<int> completed{0};
+    std::atomic<int> invalid_error{0};
+    std::atomic<int> null_error{0};
+    std::atomic<int> unavailable_error{0};
+    std::atomic<int> register_error{0};
+    ASSERT_TRUE(IoRuntime::start_task<RecvMultishotBoundaryTask>(
+        fds[0],
+        &completed,
+        &invalid_error,
+        &null_error,
+        &unavailable_error,
+        &register_error));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(invalid_error.load(std::memory_order_acquire), EBADF);
+    EXPECT_EQ(null_error.load(std::memory_order_acquire), EINVAL);
+    EXPECT_EQ(unavailable_error.load(std::memory_order_acquire), ENOSYS);
+    EXPECT_EQ(register_error.load(std::memory_order_acquire), ENOSYS);
+
+    close_pair(fds);
+#else
+    GTEST_SKIP() << "provided buffer recv_multishot is Linux-only";
+#endif
+}
+
 TEST_F(IoRuntimeFixture, EpollIoThreadConnectsTcpStreamFromHelper) {
 #if defined(__linux__)
     if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
@@ -5493,6 +5821,67 @@ TEST_F(UringIoRuntimeFixture, IoUringAcceptMultishotAcceptsMultipleConnections) 
         close_fd(client);
     }
     close_fd(listener);
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringRecvMultishotUsesProvidedBuffers) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io_uring backend unavailable";
+    }
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+
+    constexpr int target_reads = 2;
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<int> read_count{0};
+    std::atomic<int> packed_read{0};
+    std::atomic<int> error{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringRecvMultishotTask>(
+        fds[0],
+        target_reads,
+        &armed,
+        &completed,
+        &read_count,
+        &packed_read,
+        &error));
+
+    if (!wait_until_at_least(armed, 1)) {
+        ASSERT_TRUE(wait_until_at_least(completed, 1));
+        const int setup_error = error.load(std::memory_order_acquire);
+        if (setup_error == EINVAL ||
+            setup_error == EOPNOTSUPP ||
+            setup_error == ENOSYS ||
+            setup_error == ENOBUFS) {
+            close_pair(fds);
+            GTEST_SKIP() << "io_uring provided buffer recv_multishot unsupported";
+        }
+        FAIL() << "recv_multishot was not armed, error=" << setup_error;
+    }
+
+    const char payload[] = {'A', 'B'};
+    ASSERT_EQ(::write(fds[1], payload, sizeof(payload)), static_cast<ssize_t>(sizeof(payload)));
+
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    const int task_error = error.load(std::memory_order_acquire);
+    if (task_error == EINVAL ||
+        task_error == EOPNOTSUPP ||
+        task_error == ENOSYS ||
+        task_error == ENOBUFS) {
+        close_pair(fds);
+        GTEST_SKIP() << "io_uring provided buffer recv_multishot unsupported";
+    }
+    EXPECT_EQ(task_error, 0);
+    EXPECT_EQ(read_count.load(std::memory_order_acquire), target_reads);
+    EXPECT_EQ(
+        packed_read.load(std::memory_order_acquire),
+        (static_cast<int>('A') << 8) | static_cast<int>('B'));
+
+    close_pair(fds);
 #else
     GTEST_SKIP() << "io_uring backend is Linux-only";
 #endif
