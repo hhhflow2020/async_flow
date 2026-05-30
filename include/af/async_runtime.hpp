@@ -31,6 +31,7 @@
 #if defined(__linux__)
 #include <algorithm>
 #include <linux/io_uring.h>
+#include <poll.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
@@ -558,6 +559,14 @@ public:
             return false;
         }
         return executors_[index]->io_uring_backend_available();
+    }
+
+    [[nodiscard]] static bool io_uring_poll_available(Thread thread) noexcept {
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            return false;
+        }
+        return executors_[index]->io_uring_poll_available();
     }
 
 #if !defined(_WIN32)
@@ -2061,6 +2070,7 @@ private:
 
     class alignas(detail::hardware_cache_line_size) Executor {
 #if defined(__linux__)
+        struct IoWaitRegistration;
         struct IoUringOperation;
 #endif
 
@@ -2120,6 +2130,14 @@ private:
         [[nodiscard]] bool io_uring_backend_available() const noexcept {
 #if defined(__linux__)
             return io_uring_fd_ >= 0;
+#else
+            return false;
+#endif
+        }
+
+        [[nodiscard]] bool io_uring_poll_available() const noexcept {
+#if defined(__linux__)
+            return io_uring_fd_ >= 0 && io_uring_poll_add_available_;
 #else
             return false;
 #endif
@@ -2425,6 +2443,23 @@ private:
             registration->fd = fd;
             registration->task = task;
             registration->result = result;
+            registration->poll_operation = nullptr;
+
+            const IoUringPollSubmitResult poll_result =
+                try_submit_io_uring_poll_wait(fd, events, task, result, registration);
+            if (poll_result == IoUringPollSubmitResult::Submitted) {
+                forget_deferred_io_delete(fd);
+                *result = IoResult{fd, 0, 0};
+                return true;
+            }
+            if (poll_result == IoUringPollSubmitResult::Failed) {
+                io_waits_.erase(fd);
+                io_wait_pool_.destroy(registration);
+                return false;
+            }
+            if (poll_result == IoUringPollSubmitResult::BackendClosed) {
+                return false;
+            }
 
             std::uint32_t native_events = EPOLLERR | EPOLLHUP | EPOLLONESHOT;
             if ((events & io_readable) != 0U) {
@@ -2485,6 +2520,37 @@ private:
             }
 
             IoWaitRegistration* registration = it->second;
+            if (registration->poll_operation != nullptr) {
+                IoUringOperation* operation = registration->poll_operation;
+                const int submit_error = submit_io_uring_cancel(operation);
+                if (submit_error != 0) {
+                    state.wait.events = io_error;
+                    state.wait.error = submit_error;
+                    state.wait.result = -submit_error;
+                    return false;
+                }
+
+                io_waits_.erase(it);
+                registration->poll_operation = nullptr;
+                if (operation->wait_registration == registration) {
+                    operation->wait_registration = nullptr;
+                }
+                operation->cancel_requested = true;
+                operation->task = nullptr;
+                operation->result = nullptr;
+                state.readiness_rearm_hint = false;
+                state.readiness_fd = -1;
+
+                state.wait.fd = fd;
+                state.wait.events = io_error;
+                state.wait.error = ECANCELED;
+                state.wait.result = -ECANCELED;
+                if (registration->task != running_task_) {
+                    enqueue_pending_blocking(index_, registration->task);
+                }
+                io_wait_pool_.destroy(registration);
+                return true;
+            }
             io_waits_.erase(it);
             static_cast<void>(::epoll_ctl(io_epoll_fd_, EPOLL_CTL_DEL, fd, nullptr));
             forget_deferred_io_delete(fd);
@@ -3727,6 +3793,13 @@ private:
 
     private:
 #if defined(__linux__)
+        struct IoWaitRegistration {
+            int fd{-1};
+            Task* task{nullptr};
+            IoResult* result{nullptr};
+            IoUringOperation* poll_operation{nullptr};
+        };
+
         struct IoUringMessage {
             iovec iov{};
             msghdr header{};
@@ -3748,16 +3821,25 @@ private:
             IoUringOperation* next{nullptr};
             IoUringMessage* msg{nullptr};
             IoUringSocketAddress* socket_address{nullptr};
+            IoWaitRegistration* wait_registration{nullptr};
             std::uint32_t complete_events{0};
             std::uint8_t opcode{0};
             bool cancel_requested{false};
             bool multishot{false};
+            bool poll_wait{false};
             bool zero_copy_send{false};
             bool zero_copy_primary_done{false};
             bool zero_copy_notification_done{false};
         };
 
         static constexpr std::uint8_t io_uring_op_send_zc = 47U;
+
+        enum class IoUringPollSubmitResult : std::uint8_t {
+            Submitted,
+            Fallback,
+            Failed,
+            BackendClosed,
+        };
 #endif
 
         [[nodiscard]] bool io_thread() const noexcept {
@@ -3769,6 +3851,92 @@ private:
         }
 
 #if defined(__linux__)
+        [[nodiscard]] IoUringPollSubmitResult try_submit_io_uring_poll_wait(
+            int fd,
+            std::uint32_t events,
+            Task* task,
+            IoResult* result,
+            IoWaitRegistration* registration) noexcept {
+            if (!io_uring_thread() || io_uring_fd_ < 0 || !io_uring_poll_add_available_) {
+                return IoUringPollSubmitResult::Fallback;
+            }
+
+            const std::uint32_t native_events = native_poll_events(events);
+            if (native_events == 0U) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = EINVAL;
+                return IoUringPollSubmitResult::Failed;
+            }
+
+            IoUringOperation* operation = nullptr;
+            try {
+                operation = io_uring_op_pool_.create();
+            } catch (...) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = ENOMEM;
+                return IoUringPollSubmitResult::Failed;
+            }
+
+            int reserve_error = 0;
+            io_uring_sqe* sqe = reserve_io_uring_sqe(reserve_error);
+            if (sqe == nullptr) {
+                io_uring_op_pool_.destroy(operation);
+                result->fd = fd;
+                result->events = io_error;
+                result->error = reserve_error == 0 ? EBUSY : reserve_error;
+                if (io_uring_fd_ < 0) {
+                    return IoUringPollSubmitResult::BackendClosed;
+                }
+                return IoUringPollSubmitResult::Fallback;
+            }
+
+            operation->task = task;
+            operation->result = result;
+            operation->prev = nullptr;
+            operation->next = nullptr;
+            operation->msg = nullptr;
+            operation->socket_address = nullptr;
+            operation->wait_registration = registration;
+            operation->complete_events = 0;
+            operation->opcode = IORING_OP_POLL_ADD;
+            operation->cancel_requested = false;
+            operation->multishot = false;
+            operation->poll_wait = true;
+            operation->zero_copy_send = false;
+            operation->zero_copy_primary_done = false;
+            operation->zero_copy_notification_done = false;
+            registration->poll_operation = operation;
+
+            track_io_uring_operation(operation);
+
+            *sqe = io_uring_sqe{};
+            sqe->opcode = IORING_OP_POLL_ADD;
+            sqe->fd = fd;
+            sqe->user_data = reinterpret_cast<std::uint64_t>(operation);
+            sqe->poll32_events = native_events;
+
+            result->fd = fd;
+            result->events = 0;
+            result->error = 0;
+            result->result = 0;
+
+            if (io_uring_pending_submissions_ >= io_uring_submit_batch_threshold_) {
+                const int submit_error = flush_io_uring_submissions();
+                if (submit_error == 0) {
+                    return IoUringPollSubmitResult::Submitted;
+                }
+                result->events = io_error;
+                result->error = submit_error;
+                result->result = -submit_error;
+                fail_io_uring_backend(submit_error, operation);
+                return IoUringPollSubmitResult::BackendClosed;
+            }
+
+            return IoUringPollSubmitResult::Submitted;
+        }
+
         [[nodiscard]] bool submit_io_uring_op(
             std::uint8_t opcode,
             int fd,
@@ -3916,11 +4084,13 @@ private:
             operation->opcode = opcode;
             operation->cancel_requested = false;
             operation->multishot = multishot;
+            operation->poll_wait = false;
             operation->zero_copy_send = zero_copy_send;
             operation->zero_copy_primary_done = false;
             operation->zero_copy_notification_done = false;
             operation->msg = nullptr;
             operation->socket_address = nullptr;
+            operation->wait_registration = nullptr;
             if (message_op) {
                 try {
                     operation->msg = io_uring_msg_pool_.create();
@@ -4394,6 +4564,7 @@ private:
 
         void detect_io_uring_features() noexcept {
             io_uring_send_zc_available_ = false;
+            io_uring_poll_add_available_ = false;
 
             constexpr unsigned probe_count = 64;
             std::array<
@@ -4416,7 +4587,9 @@ private:
                 if (ops[i].op == io_uring_op_send_zc &&
                     (ops[i].flags & IO_URING_OP_SUPPORTED) != 0U) {
                     io_uring_send_zc_available_ = true;
-                    return;
+                } else if (ops[i].op == IORING_OP_POLL_ADD &&
+                           (ops[i].flags & IO_URING_OP_SUPPORTED) != 0U) {
+                    io_uring_poll_add_available_ = true;
                 }
             }
         }
@@ -4470,6 +4643,7 @@ private:
             io_uring_cqes_ = nullptr;
             io_uring_pending_submissions_ = 0;
             io_uring_send_zc_available_ = false;
+            io_uring_poll_add_available_ = false;
             io_uring_buffers_registered_ = false;
             io_uring_registered_buffer_count_ = 0;
             io_uring_files_registered_ = false;
@@ -4578,6 +4752,11 @@ private:
             IoUringOperation* operation,
             int result,
             std::uint32_t cqe_flags) noexcept {
+            if (operation->poll_wait) {
+                complete_io_uring_poll_wait(operation, result);
+                return false;
+            }
+
             if (operation->zero_copy_send && (cqe_flags & IORING_CQE_F_NOTIF) != 0U) {
                 operation->zero_copy_notification_done = true;
                 if (operation->zero_copy_primary_done) {
@@ -4645,6 +4824,44 @@ private:
             }
             destroy_io_uring_operation(operation);
             return false;
+        }
+
+        void complete_io_uring_poll_wait(
+            IoUringOperation* operation,
+            int result) noexcept {
+            IoWaitRegistration* registration = operation->wait_registration;
+            if (registration == nullptr || operation->task == nullptr || operation->result == nullptr) {
+                untrack_io_uring_operation(operation);
+                destroy_io_uring_operation(operation);
+                return;
+            }
+
+            const int fd = registration->fd;
+            auto it = io_waits_.find(fd);
+            if (it != io_waits_.end() && it->second == registration) {
+                io_waits_.erase(it);
+            }
+
+            registration->result->fd = fd;
+            registration->result->result = result;
+            if (operation->cancel_requested) {
+                registration->result->events = io_error;
+                registration->result->error = ECANCELED;
+                registration->result->result = -ECANCELED;
+            } else if (result < 0) {
+                registration->result->events = io_error;
+                registration->result->error = -result;
+            } else {
+                registration->result->events = io_events_from_poll(static_cast<std::uint32_t>(result));
+                registration->result->error = 0;
+            }
+
+            enqueue_pending_blocking(index_, registration->task);
+            registration->poll_operation = nullptr;
+            operation->wait_registration = nullptr;
+            untrack_io_uring_operation(operation);
+            destroy_io_uring_operation(operation);
+            io_wait_pool_.destroy(registration);
         }
 
         [[nodiscard]] static bool io_uring_result_is_fd(std::uint8_t opcode) noexcept {
@@ -4788,6 +5005,39 @@ private:
             io_wake_pending_.store(false, std::memory_order_release);
         }
 
+        [[nodiscard]] static std::uint32_t native_poll_events(std::uint32_t events) noexcept {
+            std::uint32_t result = POLLERR | POLLHUP;
+            if ((events & io_readable) != 0U) {
+                result |= POLLIN;
+            }
+            if ((events & io_writable) != 0U) {
+                result |= POLLOUT;
+            }
+            return result;
+        }
+
+        [[nodiscard]] static std::uint32_t io_events_from_poll(std::uint32_t events) noexcept {
+            std::uint32_t result = 0;
+            if ((events & (POLLIN | POLLPRI)) != 0U) {
+                result |= io_readable;
+            }
+            if ((events & POLLOUT) != 0U) {
+                result |= io_writable;
+            }
+            if ((events & (POLLERR | POLLNVAL)) != 0U) {
+                result |= io_error;
+            }
+            if ((events & POLLHUP) != 0U) {
+                result |= io_hangup;
+            }
+#ifdef POLLRDHUP
+            if ((events & POLLRDHUP) != 0U) {
+                result |= io_hangup;
+            }
+#endif
+            return result;
+        }
+
         [[nodiscard]] static std::uint32_t io_events_from_native(std::uint32_t events) noexcept {
             std::uint32_t result = 0;
             if ((events & EPOLLIN) != 0U) {
@@ -4891,12 +5141,6 @@ private:
         std::atomic<bool> stop_requested_{false};
         Task* running_task_{nullptr};
 #if defined(__linux__)
-        struct IoWaitRegistration {
-            int fd{-1};
-            Task* task{nullptr};
-            IoResult* result{nullptr};
-        };
-
         int io_epoll_fd_{-1};
         int io_wake_fd_{-1};
         absl::flat_hash_map<int, IoWaitRegistration*> io_waits_;
@@ -4921,6 +5165,7 @@ private:
         io_uring_cqe* io_uring_cqes_{nullptr};
         unsigned io_uring_pending_submissions_{0};
         bool io_uring_send_zc_available_{false};
+        bool io_uring_poll_add_available_{false};
         bool io_uring_buffers_registered_{false};
         unsigned io_uring_registered_buffer_count_{0};
         bool io_uring_files_registered_{false};

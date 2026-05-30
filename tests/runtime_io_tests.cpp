@@ -1235,6 +1235,66 @@ private:
     std::atomic<std::size_t>* bytes_sent_{nullptr};
 };
 
+class UringPendingSendfilePollTask final : public UringIoTaskBase {
+public:
+    explicit UringPendingSendfilePollTask(UringIoTaskBase::FactoryToken token)
+        : UringIoTaskBase(token) {}
+
+    bool do_it(
+        int socket_fd,
+        int file_fd,
+        std::atomic<af::IoOpState*>* state,
+        std::atomic<int>* wait_kind,
+        std::atomic<int>* pending_seen,
+        std::atomic<int>* completed,
+        std::atomic<int>* error,
+        std::atomic<std::size_t>* bytes_sent) {
+        stream_.reset(IoTestThread::IO_0, socket_fd);
+        file_fd_ = file_fd;
+        state_ = state;
+        wait_kind_ = wait_kind;
+        pending_seen_ = pending_seen;
+        completed_ = completed;
+        error_ = error;
+        bytes_sent_ = bytes_sent;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        const af::IoStatus status = stream_.sendfile_some(*this, file_fd_, &offset_, 1, send_);
+        if (status.pending()) {
+            state_->store(&send_, std::memory_order_release);
+            wait_kind_->store(static_cast<int>(send_.wait_kind), std::memory_order_release);
+            pending_seen_->fetch_add(1, std::memory_order_release);
+            return pending();
+        }
+        if (status.failed()) {
+            error_->store(status.error, std::memory_order_release);
+            completed_->fetch_add(1, std::memory_order_release);
+            return done();
+        }
+        if (!status.ready() || status.bytes != 1U || offset_ != 1) {
+            return failed();
+        }
+        bytes_sent_->store(status.bytes, std::memory_order_release);
+        error_->store(0, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    af::TcpStream<IoTestThread> stream_{};
+    int file_fd_{-1};
+    af::IoOffset offset_{0};
+    af::IoOpState send_{};
+    std::atomic<af::IoOpState*>* state_{nullptr};
+    std::atomic<int>* wait_kind_{nullptr};
+    std::atomic<int>* pending_seen_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* error_{nullptr};
+    std::atomic<std::size_t>* bytes_sent_{nullptr};
+};
+
 class SplicePipeTask final : public IoTaskBase {
 public:
     explicit SplicePipeTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
@@ -4720,6 +4780,115 @@ TEST_F(IoRuntimeFixture, SendfileWaitsForSocketWritableWhenBufferIsFull) {
     close_fd(file);
 #else
     GTEST_SKIP() << "sendfile is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringPollReadinessResumesSendfileWhenSocketWritable) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_uring_poll_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io_uring poll backend unavailable";
+    }
+
+    char path[] = "/tmp/asyncflow-uring-poll-sendfile-XXXXXX";
+    int file = ::mkstemp(path);
+    ASSERT_GE(file, 0);
+    static_cast<void>(::unlink(path));
+    const char payload = 'R';
+    ASSERT_EQ(::write(file, &payload, sizeof(payload)), static_cast<ssize_t>(sizeof(payload)));
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+    ASSERT_TRUE(fill_until_blocked(fds[0]));
+
+    std::atomic<af::IoOpState*> state{nullptr};
+    std::atomic<int> wait_kind{-1};
+    std::atomic<int> pending_seen{0};
+    std::atomic<int> completed{0};
+    std::atomic<int> error{-1};
+    std::atomic<std::size_t> bytes_sent{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringPendingSendfilePollTask>(
+        fds[0],
+        file,
+        &state,
+        &wait_kind,
+        &pending_seen,
+        &completed,
+        &error,
+        &bytes_sent));
+    ASSERT_TRUE(wait_until_at_least(pending_seen, 1));
+    EXPECT_EQ(
+        wait_kind.load(std::memory_order_acquire),
+        static_cast<int>(af::IoWaitKind::Readiness));
+
+    drain_available(fds[1]);
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(error.load(std::memory_order_acquire), 0);
+    EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), 1U);
+
+    close_pair(fds);
+    close_fd(file);
+#else
+    GTEST_SKIP() << "io_uring poll backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringPollReadinessCancelPendingSendfileWait) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_uring_poll_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io_uring poll backend unavailable";
+    }
+
+    char path[] = "/tmp/asyncflow-uring-poll-cancel-XXXXXX";
+    int file = ::mkstemp(path);
+    ASSERT_GE(file, 0);
+    static_cast<void>(::unlink(path));
+    const char payload = 'C';
+    ASSERT_EQ(::write(file, &payload, sizeof(payload)), static_cast<ssize_t>(sizeof(payload)));
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+    ASSERT_TRUE(fill_until_blocked(fds[0]));
+
+    std::atomic<af::IoOpState*> state{nullptr};
+    std::atomic<int> wait_kind{-1};
+    std::atomic<int> pending_seen{0};
+    std::atomic<int> completed{0};
+    std::atomic<int> error{-1};
+    std::atomic<std::size_t> bytes_sent{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringPendingSendfilePollTask>(
+        fds[0],
+        file,
+        &state,
+        &wait_kind,
+        &pending_seen,
+        &completed,
+        &error,
+        &bytes_sent));
+    ASSERT_TRUE(wait_until_at_least(pending_seen, 1));
+    ASSERT_EQ(
+        wait_kind.load(std::memory_order_acquire),
+        static_cast<int>(af::IoWaitKind::Readiness));
+
+    std::atomic<int> cancel_completed{0};
+    std::atomic<int> cancel_result{0};
+    std::atomic<int> cancel_error{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringCancelIoStateTask>(
+        &state,
+        &cancel_completed,
+        &cancel_result,
+        &cancel_error));
+    ASSERT_TRUE(wait_until_at_least(cancel_completed, 1));
+    EXPECT_EQ(cancel_result.load(std::memory_order_acquire), 1);
+    EXPECT_EQ(cancel_error.load(std::memory_order_acquire), 0);
+
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(error.load(std::memory_order_acquire), ECANCELED);
+    EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), 0U);
+
+    close_pair(fds);
+    close_fd(file);
+#else
+    GTEST_SKIP() << "io_uring poll backend is Linux-only";
 #endif
 }
 
