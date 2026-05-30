@@ -2705,17 +2705,17 @@ private:
                         socket_address_size_out == nullptr ? 0 : *socket_address_size_out;
                 }
             }
-            track_io_uring_operation(operation);
-
-            io_uring_sqe* sqe = reserve_io_uring_sqe();
+            int reserve_error = 0;
+            io_uring_sqe* sqe = reserve_io_uring_sqe(reserve_error);
             if (sqe == nullptr) {
-                untrack_io_uring_operation(operation);
                 destroy_io_uring_operation(operation);
                 result->fd = fd;
                 result->events = io_error;
-                result->error = EBUSY;
+                result->error = reserve_error == 0 ? EBUSY : reserve_error;
                 return false;
             }
+
+            track_io_uring_operation(operation);
 
             *sqe = io_uring_sqe{};
             sqe->opcode = opcode;
@@ -2779,8 +2779,11 @@ private:
             result->error = 0;
             result->result = 0;
 
-            const int submit_error = flush_io_uring_submission();
-            if (submit_error != 0) {
+            if (io_uring_pending_submissions_ >= io_uring_submit_batch_threshold_) {
+                const int submit_error = flush_io_uring_submissions();
+                if (submit_error == 0) {
+                    return true;
+                }
                 result->events = io_error;
                 result->error = submit_error;
                 result->result = -submit_error;
@@ -2821,6 +2824,12 @@ private:
                     did_work = true;
                     execute(task);
                 }
+
+#if defined(__linux__)
+                if (flush_io_uring_submissions_or_fail()) {
+                    did_work = true;
+                }
+#endif
 
                 if (stop_requested_.load(std::memory_order_acquire)) {
                     if (!did_work) {
@@ -3105,30 +3114,55 @@ private:
             io_uring_cq_tail_ = nullptr;
             io_uring_cq_ring_mask_ = nullptr;
             io_uring_cqes_ = nullptr;
+            io_uring_pending_submissions_ = 0;
         }
 
-        [[nodiscard]] io_uring_sqe* reserve_io_uring_sqe() noexcept {
+        [[nodiscard]] io_uring_sqe* reserve_io_uring_sqe(int& error) noexcept {
+            error = 0;
             if (io_uring_fd_ < 0 || io_uring_sq_tail_ == nullptr || io_uring_sq_head_ == nullptr) {
+                error = ENOSYS;
                 return nullptr;
             }
 
-            const std::uint32_t head = __atomic_load_n(io_uring_sq_head_, __ATOMIC_ACQUIRE);
-            const std::uint32_t tail = __atomic_load_n(io_uring_sq_tail_, __ATOMIC_RELAXED);
+            std::uint32_t head = __atomic_load_n(io_uring_sq_head_, __ATOMIC_ACQUIRE);
+            std::uint32_t tail = __atomic_load_n(io_uring_sq_tail_, __ATOMIC_RELAXED);
+            if (tail - head >= *io_uring_sq_ring_entries_ && io_uring_pending_submissions_ != 0U) {
+                const int submit_error = flush_io_uring_submissions();
+                if (submit_error != 0) {
+                    error = submit_error;
+                    fail_io_uring_backend(submit_error, nullptr);
+                    return nullptr;
+                }
+                head = __atomic_load_n(io_uring_sq_head_, __ATOMIC_ACQUIRE);
+                tail = __atomic_load_n(io_uring_sq_tail_, __ATOMIC_RELAXED);
+            }
             if (tail - head >= *io_uring_sq_ring_entries_) {
+                error = EBUSY;
                 return nullptr;
             }
 
             const std::uint32_t index = tail & *io_uring_sq_ring_mask_;
             io_uring_sq_array_[index] = index;
             __atomic_store_n(io_uring_sq_tail_, tail + 1U, __ATOMIC_RELEASE);
+            ++io_uring_pending_submissions_;
             return &io_uring_sqes_[index];
         }
 
-        [[nodiscard]] int flush_io_uring_submission() noexcept {
-            for (;;) {
-                const int submitted = sys_io_uring_enter(io_uring_fd_, 1, 0, 0);
+        [[nodiscard]] int flush_io_uring_submissions() noexcept {
+            if (io_uring_pending_submissions_ == 0U) {
+                return 0;
+            }
+
+            unsigned remaining = io_uring_pending_submissions_;
+            while (remaining != 0U) {
+                const int submitted = sys_io_uring_enter(io_uring_fd_, remaining, 0, 0);
                 if (submitted > 0) {
-                    return 0;
+                    const auto submitted_count = static_cast<unsigned>(submitted);
+                    if (submitted_count > remaining) {
+                        return EIO;
+                    }
+                    remaining -= submitted_count;
+                    continue;
                 }
                 if (submitted == 0) {
                     return EIO;
@@ -3138,6 +3172,18 @@ private:
                 }
                 return errno == 0 ? EIO : errno;
             }
+
+            io_uring_pending_submissions_ = 0;
+            return 0;
+        }
+
+        [[nodiscard]] bool flush_io_uring_submissions_or_fail() noexcept {
+            const int submit_error = flush_io_uring_submissions();
+            if (submit_error == 0) {
+                return false;
+            }
+            fail_io_uring_backend(submit_error, nullptr);
+            return true;
         }
 
         [[nodiscard]] bool poll_io_uring_completions() noexcept {
@@ -3385,6 +3431,7 @@ private:
         int io_wake_fd_{-1};
         absl::flat_hash_map<int, IoWaitRegistration> io_waits_;
         static constexpr unsigned io_uring_entries_{256};
+        static constexpr unsigned io_uring_submit_batch_threshold_{64};
         int io_uring_fd_{-1};
         std::byte* io_uring_sq_ring_{nullptr};
         std::byte* io_uring_cq_ring_{nullptr};
@@ -3401,6 +3448,7 @@ private:
         std::uint32_t* io_uring_cq_tail_{nullptr};
         std::uint32_t* io_uring_cq_ring_mask_{nullptr};
         io_uring_cqe* io_uring_cqes_{nullptr};
+        unsigned io_uring_pending_submissions_{0};
         IoUringOperation* io_uring_operations_{nullptr};
         detail::ObjectPool<IoUringMessage> io_uring_msg_pool_;
         detail::ObjectPool<IoUringSocketAddress> io_uring_address_pool_;

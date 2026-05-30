@@ -516,6 +516,7 @@ auto sharded = af::split_change_batch(batch, shard_count);
 - 有序 batch 提供 `af::retryable_ordered_batch_options`，业务重试同一 batch 时可跳过已经应用成功的 shard。
 - Linux IO executor 使用 epoll + eventfd，任务先调度到指定 IO 线程后再注册 fd readiness，避免所有 IO 都通过 MPMC 队列跨线程搬运。
 - `ThreadKind::IoUring` 优先初始化 io_uring，并通过 eventfd 唤醒 completion；如果 io_uring 不可用，线程仍保留 epoll readiness fallback。
+- io_uring submit 在 executor tick 内合并，多个 SQE 尽量一次 `io_uring_enter` 提交；SQ 接近阈值或线程准备阻塞前会强制 flush，兼顾吞吐和尾延迟。
 - `af::io_openat()` / `io_close()` / `io_statx()` / `io_fallocate()` / `io_renameat()` / `io_unlinkat()` 和 `af::IoFile::read_at()` / `write_at()` / `readv_at()` / `writev_at()` / `fsync()` 通过 io_uring 提交真正的文件生命周期操作，completion 后恢复原 task。
 - `af::io_sendfile_some()` 通过 Linux `sendfile(2)` 做文件到 socket 的内核态搬运，遇到 socket buffer 满时等待 out fd writable；`af::io_splice_some()` 在 `ThreadKind::IoUring` 优先提交 `IORING_OP_SPLICE`，不可用时退回 `splice(2)` + readiness。
 - `af::TcpListener::accept_some()` / `af::TcpStream::connect()` / `recv_some()` / `send_some()` / `recvv_some()` / `sendv_some()` 在 `ThreadKind::IoUring` 线程上优先提交 `IORING_OP_ACCEPT` / `IORING_OP_CONNECT` / `IORING_OP_RECV` / `IORING_OP_SEND` 或 `IORING_OP_RECVMSG` / `IORING_OP_SENDMSG`；`af::UdpSocket::recv_from_some()` / `send_to_some()` / `recvv_from_some()` / `sendv_to_some()` 优先提交 `IORING_OP_RECVMSG` / `IORING_OP_SENDMSG`，ring 不可用或 would-block 时退回 epoll readiness。

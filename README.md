@@ -208,7 +208,7 @@ auto sharded = af::split_change_batch(batch, player_logic_shard_count);
 - `af::io_sendfile_some()` 和 `af::io_splice_some()` 支持文件到 socket、fd 到 fd 的内核态搬运；`sendfile` 遇到 EAGAIN 等待 out fd writable，`splice` 在 io_uring 可用时优先 `IORING_OP_SPLICE`，fallback 会根据 fd readiness 选择等待输入 readable 或输出 writable。
 - `af::make_eventfd()` / `af::write_eventfd()` / `af::IoEvent::wait()` 封装 Linux eventfd，适合业务侧异步通知、轻量计数器和跨组件唤醒，event fd 仍然在绑定 IO 线程上恢复 task。
 - `af::make_timerfd()` / `af::arm_timerfd_after()` / `af::arm_timerfd_every()` / `af::IoTimer::wait()` 封装 Linux timerfd，适合超时、重试、心跳和连接保活，计时 fd 仍然在绑定 IO 线程上恢复 task。
-- `ThreadKind::IoUring` 在同一个 IO executor 内用 raw io_uring syscall 提交 `read_at` / `write_at` / `readv_at` / `writev_at` / `fsync`、TCP `accept/connect/recv/send/recvv/sendv` 和 UDP `recvmsg/sendmsg/recvv_from/sendv_to`，completion 通过 eventfd 唤醒，不把 IO completion 跨线程搬运。
+- `ThreadKind::IoUring` 在同一个 IO executor 内用 raw io_uring syscall 提交 `read_at` / `write_at` / `readv_at` / `writev_at` / `fsync`、TCP `accept/connect/recv/send/recvv/sendv` 和 UDP `recvmsg/sendmsg/recvv_from/sendv_to`，同一 executor tick 内的多个 SQE 会合并提交以减少 `io_uring_enter`，completion 通过 eventfd 唤醒，不把 IO completion 跨线程搬运。
 - `af::IoFile` / `af::TcpListener` / `af::TcpStream` / `af::UdpSocket` / `af::IoEvent` / `af::IoTimer` 是零堆分配 adapter，仅保存 `thread + fd` 并内联转发到 helper；它们不会引入额外队列或 MPMC hop。
 - `CrudOp<Key, Value>` / `ChangeBatch<Key, Value>` 是纯数据 helper，不引入额外运行期状态。
 - `parallel_shards()` 的 handler 如果返回 `bool`，`false` 会计为 shard 失败；owner 恢复后可用 `last_parallel_failures()` 读取失败数。
