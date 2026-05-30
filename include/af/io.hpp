@@ -1,9 +1,11 @@
 #pragma once
 
 #include <cerrno>
+#include <chrono>
 #include <climits>
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 #include <limits>
 #include <type_traits>
 #include <utility>
@@ -16,6 +18,10 @@
 #include <sys/types.h>
 #include <sys/uio.h>
 #include <unistd.h>
+#endif
+
+#if defined(__linux__)
+#include <sys/timerfd.h>
 #endif
 
 namespace af {
@@ -161,6 +167,28 @@ namespace detail {
     return flags;
 }
 
+#if defined(__linux__)
+[[nodiscard]] inline int io_default_timerfd_flags() noexcept {
+    int flags = 0;
+#if defined(TFD_NONBLOCK)
+    flags |= TFD_NONBLOCK;
+#endif
+#if defined(TFD_CLOEXEC)
+    flags |= TFD_CLOEXEC;
+#endif
+    return flags;
+}
+
+[[nodiscard]] inline timespec io_timespec_from_duration(
+    std::chrono::nanoseconds duration) noexcept {
+    const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration);
+    duration -= seconds;
+    return timespec{
+        static_cast<time_t>(seconds.count()),
+        static_cast<long>(duration.count())};
+}
+#endif
+
 [[nodiscard]] inline bool io_connect_in_progress(int error) noexcept {
     return error == EINPROGRESS || error == EALREADY || error == EINTR ||
            error == EAGAIN
@@ -297,6 +325,73 @@ inline void clear_waiting(IoOpState& state) noexcept {
 }
 
 } // namespace detail
+
+#if defined(__linux__)
+[[nodiscard]] inline UniqueFd make_timerfd(
+    clockid_t clock_id = CLOCK_MONOTONIC,
+    int flags = detail::io_default_timerfd_flags()) noexcept {
+    return UniqueFd(::timerfd_create(clock_id, flags));
+}
+
+[[nodiscard]] inline bool arm_timerfd(
+    int fd,
+    std::chrono::nanoseconds initial,
+    std::chrono::nanoseconds interval,
+    int& error) noexcept {
+    error = 0;
+    if (fd < 0) {
+        error = EBADF;
+        return false;
+    }
+    if (initial.count() < 0 || interval.count() < 0) {
+        error = EINVAL;
+        return false;
+    }
+
+    itimerspec spec{};
+    if (initial.count() != 0) {
+        spec.it_value = detail::io_timespec_from_duration(initial);
+    }
+    if (interval.count() != 0) {
+        spec.it_interval = detail::io_timespec_from_duration(interval);
+    }
+    if (::timerfd_settime(fd, 0, &spec, nullptr) != 0) {
+        error = errno == 0 ? EIO : errno;
+        return false;
+    }
+    return true;
+}
+
+[[nodiscard]] inline bool arm_timerfd_after(
+    int fd,
+    std::chrono::nanoseconds delay,
+    int& error) noexcept {
+    if (delay.count() <= 0) {
+        error = EINVAL;
+        return false;
+    }
+    return arm_timerfd(fd, delay, std::chrono::nanoseconds{0}, error);
+}
+
+[[nodiscard]] inline bool arm_timerfd_every(
+    int fd,
+    std::chrono::nanoseconds interval,
+    int& error) noexcept {
+    if (interval.count() <= 0) {
+        error = EINVAL;
+        return false;
+    }
+    return arm_timerfd(fd, interval, interval, error);
+}
+
+[[nodiscard]] inline bool disarm_timerfd(int fd, int& error) noexcept {
+    return arm_timerfd(
+        fd,
+        std::chrono::nanoseconds{0},
+        std::chrono::nanoseconds{0},
+        error);
+}
+#endif
 
 template <typename TaskT>
 [[nodiscard]] IoStatus io_accept_some(
@@ -1355,6 +1450,48 @@ template <typename TaskT>
 }
 #endif
 
+template <typename TaskT>
+[[nodiscard]] IoStatus io_wait_timerfd(
+    TaskT& task,
+    typename TaskT::Thread thread,
+    int fd,
+    std::uint64_t* expirations,
+    IoOpState& state) noexcept {
+    if (expirations == nullptr) {
+        return IoStatus::failed(EINVAL);
+    }
+
+#if !defined(__linux__)
+    static_cast<void>(task);
+    static_cast<void>(thread);
+    static_cast<void>(fd);
+    static_cast<void>(state);
+    return IoStatus::failed(ENOSYS);
+#else
+    detail::clear_waiting(state);
+    for (;;) {
+        std::uint64_t value = 0;
+        const ssize_t n = ::read(fd, &value, sizeof(value));
+        if (n == static_cast<ssize_t>(sizeof(value))) {
+            *expirations = value;
+            return IoStatus::ready(sizeof(value));
+        }
+        if (n >= 0) {
+            return IoStatus::failed(EIO);
+        }
+
+        const int error = errno;
+        if (error == EINTR) {
+            continue;
+        }
+        if (detail::io_would_block(error)) {
+            return detail::arm_io_wait(task, thread, fd, io_readable, state);
+        }
+        return IoStatus::failed(error);
+    }
+#endif
+}
+
 template <typename ThreadT>
 class IoDescriptor {
 public:
@@ -1746,5 +1883,22 @@ using TcpListener = IoListener<ThreadT>;
 
 template <typename ThreadT>
 using UdpSocket = IoDatagramSocket<ThreadT>;
+
+template <typename ThreadT>
+class IoTimer : public IoDescriptor<ThreadT> {
+public:
+    using IoDescriptor<ThreadT>::IoDescriptor;
+
+    template <typename TaskT>
+    [[nodiscard]] IoStatus wait(
+        TaskT& task,
+        std::uint64_t* expirations,
+        IoOpState& state) const noexcept {
+        static_assert(
+            std::is_same_v<typename TaskT::Thread, ThreadT>,
+            "IoTimer thread type must match the task runtime thread type");
+        return af::io_wait_timerfd(task, this->thread_, this->fd_, expirations, state);
+    }
+};
 
 } // namespace af

@@ -45,6 +45,9 @@ if(ASYNCFLOW_BUILD_EXAMPLES)
     add_executable(asyncflow_io_epoll_example examples/io_epoll.cpp)
     target_link_libraries(asyncflow_io_epoll_example PRIVATE AsyncFlow::AsyncFlow)
 
+    add_executable(asyncflow_io_timer_example examples/io_timer.cpp)
+    target_link_libraries(asyncflow_io_timer_example PRIVATE AsyncFlow::AsyncFlow)
+
     add_executable(asyncflow_io_adapters_example examples/io_adapters.cpp)
     target_link_libraries(asyncflow_io_adapters_example PRIVATE AsyncFlow::AsyncFlow)
 

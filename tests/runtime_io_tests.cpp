@@ -99,10 +99,12 @@ TEST(IoAdapterTraits, AdaptersAreThinTriviallyCopyableViews) {
     EXPECT_TRUE(std::is_trivially_copyable_v<af::TcpStream<IoTestThread>>);
     EXPECT_TRUE(std::is_trivially_copyable_v<af::TcpListener<IoTestThread>>);
     EXPECT_TRUE(std::is_trivially_copyable_v<af::UdpSocket<IoTestThread>>);
+    EXPECT_TRUE(std::is_trivially_copyable_v<af::IoTimer<IoTestThread>>);
     EXPECT_LE(sizeof(af::IoFile<IoTestThread>), 8U);
     EXPECT_LE(sizeof(af::TcpStream<IoTestThread>), 8U);
     EXPECT_LE(sizeof(af::TcpListener<IoTestThread>), 8U);
     EXPECT_LE(sizeof(af::UdpSocket<IoTestThread>), 8U);
+    EXPECT_LE(sizeof(af::IoTimer<IoTestThread>), 8U);
 }
 
 class IoRuntimeFixture : public testing::Test {
@@ -1489,6 +1491,80 @@ private:
     std::atomic<int>* completed_{nullptr};
 };
 
+template <typename TaskBaseT>
+class BasicTimerFdTask final : public TaskBaseT {
+public:
+    explicit BasicTimerFdTask(typename TaskBaseT::FactoryToken token) : TaskBaseT(token) {}
+
+    bool do_it(
+        int fd,
+        std::atomic<int>* armed,
+        std::atomic<int>* completed,
+        std::atomic<std::uint64_t>* expirations) {
+        timer_.reset(IoTestThread::IO_0, fd);
+        armed_ = armed;
+        completed_ = completed;
+        expirations_ = expirations;
+        return this->schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        std::uint64_t count = 0;
+        const af::IoStatus status = timer_.wait(*this, &count, wait_);
+        if (status.pending()) {
+            armed_->fetch_add(1, std::memory_order_release);
+            return this->pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(count) || count == 0U) {
+            return this->failed();
+        }
+        expirations_->store(count, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return this->done();
+    }
+
+    af::IoTimer<IoTestThread> timer_{};
+    af::IoOpState wait_{};
+    std::atomic<int>* armed_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<std::uint64_t>* expirations_{nullptr};
+};
+
+using TimerFdTask = BasicTimerFdTask<IoTaskBase>;
+using UringTimerFdTask = BasicTimerFdTask<UringIoTaskBase>;
+
+class TimerBoundaryTask final : public IoTaskBase {
+public:
+    explicit TimerBoundaryTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(std::atomic<int>* completed, std::atomic<int>* error) {
+        completed_ = completed;
+        error_ = error;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        af::IoTimer<IoTestThread> timer(IoTestThread::IO_0, -1);
+        af::IoOpState null_state{};
+        af::IoOpState bad_fd_state{};
+        std::uint64_t expirations = 0;
+        const af::IoStatus null_status = timer.wait(*this, nullptr, null_state);
+        const af::IoStatus bad_fd_status = timer.wait(*this, &expirations, bad_fd_state);
+        if (!null_status.failed() || null_status.error != EINVAL ||
+            !bad_fd_status.failed() || bad_fd_status.error != EBADF) {
+            return failed();
+        }
+        error_->store(bad_fd_status.error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* error_{nullptr};
+};
+
 class PendingSocketWaitTask final : public FastIoTaskBase {
 public:
     explicit PendingSocketWaitTask(FastIoTaskBase::FactoryToken token) : FastIoTaskBase(token) {}
@@ -1722,6 +1798,56 @@ TEST_F(IoRuntimeFixture, VectoredHelpersHandleInvalidAndZeroLengthOperations) {
 #endif
 }
 
+TEST_F(IoRuntimeFixture, TimerFdAdapterHandlesInvalidOperations) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int error = 0;
+    EXPECT_FALSE(af::arm_timerfd_after(-1, std::chrono::milliseconds(1), error));
+    EXPECT_EQ(error, EBADF);
+    EXPECT_FALSE(af::arm_timerfd_after(0, std::chrono::nanoseconds{0}, error));
+    EXPECT_EQ(error, EINVAL);
+
+    std::atomic<int> completed{0};
+    std::atomic<int> task_error{0};
+    ASSERT_TRUE(IoRuntime::start_task<TimerBoundaryTask>(&completed, &task_error));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(task_error.load(std::memory_order_acquire), EBADF);
+#else
+    GTEST_SKIP() << "timerfd is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, EpollIoThreadResumesTimerFdFromAdapter) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    af::UniqueFd timer = af::make_timerfd();
+    ASSERT_TRUE(timer);
+
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<std::uint64_t> expirations{0};
+    ASSERT_TRUE(IoRuntime::start_task<TimerFdTask>(
+        timer.get(),
+        &armed,
+        &completed,
+        &expirations));
+    ASSERT_TRUE(wait_until_at_least(armed, 1));
+
+    int error = 0;
+    ASSERT_TRUE(af::arm_timerfd_after(timer.get(), std::chrono::milliseconds(1), error)) << error;
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_GE(expirations.load(std::memory_order_acquire), std::uint64_t{1});
+#else
+    GTEST_SKIP() << "timerfd is Linux-only";
+#endif
+}
+
 TEST_F(IoRuntimeFixture, StreamAdapterReceivesAndSendsSocketBytes) {
 #if defined(__linux__)
     if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
@@ -1875,6 +2001,34 @@ TEST_F(UringIoRuntimeFixture, IoUringThreadFallsBackToEpollReadiness) {
     close_pair(fds);
 #else
     GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringThreadHandlesTimerFdViaEpollFallback) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io backend unavailable";
+    }
+
+    af::UniqueFd timer = af::make_timerfd();
+    ASSERT_TRUE(timer);
+
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<std::uint64_t> expirations{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringTimerFdTask>(
+        timer.get(),
+        &armed,
+        &completed,
+        &expirations));
+    ASSERT_TRUE(wait_until_at_least(armed, 1));
+
+    int error = 0;
+    ASSERT_TRUE(af::arm_timerfd_after(timer.get(), std::chrono::milliseconds(1), error)) << error;
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_GE(expirations.load(std::memory_order_acquire), std::uint64_t{1});
+#else
+    GTEST_SKIP() << "timerfd is Linux-only";
 #endif
 }
 

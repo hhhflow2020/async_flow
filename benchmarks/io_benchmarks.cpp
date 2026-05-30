@@ -195,6 +195,15 @@ void BM_IoStreamAdapterInvalidConnect(benchmark::State& state) {
     }
 }
 
+void BM_IoTimerAdapterNullExpiration(benchmark::State& state) {
+    FakeTask task;
+    af::IoTimer<BenchIoThread> timer(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(timer.wait(task, nullptr, op));
+    }
+}
+
 #if !defined(_WIN32)
 void BM_IoFileAdapterZeroIovReadvAt(benchmark::State& state) {
     FakeTask task;
@@ -238,6 +247,7 @@ BENCHMARK(BM_IoStreamAdapterZeroByteSend);
 BENCHMARK(BM_IoDatagramAdapterZeroByteRecv);
 BENCHMARK(BM_IoListenerAdapterInvalidAccept);
 BENCHMARK(BM_IoStreamAdapterInvalidConnect);
+BENCHMARK(BM_IoTimerAdapterNullExpiration);
 #if !defined(_WIN32)
 BENCHMARK(BM_IoFileAdapterZeroIovReadvAt);
 BENCHMARK(BM_IoStreamAdapterZeroIovSendv);
