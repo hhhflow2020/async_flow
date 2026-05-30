@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstdint>
+#include <limits>
 #include <thread>
 #include <type_traits>
 
@@ -99,11 +100,13 @@ TEST(IoAdapterTraits, AdaptersAreThinTriviallyCopyableViews) {
     EXPECT_TRUE(std::is_trivially_copyable_v<af::TcpStream<IoTestThread>>);
     EXPECT_TRUE(std::is_trivially_copyable_v<af::TcpListener<IoTestThread>>);
     EXPECT_TRUE(std::is_trivially_copyable_v<af::UdpSocket<IoTestThread>>);
+    EXPECT_TRUE(std::is_trivially_copyable_v<af::IoEvent<IoTestThread>>);
     EXPECT_TRUE(std::is_trivially_copyable_v<af::IoTimer<IoTestThread>>);
     EXPECT_LE(sizeof(af::IoFile<IoTestThread>), 8U);
     EXPECT_LE(sizeof(af::TcpStream<IoTestThread>), 8U);
     EXPECT_LE(sizeof(af::TcpListener<IoTestThread>), 8U);
     EXPECT_LE(sizeof(af::UdpSocket<IoTestThread>), 8U);
+    EXPECT_LE(sizeof(af::IoEvent<IoTestThread>), 8U);
     EXPECT_LE(sizeof(af::IoTimer<IoTestThread>), 8U);
 }
 
@@ -1534,6 +1537,49 @@ private:
 using TimerFdTask = BasicTimerFdTask<IoTaskBase>;
 using UringTimerFdTask = BasicTimerFdTask<UringIoTaskBase>;
 
+template <typename TaskBaseT>
+class BasicEventFdTask final : public TaskBaseT {
+public:
+    explicit BasicEventFdTask(typename TaskBaseT::FactoryToken token) : TaskBaseT(token) {}
+
+    bool do_it(
+        int fd,
+        std::atomic<int>* armed,
+        std::atomic<int>* completed,
+        std::atomic<std::uint64_t>* value) {
+        event_.reset(IoTestThread::IO_0, fd);
+        armed_ = armed;
+        completed_ = completed;
+        value_ = value;
+        return this->schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        std::uint64_t counter = 0;
+        const af::IoStatus status = event_.wait(*this, &counter, wait_);
+        if (status.pending()) {
+            armed_->fetch_add(1, std::memory_order_release);
+            return this->pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(counter) || counter == 0U) {
+            return this->failed();
+        }
+        value_->store(counter, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return this->done();
+    }
+
+    af::IoEvent<IoTestThread> event_{};
+    af::IoOpState wait_{};
+    std::atomic<int>* armed_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<std::uint64_t>* value_{nullptr};
+};
+
+using EventFdTask = BasicEventFdTask<IoTaskBase>;
+using UringEventFdTask = BasicEventFdTask<UringIoTaskBase>;
+
 class TimerBoundaryTask final : public IoTaskBase {
 public:
     explicit TimerBoundaryTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
@@ -1552,6 +1598,37 @@ private:
         std::uint64_t expirations = 0;
         const af::IoStatus null_status = timer.wait(*this, nullptr, null_state);
         const af::IoStatus bad_fd_status = timer.wait(*this, &expirations, bad_fd_state);
+        if (!null_status.failed() || null_status.error != EINVAL ||
+            !bad_fd_status.failed() || bad_fd_status.error != EBADF) {
+            return failed();
+        }
+        error_->store(bad_fd_status.error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* error_{nullptr};
+};
+
+class EventBoundaryTask final : public IoTaskBase {
+public:
+    explicit EventBoundaryTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(std::atomic<int>* completed, std::atomic<int>* error) {
+        completed_ = completed;
+        error_ = error;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        af::IoEvent<IoTestThread> event(IoTestThread::IO_0, -1);
+        af::IoOpState null_state{};
+        af::IoOpState bad_fd_state{};
+        std::uint64_t value = 0;
+        const af::IoStatus null_status = event.wait(*this, nullptr, null_state);
+        const af::IoStatus bad_fd_status = event.wait(*this, &value, bad_fd_state);
         if (!null_status.failed() || null_status.error != EINVAL ||
             !bad_fd_status.failed() || bad_fd_status.error != EBADF) {
             return failed();
@@ -1820,6 +1897,34 @@ TEST_F(IoRuntimeFixture, TimerFdAdapterHandlesInvalidOperations) {
 #endif
 }
 
+TEST_F(IoRuntimeFixture, EventFdAdapterHandlesInvalidOperations) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int error = 0;
+    EXPECT_FALSE(af::write_eventfd(-1, 1, error));
+    EXPECT_EQ(error, EBADF);
+
+    af::UniqueFd event = af::make_eventfd();
+    ASSERT_TRUE(event);
+    EXPECT_FALSE(af::write_eventfd(
+        event.get(),
+        std::numeric_limits<std::uint64_t>::max(),
+        error));
+    EXPECT_EQ(error, EINVAL);
+
+    std::atomic<int> completed{0};
+    std::atomic<int> task_error{0};
+    ASSERT_TRUE(IoRuntime::start_task<EventBoundaryTask>(&completed, &task_error));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(task_error.load(std::memory_order_acquire), EBADF);
+#else
+    GTEST_SKIP() << "eventfd is Linux-only";
+#endif
+}
+
 TEST_F(IoRuntimeFixture, EpollIoThreadResumesTimerFdFromAdapter) {
 #if defined(__linux__)
     if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
@@ -1845,6 +1950,34 @@ TEST_F(IoRuntimeFixture, EpollIoThreadResumesTimerFdFromAdapter) {
     EXPECT_GE(expirations.load(std::memory_order_acquire), std::uint64_t{1});
 #else
     GTEST_SKIP() << "timerfd is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, EpollIoThreadResumesEventFdFromAdapter) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    af::UniqueFd event = af::make_eventfd();
+    ASSERT_TRUE(event);
+
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<std::uint64_t> value{0};
+    ASSERT_TRUE(IoRuntime::start_task<EventFdTask>(
+        event.get(),
+        &armed,
+        &completed,
+        &value));
+    ASSERT_TRUE(wait_until_at_least(armed, 1));
+
+    int error = 0;
+    ASSERT_TRUE(af::write_eventfd(event.get(), 7, error)) << error;
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(value.load(std::memory_order_acquire), std::uint64_t{7});
+#else
+    GTEST_SKIP() << "eventfd is Linux-only";
 #endif
 }
 
@@ -2029,6 +2162,34 @@ TEST_F(UringIoRuntimeFixture, IoUringThreadHandlesTimerFdViaEpollFallback) {
     EXPECT_GE(expirations.load(std::memory_order_acquire), std::uint64_t{1});
 #else
     GTEST_SKIP() << "timerfd is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringThreadHandlesEventFdViaEpollFallback) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io backend unavailable";
+    }
+
+    af::UniqueFd event = af::make_eventfd();
+    ASSERT_TRUE(event);
+
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<std::uint64_t> value{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringEventFdTask>(
+        event.get(),
+        &armed,
+        &completed,
+        &value));
+    ASSERT_TRUE(wait_until_at_least(armed, 1));
+
+    int error = 0;
+    ASSERT_TRUE(af::write_eventfd(event.get(), 9, error)) << error;
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(value.load(std::memory_order_acquire), std::uint64_t{9});
+#else
+    GTEST_SKIP() << "eventfd is Linux-only";
 #endif
 }
 

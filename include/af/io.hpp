@@ -21,6 +21,7 @@
 #endif
 
 #if defined(__linux__)
+#include <sys/eventfd.h>
 #include <sys/timerfd.h>
 #endif
 
@@ -168,6 +169,17 @@ namespace detail {
 }
 
 #if defined(__linux__)
+[[nodiscard]] inline int io_default_eventfd_flags() noexcept {
+    int flags = 0;
+#if defined(EFD_NONBLOCK)
+    flags |= EFD_NONBLOCK;
+#endif
+#if defined(EFD_CLOEXEC)
+    flags |= EFD_CLOEXEC;
+#endif
+    return flags;
+}
+
 [[nodiscard]] inline int io_default_timerfd_flags() noexcept {
     int flags = 0;
 #if defined(TFD_NONBLOCK)
@@ -327,6 +339,44 @@ inline void clear_waiting(IoOpState& state) noexcept {
 } // namespace detail
 
 #if defined(__linux__)
+[[nodiscard]] inline UniqueFd make_eventfd(
+    unsigned int init_value = 0,
+    int flags = detail::io_default_eventfd_flags()) noexcept {
+    return UniqueFd(::eventfd(init_value, flags));
+}
+
+[[nodiscard]] inline bool write_eventfd(
+    int fd,
+    std::uint64_t value,
+    int& error) noexcept {
+    error = 0;
+    if (fd < 0) {
+        error = EBADF;
+        return false;
+    }
+    if (value == std::numeric_limits<std::uint64_t>::max()) {
+        error = EINVAL;
+        return false;
+    }
+
+    for (;;) {
+        const ssize_t n = ::write(fd, &value, sizeof(value));
+        if (n == static_cast<ssize_t>(sizeof(value))) {
+            return true;
+        }
+        if (n >= 0) {
+            error = EIO;
+            return false;
+        }
+
+        error = errno == 0 ? EIO : errno;
+        if (error == EINTR) {
+            continue;
+        }
+        return false;
+    }
+}
+
 [[nodiscard]] inline UniqueFd make_timerfd(
     clockid_t clock_id = CLOCK_MONOTONIC,
     int flags = detail::io_default_timerfd_flags()) noexcept {
@@ -1451,6 +1501,48 @@ template <typename TaskT>
 #endif
 
 template <typename TaskT>
+[[nodiscard]] IoStatus io_wait_eventfd(
+    TaskT& task,
+    typename TaskT::Thread thread,
+    int fd,
+    std::uint64_t* value,
+    IoOpState& state) noexcept {
+    if (value == nullptr) {
+        return IoStatus::failed(EINVAL);
+    }
+
+#if !defined(__linux__)
+    static_cast<void>(task);
+    static_cast<void>(thread);
+    static_cast<void>(fd);
+    static_cast<void>(state);
+    return IoStatus::failed(ENOSYS);
+#else
+    detail::clear_waiting(state);
+    for (;;) {
+        std::uint64_t counter = 0;
+        const ssize_t n = ::read(fd, &counter, sizeof(counter));
+        if (n == static_cast<ssize_t>(sizeof(counter))) {
+            *value = counter;
+            return IoStatus::ready(sizeof(counter));
+        }
+        if (n >= 0) {
+            return IoStatus::failed(EIO);
+        }
+
+        const int error = errno;
+        if (error == EINTR) {
+            continue;
+        }
+        if (detail::io_would_block(error)) {
+            return detail::arm_io_wait(task, thread, fd, io_readable, state);
+        }
+        return IoStatus::failed(error);
+    }
+#endif
+}
+
+template <typename TaskT>
 [[nodiscard]] IoStatus io_wait_timerfd(
     TaskT& task,
     typename TaskT::Thread thread,
@@ -1883,6 +1975,23 @@ using TcpListener = IoListener<ThreadT>;
 
 template <typename ThreadT>
 using UdpSocket = IoDatagramSocket<ThreadT>;
+
+template <typename ThreadT>
+class IoEvent : public IoDescriptor<ThreadT> {
+public:
+    using IoDescriptor<ThreadT>::IoDescriptor;
+
+    template <typename TaskT>
+    [[nodiscard]] IoStatus wait(
+        TaskT& task,
+        std::uint64_t* value,
+        IoOpState& state) const noexcept {
+        static_assert(
+            std::is_same_v<typename TaskT::Thread, ThreadT>,
+            "IoEvent thread type must match the task runtime thread type");
+        return af::io_wait_eventfd(task, this->thread_, this->fd_, value, state);
+    }
+};
 
 template <typename ThreadT>
 class IoTimer : public IoDescriptor<ThreadT> {
