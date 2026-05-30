@@ -204,7 +204,7 @@ auto sharded = af::split_change_batch(batch, player_logic_shard_count);
 - `parallel_shards_ordered()` 会对每个 shard 维护 `last_applied_batch_id`，要求 batch id 连续递增。
 - `parallel_shards_ordered(..., af::retryable_ordered_batch_options, ...)` 支持重试同一个 batch 时跳过已经应用成功的 shard；`af::OrderedBatchRetrySkipPolicy` 可用于业务侧记录失败次数并决定重试、跳过或停止。
 - `start_ordered_task<Stream, ApplyTask>()` 会在指定 sequencer 线程上缓存乱序 batch，并按 batch_id 连续启动 apply task；如果 apply task 启动失败，不推进期待 batch id，后续重试仍从失败 batch 开始。
-- Linux IO executor 使用 epoll + eventfd，`wait_io()` 注册一次性 fd readiness 后恢复原 pending task；跨线程唤醒做合并写，避免每次任务投递都写 eventfd。
+- Linux IO executor 使用 epoll + eventfd，`wait_io()` 注册一次性 fd readiness 后恢复原 pending task；同一个 `IoOpState` 在同一 fd 上立即重挂时优先 `EPOLL_CTL_MOD`，readiness 完成后延迟清理内核注册，给恢复的 task 一次直接重挂机会，否则在阻塞前统一 `DEL`，减少热连接完成阶段 `DEL` 和下一轮 `ADD` 的系统调用；跨线程唤醒做合并写，避免每次任务投递都写 eventfd。
 - `af::io_openat()` / `af::io_close()` / `af::io_statx()` / `af::io_fallocate()` / `af::io_renameat()` / `af::io_unlinkat()` 在 `ThreadKind::IoUring` 线程上提交文件生命周期操作，可把文件打开、预分配、元数据查询、rename/unlink 和关闭都放到 IO 线程。
 - `af::io_read_some()` / `af::io_write_some()` / `af::io_recv_some()` / `af::io_send_some()` / `af::io_recv_from_some()` / `af::io_send_to_some()` 封装了非阻塞 fd 的 EAGAIN -> wait -> resume 流程，减少业务任务里重复写 syscall 分支；`readv/writev`、`recvv/sendv`、`recvv_from/sendv_to` 和 `readv_at/writev_at` 支持 scatter/gather，减少协议 framing、日志聚合等场景的中间拷贝。
 - `af::io_sendfile_some()` 和 `af::io_splice_some()` 支持文件到 socket、fd 到 fd 的内核态搬运；`sendfile` 遇到 EAGAIN 等待 out fd writable，`splice` 在 io_uring 可用时优先 `IORING_OP_SPLICE`，fallback 会根据 fd readiness 选择等待输入 readable 或输出 writable。

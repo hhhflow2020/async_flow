@@ -272,6 +272,97 @@ private:
     std::atomic<char>* byte_read_{nullptr};
 };
 
+class SocketRepeatedReadableTask final : public IoTaskBase {
+public:
+    explicit SocketRepeatedReadableTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(
+        int fd,
+        std::atomic<int>* armed,
+        std::atomic<int>* completed,
+        std::atomic<int>* reads,
+        char* output) {
+        fd_ = fd;
+        armed_ = armed;
+        completed_ = completed;
+        reads_ = reads;
+        output_ = output;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Arm,
+        Read,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Arm:
+            return arm_read();
+
+        case State::Read:
+            return finish_read();
+        }
+        return failed();
+    }
+
+    af::TaskResult arm_read() {
+        state_ = State::Read;
+        const af::IoStatus status = af::io_read_some(
+            *this,
+            IoTestThread::IO_0,
+            fd_,
+            &value_,
+            sizeof(value_),
+            read_);
+        return handle_status(status);
+    }
+
+    af::TaskResult finish_read() {
+        const af::IoStatus status = af::io_read_some(
+            *this,
+            IoTestThread::IO_0,
+            fd_,
+            &value_,
+            sizeof(value_),
+            read_);
+        return handle_status(status);
+    }
+
+    af::TaskResult handle_status(af::IoStatus status) {
+        if (status.pending()) {
+            armed_->fetch_add(1, std::memory_order_release);
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(value_)) {
+            return failed();
+        }
+
+        output_[read_count_] = value_;
+        ++read_count_;
+        reads_->store(static_cast<int>(read_count_), std::memory_order_release);
+        if (read_count_ == expected_reads_) {
+            completed_->fetch_add(1, std::memory_order_release);
+            return done();
+        }
+
+        state_ = State::Arm;
+        return arm_read();
+    }
+
+    static constexpr std::size_t expected_reads_{2};
+    State state_{State::Arm};
+    int fd_{-1};
+    char value_{0};
+    std::size_t read_count_{0};
+    af::IoOpState read_{};
+    std::atomic<int>* armed_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* reads_{nullptr};
+    char* output_{nullptr};
+};
+
 class SocketWritableTask final : public IoTaskBase {
 public:
     explicit SocketWritableTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
@@ -3011,6 +3102,45 @@ TEST_F(IoRuntimeFixture, EpollIoThreadResumesTaskWhenFdBecomesReadable) {
     ASSERT_EQ(::write(fds[1], &value, sizeof(value)), 1);
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(byte_read.load(std::memory_order_acquire), value);
+
+    close_pair(fds);
+#else
+    GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, EpollIoThreadRearmsReadableFdWithSameState) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<int> reads{0};
+    char output[2]{};
+
+    ASSERT_TRUE(IoRuntime::start_task<SocketRepeatedReadableTask>(
+        fds[0],
+        &armed,
+        &completed,
+        &reads,
+        output));
+    ASSERT_TRUE(wait_until_at_least(armed, 1));
+
+    const char first = 'a';
+    ASSERT_EQ(::write(fds[1], &first, sizeof(first)), 1);
+    ASSERT_TRUE(wait_until_at_least(reads, 1));
+    ASSERT_TRUE(wait_until_at_least(armed, 2));
+
+    const char second = 'b';
+    ASSERT_EQ(::write(fds[1], &second, sizeof(second)), 1);
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(output[0], first);
+    EXPECT_EQ(output[1], second);
 
     close_pair(fds);
 #else

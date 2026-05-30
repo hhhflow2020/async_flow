@@ -553,7 +553,8 @@ public:
         int fd,
         std::uint32_t events,
         Task* task,
-        IoResult* result) noexcept {
+        IoResult* result,
+        bool prefer_rearm = false) noexcept {
         if (task == nullptr || result == nullptr || fd < 0 || events == 0U) {
             if (result != nullptr) {
                 result->fd = fd;
@@ -570,7 +571,7 @@ public:
             result->error = EINVAL;
             return false;
         }
-        return executors_[index]->register_io_wait(fd, events, task, result);
+        return executors_[index]->register_io_wait(fd, events, task, result, prefer_rearm);
     }
 
     [[nodiscard]] static bool cancel_io(Thread thread, IoOpState& state) noexcept {
@@ -1721,7 +1722,8 @@ private:
             int fd,
             std::uint32_t events,
             Task* task,
-            IoResult* result) noexcept {
+            IoResult* result,
+            bool prefer_rearm = false) noexcept {
             AF_ASSERT(current_thread_index_ == index_ && "io_wait must be called from its IO thread");
             if (current_thread_index_ != index_ || task == nullptr || result == nullptr) {
                 if (result != nullptr) {
@@ -1760,9 +1762,13 @@ private:
             event.events = native_events;
             event.data.fd = fd;
 
-            if (::epoll_ctl(io_epoll_fd_, EPOLL_CTL_ADD, fd, &event) != 0) {
-                if (errno != EEXIST ||
-                    ::epoll_ctl(io_epoll_fd_, EPOLL_CTL_MOD, fd, &event) != 0) {
+            const int first_op = prefer_rearm ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
+            const int fallback_op = prefer_rearm ? EPOLL_CTL_ADD : EPOLL_CTL_MOD;
+            const int fallback_error = prefer_rearm ? ENOENT : EEXIST;
+            if (::epoll_ctl(io_epoll_fd_, first_op, fd, &event) != 0) {
+                const int first_error = errno;
+                if (first_error != fallback_error ||
+                    ::epoll_ctl(io_epoll_fd_, fallback_op, fd, &event) != 0) {
                     result->fd = fd;
                     result->events = io_error;
                     result->error = errno;
@@ -1770,6 +1776,7 @@ private:
                 }
             }
 
+            forget_deferred_io_delete(fd);
             *result = IoResult{fd, 0, 0};
             io_waits_.emplace(fd, IoWaitRegistration{task, result});
             return true;
@@ -1803,6 +1810,9 @@ private:
             IoWaitRegistration registration = it->second;
             io_waits_.erase(it);
             static_cast<void>(::epoll_ctl(io_epoll_fd_, EPOLL_CTL_DEL, fd, nullptr));
+            forget_deferred_io_delete(fd);
+            state.readiness_rearm_hint = false;
+            state.readiness_fd = -1;
 
             state.wait.fd = fd;
             state.wait.events = io_error;
@@ -2954,6 +2964,7 @@ private:
                 if (flush_io_uring_submissions_or_fail()) {
                     did_work = true;
                 }
+                flush_deferred_io_deletes();
 #endif
 
                 if (stop_requested_.load(std::memory_order_acquire)) {
@@ -2977,8 +2988,6 @@ private:
                 if (Task* task = pop_one()) {
                     sleeping_.store(false, std::memory_order_relaxed);
                     execute(task);
-                } else if (poll_io(0)) {
-                    sleeping_.store(false, std::memory_order_relaxed);
                 } else {
                     if (io_thread() && io_backend_available()) {
                         static_cast<void>(poll_io(-1));
@@ -3027,6 +3036,7 @@ private:
 #if defined(__linux__)
             close_io_uring_backend();
             io_waits_.clear();
+            io_deferred_deletes_.clear();
             if (io_wake_fd_ >= 0) {
                 ::close(io_wake_fd_);
                 io_wake_fd_ = -1;
@@ -3046,7 +3056,7 @@ private:
                 return did_work;
             }
 
-            std::array<epoll_event, 64> events{};
+            std::array<epoll_event, 64> events;
             const int count = ::epoll_wait(
                 io_epoll_fd_,
                 events.data(),
@@ -3074,7 +3084,7 @@ private:
 
                 IoWaitRegistration registration = it->second;
                 io_waits_.erase(it);
-                static_cast<void>(::epoll_ctl(io_epoll_fd_, EPOLL_CTL_DEL, fd, nullptr));
+                defer_io_delete(fd);
 
                 registration.result->fd = fd;
                 registration.result->events = io_events_from_native(
@@ -3091,6 +3101,32 @@ private:
         }
 
 #if defined(__linux__)
+        void defer_io_delete(int fd) {
+            io_deferred_deletes_.push_back(fd);
+        }
+
+        void forget_deferred_io_delete(int fd) noexcept {
+            auto it = std::find(
+                io_deferred_deletes_.begin(),
+                io_deferred_deletes_.end(),
+                fd);
+            if (it == io_deferred_deletes_.end()) {
+                return;
+            }
+            *it = io_deferred_deletes_.back();
+            io_deferred_deletes_.pop_back();
+        }
+
+        void flush_deferred_io_deletes() noexcept {
+            if (io_deferred_deletes_.empty()) {
+                return;
+            }
+            for (int fd : io_deferred_deletes_) {
+                static_cast<void>(::epoll_ctl(io_epoll_fd_, EPOLL_CTL_DEL, fd, nullptr));
+            }
+            io_deferred_deletes_.clear();
+        }
+
         [[nodiscard]] static int sys_io_uring_setup(
             unsigned entries,
             io_uring_params* params) noexcept {
@@ -3599,6 +3635,7 @@ private:
         int io_epoll_fd_{-1};
         int io_wake_fd_{-1};
         absl::flat_hash_map<int, IoWaitRegistration> io_waits_;
+        std::vector<int> io_deferred_deletes_;
         static constexpr unsigned io_uring_entries_{256};
         static constexpr unsigned io_uring_submit_batch_threshold_{64};
         int io_uring_fd_{-1};

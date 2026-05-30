@@ -272,15 +272,23 @@ template <typename TaskT>
     int fd,
     std::uint32_t events,
     IoOpState& state) noexcept {
+    const bool prefer_rearm =
+        state.readiness_rearm_hint && state.readiness_fd == fd;
     state.wait = IoResult{fd, 0, 0};
-    if (TaskT::Runtime::io_wait(thread, fd, events, &task, &state.wait)) {
+    if (TaskT::Runtime::io_wait(thread, fd, events, &task, &state.wait, prefer_rearm)) {
         state.waiting = true;
         state.wait_kind = IoWaitKind::Readiness;
+        state.readiness_rearm_hint = true;
+        state.readiness_fd = fd;
         return IoStatus::make_pending();
     }
 
     state.waiting = false;
     state.wait_kind = IoWaitKind::None;
+    if (state.wait.error == EBADF || state.wait.error == ENOENT || state.wait.error == ENOSYS) {
+        state.readiness_rearm_hint = false;
+        state.readiness_fd = -1;
+    }
     return IoStatus::failed(state.wait.error == 0 ? EINVAL : state.wait.error);
 }
 
@@ -319,6 +327,11 @@ inline void clear_waiting(IoOpState& state) noexcept {
     state.wait_kind = IoWaitKind::None;
 }
 
+inline void clear_readiness_rearm_hint(IoOpState& state) noexcept {
+    state.readiness_rearm_hint = false;
+    state.readiness_fd = -1;
+}
+
 [[nodiscard]] inline bool cancelled_wait_ready(const IoOpState& state) noexcept {
     return state.waiting && state.wait.error == ECANCELED;
 }
@@ -330,6 +343,7 @@ inline void clear_waiting(IoOpState& state) noexcept {
 
 [[nodiscard]] inline IoStatus consume_cancelled_wait(IoOpState& state) noexcept {
     clear_waiting(state);
+    clear_readiness_rearm_hint(state);
     return IoStatus::failed(ECANCELED);
 }
 

@@ -21,7 +21,8 @@ struct FakeRuntime {
         int,
         std::uint32_t,
         void*,
-        af::IoResult*) noexcept {
+        af::IoResult*,
+        bool = false) noexcept {
         return false;
     }
 
