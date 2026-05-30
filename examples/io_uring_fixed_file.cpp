@@ -9,6 +9,7 @@
 #include "af/async_flow.hpp"
 
 #if defined(__linux__)
+#include <sys/uio.h>
 #include <unistd.h>
 #endif
 
@@ -101,15 +102,19 @@ private:
         if (!fixed_file_async::io_register_files(FixedFileThread::IO_0, &fd_, 1, &error)) {
             return complete(error == 0 ? EIO : error);
         }
+        iovec iov{buffer_, sizeof(buffer_)};
+        if (!fixed_file_async::io_register_buffers(FixedFileThread::IO_0, &iov, 1, &error)) {
+            return complete(error == 0 ? EIO : error);
+        }
+        buffer_[0] = value_;
         state_ = State::Write;
         return again();
     }
 
     af::TaskResult write_value() {
-        const af::IoStatus status = file_.write_at(
+        const af::IoStatus status = file_.write_fixed_at(
             *this,
-            &value_,
-            sizeof(value_),
+            af::IoFixedBuffer{buffer_, 1, 0},
             0,
             write_);
         if (status.pending()) {
@@ -118,6 +123,7 @@ private:
         if (!status.ready()) {
             return complete(status.failed() ? status.error : EIO);
         }
+        buffer_[0] = 0;
         state_ = State::Fsync;
         return again();
     }
@@ -135,16 +141,15 @@ private:
     }
 
     af::TaskResult read_value() {
-        const af::IoStatus status = file_.read_at(
+        const af::IoStatus status = file_.read_fixed_at(
             *this,
-            &read_,
-            sizeof(read_),
+            af::IoFixedBuffer{buffer_, 1, 0},
             0,
             read_state_);
         if (status.pending()) {
             return pending();
         }
-        if (!status.ready() || status.bytes != sizeof(read_)) {
+        if (!status.ready() || status.bytes != 1U) {
             return complete(status.failed() ? status.error : EIO);
         }
         state_ = State::Unregister;
@@ -153,10 +158,13 @@ private:
 
     af::TaskResult unregister_file() {
         int error = 0;
+        if (!fixed_file_async::io_unregister_buffers(FixedFileThread::IO_0, &error)) {
+            return complete(error == 0 ? EIO : error);
+        }
         if (!fixed_file_async::io_unregister_files(FixedFileThread::IO_0, &error)) {
             return complete(error == 0 ? EIO : error);
         }
-        byte_read_->store(read_, std::memory_order_release);
+        byte_read_->store(buffer_[0], std::memory_order_release);
         return complete(0);
     }
 
@@ -169,8 +177,8 @@ private:
     State state_{State::Register};
     int fd_{-1};
     af::IoFixedFile<FixedFileThread> file_{};
+    alignas(64) char buffer_[64]{};
     char value_{'F'};
-    char read_{0};
     af::IoOpState write_{};
     af::IoOpState fsync_{};
     af::IoOpState read_state_{};

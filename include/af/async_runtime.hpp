@@ -822,6 +822,76 @@ public:
     }
 
 #if !defined(_WIN32)
+    [[nodiscard]] static bool io_submit_read_fixed_file_at(
+        Thread thread,
+        int file_index,
+        void* data,
+        std::size_t size,
+        std::uint64_t offset,
+        std::uint16_t buffer_index,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || file_index < 0 || data == nullptr) {
+            if (result != nullptr) {
+                result->fd = file_index;
+                result->events = io_error;
+                result->error = file_index < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = file_index;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_read_fixed_file(
+            file_index,
+            data,
+            size,
+            offset,
+            buffer_index,
+            task,
+            result);
+    }
+
+    [[nodiscard]] static bool io_submit_write_fixed_file_at(
+        Thread thread,
+        int file_index,
+        const void* data,
+        std::size_t size,
+        std::uint64_t offset,
+        std::uint16_t buffer_index,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || file_index < 0 || data == nullptr) {
+            if (result != nullptr) {
+                result->fd = file_index;
+                result->events = io_error;
+                result->error = file_index < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = file_index;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_write_fixed_file(
+            file_index,
+            data,
+            size,
+            offset,
+            buffer_index,
+            task,
+            result);
+    }
+
     [[nodiscard]] static bool io_submit_read_fixed_at(
         Thread thread,
         int fd,
@@ -2531,6 +2601,98 @@ private:
         }
 
 #if !defined(_WIN32)
+        [[nodiscard]] bool submit_io_uring_read_fixed_file(
+            int file_index,
+            void* data,
+            std::size_t size,
+            std::uint64_t offset,
+            std::uint16_t buffer_index,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_READ_FIXED,
+                file_index,
+                data,
+                size,
+                offset,
+                0,
+                io_readable,
+                task,
+                result,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                nullptr,
+                0,
+                0,
+                -1,
+                buffer_index,
+                true);
+#else
+            static_cast<void>(file_index);
+            static_cast<void>(data);
+            static_cast<void>(size);
+            static_cast<void>(offset);
+            static_cast<void>(buffer_index);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
+        [[nodiscard]] bool submit_io_uring_write_fixed_file(
+            int file_index,
+            const void* data,
+            std::size_t size,
+            std::uint64_t offset,
+            std::uint16_t buffer_index,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_WRITE_FIXED,
+                file_index,
+                const_cast<void*>(data),
+                size,
+                offset,
+                0,
+                io_writable,
+                task,
+                result,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                nullptr,
+                0,
+                0,
+                -1,
+                buffer_index,
+                true);
+#else
+            static_cast<void>(file_index);
+            static_cast<void>(data);
+            static_cast<void>(size);
+            static_cast<void>(offset);
+            static_cast<void>(buffer_index);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
         [[nodiscard]] bool submit_io_uring_read_fixed(
             int fd,
             void* data,

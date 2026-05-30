@@ -1206,7 +1206,11 @@ private:
         af::IoOpState zero{};
         af::IoOpState bad{};
         af::IoOpState null_data{};
+        af::IoOpState fixed_unavailable{};
+        af::IoOpState fixed_bad{};
+        af::IoOpState fixed_null{};
         char value = 0;
+        af::IoFixedBuffer buffer{&value, sizeof(value), 0};
 
         const af::IoStatus unavailable_read =
             missing.read_at(*this, &value, sizeof(value), 0, unavailable);
@@ -1214,10 +1218,22 @@ private:
         const af::IoStatus bad_read = invalid.read_at(*this, &value, sizeof(value), 0, bad);
         const af::IoStatus null_read =
             missing.read_at(*this, nullptr, sizeof(value), 0, null_data);
+        const af::IoStatus fixed_unavailable_read =
+            missing.read_fixed_at(*this, buffer, 0, fixed_unavailable);
+        const af::IoStatus fixed_bad_read =
+            invalid.read_fixed_at(*this, buffer, 0, fixed_bad);
+        const af::IoStatus fixed_null_read = missing.read_fixed_at(
+            *this,
+            af::IoFixedBuffer{nullptr, sizeof(value), 0},
+            0,
+            fixed_null);
         if (!unavailable_read.failed() || unavailable_read.error != ENOSYS ||
             !zero_read.ready() || zero_read.bytes != 0U ||
             !bad_read.failed() || bad_read.error != EBADF ||
-            !null_read.failed() || null_read.error != EINVAL) {
+            !null_read.failed() || null_read.error != EINVAL ||
+            !fixed_unavailable_read.failed() || fixed_unavailable_read.error != ENOSYS ||
+            !fixed_bad_read.failed() || fixed_bad_read.error != EBADF ||
+            !fixed_null_read.failed() || fixed_null_read.error != EINVAL) {
             return failed();
         }
 
@@ -1628,23 +1644,41 @@ private:
             return failed();
         }
 
+        const af::IoStatus no_buffer = file_.write_fixed_at(
+            *this,
+            buffer_,
+            1,
+            0,
+            0,
+            no_buffer_);
+        if (!no_buffer.failed() || no_buffer.error != ENOBUFS) {
+            return failed();
+        }
+
+        iovec iov{buffer_, sizeof(buffer_)};
+        int buffer_error = 0;
+        if (!UringIoRuntime::io_register_buffers(IoTestThread::IO_0, &iov, 1, &buffer_error)) {
+            return failed();
+        }
+
+        buffer_[0] = value_;
         state_ = State::Write;
         return again();
     }
 
     af::TaskResult write_value() {
-        const af::IoStatus status = file_.write_at(
+        const af::IoStatus status = file_.write_fixed_at(
             *this,
-            &value_,
-            sizeof(value_),
+            af::IoFixedBuffer{buffer_, 1, 0},
             0,
             write_);
         if (status.pending()) {
             return pending();
         }
-        if (!status.ready() || status.bytes != sizeof(value_)) {
+        if (!status.ready() || status.bytes != 1U) {
             return failed();
         }
+        buffer_[0] = 0;
         state_ = State::Fsync;
         return again();
     }
@@ -1662,16 +1696,15 @@ private:
     }
 
     af::TaskResult read_value() {
-        const af::IoStatus status = file_.read_at(
+        const af::IoStatus status = file_.read_fixed_at(
             *this,
-            &read_,
-            sizeof(read_),
+            af::IoFixedBuffer{buffer_, 1, 0},
             0,
             read_state_);
         if (status.pending()) {
             return pending();
         }
-        if (!status.ready() || status.bytes != sizeof(read_) || read_ != value_) {
+        if (!status.ready() || status.bytes != 1U || buffer_[0] != value_) {
             return failed();
         }
         state_ = State::Unregister;
@@ -1680,10 +1713,13 @@ private:
 
     af::TaskResult unregister_file() {
         int error = 0;
+        if (!UringIoRuntime::io_unregister_buffers(IoTestThread::IO_0, &error)) {
+            return failed();
+        }
         if (!UringIoRuntime::io_unregister_files(IoTestThread::IO_0, &error)) {
             return failed();
         }
-        byte_read_->store(read_, std::memory_order_release);
+        byte_read_->store(buffer_[0], std::memory_order_release);
         completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
@@ -1691,10 +1727,11 @@ private:
     State state_{State::Register};
     int fd_{-1};
     af::IoFixedFile<IoTestThread> file_{};
+    alignas(64) char buffer_[64]{};
     char value_{'F'};
-    char read_{0};
     af::IoOpState no_table_{};
     af::IoOpState bad_index_{};
+    af::IoOpState no_buffer_{};
     af::IoOpState write_{};
     af::IoOpState fsync_{};
     af::IoOpState read_state_{};

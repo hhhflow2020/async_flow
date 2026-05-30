@@ -147,6 +147,30 @@ struct FakeRuntime {
         return false;
     }
 
+    static bool io_submit_read_fixed_file_at(
+        BenchIoThread,
+        int,
+        void*,
+        std::size_t,
+        std::uint64_t,
+        std::uint16_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
+    static bool io_submit_write_fixed_file_at(
+        BenchIoThread,
+        int,
+        const void*,
+        std::size_t,
+        std::uint64_t,
+        std::uint16_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
     static bool io_submit_fsync_fixed_file(
         BenchIoThread,
         int,
@@ -468,6 +492,32 @@ void BM_IoFixedFileAdapterZeroByteWriteAt(benchmark::State& state) {
     }
 }
 
+void BM_IoFixedFileAdapterZeroByteReadFixedAt(benchmark::State& state) {
+    FakeTask task;
+    af::IoFixedFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(file.read_fixed_at(
+            task,
+            af::IoFixedBuffer{nullptr, 0, 0},
+            0,
+            op));
+    }
+}
+
+void BM_IoFixedFileAdapterZeroByteWriteFixedAt(benchmark::State& state) {
+    FakeTask task;
+    af::IoFixedFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(file.write_fixed_at(
+            task,
+            af::IoFixedBuffer{nullptr, 0, 0},
+            0,
+            op));
+    }
+}
+
 void BM_IoStreamAdapterZeroIovSendv(benchmark::State& state) {
     FakeTask task;
     af::TcpStream<BenchIoThread> stream(BenchIoThread::IO_0, -1);
@@ -514,6 +564,8 @@ BENCHMARK(BM_IoFileAdapterZeroByteReadFixedAt);
 BENCHMARK(BM_IoFileAdapterZeroByteWriteFixedAt);
 BENCHMARK(BM_IoFixedFileAdapterZeroByteReadAt);
 BENCHMARK(BM_IoFixedFileAdapterZeroByteWriteAt);
+BENCHMARK(BM_IoFixedFileAdapterZeroByteReadFixedAt);
+BENCHMARK(BM_IoFixedFileAdapterZeroByteWriteFixedAt);
 BENCHMARK(BM_IoStreamAdapterZeroIovSendv);
 BENCHMARK(BM_IoDatagramAdapterZeroIovRecvvFrom);
 BENCHMARK(BM_IoDatagramAdapterZeroIovSendvTo);
