@@ -1652,6 +1652,10 @@ private:
     }
 
     class alignas(detail::hardware_cache_line_size) Executor {
+#if defined(__linux__)
+        struct IoUringOperation;
+#endif
+
     public:
         explicit Executor(std::uint16_t index)
             : index_(index),
@@ -1807,6 +1811,43 @@ private:
             enqueue_pending_blocking(index_, registration.task);
             return true;
         }
+
+        [[nodiscard]] bool cancel_io_completion(IoOpState& state) noexcept {
+            if (io_uring_fd_ < 0) {
+                state.wait.events = io_error;
+                state.wait.error = ENOSYS;
+                state.wait.result = -ENOSYS;
+                return false;
+            }
+
+            IoUringOperation* operation = find_io_uring_operation(&state.wait);
+            if (operation == nullptr) {
+                state.wait.events = io_error;
+                state.wait.error = ENOENT;
+                state.wait.result = -ENOENT;
+                return false;
+            }
+            if (operation->opcode == IORING_OP_CLOSE) {
+                state.wait.events = io_error;
+                state.wait.error = EOPNOTSUPP;
+                state.wait.result = -EOPNOTSUPP;
+                return false;
+            }
+
+            const int submit_error = submit_io_uring_cancel(operation);
+            if (submit_error != 0) {
+                state.wait.events = io_error;
+                state.wait.error = submit_error;
+                state.wait.result = -submit_error;
+                return false;
+            }
+
+            operation->cancel_requested = true;
+            state.wait.events = io_error;
+            state.wait.error = ECANCELED;
+            state.wait.result = -ECANCELED;
+            return true;
+        }
 #endif
 
         [[nodiscard]] bool cancel_io(IoOpState& state) noexcept {
@@ -1832,10 +1873,7 @@ private:
                 return cancel_io_wait(state);
             }
             if (state.wait_kind == IoWaitKind::Completion) {
-                state.wait.events = io_error;
-                state.wait.error = ENOSYS;
-                state.wait.result = -ENOSYS;
-                return false;
+                return cancel_io_completion(state);
             }
 #endif
             state.wait.events = io_error;
@@ -2617,6 +2655,8 @@ private:
             IoUringMessage* msg{nullptr};
             IoUringSocketAddress* socket_address{nullptr};
             std::uint32_t complete_events{0};
+            std::uint8_t opcode{0};
+            bool cancel_requested{false};
         };
 #endif
 
@@ -2733,6 +2773,8 @@ private:
             operation->task = task;
             operation->result = result;
             operation->complete_events = complete_events;
+            operation->opcode = opcode;
+            operation->cancel_requested = false;
             operation->msg = nullptr;
             operation->socket_address = nullptr;
             if (message_op) {
@@ -3288,7 +3330,14 @@ private:
         void complete_io_uring_operation(IoUringOperation* operation, int result) noexcept {
             untrack_io_uring_operation(operation);
             operation->result->result = result;
-            if (result < 0) {
+            if (operation->cancel_requested) {
+                if (result >= 0 && io_uring_result_is_fd(operation->opcode)) {
+                    ::close(result);
+                }
+                operation->result->events = io_error;
+                operation->result->error = ECANCELED;
+                operation->result->result = -ECANCELED;
+            } else if (result < 0) {
                 operation->result->events = io_error;
                 operation->result->error = -result;
             } else {
@@ -3314,6 +3363,42 @@ private:
             }
             enqueue_pending_blocking(index_, operation->task);
             destroy_io_uring_operation(operation);
+        }
+
+        [[nodiscard]] static bool io_uring_result_is_fd(std::uint8_t opcode) noexcept {
+            return opcode == IORING_OP_OPENAT || opcode == IORING_OP_ACCEPT;
+        }
+
+        [[nodiscard]] IoUringOperation* find_io_uring_operation(IoResult* result) noexcept {
+            IoUringOperation* operation = io_uring_operations_;
+            while (operation != nullptr) {
+                if (operation->result == result) {
+                    return operation;
+                }
+                operation = operation->next;
+            }
+            return nullptr;
+        }
+
+        [[nodiscard]] int submit_io_uring_cancel(IoUringOperation* operation) noexcept {
+            int reserve_error = 0;
+            io_uring_sqe* sqe = reserve_io_uring_sqe(reserve_error);
+            if (sqe == nullptr) {
+                return reserve_error == 0 ? EBUSY : reserve_error;
+            }
+
+            *sqe = io_uring_sqe{};
+            sqe->opcode = IORING_OP_ASYNC_CANCEL;
+            sqe->fd = -1;
+            sqe->addr = reinterpret_cast<std::uint64_t>(operation);
+            sqe->cancel_flags = 0;
+            sqe->user_data = 0;
+
+            const int submit_error = flush_io_uring_submissions();
+            if (submit_error != 0) {
+                fail_io_uring_backend(submit_error, nullptr);
+            }
+            return submit_error;
         }
 
         void track_io_uring_operation(IoUringOperation* operation) noexcept {
@@ -3371,8 +3456,8 @@ private:
                 }
 
                 operation->result->events = io_error;
-                operation->result->error = error;
-                operation->result->result = -error;
+                operation->result->error = operation->cancel_requested ? ECANCELED : error;
+                operation->result->result = operation->cancel_requested ? -ECANCELED : -error;
                 enqueue_pending_blocking(index_, operation->task);
                 destroy_io_uring_operation(operation);
                 operation = next;

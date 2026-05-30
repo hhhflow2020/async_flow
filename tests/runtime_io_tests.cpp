@@ -1633,6 +1633,102 @@ private:
     std::atomic<char>* byte_read_{nullptr};
 };
 
+class UringCancellableSocketRecvTask final : public UringIoTaskBase {
+public:
+    explicit UringCancellableSocketRecvTask(UringIoTaskBase::FactoryToken token)
+        : UringIoTaskBase(token) {}
+
+    bool do_it(
+        int fd,
+        std::atomic<af::IoOpState*>* state,
+        std::atomic<int>* wait_kind,
+        std::atomic<int>* armed,
+        std::atomic<int>* completed,
+        std::atomic<int>* error,
+        std::atomic<int>* bytes) {
+        stream_.reset(IoTestThread::IO_0, fd);
+        state_ = state;
+        wait_kind_ = wait_kind;
+        armed_ = armed;
+        completed_ = completed;
+        error_ = error;
+        bytes_ = bytes;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        const af::IoStatus status = stream_.recv_some(*this, &value_, sizeof(value_), recv_);
+        if (status.pending()) {
+            state_->store(&recv_, std::memory_order_release);
+            wait_kind_->store(static_cast<int>(recv_.wait_kind), std::memory_order_release);
+            armed_->fetch_add(1, std::memory_order_release);
+            return pending();
+        }
+
+        if (status.failed()) {
+            error_->store(status.error, std::memory_order_release);
+        } else if (status.ready()) {
+            error_->store(0, std::memory_order_release);
+            bytes_->store(static_cast<int>(status.bytes), std::memory_order_release);
+        } else if (status.closed()) {
+            error_->store(0, std::memory_order_release);
+            bytes_->store(0, std::memory_order_release);
+        } else {
+            return failed();
+        }
+
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    af::TcpStream<IoTestThread> stream_{};
+    char value_{0};
+    af::IoOpState recv_{};
+    std::atomic<af::IoOpState*>* state_{nullptr};
+    std::atomic<int>* wait_kind_{nullptr};
+    std::atomic<int>* armed_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* error_{nullptr};
+    std::atomic<int>* bytes_{nullptr};
+};
+
+class UringCancelIoStateTask final : public UringIoTaskBase {
+public:
+    explicit UringCancelIoStateTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
+
+    bool do_it(
+        std::atomic<af::IoOpState*>* state,
+        std::atomic<int>* completed,
+        std::atomic<int>* result,
+        std::atomic<int>* error) {
+        state_ = state;
+        completed_ = completed;
+        result_ = result;
+        error_ = error;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        af::IoOpState* state = state_->load(std::memory_order_acquire);
+        if (state == nullptr) {
+            return failed();
+        }
+
+        const bool ok = UringIoRuntime::cancel_io(IoTestThread::IO_0, *state);
+        result_->store(ok ? 1 : 0, std::memory_order_release);
+        error_->store(state->wait.error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<af::IoOpState*>* state_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* result_{nullptr};
+    std::atomic<int>* error_{nullptr};
+};
+
 class UringStreamSendTask final : public UringIoTaskBase {
 public:
     explicit UringStreamSendTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
@@ -3329,6 +3425,67 @@ TEST_F(UringIoRuntimeFixture, IoUringThreadFallsBackToEpollReadiness) {
     ASSERT_EQ(::write(fds[1], &value, sizeof(value)), 1);
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(byte_read.load(std::memory_order_acquire), value);
+
+    close_pair(fds);
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringThreadCancelsPendingRecvCompletion) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io_uring backend unavailable";
+    }
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds), 0);
+
+    std::atomic<af::IoOpState*> state{nullptr};
+    std::atomic<int> wait_kind{-1};
+    std::atomic<int> armed{0};
+    std::atomic<int> recv_completed{0};
+    std::atomic<int> recv_error{0};
+    std::atomic<int> recv_bytes{-1};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringCancellableSocketRecvTask>(
+        fds[0],
+        &state,
+        &wait_kind,
+        &armed,
+        &recv_completed,
+        &recv_error,
+        &recv_bytes));
+    ASSERT_TRUE(wait_until_at_least(armed, 1));
+
+    if (wait_kind.load(std::memory_order_acquire) !=
+        static_cast<int>(af::IoWaitKind::Completion)) {
+        const char value = 'f';
+        ASSERT_EQ(::write(fds[1], &value, sizeof(value)), 1);
+        ASSERT_TRUE(wait_until_at_least(recv_completed, 1));
+        close_pair(fds);
+        GTEST_SKIP() << "recv did not remain as an io_uring completion operation";
+    }
+
+    std::atomic<int> cancel_completed{0};
+    std::atomic<int> cancel_result{0};
+    std::atomic<int> cancel_error{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringCancelIoStateTask>(
+        &state,
+        &cancel_completed,
+        &cancel_result,
+        &cancel_error));
+    ASSERT_TRUE(wait_until_at_least(cancel_completed, 1));
+
+    if (!wait_until_at_least(recv_completed, 1)) {
+        const char value = 'u';
+        ASSERT_EQ(::write(fds[1], &value, sizeof(value)), 1);
+        ASSERT_TRUE(wait_until_at_least(recv_completed, 1));
+    }
+
+    EXPECT_EQ(cancel_result.load(std::memory_order_acquire), 1);
+    EXPECT_EQ(cancel_error.load(std::memory_order_acquire), ECANCELED);
+    EXPECT_EQ(recv_error.load(std::memory_order_acquire), ECANCELED);
+    EXPECT_EQ(recv_bytes.load(std::memory_order_acquire), -1);
 
     close_pair(fds);
 #else
