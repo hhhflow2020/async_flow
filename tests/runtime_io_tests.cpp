@@ -1043,6 +1043,42 @@ private:
     std::atomic<char>* byte_read_{nullptr};
 };
 
+template <typename BaseTask>
+class BasicStreamShutdownTask final : public BaseTask {
+public:
+    explicit BasicStreamShutdownTask(typename BaseTask::FactoryToken token) : BaseTask(token) {}
+
+    bool do_it(int fd, std::atomic<int>* completed, std::atomic<int>* error) {
+        stream_.reset(IoTestThread::IO_0, fd);
+        completed_ = completed;
+        error_ = error;
+        return this->schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        return shutdown_write();
+    }
+
+    af::TaskResult shutdown_write() {
+        const af::IoStatus status = stream_.shutdown(*this, SHUT_WR, shutdown_);
+        if (status.pending()) {
+            return this->pending();
+        }
+        error_->store(status.ready() ? 0 : status.error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return this->done();
+    }
+
+    af::TcpStream<IoTestThread> stream_{};
+    af::IoOpState shutdown_{};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* error_{nullptr};
+};
+
+using StreamShutdownTask = BasicStreamShutdownTask<IoTaskBase>;
+using UringStreamShutdownTask = BasicStreamShutdownTask<UringIoTaskBase>;
+
 class StreamVectoredEchoTask final : public IoTaskBase {
 public:
     explicit StreamVectoredEchoTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
@@ -6267,6 +6303,29 @@ TEST_F(IoRuntimeFixture, StreamAdapterReceivesAndSendsSocketBytes) {
 #endif
 }
 
+TEST_F(IoRuntimeFixture, StreamAdapterShutdownWriteHalfClosesPeer) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+
+    std::atomic<int> completed{0};
+    std::atomic<int> error{0};
+    ASSERT_TRUE(IoRuntime::start_task<StreamShutdownTask>(fds[0], &completed, &error));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(error.load(std::memory_order_acquire), 0);
+
+    char ignored = 0;
+    EXPECT_EQ(::read(fds[1], &ignored, sizeof(ignored)), 0);
+    close_pair(fds);
+#else
+    GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
 TEST_F(IoRuntimeFixture, StreamAdapterReceivesAndSendsVectoredSocketBytes) {
 #if defined(__linux__)
     if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
@@ -6970,6 +7029,29 @@ TEST_F(UringIoRuntimeFixture, IoUringThreadSendZcSendsStreamBytesOrFallsBack) {
     ASSERT_EQ(::read(fds[1], &value, sizeof(value)), 1);
     EXPECT_EQ(value, 'Z');
 
+    close_pair(fds);
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringThreadShutdownsStreamOrFallsBack) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io backend unavailable";
+    }
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+
+    std::atomic<int> completed{0};
+    std::atomic<int> error{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringStreamShutdownTask>(fds[0], &completed, &error));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(error.load(std::memory_order_acquire), 0);
+
+    char ignored = 0;
+    EXPECT_EQ(::read(fds[1], &ignored, sizeof(ignored)), 0);
     close_pair(fds);
 #else
     GTEST_SKIP() << "io_uring backend is Linux-only";

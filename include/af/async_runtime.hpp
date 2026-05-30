@@ -1318,6 +1318,31 @@ public:
         return executors_[index]->submit_io_uring_close(fd, task, result);
     }
 
+    [[nodiscard]] static bool io_submit_shutdown(
+        Thread thread,
+        int fd,
+        int how,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || fd < 0) {
+            if (result != nullptr) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = fd < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_shutdown(fd, how, task, result);
+    }
+
     [[nodiscard]] static bool io_submit_statx(
         Thread thread,
         int dir_fd,
@@ -4142,6 +4167,33 @@ private:
 #endif
         }
 
+        [[nodiscard]] bool submit_io_uring_shutdown(
+            int fd,
+            int how,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_SHUTDOWN,
+                fd,
+                nullptr,
+                static_cast<std::size_t>(how),
+                0,
+                0,
+                io_writable,
+                task,
+                result);
+#else
+            static_cast<void>(fd);
+            static_cast<void>(how);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
         [[nodiscard]] bool submit_io_uring_statx(
             int dir_fd,
             const char* path,
@@ -5556,6 +5608,7 @@ private:
                 return false;
             }
             const bool close_op = opcode == IORING_OP_CLOSE;
+            const bool shutdown_op = opcode == IORING_OP_SHUTDOWN;
             const bool fallocate_op = opcode == IORING_OP_FALLOCATE;
             const bool splice_op = opcode == IORING_OP_SPLICE;
             const bool fixed_buffer_op =
@@ -5572,7 +5625,7 @@ private:
                 accept_op && socket_address_out != nullptr && socket_address_size_out != nullptr;
             const bool needs_socket_address = connect_op || accept_address_op;
             const bool data_optional_op =
-                opcode == IORING_OP_FSYNC || close_op || fallocate_op || splice_op;
+                opcode == IORING_OP_FSYNC || close_op || shutdown_op || fallocate_op || splice_op;
             if (!data_optional_op && !address_op && data == nullptr && !message_iov_op &&
                 !buffer_select) {
                 result->fd = fd;
@@ -5778,6 +5831,8 @@ private:
                 sqe->fsync_flags = op_flags;
             } else if (close_op) {
                 // fd is already filled.
+            } else if (shutdown_op) {
+                sqe->len = static_cast<unsigned>(size);
             } else if (fallocate_op) {
                 sqe->addr = extra;
                 sqe->len = static_cast<unsigned>(size);

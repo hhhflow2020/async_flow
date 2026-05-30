@@ -436,6 +436,15 @@ struct FakeRuntime {
         return false;
     }
 
+    static bool io_submit_shutdown(
+        BenchIoThread,
+        int,
+        int,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
     static bool io_submit_statx(
         BenchIoThread,
         int,
@@ -622,6 +631,15 @@ void BM_IoStreamAdapterInvalidConnect(benchmark::State& state) {
     af::IoOpState op;
     for (auto _ : state) {
         benchmark::DoNotOptimize(stream.connect(task, nullptr, 0, op));
+    }
+}
+
+void BM_IoStreamAdapterInvalidShutdown(benchmark::State& state) {
+    FakeTask task;
+    af::TcpStream<BenchIoThread> stream(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(stream.shutdown(task, 1, op));
     }
 }
 
@@ -934,6 +952,7 @@ BENCHMARK(BM_IoListenerAdapterInvalidAccept);
 BENCHMARK(BM_IoListenerAdapterInvalidAcceptDirect);
 BENCHMARK(BM_IoListenerAdapterInvalidAcceptMultishot);
 BENCHMARK(BM_IoStreamAdapterInvalidConnect);
+BENCHMARK(BM_IoStreamAdapterInvalidShutdown);
 BENCHMARK(BM_IoTimerAdapterNullExpiration);
 BENCHMARK(BM_IoEventAdapterNullValue);
 BENCHMARK(BM_IoTimeoutInvalidDelay);
