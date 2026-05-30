@@ -74,6 +74,54 @@ struct FakeRuntime {
         return false;
     }
 
+    static bool io_submit_recvmsg_iov(
+        BenchIoThread,
+        int,
+        const iovec*,
+        int,
+        sockaddr*,
+        socklen_t*,
+        std::uint32_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
+    static bool io_submit_sendmsg_iov(
+        BenchIoThread,
+        int,
+        const iovec*,
+        int,
+        const sockaddr*,
+        socklen_t,
+        std::uint32_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
+    static bool io_submit_readv_at(
+        BenchIoThread,
+        int,
+        const iovec*,
+        int,
+        std::uint64_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
+    static bool io_submit_writev_at(
+        BenchIoThread,
+        int,
+        const iovec*,
+        int,
+        std::uint64_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
     static bool io_submit_accept(
         BenchIoThread,
         int,
@@ -147,10 +195,34 @@ void BM_IoStreamAdapterInvalidConnect(benchmark::State& state) {
     }
 }
 
+#if !defined(_WIN32)
+void BM_IoFileAdapterZeroIovReadvAt(benchmark::State& state) {
+    FakeTask task;
+    af::IoFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(file.readv_at(task, nullptr, 0, 0, op));
+    }
+}
+
+void BM_IoStreamAdapterZeroIovSendv(benchmark::State& state) {
+    FakeTask task;
+    af::TcpStream<BenchIoThread> stream(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(stream.sendv_some(task, nullptr, 0, op));
+    }
+}
+#endif
+
 BENCHMARK(BM_IoFileAdapterZeroByteRead);
 BENCHMARK(BM_IoStreamAdapterZeroByteSend);
 BENCHMARK(BM_IoDatagramAdapterZeroByteRecv);
 BENCHMARK(BM_IoListenerAdapterInvalidAccept);
 BENCHMARK(BM_IoStreamAdapterInvalidConnect);
+#if !defined(_WIN32)
+BENCHMARK(BM_IoFileAdapterZeroIovReadvAt);
+BENCHMARK(BM_IoStreamAdapterZeroIovSendv);
+#endif
 
 } // namespace

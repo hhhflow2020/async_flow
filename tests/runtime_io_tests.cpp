@@ -9,6 +9,10 @@
 
 #include "af/async_flow.hpp"
 
+#if !defined(_WIN32)
+#include <sys/uio.h>
+#endif
+
 #if defined(__linux__)
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -555,6 +559,86 @@ private:
     std::atomic<char>* byte_read_{nullptr};
 };
 
+class StreamVectoredEchoTask final : public IoTaskBase {
+public:
+    explicit StreamVectoredEchoTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(
+        int fd,
+        std::atomic<int>* armed,
+        std::atomic<int>* completed,
+        std::atomic<int>* request_seen) {
+        stream_.reset(IoTestThread::IO_0, fd);
+        armed_ = armed;
+        completed_ = completed;
+        request_seen_ = request_seen;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        ReadRequest,
+        SendResponse,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::ReadRequest:
+            return read_request();
+
+        case State::SendResponse:
+            return send_response();
+        }
+        return failed();
+    }
+
+    af::TaskResult read_request() {
+        iovec request_iov[2]{
+            iovec{&request_[0], 1},
+            iovec{&request_[1], 1},
+        };
+        const af::IoStatus status = stream_.recvv_some(*this, request_iov, 2, read_);
+        if (status.pending()) {
+            armed_->fetch_add(1, std::memory_order_release);
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(request_)) {
+            return failed();
+        }
+        const int combined =
+            (static_cast<int>(request_[0]) << 8) | static_cast<unsigned char>(request_[1]);
+        request_seen_->store(combined, std::memory_order_release);
+        state_ = State::SendResponse;
+        return again();
+    }
+
+    af::TaskResult send_response() {
+        iovec response_iov[2]{
+            iovec{&response_[0], 1},
+            iovec{&response_[1], 1},
+        };
+        const af::IoStatus status = stream_.sendv_some(*this, response_iov, 2, write_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(response_)) {
+            return failed();
+        }
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    State state_{State::ReadRequest};
+    af::TcpStream<IoTestThread> stream_{};
+    char request_[2]{};
+    char response_[2]{'X', 'Y'};
+    af::IoOpState read_{};
+    af::IoOpState write_{};
+    std::atomic<int>* armed_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* request_seen_{nullptr};
+};
+
 class FileAdapterBoundaryTask final : public IoTaskBase {
 public:
     explicit FileAdapterBoundaryTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
@@ -670,6 +754,94 @@ private:
     std::atomic<char>* byte_read_{nullptr};
 };
 
+class UringFileVectoredReadWriteTask final : public UringIoTaskBase {
+public:
+    explicit UringFileVectoredReadWriteTask(UringIoTaskBase::FactoryToken token)
+        : UringIoTaskBase(token) {}
+
+    bool do_it(int fd, std::atomic<int>* completed, std::atomic<int>* bytes_read) {
+        file_.reset(IoTestThread::IO_0, fd);
+        completed_ = completed;
+        bytes_read_ = bytes_read;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Write,
+        Fsync,
+        Read,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Write:
+            return write_value();
+
+        case State::Fsync:
+            return fsync_value();
+
+        case State::Read:
+            return read_value();
+        }
+        return failed();
+    }
+
+    af::TaskResult write_value() {
+        write_iov_[0] = iovec{&first_, 1};
+        write_iov_[1] = iovec{&second_, 1};
+        const af::IoStatus status = file_.writev_at(*this, write_iov_, 2, 0, write_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != 2U) {
+            return failed();
+        }
+        state_ = State::Fsync;
+        return again();
+    }
+
+    af::TaskResult fsync_value() {
+        const af::IoStatus status = file_.fsync(*this, fsync_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready()) {
+            return failed();
+        }
+        state_ = State::Read;
+        return again();
+    }
+
+    af::TaskResult read_value() {
+        read_iov_[0] = iovec{&read_[0], 1};
+        read_iov_[1] = iovec{&read_[1], 1};
+        const af::IoStatus status = file_.readv_at(*this, read_iov_, 2, 0, read_state_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != 2U || read_[0] != first_ || read_[1] != second_) {
+            return failed();
+        }
+        bytes_read_->store(static_cast<int>(status.bytes), std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    State state_{State::Write};
+    af::IoFile<IoTestThread> file_{};
+    char first_{'V'};
+    char second_{'W'};
+    char read_[2]{};
+    iovec write_iov_[2]{};
+    iovec read_iov_[2]{};
+    af::IoOpState write_{};
+    af::IoOpState fsync_{};
+    af::IoOpState read_state_{};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* bytes_read_{nullptr};
+};
+
 class UringStreamFallbackTask final : public UringIoTaskBase {
 public:
     explicit UringStreamFallbackTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
@@ -736,6 +908,85 @@ private:
     char value_{'S'};
     af::IoOpState write_{};
     std::atomic<int>* completed_{nullptr};
+};
+
+class UringStreamVectoredTask final : public UringIoTaskBase {
+public:
+    explicit UringStreamVectoredTask(UringIoTaskBase::FactoryToken token)
+        : UringIoTaskBase(token) {}
+
+    bool do_it(
+        int fd,
+        std::atomic<int>* armed,
+        std::atomic<int>* completed,
+        std::atomic<int>* request_seen) {
+        stream_.reset(IoTestThread::IO_0, fd);
+        armed_ = armed;
+        completed_ = completed;
+        request_seen_ = request_seen;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        ReadRequest,
+        SendResponse,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::ReadRequest:
+            return read_request();
+
+        case State::SendResponse:
+            return send_response();
+        }
+        return failed();
+    }
+
+    af::TaskResult read_request() {
+        request_iov_[0] = iovec{&request_[0], 1};
+        request_iov_[1] = iovec{&request_[1], 1};
+        const af::IoStatus status = stream_.recvv_some(*this, request_iov_, 2, read_);
+        if (status.pending()) {
+            armed_->fetch_add(1, std::memory_order_release);
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(request_)) {
+            return failed();
+        }
+        const int combined =
+            (static_cast<int>(request_[0]) << 8) | static_cast<unsigned char>(request_[1]);
+        request_seen_->store(combined, std::memory_order_release);
+        state_ = State::SendResponse;
+        return again();
+    }
+
+    af::TaskResult send_response() {
+        response_iov_[0] = iovec{&response_[0], 1};
+        response_iov_[1] = iovec{&response_[1], 1};
+        const af::IoStatus status = stream_.sendv_some(*this, response_iov_, 2, write_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(response_)) {
+            return failed();
+        }
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    State state_{State::ReadRequest};
+    af::TcpStream<IoTestThread> stream_{};
+    char request_[2]{};
+    char response_[2]{'U', 'V'};
+    iovec request_iov_[2]{};
+    iovec response_iov_[2]{};
+    af::IoOpState read_{};
+    af::IoOpState write_{};
+    std::atomic<int>* armed_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* request_seen_{nullptr};
 };
 
 class UringUdpRecvTask final : public UringIoTaskBase {
@@ -1049,6 +1300,65 @@ private:
     std::atomic<int>* completed_{nullptr};
 };
 
+class VectoredBoundaryTask final : public IoTaskBase {
+public:
+    explicit VectoredBoundaryTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(std::atomic<int>* completed) {
+        completed_ = completed;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        af::IoFile<IoTestThread> file(IoTestThread::IO_0, -1);
+        af::TcpStream<IoTestThread> stream(IoTestThread::IO_0, -1);
+        af::IoOpState readv{};
+        af::IoOpState writev{};
+        af::IoOpState readv_at{};
+        af::IoOpState writev_at{};
+        af::IoOpState recvv{};
+        af::IoOpState sendv{};
+        af::IoOpState bad_file{};
+        af::IoOpState bad_iov_state{};
+        af::IoOpState bad_count_state{};
+
+        char value = 'v';
+        iovec valid_iov{&value, 1};
+        iovec invalid_iov{nullptr, 1};
+
+        const af::IoStatus zero_readv = file.readv_some(*this, nullptr, 0, readv);
+        const af::IoStatus zero_writev = file.writev_some(*this, nullptr, 0, writev);
+        const af::IoStatus zero_readv_at = file.readv_at(*this, nullptr, 0, 0, readv_at);
+        const af::IoStatus zero_writev_at = file.writev_at(*this, nullptr, 0, 0, writev_at);
+        const af::IoStatus zero_recvv = stream.recvv_some(*this, nullptr, 0, recvv);
+        const af::IoStatus zero_sendv = stream.sendv_some(*this, nullptr, 0, sendv);
+        const af::IoStatus bad_file_status =
+            file.writev_at(*this, &valid_iov, 1, 0, bad_file);
+        const af::IoStatus bad_iov =
+            stream.sendv_some(*this, &invalid_iov, 1, bad_iov_state);
+        const af::IoStatus bad_count =
+            stream.recvv_some(*this, &valid_iov, -1, bad_count_state);
+
+        if (!zero_readv.ready() || zero_readv.bytes != 0U ||
+            !zero_writev.ready() || zero_writev.bytes != 0U ||
+            !zero_readv_at.ready() || zero_readv_at.bytes != 0U ||
+            !zero_writev_at.ready() || zero_writev_at.bytes != 0U ||
+            !zero_recvv.ready() || zero_recvv.bytes != 0U ||
+            !zero_sendv.ready() || zero_sendv.bytes != 0U ||
+            !bad_file_status.failed() || bad_file_status.error != EBADF ||
+            !bad_iov.failed() || bad_iov.error != EINVAL ||
+            !bad_count.failed() || bad_count.error != EINVAL) {
+            return failed();
+        }
+
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int>* completed_{nullptr};
+};
+
 class PendingSocketWaitTask final : public FastIoTaskBase {
 public:
     explicit PendingSocketWaitTask(FastIoTaskBase::FactoryToken token) : FastIoTaskBase(token) {}
@@ -1268,6 +1578,20 @@ TEST_F(IoRuntimeFixture, FileAdapterHandlesInvalidAndZeroByteOperations) {
 #endif
 }
 
+TEST_F(IoRuntimeFixture, VectoredHelpersHandleInvalidAndZeroLengthOperations) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    std::atomic<int> completed{0};
+    ASSERT_TRUE(IoRuntime::start_task<VectoredBoundaryTask>(&completed));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+#else
+    GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
 TEST_F(IoRuntimeFixture, StreamAdapterReceivesAndSendsSocketBytes) {
 #if defined(__linux__)
     if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
@@ -1295,6 +1619,41 @@ TEST_F(IoRuntimeFixture, StreamAdapterReceivesAndSendsSocketBytes) {
     char response = 0;
     ASSERT_EQ(::read(fds[1], &response, sizeof(response)), 1);
     EXPECT_EQ(response, 'R');
+
+    close_pair(fds);
+#else
+    GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, StreamAdapterReceivesAndSendsVectoredSocketBytes) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<int> request_seen{0};
+    ASSERT_TRUE(IoRuntime::start_task<StreamVectoredEchoTask>(
+        fds[0],
+        &armed,
+        &completed,
+        &request_seen));
+    ASSERT_TRUE(wait_until_at_least(armed, 1));
+
+    const char request[2]{'A', 'B'};
+    ASSERT_EQ(::write(fds[1], request, sizeof(request)), 2);
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(request_seen.load(std::memory_order_acquire), ('A' << 8) | 'B');
+
+    char response[2]{};
+    ASSERT_EQ(::read(fds[1], response, sizeof(response)), 2);
+    EXPECT_EQ(response[0], 'X');
+    EXPECT_EQ(response[1], 'Y');
 
     close_pair(fds);
 #else
@@ -1405,6 +1764,41 @@ TEST_F(UringIoRuntimeFixture, IoUringThreadSendsStreamBytesOrFallsBackToEpoll) {
     char value = 0;
     ASSERT_EQ(::read(fds[1], &value, sizeof(value)), 1);
     EXPECT_EQ(value, 'S');
+
+    close_pair(fds);
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringThreadHandlesVectoredStreamOrFallsBackToEpoll) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io backend unavailable";
+    }
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<int> request_seen{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringStreamVectoredTask>(
+        fds[0],
+        &armed,
+        &completed,
+        &request_seen));
+    ASSERT_TRUE(wait_until_at_least(armed, 1));
+
+    const char request[2]{'C', 'D'};
+    ASSERT_EQ(::write(fds[1], request, sizeof(request)), 2);
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(request_seen.load(std::memory_order_acquire), ('C' << 8) | 'D');
+
+    char response[2]{};
+    ASSERT_EQ(::read(fds[1], response, sizeof(response)), 2);
+    EXPECT_EQ(response[0], 'U');
+    EXPECT_EQ(response[1], 'V');
 
     close_pair(fds);
 #else
@@ -1592,6 +1986,33 @@ TEST_F(UringIoRuntimeFixture, IoUringFileAdapterWritesFsyncsAndReadsAtOffset) {
         &byte_read));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(byte_read.load(std::memory_order_acquire), 'F');
+
+    file.reset();
+    static_cast<void>(::unlink(path));
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringFileAdapterWritesAndReadsVectoredAtOffset) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io_uring backend unavailable";
+    }
+
+    char path[] = "/tmp/asyncflow-uring-vectored-XXXXXX";
+    const int fd = ::mkstemp(path);
+    ASSERT_GE(fd, 0);
+    af::UniqueFd file(fd);
+
+    std::atomic<int> completed{0};
+    std::atomic<int> bytes_read{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringFileVectoredReadWriteTask>(
+        file.get(),
+        &completed,
+        &bytes_read));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(bytes_read.load(std::memory_order_acquire), 2);
 
     file.reset();
     static_cast<void>(::unlink(path));

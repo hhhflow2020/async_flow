@@ -621,6 +621,62 @@ public:
         return executors_[index]->submit_io_uring_write(fd, data, size, offset, task, result);
     }
 
+#if !defined(_WIN32)
+    [[nodiscard]] static bool io_submit_readv_at(
+        Thread thread,
+        int fd,
+        const iovec* iov,
+        int iov_count,
+        std::uint64_t offset,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || fd < 0 || iov == nullptr || iov_count <= 0) {
+            if (result != nullptr) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = fd < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_readv(fd, iov, iov_count, offset, task, result);
+    }
+
+    [[nodiscard]] static bool io_submit_writev_at(
+        Thread thread,
+        int fd,
+        const iovec* iov,
+        int iov_count,
+        std::uint64_t offset,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || fd < 0 || iov == nullptr || iov_count <= 0) {
+            if (result != nullptr) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = fd < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_writev(fd, iov, iov_count, offset, task, result);
+    }
+#endif
+
     [[nodiscard]] static bool io_submit_fsync(
         Thread thread,
         int fd,
@@ -701,6 +757,102 @@ public:
     }
 
 #if !defined(_WIN32)
+    [[nodiscard]] static bool io_submit_recvmsg_iov(
+        Thread thread,
+        int fd,
+        const iovec* iov,
+        int iov_count,
+        sockaddr* address,
+        socklen_t* address_size,
+        std::uint32_t flags,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || fd < 0 || iov == nullptr || iov_count <= 0) {
+            if (result != nullptr) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = fd < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+#if defined(__linux__)
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_recvmsg_iov(
+            fd,
+            iov,
+            iov_count,
+            address,
+            address_size,
+            flags,
+            task,
+            result);
+#else
+        static_cast<void>(thread);
+        static_cast<void>(address);
+        static_cast<void>(address_size);
+        static_cast<void>(flags);
+        result->fd = fd;
+        result->events = io_error;
+        result->error = ENOSYS;
+        return false;
+#endif
+    }
+
+    [[nodiscard]] static bool io_submit_sendmsg_iov(
+        Thread thread,
+        int fd,
+        const iovec* iov,
+        int iov_count,
+        const sockaddr* address,
+        socklen_t address_size,
+        std::uint32_t flags,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || fd < 0 || iov == nullptr || iov_count <= 0) {
+            if (result != nullptr) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = fd < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+#if defined(__linux__)
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_sendmsg_iov(
+            fd,
+            iov,
+            iov_count,
+            address,
+            address_size,
+            flags,
+            task,
+            result);
+#else
+        static_cast<void>(thread);
+        static_cast<void>(address);
+        static_cast<void>(address_size);
+        static_cast<void>(flags);
+        result->fd = fd;
+        result->events = io_error;
+        result->error = ENOSYS;
+        return false;
+#endif
+    }
+
     [[nodiscard]] static bool io_submit_recvmsg(
         Thread thread,
         int fd,
@@ -1433,6 +1585,70 @@ private:
 #endif
         }
 
+#if !defined(_WIN32)
+        [[nodiscard]] bool submit_io_uring_readv(
+            int fd,
+            const iovec* iov,
+            int iov_count,
+            std::uint64_t offset,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_READV,
+                fd,
+                const_cast<iovec*>(iov),
+                static_cast<std::size_t>(iov_count),
+                offset,
+                0,
+                io_readable,
+                task,
+                result);
+#else
+            static_cast<void>(fd);
+            static_cast<void>(iov);
+            static_cast<void>(iov_count);
+            static_cast<void>(offset);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
+        [[nodiscard]] bool submit_io_uring_writev(
+            int fd,
+            const iovec* iov,
+            int iov_count,
+            std::uint64_t offset,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_WRITEV,
+                fd,
+                const_cast<iovec*>(iov),
+                static_cast<std::size_t>(iov_count),
+                offset,
+                0,
+                io_writable,
+                task,
+                result);
+#else
+            static_cast<void>(fd);
+            static_cast<void>(iov);
+            static_cast<void>(iov_count);
+            static_cast<void>(offset);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+#endif
+
         [[nodiscard]] bool submit_io_uring_fsync(
             int fd,
             std::uint32_t flags,
@@ -1505,6 +1721,94 @@ private:
         }
 
 #if !defined(_WIN32)
+        [[nodiscard]] bool submit_io_uring_recvmsg_iov(
+            int fd,
+            const iovec* iov,
+            int iov_count,
+            sockaddr* address,
+            socklen_t* address_size,
+            std::uint32_t flags,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_RECVMSG,
+                fd,
+                nullptr,
+                0,
+                0,
+                flags,
+                io_readable,
+                task,
+                result,
+                address,
+                address_size == nullptr ? 0 : *address_size,
+                address_size,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                iov,
+                static_cast<std::size_t>(iov_count));
+#else
+            static_cast<void>(fd);
+            static_cast<void>(iov);
+            static_cast<void>(iov_count);
+            static_cast<void>(address);
+            static_cast<void>(address_size);
+            static_cast<void>(flags);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
+        [[nodiscard]] bool submit_io_uring_sendmsg_iov(
+            int fd,
+            const iovec* iov,
+            int iov_count,
+            const sockaddr* address,
+            socklen_t address_size,
+            std::uint32_t flags,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_SENDMSG,
+                fd,
+                nullptr,
+                0,
+                0,
+                flags,
+                io_writable,
+                task,
+                result,
+                const_cast<sockaddr*>(address),
+                address_size,
+                nullptr,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                iov,
+                static_cast<std::size_t>(iov_count));
+#else
+            static_cast<void>(fd);
+            static_cast<void>(iov);
+            static_cast<void>(iov_count);
+            static_cast<void>(address);
+            static_cast<void>(address_size);
+            static_cast<void>(flags);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
         [[nodiscard]] bool submit_io_uring_recvmsg(
             int fd,
             void* data,
@@ -1791,7 +2095,9 @@ private:
             const sockaddr* socket_address = nullptr,
             socklen_t socket_address_size = 0,
             sockaddr* socket_address_out = nullptr,
-            socklen_t* socket_address_size_out = nullptr) noexcept {
+            socklen_t* socket_address_size_out = nullptr,
+            const iovec* message_iov = nullptr,
+            std::size_t message_iov_count = 0) noexcept {
             AF_ASSERT(current_thread_index_ == index_ && "io_uring submit must be called from its IO thread");
             if (current_thread_index_ != index_ || task == nullptr || result == nullptr) {
                 if (result != nullptr) {
@@ -1811,10 +2117,11 @@ private:
             const bool accept_op = opcode == IORING_OP_ACCEPT;
             const bool connect_op = opcode == IORING_OP_CONNECT;
             const bool address_op = accept_op || connect_op;
+            const bool message_iov_op = message_op && message_iov != nullptr;
             const bool accept_address_op =
                 accept_op && socket_address_out != nullptr && socket_address_size_out != nullptr;
             const bool needs_socket_address = connect_op || accept_address_op;
-            if (opcode != IORING_OP_FSYNC && !address_op && data == nullptr) {
+            if (opcode != IORING_OP_FSYNC && !address_op && data == nullptr && !message_iov_op) {
                 result->fd = fd;
                 result->events = io_error;
                 result->error = EINVAL;
@@ -1822,6 +2129,14 @@ private:
             }
             if (opcode != IORING_OP_FSYNC && !message_op &&
                 size > static_cast<std::size_t>(std::numeric_limits<unsigned>::max())) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = EINVAL;
+                return false;
+            }
+            if (message_iov_op &&
+                (message_iov_count == 0U ||
+                 message_iov_count > static_cast<std::size_t>(IOV_MAX))) {
                 result->fd = fd;
                 result->events = io_error;
                 result->error = EINVAL;
@@ -1868,12 +2183,17 @@ private:
                     result->error = ENOMEM;
                     return false;
                 }
-                operation->msg->iov = iovec{data, size};
                 operation->msg->header = msghdr{};
                 operation->msg->header.msg_name = message_name;
                 operation->msg->header.msg_namelen = message_name_len;
-                operation->msg->header.msg_iov = &operation->msg->iov;
-                operation->msg->header.msg_iovlen = 1;
+                if (message_iov_op) {
+                    operation->msg->header.msg_iov = const_cast<iovec*>(message_iov);
+                    operation->msg->header.msg_iovlen = message_iov_count;
+                } else {
+                    operation->msg->iov = iovec{data, size};
+                    operation->msg->header.msg_iov = &operation->msg->iov;
+                    operation->msg->header.msg_iovlen = 1;
+                }
                 operation->msg->address_size = message_name_len_out;
             }
             if (needs_socket_address) {

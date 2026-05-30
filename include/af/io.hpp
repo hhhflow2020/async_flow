@@ -4,6 +4,7 @@
 #include <climits>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <type_traits>
 #include <utility>
 
@@ -13,6 +14,7 @@
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/uio.h>
 #include <unistd.h>
 #endif
 
@@ -233,6 +235,50 @@ inline void clear_waiting(IoOpState& state) noexcept {
 [[nodiscard]] inline bool uring_submit_error_can_fallback(int error) noexcept {
     return error == ENOSYS || error == EBUSY;
 }
+
+#if !defined(_WIN32)
+[[nodiscard]] inline int io_max_iov() noexcept {
+#if defined(IOV_MAX)
+    return IOV_MAX;
+#else
+    return 1024;
+#endif
+}
+
+[[nodiscard]] inline bool io_validate_iov(
+    const iovec* iov,
+    int iov_count,
+    std::size_t& total_size,
+    int& error) noexcept {
+    total_size = 0;
+    error = 0;
+    if (iov_count < 0 || iov_count > io_max_iov()) {
+        error = EINVAL;
+        return false;
+    }
+    if (iov_count == 0) {
+        return true;
+    }
+    if (iov == nullptr) {
+        error = EINVAL;
+        return false;
+    }
+
+    for (int i = 0; i < iov_count; ++i) {
+        const std::size_t len = iov[i].iov_len;
+        if (len != 0U && iov[i].iov_base == nullptr) {
+            error = EINVAL;
+            return false;
+        }
+        if (len > std::numeric_limits<std::size_t>::max() - total_size) {
+            error = EOVERFLOW;
+            return false;
+        }
+        total_size += len;
+    }
+    return true;
+}
+#endif
 
 [[nodiscard]] inline IoStatus completed_uring_status(
     IoOpState& state,
@@ -548,6 +594,145 @@ template <typename TaskT>
 #endif
 }
 
+#if !defined(_WIN32)
+template <typename TaskT>
+[[nodiscard]] IoStatus io_recvv_some(
+    TaskT& task,
+    typename TaskT::Thread thread,
+    int fd,
+    const iovec* iov,
+    int iov_count,
+    IoOpState& state) noexcept {
+    std::size_t total_size = 0;
+    int validation_error = 0;
+    if (!detail::io_validate_iov(iov, iov_count, total_size, validation_error)) {
+        return IoStatus::failed(validation_error);
+    }
+    if (total_size == 0U) {
+        return IoStatus::ready(0);
+    }
+
+    if (detail::waiting_for_completion(state)) {
+        const IoStatus completion = detail::completed_uring_status(state, true);
+        if (completion.failed() && detail::io_would_block(completion.error)) {
+            return detail::arm_io_wait(task, thread, fd, io_readable, state);
+        }
+        return completion;
+    }
+    const bool resumed_from_readiness = state.waiting && state.wait_kind == IoWaitKind::Readiness;
+    detail::clear_waiting(state);
+    if (!resumed_from_readiness && TaskT::Runtime::io_uring_backend_available(thread)) {
+        state.wait = IoResult{fd, 0, 0, 0};
+        if (TaskT::Runtime::io_submit_recvmsg_iov(
+                thread,
+                fd,
+                iov,
+                iov_count,
+                nullptr,
+                nullptr,
+                0,
+                &task,
+                &state.wait)) {
+            state.waiting = true;
+            state.wait_kind = IoWaitKind::Completion;
+            return IoStatus::make_pending();
+        }
+        if (!detail::uring_submit_error_can_fallback(state.wait.error)) {
+            return IoStatus::failed(state.wait.error);
+        }
+    }
+
+    msghdr message{};
+    message.msg_iov = const_cast<iovec*>(iov);
+    message.msg_iovlen = static_cast<std::size_t>(iov_count);
+    for (;;) {
+        const ssize_t n = ::recvmsg(fd, &message, 0);
+        if (n > 0) {
+            return IoStatus::ready(static_cast<std::size_t>(n));
+        }
+        if (n == 0) {
+            return IoStatus::make_closed();
+        }
+
+        const int error = errno;
+        if (error == EINTR) {
+            continue;
+        }
+        if (detail::io_would_block(error)) {
+            return detail::arm_io_wait(task, thread, fd, io_readable, state);
+        }
+        return IoStatus::failed(error);
+    }
+}
+
+template <typename TaskT>
+[[nodiscard]] IoStatus io_sendv_some(
+    TaskT& task,
+    typename TaskT::Thread thread,
+    int fd,
+    const iovec* iov,
+    int iov_count,
+    IoOpState& state) noexcept {
+    std::size_t total_size = 0;
+    int validation_error = 0;
+    if (!detail::io_validate_iov(iov, iov_count, total_size, validation_error)) {
+        return IoStatus::failed(validation_error);
+    }
+    if (total_size == 0U) {
+        return IoStatus::ready(0);
+    }
+
+    if (detail::waiting_for_completion(state)) {
+        const IoStatus completion = detail::completed_uring_status(state);
+        if (completion.failed() && detail::io_would_block(completion.error)) {
+            return detail::arm_io_wait(task, thread, fd, io_writable, state);
+        }
+        return completion;
+    }
+    const bool resumed_from_readiness = state.waiting && state.wait_kind == IoWaitKind::Readiness;
+    detail::clear_waiting(state);
+    if (!resumed_from_readiness && TaskT::Runtime::io_uring_backend_available(thread)) {
+        state.wait = IoResult{fd, 0, 0, 0};
+        if (TaskT::Runtime::io_submit_sendmsg_iov(
+                thread,
+                fd,
+                iov,
+                iov_count,
+                nullptr,
+                0,
+                detail::io_no_signal_flag(),
+                &task,
+                &state.wait)) {
+            state.waiting = true;
+            state.wait_kind = IoWaitKind::Completion;
+            return IoStatus::make_pending();
+        }
+        if (!detail::uring_submit_error_can_fallback(state.wait.error)) {
+            return IoStatus::failed(state.wait.error);
+        }
+    }
+
+    msghdr message{};
+    message.msg_iov = const_cast<iovec*>(iov);
+    message.msg_iovlen = static_cast<std::size_t>(iov_count);
+    for (;;) {
+        const ssize_t n = ::sendmsg(fd, &message, detail::io_no_signal_flag());
+        if (n >= 0) {
+            return IoStatus::ready(static_cast<std::size_t>(n));
+        }
+
+        const int error = errno;
+        if (error == EINTR) {
+            continue;
+        }
+        if (detail::io_would_block(error)) {
+            return detail::arm_io_wait(task, thread, fd, io_writable, state);
+        }
+        return IoStatus::failed(error);
+    }
+}
+#endif
+
 template <typename TaskT>
 [[nodiscard]] IoStatus io_read_some(
     TaskT& task,
@@ -592,6 +777,46 @@ template <typename TaskT>
 #endif
 }
 
+#if !defined(_WIN32)
+template <typename TaskT>
+[[nodiscard]] IoStatus io_readv_some(
+    TaskT& task,
+    typename TaskT::Thread thread,
+    int fd,
+    const iovec* iov,
+    int iov_count,
+    IoOpState& state) noexcept {
+    std::size_t total_size = 0;
+    int validation_error = 0;
+    if (!detail::io_validate_iov(iov, iov_count, total_size, validation_error)) {
+        return IoStatus::failed(validation_error);
+    }
+    if (total_size == 0U) {
+        return IoStatus::ready(0);
+    }
+
+    detail::clear_waiting(state);
+    for (;;) {
+        const ssize_t n = ::readv(fd, iov, iov_count);
+        if (n > 0) {
+            return IoStatus::ready(static_cast<std::size_t>(n));
+        }
+        if (n == 0) {
+            return IoStatus::make_closed();
+        }
+
+        const int error = errno;
+        if (error == EINTR) {
+            continue;
+        }
+        if (detail::io_would_block(error)) {
+            return detail::arm_io_wait(task, thread, fd, io_readable, state);
+        }
+        return IoStatus::failed(error);
+    }
+}
+#endif
+
 template <typename TaskT>
 [[nodiscard]] IoStatus io_read_at(
     TaskT& task,
@@ -621,6 +846,47 @@ template <typename TaskT>
     return IoStatus::failed(state.wait.error == 0 ? ENOSYS : state.wait.error);
 }
 
+#if !defined(_WIN32)
+template <typename TaskT>
+[[nodiscard]] IoStatus io_readv_at(
+    TaskT& task,
+    typename TaskT::Thread thread,
+    int fd,
+    const iovec* iov,
+    int iov_count,
+    std::uint64_t offset,
+    IoOpState& state) noexcept {
+    if (detail::waiting_for_completion(state)) {
+        return detail::completed_uring_status(state);
+    }
+    detail::clear_waiting(state);
+
+    std::size_t total_size = 0;
+    int error = 0;
+    if (!detail::io_validate_iov(iov, iov_count, total_size, error)) {
+        return IoStatus::failed(error);
+    }
+    if (total_size == 0U) {
+        return IoStatus::ready(0);
+    }
+
+    state.wait = IoResult{fd, 0, 0, 0};
+    if (TaskT::Runtime::io_submit_readv_at(
+            thread,
+            fd,
+            iov,
+            iov_count,
+            offset,
+            &task,
+            &state.wait)) {
+        state.waiting = true;
+        state.wait_kind = IoWaitKind::Completion;
+        return IoStatus::make_pending();
+    }
+    return IoStatus::failed(state.wait.error == 0 ? ENOSYS : state.wait.error);
+}
+#endif
+
 template <typename TaskT>
 [[nodiscard]] IoStatus io_write_at(
     TaskT& task,
@@ -649,6 +915,47 @@ template <typename TaskT>
     }
     return IoStatus::failed(state.wait.error == 0 ? ENOSYS : state.wait.error);
 }
+
+#if !defined(_WIN32)
+template <typename TaskT>
+[[nodiscard]] IoStatus io_writev_at(
+    TaskT& task,
+    typename TaskT::Thread thread,
+    int fd,
+    const iovec* iov,
+    int iov_count,
+    std::uint64_t offset,
+    IoOpState& state) noexcept {
+    if (detail::waiting_for_completion(state)) {
+        return detail::completed_uring_status(state);
+    }
+    detail::clear_waiting(state);
+
+    std::size_t total_size = 0;
+    int error = 0;
+    if (!detail::io_validate_iov(iov, iov_count, total_size, error)) {
+        return IoStatus::failed(error);
+    }
+    if (total_size == 0U) {
+        return IoStatus::ready(0);
+    }
+
+    state.wait = IoResult{fd, 0, 0, 0};
+    if (TaskT::Runtime::io_submit_writev_at(
+            thread,
+            fd,
+            iov,
+            iov_count,
+            offset,
+            &task,
+            &state.wait)) {
+        state.waiting = true;
+        state.wait_kind = IoWaitKind::Completion;
+        return IoStatus::make_pending();
+    }
+    return IoStatus::failed(state.wait.error == 0 ? ENOSYS : state.wait.error);
+}
+#endif
 
 template <typename TaskT>
 [[nodiscard]] IoStatus io_fsync(
@@ -711,6 +1018,43 @@ template <typename TaskT>
     }
 #endif
 }
+
+#if !defined(_WIN32)
+template <typename TaskT>
+[[nodiscard]] IoStatus io_writev_some(
+    TaskT& task,
+    typename TaskT::Thread thread,
+    int fd,
+    const iovec* iov,
+    int iov_count,
+    IoOpState& state) noexcept {
+    std::size_t total_size = 0;
+    int validation_error = 0;
+    if (!detail::io_validate_iov(iov, iov_count, total_size, validation_error)) {
+        return IoStatus::failed(validation_error);
+    }
+    if (total_size == 0U) {
+        return IoStatus::ready(0);
+    }
+
+    detail::clear_waiting(state);
+    for (;;) {
+        const ssize_t n = ::writev(fd, iov, iov_count);
+        if (n >= 0) {
+            return IoStatus::ready(static_cast<std::size_t>(n));
+        }
+
+        const int error = errno;
+        if (error == EINTR) {
+            continue;
+        }
+        if (detail::io_would_block(error)) {
+            return detail::arm_io_wait(task, thread, fd, io_writable, state);
+        }
+        return IoStatus::failed(error);
+    }
+}
+#endif
 
 template <typename TaskT>
 [[nodiscard]] IoStatus io_recv_from_some(
@@ -921,6 +1265,32 @@ public:
         return af::io_write_some(task, this->thread_, this->fd_, data, size, state);
     }
 
+#if !defined(_WIN32)
+    template <typename TaskT>
+    [[nodiscard]] IoStatus readv_some(
+        TaskT& task,
+        const iovec* iov,
+        int iov_count,
+        IoOpState& state) const noexcept {
+        static_assert(
+            std::is_same_v<typename TaskT::Thread, ThreadT>,
+            "IoFile thread type must match the task runtime thread type");
+        return af::io_readv_some(task, this->thread_, this->fd_, iov, iov_count, state);
+    }
+
+    template <typename TaskT>
+    [[nodiscard]] IoStatus writev_some(
+        TaskT& task,
+        const iovec* iov,
+        int iov_count,
+        IoOpState& state) const noexcept {
+        static_assert(
+            std::is_same_v<typename TaskT::Thread, ThreadT>,
+            "IoFile thread type must match the task runtime thread type");
+        return af::io_writev_some(task, this->thread_, this->fd_, iov, iov_count, state);
+    }
+#endif
+
     template <typename TaskT>
     [[nodiscard]] IoStatus read_at(
         TaskT& task,
@@ -934,6 +1304,21 @@ public:
         return af::io_read_at(task, this->thread_, this->fd_, data, size, offset, state);
     }
 
+#if !defined(_WIN32)
+    template <typename TaskT>
+    [[nodiscard]] IoStatus readv_at(
+        TaskT& task,
+        const iovec* iov,
+        int iov_count,
+        std::uint64_t offset,
+        IoOpState& state) const noexcept {
+        static_assert(
+            std::is_same_v<typename TaskT::Thread, ThreadT>,
+            "IoFile thread type must match the task runtime thread type");
+        return af::io_readv_at(task, this->thread_, this->fd_, iov, iov_count, offset, state);
+    }
+#endif
+
     template <typename TaskT>
     [[nodiscard]] IoStatus write_at(
         TaskT& task,
@@ -946,6 +1331,21 @@ public:
             "IoFile thread type must match the task runtime thread type");
         return af::io_write_at(task, this->thread_, this->fd_, data, size, offset, state);
     }
+
+#if !defined(_WIN32)
+    template <typename TaskT>
+    [[nodiscard]] IoStatus writev_at(
+        TaskT& task,
+        const iovec* iov,
+        int iov_count,
+        std::uint64_t offset,
+        IoOpState& state) const noexcept {
+        static_assert(
+            std::is_same_v<typename TaskT::Thread, ThreadT>,
+            "IoFile thread type must match the task runtime thread type");
+        return af::io_writev_at(task, this->thread_, this->fd_, iov, iov_count, offset, state);
+    }
+#endif
 
     template <typename TaskT>
     [[nodiscard]] IoStatus fsync(
@@ -988,6 +1388,32 @@ public:
         return af::io_send_some(task, this->thread_, this->fd_, data, size, state);
     }
 
+#if !defined(_WIN32)
+    template <typename TaskT>
+    [[nodiscard]] IoStatus recvv_some(
+        TaskT& task,
+        const iovec* iov,
+        int iov_count,
+        IoOpState& state) const noexcept {
+        static_assert(
+            std::is_same_v<typename TaskT::Thread, ThreadT>,
+            "IoStream thread type must match the task runtime thread type");
+        return af::io_recvv_some(task, this->thread_, this->fd_, iov, iov_count, state);
+    }
+
+    template <typename TaskT>
+    [[nodiscard]] IoStatus sendv_some(
+        TaskT& task,
+        const iovec* iov,
+        int iov_count,
+        IoOpState& state) const noexcept {
+        static_assert(
+            std::is_same_v<typename TaskT::Thread, ThreadT>,
+            "IoStream thread type must match the task runtime thread type");
+        return af::io_sendv_some(task, this->thread_, this->fd_, iov, iov_count, state);
+    }
+#endif
+
     template <typename TaskT>
     [[nodiscard]] IoStatus connect(
         TaskT& task,
@@ -1009,6 +1435,17 @@ public:
         return recv_some(task, data, size, state);
     }
 
+#if !defined(_WIN32)
+    template <typename TaskT>
+    [[nodiscard]] IoStatus readv_some(
+        TaskT& task,
+        const iovec* iov,
+        int iov_count,
+        IoOpState& state) const noexcept {
+        return recvv_some(task, iov, iov_count, state);
+    }
+#endif
+
     template <typename TaskT>
     [[nodiscard]] IoStatus write_some(
         TaskT& task,
@@ -1017,6 +1454,17 @@ public:
         IoOpState& state) const noexcept {
         return send_some(task, data, size, state);
     }
+
+#if !defined(_WIN32)
+    template <typename TaskT>
+    [[nodiscard]] IoStatus writev_some(
+        TaskT& task,
+        const iovec* iov,
+        int iov_count,
+        IoOpState& state) const noexcept {
+        return sendv_some(task, iov, iov_count, state);
+    }
+#endif
 };
 
 template <typename ThreadT>
