@@ -154,6 +154,59 @@ struct FakeRuntime {
         af::IoResult*) noexcept {
         return false;
     }
+
+    static bool io_submit_close(
+        BenchIoThread,
+        int,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
+    static bool io_submit_statx(
+        BenchIoThread,
+        int,
+        const char*,
+        int,
+        std::uint32_t,
+        struct statx*,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
+    static bool io_submit_fallocate(
+        BenchIoThread,
+        int,
+        int,
+        std::uint64_t,
+        std::uint64_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
+    static bool io_submit_renameat(
+        BenchIoThread,
+        int,
+        const char*,
+        int,
+        const char*,
+        std::uint32_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
+    static bool io_submit_unlinkat(
+        BenchIoThread,
+        int,
+        const char*,
+        int,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
 };
 
 struct FakeTask {
@@ -241,6 +294,31 @@ void BM_IoOpenAtNullPath(benchmark::State& state) {
     }
 }
 
+void BM_IoStatxNullPath(benchmark::State& state) {
+    FakeTask task;
+    af::IoOpState op;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(af::io_statx(
+            task,
+            BenchIoThread::IO_0,
+            -1,
+            nullptr,
+            0,
+            0,
+            nullptr,
+            op));
+    }
+}
+
+void BM_IoCloseInvalidFd(benchmark::State& state) {
+    FakeTask task;
+    af::IoOpState op;
+    for (auto _ : state) {
+        af::UniqueFd fd;
+        benchmark::DoNotOptimize(af::io_close(task, BenchIoThread::IO_0, fd, op));
+    }
+}
+
 #if !defined(_WIN32)
 void BM_IoFileAdapterZeroIovReadvAt(benchmark::State& state) {
     FakeTask task;
@@ -287,6 +365,8 @@ BENCHMARK(BM_IoStreamAdapterInvalidConnect);
 BENCHMARK(BM_IoTimerAdapterNullExpiration);
 BENCHMARK(BM_IoEventAdapterNullValue);
 BENCHMARK(BM_IoOpenAtNullPath);
+BENCHMARK(BM_IoStatxNullPath);
+BENCHMARK(BM_IoCloseInvalidFd);
 #if !defined(_WIN32)
 BENCHMARK(BM_IoFileAdapterZeroIovReadvAt);
 BENCHMARK(BM_IoStreamAdapterZeroIovSendv);

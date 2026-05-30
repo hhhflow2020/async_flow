@@ -1,5 +1,6 @@
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cstdint>
 #include <limits>
@@ -18,6 +19,7 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -1077,6 +1079,245 @@ private:
     std::atomic<char>* byte_read_{nullptr};
 };
 
+class UringFileLifecycleTask final : public UringIoTaskBase {
+public:
+    explicit UringFileLifecycleTask(UringIoTaskBase::FactoryToken token)
+        : UringIoTaskBase(token) {}
+
+    bool do_it(
+        const char* path,
+        const char* renamed_path,
+        std::atomic<int>* completed,
+        std::atomic<int>* close_released,
+        std::atomic<std::uint64_t>* observed_size) {
+        path_ = path;
+        renamed_path_ = renamed_path;
+        completed_ = completed;
+        close_released_ = close_released;
+        observed_size_ = observed_size;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Open,
+        Fallocate,
+        Write,
+        Fsync,
+        Read,
+        Statx,
+        Rename,
+        Unlink,
+        Close,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Open:
+            return open_file();
+
+        case State::Fallocate:
+            return fallocate_file();
+
+        case State::Write:
+            return write_value();
+
+        case State::Fsync:
+            return fsync_value();
+
+        case State::Read:
+            return read_value();
+
+        case State::Statx:
+            return stat_file();
+
+        case State::Rename:
+            return rename_file();
+
+        case State::Unlink:
+            return unlink_file();
+
+        case State::Close:
+            return close_file();
+        }
+        return failed();
+    }
+
+    af::TaskResult open_file() {
+        int fd = -1;
+        const af::IoStatus status = af::io_openat(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            path_,
+            O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC,
+            0600U,
+            &fd,
+            open_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || fd < 0) {
+            return failed();
+        }
+        owned_.reset(fd);
+        file_.reset(IoTestThread::IO_0, owned_.get());
+        state_ = State::Fallocate;
+        return again();
+    }
+
+    af::TaskResult fallocate_file() {
+        const af::IoStatus status = af::io_fallocate(
+            *this,
+            IoTestThread::IO_0,
+            owned_.get(),
+            FALLOC_FL_KEEP_SIZE,
+            0,
+            4096,
+            fallocate_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready()) {
+            return failed();
+        }
+        state_ = State::Write;
+        return again();
+    }
+
+    af::TaskResult write_value() {
+        const af::IoStatus status = file_.write_at(*this, &value_, sizeof(value_), 0, write_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(value_)) {
+            return failed();
+        }
+        state_ = State::Fsync;
+        return again();
+    }
+
+    af::TaskResult fsync_value() {
+        const af::IoStatus status = file_.fsync(*this, fsync_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready()) {
+            return failed();
+        }
+        state_ = State::Read;
+        return again();
+    }
+
+    af::TaskResult read_value() {
+        const af::IoStatus status = file_.read_at(*this, &read_, sizeof(read_), 0, read_state_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(read_) || read_ != value_) {
+            return failed();
+        }
+        state_ = State::Statx;
+        return again();
+    }
+
+    af::TaskResult stat_file() {
+        const af::IoStatus status = af::io_statx(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            path_,
+            0,
+            STATX_SIZE,
+            &stat_,
+            stat_state_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || stat_.stx_size != sizeof(value_)) {
+            return failed();
+        }
+        observed_size_->store(stat_.stx_size, std::memory_order_release);
+        state_ = State::Rename;
+        return again();
+    }
+
+    af::TaskResult rename_file() {
+        const af::IoStatus status = af::io_renameat(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            path_,
+            AT_FDCWD,
+            renamed_path_,
+            0,
+            rename_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready()) {
+            return failed();
+        }
+        state_ = State::Unlink;
+        return again();
+    }
+
+    af::TaskResult unlink_file() {
+        const af::IoStatus status = af::io_unlinkat(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            renamed_path_,
+            0,
+            unlink_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready()) {
+            return failed();
+        }
+        state_ = State::Close;
+        return again();
+    }
+
+    af::TaskResult close_file() {
+        const af::IoStatus status = af::io_close(*this, IoTestThread::IO_0, owned_, close_);
+        if (status.pending()) {
+            if (owned_.get() != -1) {
+                return failed();
+            }
+            return pending();
+        }
+        if (!status.ready() || owned_.get() != -1) {
+            return failed();
+        }
+        close_released_->store(1, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    State state_{State::Open};
+    const char* path_{nullptr};
+    const char* renamed_path_{nullptr};
+    af::UniqueFd owned_{};
+    af::IoFile<IoTestThread> file_{};
+    char value_{'L'};
+    char read_{0};
+    struct statx stat_{};
+    af::IoOpState open_{};
+    af::IoOpState fallocate_{};
+    af::IoOpState write_{};
+    af::IoOpState fsync_{};
+    af::IoOpState read_state_{};
+    af::IoOpState stat_state_{};
+    af::IoOpState rename_{};
+    af::IoOpState unlink_{};
+    af::IoOpState close_{};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* close_released_{nullptr};
+    std::atomic<std::uint64_t>* observed_size_{nullptr};
+};
+
 class UringStreamFallbackTask final : public UringIoTaskBase {
 public:
     explicit UringStreamFallbackTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
@@ -1770,6 +2011,18 @@ private:
         af::IoOpState null_path{};
         af::IoOpState null_output{};
         af::IoOpState no_uring{};
+        af::IoOpState close_no_uring{};
+        af::IoOpState stat_no_uring{};
+        af::IoOpState fallocate_no_uring{};
+        af::IoOpState rename_no_uring{};
+        af::IoOpState unlink_no_uring{};
+        af::IoOpState stat_null_path{};
+        af::IoOpState stat_null_output{};
+        af::IoOpState fallocate_bad_fd{};
+        af::IoOpState rename_null_old{};
+        af::IoOpState rename_null_new{};
+        af::IoOpState unlink_null_path{};
+        struct statx stat{};
         int opened = -1;
         const af::IoStatus null_path_status = af::io_openat(
             *this,
@@ -1798,9 +2051,111 @@ private:
             0,
             &opened,
             no_uring);
+        af::UniqueFd event = af::make_eventfd();
+        if (!event) {
+            return failed();
+        }
+        const af::IoStatus close_no_uring_status =
+            af::io_close(*this, IoTestThread::IO_0, event, close_no_uring);
+        const af::IoStatus stat_no_uring_status = af::io_statx(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            "/tmp/asyncflow-openat-boundary",
+            0,
+            STATX_SIZE,
+            &stat,
+            stat_no_uring);
+        const af::IoStatus fallocate_no_uring_status = af::io_fallocate(
+            *this,
+            IoTestThread::IO_0,
+            event.get(),
+            FALLOC_FL_KEEP_SIZE,
+            0,
+            4096,
+            fallocate_no_uring);
+        const af::IoStatus rename_no_uring_status = af::io_renameat(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            "/tmp/asyncflow-openat-boundary-old",
+            AT_FDCWD,
+            "/tmp/asyncflow-openat-boundary-new",
+            0,
+            rename_no_uring);
+        const af::IoStatus unlink_no_uring_status = af::io_unlinkat(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            "/tmp/asyncflow-openat-boundary",
+            0,
+            unlink_no_uring);
+        const af::IoStatus stat_null_path_status = af::io_statx(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            nullptr,
+            0,
+            STATX_SIZE,
+            &stat,
+            stat_null_path);
+        const af::IoStatus stat_null_output_status = af::io_statx(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            "/tmp/asyncflow-openat-boundary",
+            0,
+            STATX_SIZE,
+            nullptr,
+            stat_null_output);
+        const af::IoStatus fallocate_bad_fd_status = af::io_fallocate(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            FALLOC_FL_KEEP_SIZE,
+            0,
+            4096,
+            fallocate_bad_fd);
+        const af::IoStatus rename_null_old_status = af::io_renameat(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            nullptr,
+            AT_FDCWD,
+            "/tmp/asyncflow-openat-boundary-new",
+            0,
+            rename_null_old);
+        const af::IoStatus rename_null_new_status = af::io_renameat(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            "/tmp/asyncflow-openat-boundary-old",
+            AT_FDCWD,
+            nullptr,
+            0,
+            rename_null_new);
+        const af::IoStatus unlink_null_path_status = af::io_unlinkat(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            nullptr,
+            0,
+            unlink_null_path);
         if (!null_path_status.failed() || null_path_status.error != EINVAL ||
             !null_output_status.failed() || null_output_status.error != EINVAL ||
             !no_uring_status.failed() || no_uring_status.error != ENOSYS ||
+            !close_no_uring_status.failed() || close_no_uring_status.error != ENOSYS ||
+            event.get() < 0 ||
+            !stat_no_uring_status.failed() || stat_no_uring_status.error != ENOSYS ||
+            !fallocate_no_uring_status.failed() || fallocate_no_uring_status.error != ENOSYS ||
+            !rename_no_uring_status.failed() || rename_no_uring_status.error != ENOSYS ||
+            !unlink_no_uring_status.failed() || unlink_no_uring_status.error != ENOSYS ||
+            !stat_null_path_status.failed() || stat_null_path_status.error != EINVAL ||
+            !stat_null_output_status.failed() || stat_null_output_status.error != EINVAL ||
+            !fallocate_bad_fd_status.failed() || fallocate_bad_fd_status.error != EBADF ||
+            !rename_null_old_status.failed() || rename_null_old_status.error != EINVAL ||
+            !rename_null_new_status.failed() || rename_null_new_status.error != EINVAL ||
+            !unlink_null_path_status.failed() || unlink_null_path_status.error != EINVAL ||
             opened != -1) {
             return failed();
         }
@@ -2776,6 +3131,48 @@ TEST_F(UringIoRuntimeFixture, IoUringThreadOpensFileWithOpenAt) {
     EXPECT_EQ(byte_read.load(std::memory_order_acquire), 'O');
 
     static_cast<void>(::unlink(path));
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringFileLifecycleRunsOnIoThread) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io_uring backend unavailable";
+    }
+
+    char path[] = "/tmp/asyncflow-lifecycle-XXXXXX";
+    int seed = ::mkstemp(path);
+    ASSERT_GE(seed, 0);
+    close_fd(seed);
+    static_cast<void>(::unlink(path));
+
+    char renamed_path[sizeof(path) + 8]{};
+    ASSERT_GT(std::snprintf(renamed_path, sizeof(renamed_path), "%s.renamed", path), 0);
+    static_cast<void>(::unlink(renamed_path));
+
+    std::atomic<int> completed{0};
+    std::atomic<int> close_released{0};
+    std::atomic<std::uint64_t> observed_size{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringFileLifecycleTask>(
+        path,
+        renamed_path,
+        &completed,
+        &close_released,
+        &observed_size));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+
+    EXPECT_EQ(close_released.load(std::memory_order_acquire), 1);
+    EXPECT_EQ(observed_size.load(std::memory_order_acquire), std::uint64_t{1});
+    EXPECT_EQ(::access(path, F_OK), -1);
+    EXPECT_EQ(errno, ENOENT);
+    errno = 0;
+    EXPECT_EQ(::access(renamed_path, F_OK), -1);
+    EXPECT_EQ(errno, ENOENT);
+
+    static_cast<void>(::unlink(path));
+    static_cast<void>(::unlink(renamed_path));
 #else
     GTEST_SKIP() << "io_uring backend is Linux-only";
 #endif
