@@ -70,6 +70,7 @@
 #ifndef IORING_CQE_F_NOTIF
 #define IORING_CQE_F_NOTIF (1U << 3U)
 #endif
+
 #endif
 
 #if !defined(__linux__)
@@ -1217,6 +1218,45 @@ public:
             path,
             flags,
             mode,
+            task,
+            result);
+    }
+
+    [[nodiscard]] static bool io_submit_openat_direct(
+        Thread thread,
+        int dir_fd,
+        const char* path,
+        int flags,
+        std::uint32_t mode,
+        int file_index,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || path == nullptr || file_index < 0) {
+            if (result != nullptr) {
+                result->fd = file_index;
+                result->events = io_error;
+                result->error = file_index < 0 ? EBADF : EINVAL;
+                result->result = -result->error;
+                result->completion_token = nullptr;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = file_index;
+            result->events = io_error;
+            result->error = EINVAL;
+            result->result = -EINVAL;
+            result->completion_token = nullptr;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_openat_direct(
+            dir_fd,
+            path,
+            flags,
+            mode,
+            file_index,
             task,
             result);
     }
@@ -3235,6 +3275,7 @@ private:
             operation->timeout.tv_sec = seconds.count();
             operation->timeout.tv_nsec = nanoseconds.count();
             operation->complete_events = io_readable;
+            operation->direct_file_index = -1;
             operation->opcode = IORING_OP_TIMEOUT;
             operation->cancel_requested = false;
             operation->multishot = false;
@@ -3714,6 +3755,57 @@ private:
             static_cast<void>(path);
             static_cast<void>(flags);
             static_cast<void>(mode);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
+        [[nodiscard]] bool submit_io_uring_openat_direct(
+            int dir_fd,
+            const char* path,
+            int flags,
+            std::uint32_t mode,
+            int file_index,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_OPENAT,
+                dir_fd,
+                const_cast<char*>(path),
+                mode,
+                0,
+                static_cast<std::uint32_t>(flags),
+                io_readable,
+                task,
+                result,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                nullptr,
+                0,
+                0,
+                -1,
+                0,
+                false,
+                false,
+                false,
+                0,
+                false,
+                file_index);
+#else
+            static_cast<void>(dir_fd);
+            static_cast<void>(path);
+            static_cast<void>(flags);
+            static_cast<void>(mode);
+            static_cast<void>(file_index);
             static_cast<void>(task);
             if (result != nullptr) {
                 result->error = ENOSYS;
@@ -4618,6 +4710,7 @@ private:
             };
             IoWaitRegistration* wait_registration{nullptr};
             std::uint32_t complete_events{0};
+            int direct_file_index{-1};
             std::uint8_t opcode{0};
             bool cancel_requested{false};
             bool multishot{false};
@@ -4704,6 +4797,7 @@ private:
             operation->socket_address = nullptr;
             operation->wait_registration = registration;
             operation->complete_events = 0;
+            operation->direct_file_index = -1;
             operation->opcode = IORING_OP_POLL_ADD;
             operation->cancel_requested = false;
             operation->multishot = false;
@@ -4768,7 +4862,8 @@ private:
             bool multishot = false,
             bool zero_copy_send = false,
             std::uint16_t provided_buffer_group = 0,
-            bool buffer_select = false) noexcept {
+            bool buffer_select = false,
+            int direct_file_index = -1) noexcept {
             AF_ASSERT(current_thread_index_ == index_ && "io_uring submit must be called from its IO thread");
             if (result != nullptr) {
                 result->completion_token = nullptr;
@@ -4831,6 +4926,26 @@ private:
                     return false;
                 }
                 if (static_cast<unsigned>(fd) >= io_uring_registered_file_count_) {
+                    result->fd = fd;
+                    result->events = io_error;
+                    result->error = EINVAL;
+                    return false;
+                }
+            }
+            if (direct_file_index >= 0) {
+                if (!(openat_op || accept_op)) {
+                    result->fd = fd;
+                    result->events = io_error;
+                    result->error = EINVAL;
+                    return false;
+                }
+                if (!io_uring_files_registered_) {
+                    result->fd = fd;
+                    result->events = io_error;
+                    result->error = ENXIO;
+                    return false;
+                }
+                if (static_cast<unsigned>(direct_file_index) >= io_uring_registered_file_count_) {
                     result->fd = fd;
                     result->events = io_error;
                     result->error = EINVAL;
@@ -4904,6 +5019,7 @@ private:
             operation->task = task;
             operation->result = result;
             operation->complete_events = complete_events;
+            operation->direct_file_index = direct_file_index;
             operation->opcode = opcode;
             operation->cancel_requested = false;
             operation->multishot = multishot;
@@ -4986,6 +5102,9 @@ private:
             if (buffer_select) {
                 sqe->flags |= IOSQE_BUFFER_SELECT;
                 sqe->buf_index = provided_buffer_group;
+            }
+            if (direct_file_index >= 0) {
+                sqe->file_index = static_cast<std::uint32_t>(direct_file_index) + 1U;
             }
             if (opcode == IORING_OP_FSYNC) {
                 sqe->fsync_flags = op_flags;
@@ -5621,8 +5740,12 @@ private:
             }
             operation->result->result = result;
             if (operation->cancel_requested) {
-                if (result >= 0 && io_uring_result_is_fd(operation->opcode)) {
-                    ::close(result);
+                if (result >= 0) {
+                    if (io_uring_operation_result_is_fd(operation)) {
+                        ::close(result);
+                    } else {
+                        clear_direct_io_uring_file_slot(operation);
+                    }
                 }
                 operation->result->events = io_error;
                 operation->result->error = ECANCELED;
@@ -5716,6 +5839,32 @@ private:
 
         [[nodiscard]] static bool io_uring_result_is_fd(std::uint8_t opcode) noexcept {
             return opcode == IORING_OP_OPENAT || opcode == IORING_OP_ACCEPT;
+        }
+
+        [[nodiscard]] static bool io_uring_operation_result_is_fd(
+            const IoUringOperation* operation) noexcept {
+            return operation != nullptr &&
+                   operation->direct_file_index < 0 &&
+                   io_uring_result_is_fd(operation->opcode);
+        }
+
+        void clear_direct_io_uring_file_slot(const IoUringOperation* operation) noexcept {
+            if (operation == nullptr ||
+                operation->direct_file_index < 0 ||
+                !io_uring_result_is_fd(operation->opcode) ||
+                io_uring_fd_ < 0 ||
+                !io_uring_files_registered_) {
+                return;
+            }
+            const int invalid_fd = -1;
+            io_uring_files_update update{};
+            update.offset = static_cast<unsigned>(operation->direct_file_index);
+            update.fds = reinterpret_cast<std::uint64_t>(&invalid_fd);
+            static_cast<void>(sys_io_uring_register(
+                io_uring_fd_,
+                IORING_REGISTER_FILES_UPDATE,
+                &update,
+                1));
         }
 
         [[nodiscard]] int submit_io_uring_cancel(IoUringOperation* operation) noexcept {
@@ -5813,7 +5962,7 @@ private:
         void close_pending_io_uring_fd_result(IoUringOperation* operation) noexcept {
             if (operation == nullptr ||
                 operation->result == nullptr ||
-                !io_uring_result_is_fd(operation->opcode) ||
+                !io_uring_operation_result_is_fd(operation) ||
                 operation->result->error != 0 ||
                 (operation->result->events & operation->complete_events) == 0U ||
                 operation->result->result < 0) {

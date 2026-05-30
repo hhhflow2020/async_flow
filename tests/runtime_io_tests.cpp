@@ -1833,6 +1833,10 @@ private:
         af::IoOpState fixed_unavailable{};
         af::IoOpState fixed_bad{};
         af::IoOpState fixed_null{};
+        af::IoOpState direct_null_path{};
+        af::IoOpState direct_null_output{};
+        af::IoOpState direct_bad_index{};
+        af::IoOpState direct_unavailable{};
         char value = 0;
         af::IoFixedBuffer buffer{&value, sizeof(value), 0};
 
@@ -1851,13 +1855,59 @@ private:
             af::IoFixedBuffer{nullptr, sizeof(value), 0},
             0,
             fixed_null);
+        af::IoFixedFile<IoTestThread> direct_file{};
+        const af::IoStatus direct_null_path_status = af::io_openat_direct(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            nullptr,
+            O_RDONLY | O_CLOEXEC,
+            0,
+            0,
+            &direct_file,
+            direct_null_path);
+        const af::IoStatus direct_null_output_status = af::io_openat_direct(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            "/tmp/asyncflow-openat-direct-boundary",
+            O_RDONLY | O_CLOEXEC,
+            0,
+            0,
+            nullptr,
+            direct_null_output);
+        const af::IoStatus direct_bad_index_status = af::io_openat_direct(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            "/tmp/asyncflow-openat-direct-boundary",
+            O_RDONLY | O_CLOEXEC,
+            0,
+            -1,
+            &direct_file,
+            direct_bad_index);
+        const af::IoStatus direct_unavailable_status = af::io_openat_direct(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            "/tmp/asyncflow-openat-direct-boundary",
+            O_RDONLY | O_CLOEXEC,
+            0,
+            0,
+            &direct_file,
+            direct_unavailable);
         if (!unavailable_read.failed() || unavailable_read.error != ENOSYS ||
             !zero_read.ready() || zero_read.bytes != 0U ||
             !bad_read.failed() || bad_read.error != EBADF ||
             !null_read.failed() || null_read.error != EINVAL ||
             !fixed_unavailable_read.failed() || fixed_unavailable_read.error != ENOSYS ||
             !fixed_bad_read.failed() || fixed_bad_read.error != EBADF ||
-            !fixed_null_read.failed() || fixed_null_read.error != EINVAL) {
+            !fixed_null_read.failed() || fixed_null_read.error != EINVAL ||
+            !direct_null_path_status.failed() || direct_null_path_status.error != EINVAL ||
+            !direct_null_output_status.failed() || direct_null_output_status.error != EINVAL ||
+            !direct_bad_index_status.failed() || direct_bad_index_status.error != EBADF ||
+            !direct_unavailable_status.failed() || direct_unavailable_status.error != ENOSYS ||
+            direct_file.valid()) {
             return failed();
         }
 
@@ -2666,6 +2716,154 @@ private:
     af::IoOpState second_read_state_{};
     std::atomic<int>* completed_{nullptr};
     std::atomic<int>* packed_read_{nullptr};
+};
+
+class UringOpenAtDirectFileTask final : public UringIoTaskBase {
+public:
+    explicit UringOpenAtDirectFileTask(UringIoTaskBase::FactoryToken token)
+        : UringIoTaskBase(token) {}
+
+    bool do_it(
+        const char* path,
+        std::atomic<int>* completed,
+        std::atomic<int>* error,
+        std::atomic<char>* byte_read) {
+        path_ = path;
+        completed_ = completed;
+        error_ = error;
+        byte_read_ = byte_read;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Register,
+        Open,
+        Write,
+        Fsync,
+        Read,
+        Unregister,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Register:
+            return register_sparse_slot();
+
+        case State::Open:
+            return open_direct();
+
+        case State::Write:
+            return write_value();
+
+        case State::Fsync:
+            return fsync_value();
+
+        case State::Read:
+            return read_value();
+
+        case State::Unregister:
+            return complete(0);
+        }
+        return complete(EIO);
+    }
+
+    af::TaskResult register_sparse_slot() {
+        const int sparse = -1;
+        int error = 0;
+        if (!UringIoRuntime::io_register_files(IoTestThread::IO_0, &sparse, 1, &error)) {
+            return complete(error == 0 ? EIO : error);
+        }
+        registered_ = true;
+        state_ = State::Open;
+        return again();
+    }
+
+    af::TaskResult open_direct() {
+        const af::IoStatus status = af::io_openat_direct(
+            *this,
+            IoTestThread::IO_0,
+            AT_FDCWD,
+            path_,
+            O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC,
+            0600U,
+            0,
+            &file_,
+            open_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || !file_.valid()) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        state_ = State::Write;
+        return again();
+    }
+
+    af::TaskResult write_value() {
+        const af::IoStatus status = file_.write_at(*this, &value_, sizeof(value_), 0, write_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(value_)) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        state_ = State::Fsync;
+        return again();
+    }
+
+    af::TaskResult fsync_value() {
+        const af::IoStatus status = file_.fsync(*this, fsync_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready()) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        state_ = State::Read;
+        return again();
+    }
+
+    af::TaskResult read_value() {
+        const af::IoStatus status = file_.read_at(*this, &read_, sizeof(read_), 0, read_state_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(read_) || read_ != value_) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        state_ = State::Unregister;
+        return again();
+    }
+
+    af::TaskResult complete(int error) {
+        if (registered_) {
+            int unregister_error = 0;
+            if (!UringIoRuntime::io_unregister_files(IoTestThread::IO_0, &unregister_error) &&
+                error == 0) {
+                error = unregister_error == 0 ? EIO : unregister_error;
+            }
+            registered_ = false;
+        }
+        byte_read_->store(read_, std::memory_order_release);
+        error_->store(error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    State state_{State::Register};
+    const char* path_{nullptr};
+    af::IoFixedFile<IoTestThread> file_{};
+    char value_{'D'};
+    char read_{0};
+    bool registered_{false};
+    af::IoOpState open_{};
+    af::IoOpState write_{};
+    af::IoOpState fsync_{};
+    af::IoOpState read_state_{};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* error_{nullptr};
+    std::atomic<char>* byte_read_{nullptr};
 };
 
 class UringBatchedFileWriteTask final : public UringIoTaskBase {
@@ -7242,6 +7440,50 @@ TEST_F(UringIoRuntimeFixture, IoUringFixedFileTableUpdatesRegisteredSlot) {
     static_cast<void>(::unlink(second_path));
 #else
     GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringOpenAtDirectInstallsFixedFileSlot) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io_uring backend unavailable";
+    }
+
+    char path[] = "/tmp/asyncflow-openat-direct-XXXXXX";
+    int seed = ::mkstemp(path);
+    ASSERT_GE(seed, 0);
+    close_fd(seed);
+    static_cast<void>(::unlink(path));
+
+    std::atomic<int> completed{0};
+    std::atomic<int> error{0};
+    std::atomic<char> byte_read{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringOpenAtDirectFileTask>(
+        path,
+        &completed,
+        &error,
+        &byte_read));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+
+    const int direct_error = error.load(std::memory_order_acquire);
+    if (direct_error == EINVAL || direct_error == EBADF || direct_error == ENOSYS
+#ifdef EOPNOTSUPP
+        || direct_error == EOPNOTSUPP
+#endif
+#ifdef ENXIO
+        || direct_error == ENXIO
+#endif
+    ) {
+        static_cast<void>(::unlink(path));
+        GTEST_SKIP() << "io_uring direct descriptor open unsupported: " << direct_error;
+    }
+
+    EXPECT_EQ(direct_error, 0);
+    EXPECT_EQ(byte_read.load(std::memory_order_acquire), 'D');
+
+    static_cast<void>(::unlink(path));
+#else
+    GTEST_SKIP() << "io_uring direct descriptor open is Linux-only";
 #endif
 }
 

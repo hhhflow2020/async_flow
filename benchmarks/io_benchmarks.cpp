@@ -338,6 +338,18 @@ struct FakeRuntime {
         return false;
     }
 
+    static bool io_submit_openat_direct(
+        BenchIoThread,
+        int,
+        const char*,
+        int,
+        std::uint32_t,
+        int,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
     static bool io_submit_close(
         BenchIoThread,
         int,
@@ -566,6 +578,24 @@ void BM_IoOpenAtNullPath(benchmark::State& state) {
     }
 }
 
+void BM_IoOpenAtDirectInvalidIndex(benchmark::State& state) {
+    FakeTask task;
+    af::IoOpState op;
+    af::IoFixedFile<BenchIoThread> file;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(af::io_openat_direct(
+            task,
+            BenchIoThread::IO_0,
+            -1,
+            "/tmp/asyncflow-openat-direct-bench",
+            0,
+            0,
+            -1,
+            &file,
+            op));
+    }
+}
+
 void BM_IoStatxNullPath(benchmark::State& state) {
     FakeTask task;
     af::IoOpState op;
@@ -759,6 +789,7 @@ BENCHMARK(BM_IoTimerAdapterNullExpiration);
 BENCHMARK(BM_IoEventAdapterNullValue);
 BENCHMARK(BM_IoTimeoutInvalidDelay);
 BENCHMARK(BM_IoOpenAtNullPath);
+BENCHMARK(BM_IoOpenAtDirectInvalidIndex);
 BENCHMARK(BM_IoStatxNullPath);
 BENCHMARK(BM_IoCloseInvalidFd);
 BENCHMARK(BM_IoSendfileZeroCount);
