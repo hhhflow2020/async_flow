@@ -18,6 +18,7 @@
 
 #include "af/detail/bounded_queues.hpp"
 #include "af/detail/config.hpp"
+#include "af/detail/io_uring_support.hpp"
 #include "af/detail/object_pool.hpp"
 #include "af/task.hpp"
 #include "absl/container/flat_hash_map.h"
@@ -31,46 +32,12 @@
 
 #if defined(__linux__)
 #include <algorithm>
-#include <linux/io_uring.h>
 #include <poll.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
-
-#ifndef IORING_CQE_F_MORE
-#define IORING_CQE_F_MORE (1U << 1U)
-#endif
-
-#ifndef IORING_CQE_F_BUFFER
-#define IORING_CQE_F_BUFFER (1U << 0U)
-#endif
-
-#ifndef IOSQE_BUFFER_SELECT
-#define IOSQE_BUFFER_SELECT (1U << 5U)
-#endif
-
-#ifndef IORING_ACCEPT_MULTISHOT
-#define IORING_ACCEPT_MULTISHOT (1U << 0U)
-#endif
-
-#ifndef IORING_RECV_MULTISHOT
-#define IORING_RECV_MULTISHOT (1U << 1U)
-#endif
-
-#ifndef IORING_REGISTER_PBUF_RING
-#define IORING_REGISTER_PBUF_RING 22U
-#endif
-
-#ifndef IORING_UNREGISTER_PBUF_RING
-#define IORING_UNREGISTER_PBUF_RING 23U
-#endif
-
-#ifndef IORING_CQE_F_NOTIF
-#define IORING_CQE_F_NOTIF (1U << 3U)
-#endif
-
 #endif
 
 #if !defined(__linux__)
@@ -3674,29 +3641,15 @@ private:
             Task* task,
             IoResult* result) noexcept {
 #if defined(__linux__)
-            return submit_io_uring_op(
+            return submit_io_uring_fixed_file_rw(
                 IORING_OP_READ,
                 file_index,
                 data,
                 size,
                 offset,
-                0,
                 io_readable,
                 task,
-                result,
-                nullptr,
-                0,
-                nullptr,
-                nullptr,
-                0,
-                nullptr,
-                nullptr,
-                nullptr,
-                0,
-                0,
-                -1,
-                0,
-                true);
+                result);
 #else
             static_cast<void>(file_index);
             static_cast<void>(data);
@@ -3718,29 +3671,15 @@ private:
             Task* task,
             IoResult* result) noexcept {
 #if defined(__linux__)
-            return submit_io_uring_op(
+            return submit_io_uring_fixed_file_rw(
                 IORING_OP_WRITE,
                 file_index,
                 const_cast<void*>(data),
                 size,
                 offset,
-                0,
                 io_writable,
                 task,
-                result,
-                nullptr,
-                0,
-                nullptr,
-                nullptr,
-                0,
-                nullptr,
-                nullptr,
-                nullptr,
-                0,
-                0,
-                -1,
-                0,
-                true);
+                result);
 #else
             static_cast<void>(file_index);
             static_cast<void>(data);
@@ -3763,29 +3702,15 @@ private:
             Task* task,
             IoResult* result) noexcept {
 #if defined(__linux__)
-            return submit_io_uring_op(
+            return submit_io_uring_fixed_file_rw(
                 IORING_OP_READV,
                 file_index,
                 const_cast<iovec*>(iov),
                 static_cast<std::size_t>(iov_count),
                 offset,
-                0,
                 io_readable,
                 task,
-                result,
-                nullptr,
-                0,
-                nullptr,
-                nullptr,
-                0,
-                nullptr,
-                nullptr,
-                nullptr,
-                0,
-                0,
-                -1,
-                0,
-                true);
+                result);
 #else
             static_cast<void>(file_index);
             static_cast<void>(iov);
@@ -3807,29 +3732,15 @@ private:
             Task* task,
             IoResult* result) noexcept {
 #if defined(__linux__)
-            return submit_io_uring_op(
+            return submit_io_uring_fixed_file_rw(
                 IORING_OP_WRITEV,
                 file_index,
                 const_cast<iovec*>(iov),
                 static_cast<std::size_t>(iov_count),
                 offset,
-                0,
                 io_writable,
                 task,
-                result,
-                nullptr,
-                0,
-                nullptr,
-                nullptr,
-                0,
-                nullptr,
-                nullptr,
-                nullptr,
-                0,
-                0,
-                -1,
-                0,
-                true);
+                result);
 #else
             static_cast<void>(file_index);
             static_cast<void>(iov);
@@ -3852,27 +3763,15 @@ private:
             Task* task,
             IoResult* result) noexcept {
 #if defined(__linux__)
-            return submit_io_uring_op(
+            return submit_io_uring_fixed_file_rw(
                 IORING_OP_READ_FIXED,
                 file_index,
                 data,
                 size,
                 offset,
-                0,
                 io_readable,
                 task,
                 result,
-                nullptr,
-                0,
-                nullptr,
-                nullptr,
-                0,
-                nullptr,
-                nullptr,
-                nullptr,
-                0,
-                0,
-                -1,
                 buffer_index,
                 true);
 #else
@@ -3898,27 +3797,15 @@ private:
             Task* task,
             IoResult* result) noexcept {
 #if defined(__linux__)
-            return submit_io_uring_op(
+            return submit_io_uring_fixed_file_rw(
                 IORING_OP_WRITE_FIXED,
                 file_index,
                 const_cast<void*>(data),
                 size,
                 offset,
-                0,
                 io_writable,
                 task,
                 result,
-                nullptr,
-                0,
-                nullptr,
-                nullptr,
-                0,
-                nullptr,
-                nullptr,
-                nullptr,
-                0,
-                0,
-                -1,
                 buffer_index,
                 true);
 #else
@@ -5477,6 +5364,144 @@ private:
             }
 
             return IoUringPollSubmitResult::Submitted;
+        }
+
+        [[nodiscard]] bool submit_io_uring_fixed_file_rw(
+            std::uint8_t opcode,
+            int file_index,
+            void* data,
+            std::size_t size,
+            std::uint64_t offset,
+            std::uint32_t complete_events,
+            Task* task,
+            IoResult* result,
+            std::uint16_t fixed_buffer_index = 0,
+            bool fixed_buffer = false) noexcept {
+            AF_ASSERT(current_thread_index_ == index_ && "io_uring submit must be called from its IO thread");
+            if (result != nullptr) {
+                result->completion_token = nullptr;
+            }
+            if (current_thread_index_ != index_ || task == nullptr || result == nullptr) {
+                if (result != nullptr) {
+                    result->fd = file_index;
+                    result->events = io_error;
+                    result->error = EINVAL;
+                }
+                return false;
+            }
+            if (io_uring_fd_ < 0 || file_index < 0) {
+                result->fd = file_index;
+                result->events = io_error;
+                result->error = io_uring_fd_ < 0 ? ENOSYS : EBADF;
+                return false;
+            }
+            if (data == nullptr) {
+                result->fd = file_index;
+                result->events = io_error;
+                result->error = EINVAL;
+                return false;
+            }
+            if (!io_uring_files_registered_) {
+                result->fd = file_index;
+                result->events = io_error;
+                result->error = ENXIO;
+                return false;
+            }
+            if (static_cast<unsigned>(file_index) >= io_uring_registered_file_count_) {
+                result->fd = file_index;
+                result->events = io_error;
+                result->error = EINVAL;
+                return false;
+            }
+            if (fixed_buffer) {
+                if (!io_uring_buffers_registered_) {
+                    result->fd = file_index;
+                    result->events = io_error;
+                    result->error = ENOBUFS;
+                    return false;
+                }
+                if (fixed_buffer_index >= io_uring_registered_buffer_count_) {
+                    result->fd = file_index;
+                    result->events = io_error;
+                    result->error = EINVAL;
+                    return false;
+                }
+            }
+            if (!detail::io_uring_sqe_len_fits(size)) {
+                result->fd = file_index;
+                result->events = io_error;
+                result->error = EINVAL;
+                return false;
+            }
+
+            IoUringOperation* operation = nullptr;
+            try {
+                operation = io_uring_op_pool_.create();
+            } catch (...) {
+                result->fd = file_index;
+                result->events = io_error;
+                result->error = ENOMEM;
+                return false;
+            }
+
+            operation->task = task;
+            operation->result = result;
+            operation->complete_events = complete_events;
+            operation->direct_file_index = -1;
+            operation->opcode = opcode;
+            operation->cancel_requested = false;
+            operation->multishot = false;
+            operation->poll_wait = false;
+            operation->zero_copy_send = false;
+            operation->zero_copy_primary_done = false;
+            operation->zero_copy_notification_done = false;
+            operation->msg = nullptr;
+            operation->socket_address = nullptr;
+            operation->wait_registration = nullptr;
+
+            int reserve_error = 0;
+            io_uring_sqe* sqe = reserve_io_uring_sqe(reserve_error);
+            if (sqe == nullptr) {
+                io_uring_op_pool_.destroy(operation);
+                result->fd = file_index;
+                result->events = io_error;
+                result->error = reserve_error == 0 ? EBUSY : reserve_error;
+                return false;
+            }
+
+            track_io_uring_operation(operation);
+
+            detail::fill_fixed_file_rw_sqe(
+                *sqe,
+                detail::IoUringFixedFileRwSqe{
+                    opcode,
+                    file_index,
+                    data,
+                    size,
+                    offset,
+                    fixed_buffer_index,
+                    fixed_buffer},
+                reinterpret_cast<std::uint64_t>(operation));
+
+            result->fd = file_index;
+            result->events = 0;
+            result->error = 0;
+            result->result = 0;
+            result->completion_token = operation;
+
+            if (io_uring_pending_submissions_ >= io_uring_submit_batch_threshold_) {
+                const int submit_error = flush_io_uring_submissions();
+                if (submit_error == 0) {
+                    return true;
+                }
+                result->events = io_error;
+                result->error = submit_error;
+                result->result = -submit_error;
+                fail_io_uring_backend(submit_error, operation);
+                return false;
+            }
+
+            return true;
         }
 
         [[nodiscard]] bool submit_io_uring_op(
