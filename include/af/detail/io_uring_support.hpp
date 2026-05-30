@@ -51,8 +51,34 @@ struct IoUringFixedFileRwSqe {
     bool fixed_buffer{false};
 };
 
+struct IoUringBufferSqe {
+    std::uint8_t opcode{0};
+    int fd{-1};
+    void* data{nullptr};
+    std::size_t size{0};
+    std::uint64_t offset{0};
+    std::uint32_t op_flags{0};
+};
+
 [[nodiscard]] inline constexpr bool io_uring_sqe_len_fits(std::size_t size) noexcept {
     return size <= static_cast<std::size_t>(std::numeric_limits<unsigned>::max());
+}
+
+inline void fill_buffer_sqe(
+    io_uring_sqe& sqe,
+    const IoUringBufferSqe& request,
+    std::uint64_t user_data) noexcept {
+    sqe = io_uring_sqe{};
+    sqe.opcode = request.opcode;
+    sqe.fd = request.fd;
+    sqe.user_data = user_data;
+    sqe.addr = reinterpret_cast<std::uint64_t>(request.data);
+    sqe.len = static_cast<unsigned>(request.size);
+    if (request.opcode == IORING_OP_RECV || request.opcode == IORING_OP_SEND) {
+        sqe.msg_flags = request.op_flags;
+    } else {
+        sqe.off = request.offset;
+    }
 }
 
 inline void fill_fixed_file_rw_sqe(
