@@ -548,6 +548,50 @@ public:
         return executors_[index]->io_uring_backend_available();
     }
 
+#if !defined(_WIN32)
+    [[nodiscard]] static bool io_register_buffers(
+        Thread thread,
+        const iovec* buffers,
+        unsigned buffer_count,
+        int* error = nullptr) noexcept {
+        if (error != nullptr) {
+            *error = 0;
+        }
+        if (buffers == nullptr || buffer_count == 0U) {
+            if (error != nullptr) {
+                *error = EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            if (error != nullptr) {
+                *error = EINVAL;
+            }
+            return false;
+        }
+        return executors_[index]->register_io_uring_buffers(buffers, buffer_count, error);
+    }
+
+    [[nodiscard]] static bool io_unregister_buffers(
+        Thread thread,
+        int* error = nullptr) noexcept {
+        if (error != nullptr) {
+            *error = 0;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            if (error != nullptr) {
+                *error = EINVAL;
+            }
+            return false;
+        }
+        return executors_[index]->unregister_io_uring_buffers(error);
+    }
+#endif
+
     [[nodiscard]] static bool io_wait(
         Thread thread,
         int fd,
@@ -641,6 +685,76 @@ public:
     }
 
 #if !defined(_WIN32)
+    [[nodiscard]] static bool io_submit_read_fixed_at(
+        Thread thread,
+        int fd,
+        void* data,
+        std::size_t size,
+        std::uint64_t offset,
+        std::uint16_t buffer_index,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || fd < 0 || data == nullptr) {
+            if (result != nullptr) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = fd < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_read_fixed(
+            fd,
+            data,
+            size,
+            offset,
+            buffer_index,
+            task,
+            result);
+    }
+
+    [[nodiscard]] static bool io_submit_write_fixed_at(
+        Thread thread,
+        int fd,
+        const void* data,
+        std::size_t size,
+        std::uint64_t offset,
+        std::uint16_t buffer_index,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || fd < 0 || data == nullptr) {
+            if (result != nullptr) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = fd < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_write_fixed(
+            fd,
+            data,
+            size,
+            offset,
+            buffer_index,
+            task,
+            result);
+    }
+
     [[nodiscard]] static bool io_submit_readv_at(
         Thread thread,
         int fd,
@@ -1718,6 +1832,129 @@ private:
 #endif
         }
 
+#if !defined(_WIN32)
+        [[nodiscard]] bool register_io_uring_buffers(
+            const iovec* buffers,
+            unsigned buffer_count,
+            int* error) noexcept {
+            AF_ASSERT(current_thread_index_ == index_ && "io_uring buffer registration must run on its IO thread");
+            if (error != nullptr) {
+                *error = 0;
+            }
+            if (current_thread_index_ != index_ || buffers == nullptr || buffer_count == 0U) {
+                if (error != nullptr) {
+                    *error = EINVAL;
+                }
+                return false;
+            }
+
+#if defined(__linux__)
+            if (io_uring_fd_ < 0) {
+                if (error != nullptr) {
+                    *error = ENOSYS;
+                }
+                return false;
+            }
+            if (io_uring_buffers_registered_) {
+                if (error != nullptr) {
+                    *error = EALREADY;
+                }
+                return false;
+            }
+            if (buffer_count > static_cast<unsigned>(std::numeric_limits<std::uint16_t>::max())) {
+                if (error != nullptr) {
+                    *error = EINVAL;
+                }
+                return false;
+            }
+
+            if (sys_io_uring_register(
+                    io_uring_fd_,
+                    IORING_REGISTER_BUFFERS,
+                    buffers,
+                    buffer_count) != 0) {
+                if (error != nullptr) {
+                    *error = errno == 0 ? EIO : errno;
+                }
+                return false;
+            }
+
+            io_uring_buffers_registered_ = true;
+            io_uring_registered_buffer_count_ = buffer_count;
+            return true;
+#else
+            if (error != nullptr) {
+                *error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
+        [[nodiscard]] bool unregister_io_uring_buffers(int* error) noexcept {
+            AF_ASSERT(current_thread_index_ == index_ && "io_uring buffer unregistration must run on its IO thread");
+            if (error != nullptr) {
+                *error = 0;
+            }
+            if (current_thread_index_ != index_) {
+                if (error != nullptr) {
+                    *error = EINVAL;
+                }
+                return false;
+            }
+
+#if defined(__linux__)
+            if (io_uring_fd_ < 0) {
+                if (error != nullptr) {
+                    *error = ENOSYS;
+                }
+                return false;
+            }
+            if (!io_uring_buffers_registered_) {
+                if (error != nullptr) {
+                    *error = ENOENT;
+                }
+                return false;
+            }
+            if (io_uring_pending_submissions_ != 0U) {
+                const int submit_error = flush_io_uring_submissions();
+                if (submit_error != 0) {
+                    if (error != nullptr) {
+                        *error = submit_error;
+                    }
+                    fail_io_uring_backend(submit_error, nullptr);
+                    return false;
+                }
+            }
+            if (io_uring_operations_ != nullptr) {
+                if (error != nullptr) {
+                    *error = EBUSY;
+                }
+                return false;
+            }
+
+            if (sys_io_uring_register(
+                    io_uring_fd_,
+                    IORING_UNREGISTER_BUFFERS,
+                    nullptr,
+                    0) != 0) {
+                if (error != nullptr) {
+                    *error = errno == 0 ? EIO : errno;
+                }
+                return false;
+            }
+
+            io_uring_buffers_registered_ = false;
+            io_uring_registered_buffer_count_ = 0;
+            return true;
+#else
+            if (error != nullptr) {
+                *error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+#endif
+
         [[nodiscard]] bool register_io_wait(
             int fd,
             std::uint32_t events,
@@ -1948,6 +2185,96 @@ private:
         }
 
 #if !defined(_WIN32)
+        [[nodiscard]] bool submit_io_uring_read_fixed(
+            int fd,
+            void* data,
+            std::size_t size,
+            std::uint64_t offset,
+            std::uint16_t buffer_index,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_READ_FIXED,
+                fd,
+                data,
+                size,
+                offset,
+                0,
+                io_readable,
+                task,
+                result,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                nullptr,
+                0,
+                0,
+                -1,
+                buffer_index);
+#else
+            static_cast<void>(fd);
+            static_cast<void>(data);
+            static_cast<void>(size);
+            static_cast<void>(offset);
+            static_cast<void>(buffer_index);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
+        [[nodiscard]] bool submit_io_uring_write_fixed(
+            int fd,
+            const void* data,
+            std::size_t size,
+            std::uint64_t offset,
+            std::uint16_t buffer_index,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_op(
+                IORING_OP_WRITE_FIXED,
+                fd,
+                const_cast<void*>(data),
+                size,
+                offset,
+                0,
+                io_writable,
+                task,
+                result,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                nullptr,
+                0,
+                0,
+                -1,
+                buffer_index);
+#else
+            static_cast<void>(fd);
+            static_cast<void>(data);
+            static_cast<void>(size);
+            static_cast<void>(offset);
+            static_cast<void>(buffer_index);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->error = ENOSYS;
+            }
+            return false;
+#endif
+        }
+
         [[nodiscard]] bool submit_io_uring_readv(
             int fd,
             const iovec* iov,
@@ -2704,7 +3031,8 @@ private:
             const iovec* message_iov = nullptr,
             std::size_t message_iov_count = 0,
             std::uint64_t extra = 0,
-            std::int32_t extra_fd = -1) noexcept {
+            std::int32_t extra_fd = -1,
+            std::uint16_t fixed_buffer_index = 0) noexcept {
             AF_ASSERT(current_thread_index_ == index_ && "io_uring submit must be called from its IO thread");
             if (current_thread_index_ != index_ || task == nullptr || result == nullptr) {
                 if (result != nullptr) {
@@ -2728,6 +3056,8 @@ private:
             const bool close_op = opcode == IORING_OP_CLOSE;
             const bool fallocate_op = opcode == IORING_OP_FALLOCATE;
             const bool splice_op = opcode == IORING_OP_SPLICE;
+            const bool fixed_buffer_op =
+                opcode == IORING_OP_READ_FIXED || opcode == IORING_OP_WRITE_FIXED;
             const bool message_op = opcode == IORING_OP_RECVMSG || opcode == IORING_OP_SENDMSG;
             const bool accept_op = opcode == IORING_OP_ACCEPT;
             const bool connect_op = opcode == IORING_OP_CONNECT;
@@ -2743,6 +3073,20 @@ private:
                 result->events = io_error;
                 result->error = EINVAL;
                 return false;
+            }
+            if (fixed_buffer_op) {
+                if (!io_uring_buffers_registered_) {
+                    result->fd = fd;
+                    result->events = io_error;
+                    result->error = ENOBUFS;
+                    return false;
+                }
+                if (fixed_buffer_index >= io_uring_registered_buffer_count_) {
+                    result->fd = fd;
+                    result->events = io_error;
+                    result->error = EINVAL;
+                    return false;
+                }
             }
             if (opcode != IORING_OP_FSYNC && !message_op &&
                 size > static_cast<std::size_t>(std::numeric_limits<unsigned>::max())) {
@@ -2899,6 +3243,11 @@ private:
             } else if (connect_op) {
                 sqe->addr = reinterpret_cast<std::uint64_t>(&operation->socket_address->storage);
                 sqe->off = operation->socket_address->size;
+            } else if (fixed_buffer_op) {
+                sqe->addr = reinterpret_cast<std::uint64_t>(data);
+                sqe->len = static_cast<unsigned>(size);
+                sqe->off = offset;
+                sqe->buf_index = fixed_buffer_index;
             } else if (opcode == IORING_OP_RECV || opcode == IORING_OP_SEND) {
                 sqe->addr = reinterpret_cast<std::uint64_t>(data);
                 sqe->len = static_cast<unsigned>(size);
@@ -3244,6 +3593,13 @@ private:
 
         void close_io_uring_backend() noexcept {
             clear_io_uring_operations();
+            if (io_uring_fd_ >= 0 && io_uring_buffers_registered_) {
+                static_cast<void>(sys_io_uring_register(
+                    io_uring_fd_,
+                    IORING_UNREGISTER_BUFFERS,
+                    nullptr,
+                    0));
+            }
             if (io_uring_sqes_ != nullptr && io_uring_sqes_ != MAP_FAILED) {
                 ::munmap(io_uring_sqes_, io_uring_sqes_size_);
             }
@@ -3276,6 +3632,8 @@ private:
             io_uring_cq_ring_mask_ = nullptr;
             io_uring_cqes_ = nullptr;
             io_uring_pending_submissions_ = 0;
+            io_uring_buffers_registered_ = false;
+            io_uring_registered_buffer_count_ = 0;
         }
 
         [[nodiscard]] io_uring_sqe* reserve_io_uring_sqe(int& error) noexcept {
@@ -3655,6 +4013,8 @@ private:
         std::uint32_t* io_uring_cq_ring_mask_{nullptr};
         io_uring_cqe* io_uring_cqes_{nullptr};
         unsigned io_uring_pending_submissions_{0};
+        bool io_uring_buffers_registered_{false};
+        unsigned io_uring_registered_buffer_count_{0};
         IoUringOperation* io_uring_operations_{nullptr};
         detail::ObjectPool<IoUringMessage> io_uring_msg_pool_;
         detail::ObjectPool<IoUringSocketAddress> io_uring_address_pool_;
