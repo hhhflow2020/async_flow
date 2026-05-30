@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <unistd.h>
 #endif
 
@@ -107,6 +108,32 @@ bool write_exact_until(int fd, const char* input, std::size_t size) {
     return true;
 }
 
+bool read_exact_until(int fd, char* output, std::size_t size) {
+    std::size_t offset = 0;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (offset < size) {
+        const ssize_t n = ::read(fd, output + offset, size - offset);
+        if (n > 0) {
+            offset += static_cast<std::size_t>(n);
+            continue;
+        }
+        if (n == 0) {
+            return false;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            return false;
+        }
+        if (std::chrono::steady_clock::now() > deadline) {
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+}
+
 class DirectAcceptRoundTripTask final : public DirectAcceptTask {
 public:
     explicit DirectAcceptRoundTripTask(DirectAcceptTask::FactoryToken token)
@@ -117,12 +144,12 @@ public:
         std::atomic<int>* armed,
         std::atomic<int>* completed,
         std::atomic<int>* error,
-        std::atomic<char>* byte_read) {
+        std::atomic<int>* packed_read) {
         listener_.reset(DirectAcceptThread::IO_0, listener_fd);
         armed_ = armed;
         completed_ = completed;
         error_ = error;
-        byte_read_ = byte_read;
+        packed_read_ = packed_read;
         return schedule(DirectAcceptThread::IO_0);
     }
 
@@ -131,6 +158,7 @@ private:
         Register,
         Accept,
         Recv,
+        Send,
         Unregister,
     };
 
@@ -143,7 +171,10 @@ private:
             return accept_direct();
 
         case State::Recv:
-            return recv_byte();
+            return recv_request();
+
+        case State::Send:
+            return send_response();
 
         case State::Unregister:
             return complete(0);
@@ -191,13 +222,31 @@ private:
         return again();
     }
 
-    af::TaskResult recv_byte() {
+    af::TaskResult recv_request() {
+        request_iov_[0] = iovec{&request_[0], 1};
+        request_iov_[1] = iovec{&request_[1], 1};
         const af::IoStatus status =
-            accepted_.recv_some(*this, &byte_, sizeof(byte_), recv_);
+            accepted_.recvv_some(*this, request_iov_, 2, recv_);
         if (status.pending()) {
             return pending();
         }
-        if (!status.ready() || status.bytes != sizeof(byte_)) {
+        if (!status.ready() || status.bytes != sizeof(request_)) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        packed_read_->store(pack_request(), std::memory_order_release);
+        state_ = State::Send;
+        return again();
+    }
+
+    af::TaskResult send_response() {
+        response_iov_[0] = iovec{&response_[0], 1};
+        response_iov_[1] = iovec{&response_[1], 1};
+        const af::IoStatus status =
+            accepted_.sendv_some(*this, response_iov_, 2, send_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(response_)) {
             return complete(status.failed() ? status.error : EIO);
         }
         state_ = State::Unregister;
@@ -215,24 +264,32 @@ private:
             }
             registered_ = false;
         }
-        byte_read_->store(byte_, std::memory_order_release);
         error_->store(error, std::memory_order_release);
         completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
 
+    [[nodiscard]] int pack_request() const noexcept {
+        return (static_cast<int>(static_cast<unsigned char>(request_[0])) << 8) |
+               static_cast<int>(static_cast<unsigned char>(request_[1]));
+    }
+
     State state_{State::Register};
     af::TcpListener<DirectAcceptThread> listener_{};
     af::IoFixedFile<DirectAcceptThread> accepted_{};
-    char byte_{0};
+    char request_[2]{};
+    char response_[2]{'O', 'K'};
+    iovec request_iov_[2]{};
+    iovec response_iov_[2]{};
     bool registered_{false};
     bool armed_once_{false};
     af::IoOpState accept_{};
     af::IoOpState recv_{};
+    af::IoOpState send_{};
     std::atomic<int>* armed_{nullptr};
     std::atomic<int>* completed_{nullptr};
     std::atomic<int>* error_{nullptr};
-    std::atomic<char>* byte_read_{nullptr};
+    std::atomic<int>* packed_read_{nullptr};
 };
 #endif
 
@@ -258,13 +315,13 @@ int main() {
     std::atomic<int> armed{0};
     std::atomic<int> completed{0};
     std::atomic<int> error{0};
-    std::atomic<char> byte_read{0};
+    std::atomic<int> packed_read{0};
     const bool started = direct_accept_async::start_task<DirectAcceptRoundTripTask>(
         listener.get(),
         &armed,
         &completed,
         &error,
-        &byte_read);
+        &packed_read);
     AF_ASSERT(started);
     if (!started) {
         direct_accept_async::shutdown();
@@ -301,8 +358,8 @@ int main() {
         return 1;
     }
 
-    const char request = 'A';
-    if (!write_exact_until(client.get(), &request, sizeof(request))) {
+    const char request[2]{'A', 'B'};
+    if (!write_exact_until(client.get(), request, sizeof(request))) {
         std::cerr << "client write failed\n";
         direct_accept_async::shutdown();
         return 1;
@@ -323,8 +380,16 @@ int main() {
         return unsupported_direct_accept_error(task_error) ? 0 : 1;
     }
 
-    std::cout << "io_uring accept direct byte="
-              << byte_read.load(std::memory_order_acquire) << '\n';
+    char response[2]{};
+    if (!read_exact_until(client.get(), response, sizeof(response))) {
+        std::cerr << "client read failed\n";
+        direct_accept_async::shutdown();
+        return 1;
+    }
+
+    std::cout << "io_uring accept direct packed="
+              << packed_read.load(std::memory_order_acquire)
+              << " response=" << response[0] << response[1] << '\n';
     direct_accept_async::shutdown();
     return 0;
 #else

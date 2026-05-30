@@ -1850,6 +1850,14 @@ private:
         af::IoOpState fixed_send_zero{};
         af::IoOpState fixed_send_bad{};
         af::IoOpState fixed_send_null{};
+        af::IoOpState fixed_recvv_unavailable{};
+        af::IoOpState fixed_recvv_zero{};
+        af::IoOpState fixed_recvv_bad{};
+        af::IoOpState fixed_recvv_null{};
+        af::IoOpState fixed_sendv_unavailable{};
+        af::IoOpState fixed_sendv_zero{};
+        af::IoOpState fixed_sendv_bad{};
+        af::IoOpState fixed_sendv_null{};
         char value = 0;
         af::IoFixedBuffer buffer{&value, sizeof(value), 0};
 
@@ -1979,6 +1987,24 @@ private:
             invalid.send_some(*this, &value, sizeof(value), fixed_send_bad);
         const af::IoStatus fixed_send_null_status =
             missing.send_some(*this, nullptr, sizeof(value), fixed_send_null);
+        iovec valid_iov{&value, sizeof(value)};
+        iovec invalid_iov{nullptr, sizeof(value)};
+        const af::IoStatus fixed_recvv_unavailable_status =
+            missing.recvv_some(*this, &valid_iov, 1, fixed_recvv_unavailable);
+        const af::IoStatus fixed_recvv_zero_status =
+            invalid.recvv_some(*this, nullptr, 0, fixed_recvv_zero);
+        const af::IoStatus fixed_recvv_bad_status =
+            invalid.recvv_some(*this, &valid_iov, 1, fixed_recvv_bad);
+        const af::IoStatus fixed_recvv_null_status =
+            missing.recvv_some(*this, &invalid_iov, 1, fixed_recvv_null);
+        const af::IoStatus fixed_sendv_unavailable_status =
+            missing.sendv_some(*this, &valid_iov, 1, fixed_sendv_unavailable);
+        const af::IoStatus fixed_sendv_zero_status =
+            invalid.sendv_some(*this, nullptr, 0, fixed_sendv_zero);
+        const af::IoStatus fixed_sendv_bad_status =
+            invalid.sendv_some(*this, &valid_iov, 1, fixed_sendv_bad);
+        const af::IoStatus fixed_sendv_null_status =
+            missing.sendv_some(*this, &invalid_iov, 1, fixed_sendv_null);
         if (!unavailable_read.failed() || unavailable_read.error != ENOSYS ||
             !zero_read.ready() || zero_read.bytes != 0U ||
             !bad_read.failed() || bad_read.error != EBADF ||
@@ -2003,6 +2029,14 @@ private:
             !fixed_send_zero_status.ready() || fixed_send_zero_status.bytes != 0U ||
             !fixed_send_bad_status.failed() || fixed_send_bad_status.error != EBADF ||
             !fixed_send_null_status.failed() || fixed_send_null_status.error != EINVAL ||
+            !fixed_recvv_unavailable_status.failed() || fixed_recvv_unavailable_status.error != ENOSYS ||
+            !fixed_recvv_zero_status.ready() || fixed_recvv_zero_status.bytes != 0U ||
+            !fixed_recvv_bad_status.failed() || fixed_recvv_bad_status.error != EBADF ||
+            !fixed_recvv_null_status.failed() || fixed_recvv_null_status.error != EINVAL ||
+            !fixed_sendv_unavailable_status.failed() || fixed_sendv_unavailable_status.error != ENOSYS ||
+            !fixed_sendv_zero_status.ready() || fixed_sendv_zero_status.bytes != 0U ||
+            !fixed_sendv_bad_status.failed() || fixed_sendv_bad_status.error != EBADF ||
+            !fixed_sendv_null_status.failed() || fixed_sendv_null_status.error != EINVAL ||
             direct_file.valid() || accepted_direct.valid()) {
             return failed();
         }
@@ -3776,12 +3810,12 @@ public:
         std::atomic<int>* armed,
         std::atomic<int>* completed,
         std::atomic<int>* error,
-        std::atomic<char>* byte_read) {
+        std::atomic<int>* packed_read) {
         listener_.reset(IoTestThread::IO_0, fd);
         armed_ = armed;
         completed_ = completed;
         error_ = error;
-        byte_read_ = byte_read;
+        packed_read_ = packed_read;
         return schedule(IoTestThread::IO_0);
     }
 
@@ -3790,6 +3824,7 @@ private:
         Register,
         Accept,
         Recv,
+        Send,
         Unregister,
     };
 
@@ -3802,7 +3837,10 @@ private:
             return accept_direct();
 
         case State::Recv:
-            return recv_byte();
+            return recv_request();
+
+        case State::Send:
+            return send_response();
 
         case State::Unregister:
             return complete(0);
@@ -3846,13 +3884,31 @@ private:
         return again();
     }
 
-    af::TaskResult recv_byte() {
+    af::TaskResult recv_request() {
+        request_iov_[0] = iovec{&request_[0], 1};
+        request_iov_[1] = iovec{&request_[1], 1};
         const af::IoStatus status =
-            accepted_.recv_some(*this, &byte_, sizeof(byte_), recv_);
+            accepted_.recvv_some(*this, request_iov_, 2, recv_);
         if (status.pending()) {
             return pending();
         }
-        if (!status.ready() || status.bytes != sizeof(byte_)) {
+        if (!status.ready() || status.bytes != sizeof(request_)) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        packed_read_->store(pack_request(), std::memory_order_release);
+        state_ = State::Send;
+        return again();
+    }
+
+    af::TaskResult send_response() {
+        response_iov_[0] = iovec{&response_[0], 1};
+        response_iov_[1] = iovec{&response_[1], 1};
+        const af::IoStatus status =
+            accepted_.sendv_some(*this, response_iov_, 2, send_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(response_)) {
             return complete(status.failed() ? status.error : EIO);
         }
         state_ = State::Unregister;
@@ -3868,24 +3924,32 @@ private:
             }
             registered_ = false;
         }
-        byte_read_->store(byte_, std::memory_order_release);
         error_->store(error, std::memory_order_release);
         completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
 
+    [[nodiscard]] int pack_request() const noexcept {
+        return (static_cast<int>(static_cast<unsigned char>(request_[0])) << 8) |
+               static_cast<int>(static_cast<unsigned char>(request_[1]));
+    }
+
     State state_{State::Register};
     af::TcpListener<IoTestThread> listener_{};
     af::IoFixedFile<IoTestThread> accepted_{};
-    char byte_{0};
+    char request_[2]{};
+    char response_[2]{'O', 'K'};
+    iovec request_iov_[2]{};
+    iovec response_iov_[2]{};
     bool registered_{false};
     bool armed_once_{false};
     af::IoOpState accept_{};
     af::IoOpState recv_{};
+    af::IoOpState send_{};
     std::atomic<int>* armed_{nullptr};
     std::atomic<int>* completed_{nullptr};
     std::atomic<int>* error_{nullptr};
-    std::atomic<char>* byte_read_{nullptr};
+    std::atomic<int>* packed_read_{nullptr};
 };
 
 class UringTcpAcceptMultishotTask final : public UringIoTaskBase {
@@ -6903,13 +6967,13 @@ TEST_F(UringIoRuntimeFixture, IoUringAcceptDirectReceivesThroughFixedFile) {
     std::atomic<int> armed{0};
     std::atomic<int> completed{0};
     std::atomic<int> error{0};
-    std::atomic<char> byte_read{0};
+    std::atomic<int> packed_read{0};
     ASSERT_TRUE(UringIoRuntime::start_task<UringTcpAcceptDirectTask>(
         listener,
         &armed,
         &completed,
         &error,
-        &byte_read));
+        &packed_read));
 
     if (!wait_until_at_least(armed, 1)) {
         ASSERT_TRUE(wait_until_at_least(completed, 1));
@@ -6931,8 +6995,8 @@ TEST_F(UringIoRuntimeFixture, IoUringAcceptDirectReceivesThroughFixedFile) {
     ASSERT_GE(client, 0);
     const int rc = ::connect(client, reinterpret_cast<sockaddr*>(&address), address_size);
     ASSERT_TRUE(rc == 0 || errno == EINPROGRESS);
-    const char request = 'A';
-    ASSERT_TRUE(write_exact_until(client, &request, sizeof(request)));
+    const char request[2]{'A', 'B'};
+    ASSERT_TRUE(write_exact_until(client, request, sizeof(request)));
 
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     const int task_error = error.load(std::memory_order_acquire);
@@ -6947,7 +7011,12 @@ TEST_F(UringIoRuntimeFixture, IoUringAcceptDirectReceivesThroughFixedFile) {
         GTEST_SKIP() << "io_uring direct accept unsupported";
     }
     EXPECT_EQ(task_error, 0);
-    EXPECT_EQ(byte_read.load(std::memory_order_acquire), request);
+    EXPECT_EQ(packed_read.load(std::memory_order_acquire), ('A' << 8) | 'B');
+
+    char response[2]{};
+    ASSERT_TRUE(read_exact_until(client, response, sizeof(response)));
+    EXPECT_EQ(response[0], 'O');
+    EXPECT_EQ(response[1], 'K');
 
     close_fd(client);
     close_fd(listener);
