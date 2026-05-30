@@ -20,6 +20,7 @@
 #include "af/detail/config.hpp"
 #include "af/detail/io_uring_support.hpp"
 #include "af/detail/object_pool.hpp"
+#include "af/detail/runtime_traits.hpp"
 #include "af/task.hpp"
 #include "absl/container/flat_hash_map.h"
 
@@ -80,6 +81,7 @@ public:
     using Traits = TraitsT;
     using Thread = typename Traits::Thread;
     using Task = BasicTask<AsyncRuntime<Traits>>;
+    using TraitConfig = detail::RuntimeTraitsConfig<Traits>;
 
     template <typename TaskT>
     class [[nodiscard]] TaskHandle {
@@ -141,41 +143,31 @@ public:
     static constexpr std::uint16_t invalid_thread_index = thread_count;
     static_assert(thread_count > 0, "AsyncRuntime requires at least one fixed thread");
 
-    static constexpr std::size_t spsc_queue_capacity = [] {
-        if constexpr (requires { Traits::spsc_queue_capacity; }) {
-            return static_cast<std::size_t>(Traits::spsc_queue_capacity);
-        } else {
-            return static_cast<std::size_t>(1024);
-        }
-    }();
-    static constexpr std::size_t external_queue_capacity = [] {
-        if constexpr (requires { Traits::external_queue_capacity; }) {
-            return static_cast<std::size_t>(Traits::external_queue_capacity);
-        } else {
-            return spsc_queue_capacity;
-        }
-    }();
-    static constexpr QueueFullPolicy queue_full_policy = [] {
-        if constexpr (requires { Traits::queue_full_policy; }) {
-            return Traits::queue_full_policy;
-        } else {
-            return QueueFullPolicy::Reject;
-        }
-    }();
-    static constexpr ShutdownPolicy shutdown_policy = [] {
-        if constexpr (requires { Traits::shutdown_policy; }) {
-            return Traits::shutdown_policy;
-        } else {
-            return ShutdownPolicy::WaitForTasks;
-        }
-    }();
-    static constexpr bool task_registry_enabled = [] {
-        if constexpr (requires { Traits::enable_task_registry; }) {
-            return static_cast<bool>(Traits::enable_task_registry);
-        } else {
-            return false;
-        }
-    }();
+    static constexpr std::size_t spsc_queue_capacity = TraitConfig::spsc_queue_capacity;
+    static constexpr std::size_t external_queue_capacity = TraitConfig::external_queue_capacity;
+    static constexpr QueueFullPolicy queue_full_policy = TraitConfig::queue_full_policy;
+    static constexpr ShutdownPolicy shutdown_policy = TraitConfig::shutdown_policy;
+    static constexpr bool task_registry_enabled = TraitConfig::task_registry_enabled;
+    static constexpr unsigned io_uring_entries = TraitConfig::io_uring_entries;
+    static constexpr unsigned io_uring_submit_batch_threshold =
+        TraitConfig::io_uring_submit_batch_threshold;
+    static constexpr std::size_t io_wait_reserve = TraitConfig::io_wait_reserve;
+    static constexpr std::size_t io_deferred_delete_reserve =
+        TraitConfig::io_deferred_delete_reserve;
+    static constexpr std::size_t io_uring_provided_buffer_group_reserve =
+        TraitConfig::io_uring_provided_buffer_group_reserve;
+    static_assert(spsc_queue_capacity > 0, "spsc_queue_capacity must be greater than zero");
+    static_assert(external_queue_capacity > 0, "external_queue_capacity must be greater than zero");
+    static_assert(io_uring_entries > 0, "io_uring_entries must be greater than zero");
+    static_assert(
+        std::has_single_bit(io_uring_entries),
+        "io_uring_entries must be a power of two");
+    static_assert(
+        io_uring_submit_batch_threshold > 0,
+        "io_uring_submit_batch_threshold must be greater than zero");
+    static_assert(
+        io_uring_submit_batch_threshold <= io_uring_entries,
+        "io_uring_submit_batch_threshold must not exceed io_uring_entries");
 
     [[nodiscard]] static constexpr ThreadKind thread_kind(Thread thread) noexcept {
         if constexpr (requires { Traits::thread_kind(thread); }) {
@@ -3674,7 +3666,7 @@ private:
             result->result = 0;
             result->completion_token = operation;
 
-            if (io_uring_pending_submissions_ >= io_uring_submit_batch_threshold_) {
+            if (io_uring_pending_submissions_ >= io_uring_submit_batch_threshold) {
                 const int submit_error = flush_io_uring_submissions();
                 if (submit_error == 0) {
                     return true;
@@ -5465,7 +5457,7 @@ private:
             result->result = 0;
             result->completion_token = nullptr;
 
-            if (io_uring_pending_submissions_ >= io_uring_submit_batch_threshold_) {
+            if (io_uring_pending_submissions_ >= io_uring_submit_batch_threshold) {
                 const int submit_error = flush_io_uring_submissions();
                 if (submit_error == 0) {
                     return IoUringPollSubmitResult::Submitted;
@@ -5569,7 +5561,7 @@ private:
             result->result = 0;
             result->completion_token = operation;
 
-            if (io_uring_pending_submissions_ >= io_uring_submit_batch_threshold_) {
+            if (io_uring_pending_submissions_ >= io_uring_submit_batch_threshold) {
                 const int submit_error = flush_io_uring_submissions();
                 if (submit_error == 0) {
                     return true;
@@ -5661,7 +5653,7 @@ private:
             result->result = 0;
             result->completion_token = operation;
 
-            if (io_uring_pending_submissions_ >= io_uring_submit_batch_threshold_) {
+            if (io_uring_pending_submissions_ >= io_uring_submit_batch_threshold) {
                 const int submit_error = flush_io_uring_submissions();
                 if (submit_error == 0) {
                     return true;
@@ -5799,7 +5791,7 @@ private:
             result->result = 0;
             result->completion_token = operation;
 
-            if (io_uring_pending_submissions_ >= io_uring_submit_batch_threshold_) {
+            if (io_uring_pending_submissions_ >= io_uring_submit_batch_threshold) {
                 const int submit_error = flush_io_uring_submissions();
                 if (submit_error == 0) {
                     return true;
@@ -6163,7 +6155,7 @@ private:
             result->result = 0;
             result->completion_token = operation;
 
-            if (io_uring_pending_submissions_ >= io_uring_submit_batch_threshold_) {
+            if (io_uring_pending_submissions_ >= io_uring_submit_batch_threshold) {
                 const int submit_error = flush_io_uring_submissions();
                 if (submit_error == 0) {
                     return true;
@@ -6255,6 +6247,7 @@ private:
             if (!io_thread() || io_epoll_fd_ >= 0) {
                 return;
             }
+            reserve_io_backend_storage();
 
             io_epoll_fd_ = ::epoll_create1(EPOLL_CLOEXEC);
             if (io_epoll_fd_ < 0) {
@@ -6418,7 +6411,7 @@ private:
             }
 
             io_uring_params params{};
-            io_uring_fd_ = sys_io_uring_setup(io_uring_entries_, &params);
+            io_uring_fd_ = sys_io_uring_setup(io_uring_entries, &params);
             if (io_uring_fd_ < 0) {
                 return;
             }
@@ -6627,6 +6620,22 @@ private:
             __atomic_store_n(io_uring_sq_tail_, tail + 1U, __ATOMIC_RELEASE);
             ++io_uring_pending_submissions_;
             return &io_uring_sqes_[index];
+        }
+
+        void reserve_io_backend_storage() noexcept {
+            try {
+                if constexpr (io_wait_reserve != 0U) {
+                    io_waits_.reserve(io_wait_reserve);
+                }
+                if constexpr (io_deferred_delete_reserve != 0U) {
+                    io_deferred_deletes_.reserve(io_deferred_delete_reserve);
+                }
+                if constexpr (io_uring_provided_buffer_group_reserve != 0U) {
+                    io_uring_provided_buffer_groups_.reserve(
+                        io_uring_provided_buffer_group_reserve);
+                }
+            } catch (...) {
+            }
         }
 
         [[nodiscard]] int flush_io_uring_submissions() noexcept {
@@ -7130,8 +7139,6 @@ private:
         int io_wake_fd_{-1};
         absl::flat_hash_map<int, IoWaitRegistration*> io_waits_;
         std::vector<int> io_deferred_deletes_;
-        static constexpr unsigned io_uring_entries_{256};
-        static constexpr unsigned io_uring_submit_batch_threshold_{64};
         int io_uring_fd_{-1};
         std::byte* io_uring_sq_ring_{nullptr};
         std::byte* io_uring_cq_ring_{nullptr};

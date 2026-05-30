@@ -99,6 +99,29 @@ struct UringIoRuntimeTraits {
 using UringIoRuntime = af::AsyncRuntime<UringIoRuntimeTraits>;
 using UringIoTaskBase = UringIoRuntime::Task;
 
+struct TunedIoRuntimeTraits {
+    using Thread = IoTestThread;
+
+    static constexpr std::uint16_t thread_count =
+        static_cast<std::uint16_t>(IoTestThread::enum_thread_index_end);
+    static constexpr std::size_t spsc_queue_capacity = 2048;
+    static constexpr std::size_t external_queue_capacity = 4096;
+    static constexpr unsigned io_uring_entries = 512;
+    static constexpr unsigned io_uring_submit_batch_threshold = 128;
+    static constexpr std::size_t io_wait_reserve = 256;
+    static constexpr std::size_t io_deferred_delete_reserve = 64;
+    static constexpr std::size_t io_uring_provided_buffer_group_reserve = 8;
+};
+
+using TunedIoRuntime = af::AsyncRuntime<TunedIoRuntimeTraits>;
+static_assert(TunedIoRuntime::spsc_queue_capacity == 2048U);
+static_assert(TunedIoRuntime::external_queue_capacity == 4096U);
+static_assert(TunedIoRuntime::io_uring_entries == 512U);
+static_assert(TunedIoRuntime::io_uring_submit_batch_threshold == 128U);
+static_assert(TunedIoRuntime::io_wait_reserve == 256U);
+static_assert(TunedIoRuntime::io_deferred_delete_reserve == 64U);
+static_assert(TunedIoRuntime::io_uring_provided_buffer_group_reserve == 8U);
+
 TEST(IoAdapterTraits, AdaptersAreThinTriviallyCopyableViews) {
     EXPECT_TRUE(std::is_trivially_copyable_v<af::IoFile<IoTestThread>>);
     EXPECT_TRUE(std::is_trivially_copyable_v<af::IoFixedFile<IoTestThread>>);
