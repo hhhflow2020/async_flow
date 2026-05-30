@@ -938,9 +938,13 @@ private:
     af::TaskResult run() override {
         af::IoOpState sendfile_zero{};
         af::IoOpState sendfile_bad{};
+        af::IoOpState send_zc_zero{};
+        af::IoOpState send_zc_null{};
+        af::IoOpState send_zc_bad{};
         af::IoOpState splice_zero{};
         af::IoOpState splice_bad{};
         af::IoOffset offset = 0;
+        const char value = 'Z';
 
         const af::IoStatus sendfile_zero_status = af::io_sendfile_some(
             *this,
@@ -958,6 +962,27 @@ private:
             &offset,
             1,
             sendfile_bad);
+        const af::IoStatus send_zc_zero_status = af::io_send_zc_some(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            nullptr,
+            0,
+            send_zc_zero);
+        const af::IoStatus send_zc_null_status = af::io_send_zc_some(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            nullptr,
+            1,
+            send_zc_null);
+        const af::IoStatus send_zc_bad_status = af::io_send_zc_some(
+            *this,
+            IoTestThread::IO_0,
+            -1,
+            &value,
+            sizeof(value),
+            send_zc_bad);
         const af::IoStatus splice_zero_status = af::io_splice_some(
             *this,
             IoTestThread::IO_0,
@@ -979,6 +1004,9 @@ private:
             0,
             splice_bad);
         if (!sendfile_zero_status.ready() || sendfile_zero_status.bytes != 0U ||
+            !send_zc_zero_status.ready() || send_zc_zero_status.bytes != 0U ||
+            !send_zc_null_status.failed() || send_zc_null_status.error != EINVAL ||
+            !send_zc_bad_status.failed() || send_zc_bad_status.error != EBADF ||
             !splice_zero_status.ready() || splice_zero_status.bytes != 0U ||
             !sendfile_bad_status.failed() || sendfile_bad_status.error != EBADF ||
             !splice_bad_status.failed() || splice_bad_status.error != EBADF) {
@@ -991,6 +1019,67 @@ private:
 
     std::atomic<int>* completed_{nullptr};
     std::atomic<int>* error_{nullptr};
+};
+
+class SendZcSocketTask final : public IoTaskBase {
+public:
+    explicit SendZcSocketTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(
+        int socket_fd,
+        const char* payload,
+        std::size_t total_size,
+        std::size_t chunk_size,
+        std::atomic<int>* completed,
+        std::atomic<int>* calls,
+        std::atomic<std::size_t>* bytes_sent) {
+        stream_.reset(IoTestThread::IO_0, socket_fd);
+        payload_ = payload;
+        total_size_ = total_size;
+        chunk_size_ = chunk_size == 0U ? total_size : chunk_size;
+        completed_ = completed;
+        calls_ = calls;
+        bytes_sent_ = bytes_sent;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        return send_next();
+    }
+
+    af::TaskResult send_next() {
+        if (sent_ >= total_size_) {
+            completed_->fetch_add(1, std::memory_order_release);
+            return done();
+        }
+
+        const std::size_t remaining = total_size_ - sent_;
+        const std::size_t count = remaining < chunk_size_ ? remaining : chunk_size_;
+        const af::IoStatus status =
+            stream_.send_zc_some(*this, payload_ + sent_, count, send_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes == 0U || status.bytes > remaining) {
+            return failed();
+        }
+
+        sent_ += status.bytes;
+        calls_->fetch_add(1, std::memory_order_release);
+        bytes_sent_->store(sent_, std::memory_order_release);
+        return again();
+    }
+
+    af::TcpStream<IoTestThread> stream_{};
+    const char* payload_{nullptr};
+    std::size_t total_size_{0};
+    std::size_t chunk_size_{0};
+    std::size_t sent_{0};
+    af::IoOpState send_{};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* calls_{nullptr};
+    std::atomic<std::size_t>* bytes_sent_{nullptr};
 };
 
 class SendfileSocketTask final : public IoTaskBase {
@@ -1054,6 +1143,49 @@ private:
     af::IoOpState send_{};
     std::atomic<int>* completed_{nullptr};
     std::atomic<int>* calls_{nullptr};
+    std::atomic<std::size_t>* bytes_sent_{nullptr};
+};
+
+class PendingSendZcTask final : public IoTaskBase {
+public:
+    explicit PendingSendZcTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(
+        int socket_fd,
+        std::atomic<int>* pending_seen,
+        std::atomic<int>* completed,
+        std::atomic<std::size_t>* bytes_sent) {
+        stream_.reset(IoTestThread::IO_0, socket_fd);
+        pending_seen_ = pending_seen;
+        completed_ = completed;
+        bytes_sent_ = bytes_sent;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        return send_byte();
+    }
+
+    af::TaskResult send_byte() {
+        const af::IoStatus status = stream_.send_zc_some(*this, &value_, sizeof(value_), send_);
+        if (status.pending()) {
+            pending_seen_->fetch_add(1, std::memory_order_release);
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(value_)) {
+            return failed();
+        }
+        bytes_sent_->store(status.bytes, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    af::TcpStream<IoTestThread> stream_{};
+    char value_{'Z'};
+    af::IoOpState send_{};
+    std::atomic<int>* pending_seen_{nullptr};
+    std::atomic<int>* completed_{nullptr};
     std::atomic<std::size_t>* bytes_sent_{nullptr};
 };
 
@@ -2354,6 +2486,40 @@ private:
 
     af::TcpStream<IoTestThread> stream_{};
     char value_{'S'};
+    af::IoOpState write_{};
+    std::atomic<int>* completed_{nullptr};
+};
+
+class UringStreamSendZcTask final : public UringIoTaskBase {
+public:
+    explicit UringStreamSendZcTask(UringIoTaskBase::FactoryToken token)
+        : UringIoTaskBase(token) {}
+
+    bool do_it(int fd, std::atomic<int>* completed) {
+        stream_.reset(IoTestThread::IO_0, fd);
+        completed_ = completed;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        return send_value();
+    }
+
+    af::TaskResult send_value() {
+        const af::IoStatus status = stream_.send_zc_some(*this, &value_, sizeof(value_), write_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(value_)) {
+            return failed();
+        }
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    af::TcpStream<IoTestThread> stream_{};
+    char value_{'Z'};
     af::IoOpState write_{};
     std::atomic<int>* completed_{nullptr};
 };
@@ -4251,6 +4417,72 @@ TEST_F(IoRuntimeFixture, StreamAdapterReceivesAndSendsVectoredSocketBytes) {
 #endif
 }
 
+TEST_F(IoRuntimeFixture, StreamAdapterSendZcSendsSocketBytes) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+
+    const char payload[] = "asyncflow-send-zc";
+    constexpr std::size_t payload_size = sizeof(payload) - 1U;
+    std::atomic<int> completed{0};
+    std::atomic<int> calls{0};
+    std::atomic<std::size_t> bytes_sent{0};
+    ASSERT_TRUE(IoRuntime::start_task<SendZcSocketTask>(
+        fds[0],
+        payload,
+        payload_size,
+        3,
+        &completed,
+        &calls,
+        &bytes_sent));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), payload_size);
+    EXPECT_GT(calls.load(std::memory_order_acquire), 1);
+
+    char received[payload_size]{};
+    ASSERT_TRUE(read_exact_until(fds[1], received, payload_size));
+    EXPECT_EQ(std::memcmp(received, payload, payload_size), 0);
+
+    close_pair(fds);
+#else
+    GTEST_SKIP() << "send_zc helper is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, SendZcWaitsForSocketWritableWhenBufferIsFull) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+    ASSERT_TRUE(fill_until_blocked(fds[0]));
+
+    std::atomic<int> pending_seen{0};
+    std::atomic<int> completed{0};
+    std::atomic<std::size_t> bytes_sent{0};
+    ASSERT_TRUE(IoRuntime::start_task<PendingSendZcTask>(
+        fds[0],
+        &pending_seen,
+        &completed,
+        &bytes_sent));
+    ASSERT_TRUE(wait_until_at_least(pending_seen, 1));
+
+    drain_available(fds[1]);
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), 1U);
+
+    close_pair(fds);
+#else
+    GTEST_SKIP() << "send_zc helper is Linux-only";
+#endif
+}
+
 TEST_F(IoRuntimeFixture, StreamAdapterSendfileSendsFileToSocket) {
 #if defined(__linux__)
     if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
@@ -4627,6 +4859,29 @@ TEST_F(UringIoRuntimeFixture, IoUringThreadSendsStreamBytesOrFallsBackToEpoll) {
     char value = 0;
     ASSERT_EQ(::read(fds[1], &value, sizeof(value)), 1);
     EXPECT_EQ(value, 'S');
+
+    close_pair(fds);
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringThreadSendZcSendsStreamBytesOrFallsBack) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io backend unavailable";
+    }
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+
+    std::atomic<int> completed{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringStreamSendZcTask>(fds[0], &completed));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+
+    char value = 0;
+    ASSERT_EQ(::read(fds[1], &value, sizeof(value)), 1);
+    EXPECT_EQ(value, 'Z');
 
     close_pair(fds);
 #else

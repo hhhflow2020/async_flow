@@ -519,7 +519,8 @@ auto sharded = af::split_change_batch(batch, shard_count);
 - io_uring submit 在 executor tick 内合并，多个 SQE 尽量一次 `io_uring_enter` 提交；SQ 接近阈值或线程准备阻塞前会强制 flush，兼顾吞吐和尾延迟。
 - `af::io_openat()` / `io_close()` / `io_statx()` / `io_fallocate()` / `io_renameat()` / `io_unlinkat()` 和 `af::IoFile::read_at()` / `write_at()` / `readv_at()` / `writev_at()` / `fsync()` 通过 io_uring 提交真正的文件生命周期操作，completion 后恢复原 task。
 - `af::io_sendfile_some()` 通过 Linux `sendfile(2)` 做文件到 socket 的内核态搬运，遇到 socket buffer 满时等待 out fd writable；`af::io_splice_some()` 在 `ThreadKind::IoUring` 优先提交 `IORING_OP_SPLICE`，不可用时退回 `splice(2)` + readiness。
-- `af::TcpListener::accept_some()` / `af::TcpStream::connect()` / `recv_some()` / `send_some()` / `recvv_some()` / `sendv_some()` 在 `ThreadKind::IoUring` 线程上优先提交 `IORING_OP_ACCEPT` / `IORING_OP_CONNECT` / `IORING_OP_RECV` / `IORING_OP_SEND` 或 `IORING_OP_RECVMSG` / `IORING_OP_SENDMSG`；`af::UdpSocket::recv_from_some()` / `send_to_some()` / `recvv_from_some()` / `sendv_to_some()` 优先提交 `IORING_OP_RECVMSG` / `IORING_OP_SENDMSG`，ring 不可用或 would-block 时退回 epoll readiness。
+- `af::io_send_zc_some()` / `af::TcpStream::send_zc_some()` 在 `ThreadKind::IoUring` 线程上优先提交 `IORING_OP_SEND_ZC`，runtime 通过 probe 避免在不支持的内核上反复提交失败；主 CQE 恢复业务 task，notification CQE 只用于释放内部 operation，避免复用 `IoOpState` 时出现悬挂写入。
+- `af::TcpListener::accept_some()` / `af::TcpStream::connect()` / `recv_some()` / `send_some()` / `send_zc_some()` / `recvv_some()` / `sendv_some()` 在 `ThreadKind::IoUring` 线程上优先提交 `IORING_OP_ACCEPT` / `IORING_OP_CONNECT` / `IORING_OP_RECV` / `IORING_OP_SEND` / `IORING_OP_SEND_ZC` 或 `IORING_OP_RECVMSG` / `IORING_OP_SENDMSG`；`af::UdpSocket::recv_from_some()` / `send_to_some()` / `recvv_from_some()` / `sendv_to_some()` 优先提交 `IORING_OP_RECVMSG` / `IORING_OP_SENDMSG`，ring 不可用或 would-block 时退回 epoll readiness。
 - `af::IoEvent` 使用 Linux `eventfd` readiness，适合业务侧异步通知、轻量计数器和跨组件唤醒，`ThreadKind::IoUring` 线程也可复用 epoll fallback。
 - `af::IoTimer` 使用 Linux `timerfd` readiness，适合超时、重试、心跳和连接保活，`ThreadKind::IoUring` 线程也可复用 epoll fallback。
 - `af::IoFile` / `af::TcpListener` / `af::TcpStream` / `af::UdpSocket` / `af::IoEvent` / `af::IoTimer` 仅保存 `thread + fd`，内联转发到 IO helper，不拥有 fd、不分配堆内存、不增加额外分支表；`af::TcpStream::sendfile_some()` 只是 thin adapter，不接管文件 fd 或 socket fd 所有权。
@@ -754,7 +755,23 @@ async::parallel_shards_ordered(
 ./build-conan/build/Release/asyncflow_io_sendfile_static_example
 ```
 
-### 11.11 io_uring_datagram.cpp：UDP io_uring 业务模板
+### 11.11 io_uring_send_zc.cpp：TCP 发送侧 zero-copy 模板
+
+文件：`examples/io_uring_send_zc.cpp`
+
+该示例展示：
+
+- `ThreadKind::IoUring` 线程上用 `af::TcpStream::send_zc_some()` 发送 TCP payload。
+- 内核支持 `IORING_OP_SEND_ZC` 时走 io_uring zero-copy send；不支持或 socket 返回不支持时退回普通非阻塞 `send` + readiness。
+- 发送状态保存 offset 和 `IoOpState` 为 task 成员，每个状态拆成成员函数。
+
+运行：
+
+```sh
+./build-conan/build/Release/asyncflow_io_uring_send_zc_example
+```
+
+### 11.12 io_uring_datagram.cpp：UDP io_uring 业务模板
 
 文件：`examples/io_uring_datagram.cpp`
 
@@ -770,7 +787,7 @@ async::parallel_shards_ordered(
 ./build-conan/build/Release/asyncflow_io_uring_datagram_example
 ```
 
-### 11.12 io_tcp_connect_accept.cpp：TCP accept/connect 业务模板
+### 11.13 io_tcp_connect_accept.cpp：TCP accept/connect 业务模板
 
 文件：`examples/io_tcp_connect_accept.cpp`
 
@@ -786,7 +803,7 @@ async::parallel_shards_ordered(
 ./build-conan/build/Release/asyncflow_io_tcp_connect_accept_example
 ```
 
-### 11.13 io_vectored.cpp：scatter/gather stream/datagram 业务模板
+### 11.14 io_vectored.cpp：scatter/gather stream/datagram 业务模板
 
 文件：`examples/io_vectored.cpp`
 
@@ -802,7 +819,7 @@ async::parallel_shards_ordered(
 ./build-conan/build/Release/asyncflow_io_vectored_example
 ```
 
-### 11.14 io_timer.cpp：timerfd 异步定时器业务模板
+### 11.15 io_timer.cpp：timerfd 异步定时器业务模板
 
 文件：`examples/io_timer.cpp`
 
@@ -818,7 +835,7 @@ async::parallel_shards_ordered(
 ./build-conan/build/Release/asyncflow_io_timer_example
 ```
 
-### 11.15 io_event.cpp：eventfd 异步通知业务模板
+### 11.16 io_event.cpp：eventfd 异步通知业务模板
 
 文件：`examples/io_event.cpp`
 
@@ -844,7 +861,7 @@ async::parallel_shards_ordered(
 - `tests/runtime_parallel_tests.cpp`：parallel shards、失败汇总、有序 batch、ordered start 边界、retryable ordered apply。
 - `tests/runtime_stress_tests.cpp`：高并发 init/shutdown/start_task stress，可配合 TSAN 拉长运行。
 - `tests/utility_tests.cpp`：SPSC/MPSC/MPMC 队列、对象池、分片工具、CRUD helper、BatchSequencer、ordered retry/skip policy。
-- `tests/runtime_io_tests.cpp`：IO 线程、epoll readiness、eventfd、timerfd、io_uring 文件生命周期、sendfile/splice 少拷贝传输、stream 和 datagram vectored 操作、io_uring TCP accept/connect/stream 与 UDP datagram 操作、read/write/TCP/UDP helper 与 adapter、重复 fd wait、HUP/EOF、非法 fd、worker 误用和 pending IO shutdown。
+- `tests/runtime_io_tests.cpp`：IO 线程、epoll readiness、eventfd、timerfd、io_uring 文件生命周期、sendfile/splice/send_zc 少拷贝传输、stream 和 datagram vectored 操作、io_uring TCP accept/connect/stream 与 UDP datagram 操作、read/write/TCP/UDP helper 与 adapter、重复 fd wait、HUP/EOF、非法 fd、worker 误用和 pending IO shutdown。
 
 重点覆盖：
 
@@ -867,7 +884,7 @@ async::parallel_shards_ordered(
 - retryable ordered batch 跳过已经应用过同一 batch id 的 shard，只重跑仍落后的 shard。
 - ordered batch handler 失败时失败 shard 不推进版本。
 - epoll IO task 在 readable/writable、eventfd、timerfd、UDP 零长度报文、duplicate wait、peer HUP/EOF、非法 fd、adapter 边界下行为正确。
-- `ThreadKind::IoUring` 在线程上支持 epoll readiness fallback；io_uring 可用时覆盖文件 `openat/close/statx/fallocate/renameat/unlinkat/write_at/writev_at/fsync/read_at/readv_at`、TCP `accept/connect/recv/send/recvv/sendv` 和 UDP `recvmsg/sendmsg/recvv_from/sendv_to`。
+- `ThreadKind::IoUring` 在线程上支持 epoll readiness fallback；io_uring 可用时覆盖文件 `openat/close/statx/fallocate/renameat/unlinkat/write_at/writev_at/fsync/read_at/readv_at`、TCP `accept/connect/recv/send/send_zc/recvv/sendv` 和 UDP `recvmsg/sendmsg/recvv_from/sendv_to`。
 
 运行：
 

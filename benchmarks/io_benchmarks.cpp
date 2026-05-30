@@ -48,6 +48,19 @@ struct FakeRuntime {
         return false;
     }
 
+#if defined(__linux__)
+    static bool io_submit_send_zc(
+        BenchIoThread,
+        int,
+        const void*,
+        std::size_t,
+        std::uint32_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+#endif
+
 #if !defined(_WIN32)
     static bool io_submit_recvmsg(
         BenchIoThread,
@@ -336,6 +349,17 @@ void BM_IoStreamAdapterZeroByteSend(benchmark::State& state) {
     }
 }
 
+#if defined(__linux__)
+void BM_IoStreamAdapterZeroByteSendZc(benchmark::State& state) {
+    FakeTask task;
+    af::TcpStream<BenchIoThread> stream(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(stream.send_zc_some(task, nullptr, 0, op));
+    }
+}
+#endif
+
 void BM_IoDatagramAdapterZeroByteRecv(benchmark::State& state) {
     FakeTask task;
     af::UdpSocket<BenchIoThread> socket(BenchIoThread::IO_0, -1);
@@ -574,6 +598,9 @@ void BM_IoDatagramAdapterZeroIovSendvTo(benchmark::State& state) {
 
 BENCHMARK(BM_IoFileAdapterZeroByteRead);
 BENCHMARK(BM_IoStreamAdapterZeroByteSend);
+#if defined(__linux__)
+BENCHMARK(BM_IoStreamAdapterZeroByteSendZc);
+#endif
 BENCHMARK(BM_IoDatagramAdapterZeroByteRecv);
 BENCHMARK(BM_IoListenerAdapterInvalidAccept);
 BENCHMARK(BM_IoListenerAdapterInvalidAcceptMultishot);

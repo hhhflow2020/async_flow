@@ -44,6 +44,10 @@
 #ifndef IORING_ACCEPT_MULTISHOT
 #define IORING_ACCEPT_MULTISHOT (1U << 0U)
 #endif
+
+#ifndef IORING_CQE_F_NOTIF
+#define IORING_CQE_F_NOTIF (1U << 3U)
+#endif
 #endif
 
 #if !defined(__linux__)
@@ -1331,6 +1335,35 @@ public:
         }
         return executors_[index]->submit_io_uring_send(fd, data, size, flags, task, result);
     }
+
+#if defined(__linux__)
+    [[nodiscard]] static bool io_submit_send_zc(
+        Thread thread,
+        int fd,
+        const void* data,
+        std::size_t size,
+        std::uint32_t flags,
+        Task* task,
+        IoResult* result) noexcept {
+        if (task == nullptr || result == nullptr || fd < 0 || data == nullptr) {
+            if (result != nullptr) {
+                result->fd = fd;
+                result->events = io_error;
+                result->error = fd < 0 ? EBADF : EINVAL;
+            }
+            return false;
+        }
+
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            result->fd = fd;
+            result->events = io_error;
+            result->error = EINVAL;
+            return false;
+        }
+        return executors_[index]->submit_io_uring_send_zc(fd, data, size, flags, task, result);
+    }
+#endif
 
 #if !defined(_WIN32)
     [[nodiscard]] static bool io_submit_recvmsg_iov(
@@ -3277,6 +3310,50 @@ private:
 #endif
         }
 
+#if defined(__linux__)
+        [[nodiscard]] bool submit_io_uring_send_zc(
+            int fd,
+            const void* data,
+            std::size_t size,
+            std::uint32_t flags,
+            Task* task,
+            IoResult* result) noexcept {
+            if (!io_uring_send_zc_available_) {
+                if (result != nullptr) {
+                    result->fd = fd;
+                    result->events = io_error;
+                    result->error = ENOSYS;
+                }
+                return false;
+            }
+            return submit_io_uring_op(
+                io_uring_op_send_zc,
+                fd,
+                const_cast<void*>(data),
+                size,
+                0,
+                flags,
+                io_writable,
+                task,
+                result,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                0,
+                nullptr,
+                nullptr,
+                nullptr,
+                0,
+                0,
+                -1,
+                0,
+                false,
+                false,
+                true);
+        }
+#endif
+
 #if !defined(_WIN32)
         [[nodiscard]] bool submit_io_uring_recvmsg_iov(
             int fd,
@@ -3675,7 +3752,12 @@ private:
             std::uint8_t opcode{0};
             bool cancel_requested{false};
             bool multishot{false};
+            bool zero_copy_send{false};
+            bool zero_copy_primary_done{false};
+            bool zero_copy_notification_done{false};
         };
+
+        static constexpr std::uint8_t io_uring_op_send_zc = 47U;
 #endif
 
         [[nodiscard]] bool io_thread() const noexcept {
@@ -3710,7 +3792,8 @@ private:
             std::int32_t extra_fd = -1,
             std::uint16_t fixed_buffer_index = 0,
             bool fixed_file = false,
-            bool multishot = false) noexcept {
+            bool multishot = false,
+            bool zero_copy_send = false) noexcept {
             AF_ASSERT(current_thread_index_ == index_ && "io_uring submit must be called from its IO thread");
             if (current_thread_index_ != index_ || task == nullptr || result == nullptr) {
                 if (result != nullptr) {
@@ -3833,6 +3916,9 @@ private:
             operation->opcode = opcode;
             operation->cancel_requested = false;
             operation->multishot = multishot;
+            operation->zero_copy_send = zero_copy_send;
+            operation->zero_copy_primary_done = false;
+            operation->zero_copy_notification_done = false;
             operation->msg = nullptr;
             operation->socket_address = nullptr;
             if (message_op) {
@@ -3953,7 +4039,9 @@ private:
                 sqe->len = static_cast<unsigned>(size);
                 sqe->off = offset;
                 sqe->buf_index = fixed_buffer_index;
-            } else if (opcode == IORING_OP_RECV || opcode == IORING_OP_SEND) {
+            } else if (opcode == IORING_OP_RECV ||
+                       opcode == IORING_OP_SEND ||
+                       opcode == io_uring_op_send_zc) {
                 sqe->addr = reinterpret_cast<std::uint64_t>(data);
                 sqe->len = static_cast<unsigned>(size);
                 sqe->msg_flags = op_flags;
@@ -4288,6 +4376,7 @@ private:
             io_uring_cq_tail_ = ptr_at<std::uint32_t>(io_uring_cq_ring_, params.cq_off.tail);
             io_uring_cq_ring_mask_ = ptr_at<std::uint32_t>(io_uring_cq_ring_, params.cq_off.ring_mask);
             io_uring_cqes_ = ptr_at<io_uring_cqe>(io_uring_cq_ring_, params.cq_off.cqes);
+            detect_io_uring_features();
 
             if (sys_io_uring_register(
                     io_uring_fd_,
@@ -4301,6 +4390,35 @@ private:
         template <typename T>
         [[nodiscard]] static T* ptr_at(std::byte* base, std::uint32_t offset) noexcept {
             return reinterpret_cast<T*>(base + offset);
+        }
+
+        void detect_io_uring_features() noexcept {
+            io_uring_send_zc_available_ = false;
+
+            constexpr unsigned probe_count = 64;
+            std::array<
+                std::byte,
+                sizeof(io_uring_probe) + probe_count * sizeof(io_uring_probe_op)>
+                storage{};
+            auto* probe = reinterpret_cast<io_uring_probe*>(storage.data());
+            if (sys_io_uring_register(
+                    io_uring_fd_,
+                    IORING_REGISTER_PROBE,
+                    probe,
+                    probe_count) != 0) {
+                return;
+            }
+
+            const auto* ops = reinterpret_cast<const io_uring_probe_op*>(
+                storage.data() + sizeof(io_uring_probe));
+            const unsigned op_count = std::min<unsigned>(probe->ops_len, probe_count);
+            for (unsigned i = 0; i < op_count; ++i) {
+                if (ops[i].op == io_uring_op_send_zc &&
+                    (ops[i].flags & IO_URING_OP_SUPPORTED) != 0U) {
+                    io_uring_send_zc_available_ = true;
+                    return;
+                }
+            }
         }
 
         void close_io_uring_backend() noexcept {
@@ -4351,6 +4469,7 @@ private:
             io_uring_cq_ring_mask_ = nullptr;
             io_uring_cqes_ = nullptr;
             io_uring_pending_submissions_ = 0;
+            io_uring_send_zc_available_ = false;
             io_uring_buffers_registered_ = false;
             io_uring_registered_buffer_count_ = 0;
             io_uring_files_registered_ = false;
@@ -4459,12 +4578,23 @@ private:
             IoUringOperation* operation,
             int result,
             std::uint32_t cqe_flags) noexcept {
+            if (operation->zero_copy_send && (cqe_flags & IORING_CQE_F_NOTIF) != 0U) {
+                operation->zero_copy_notification_done = true;
+                if (operation->zero_copy_primary_done) {
+                    untrack_io_uring_operation(operation);
+                    destroy_io_uring_operation(operation);
+                }
+                return false;
+            }
+
             const bool more =
                 operation->multishot &&
                 !operation->cancel_requested &&
                 result >= 0 &&
                 (cqe_flags & IORING_CQE_F_MORE) != 0U;
-            if (!more) {
+            const bool zero_copy_waits_for_notification =
+                operation->zero_copy_send && (cqe_flags & IORING_CQE_F_MORE) != 0U;
+            if (!more && !zero_copy_waits_for_notification) {
                 untrack_io_uring_operation(operation);
             }
             operation->result->result = result;
@@ -4501,6 +4631,16 @@ private:
             }
             enqueue_pending_blocking(index_, operation->task);
             if (more) {
+                return true;
+            }
+            if (zero_copy_waits_for_notification) {
+                operation->zero_copy_primary_done = true;
+                operation->task = nullptr;
+                operation->result = nullptr;
+                if (operation->zero_copy_notification_done) {
+                    untrack_io_uring_operation(operation);
+                    destroy_io_uring_operation(operation);
+                }
                 return true;
             }
             destroy_io_uring_operation(operation);
@@ -4600,6 +4740,11 @@ private:
                 }
 
                 close_pending_io_uring_fd_result(operation);
+                if (operation->task == nullptr || operation->result == nullptr) {
+                    destroy_io_uring_operation(operation);
+                    operation = next;
+                    continue;
+                }
                 operation->result->events = io_error;
                 operation->result->error = operation->cancel_requested ? ECANCELED : error;
                 operation->result->result = operation->cancel_requested ? -ECANCELED : -error;
@@ -4775,6 +4920,7 @@ private:
         std::uint32_t* io_uring_cq_ring_mask_{nullptr};
         io_uring_cqe* io_uring_cqes_{nullptr};
         unsigned io_uring_pending_submissions_{0};
+        bool io_uring_send_zc_available_{false};
         bool io_uring_buffers_registered_{false};
         unsigned io_uring_registered_buffer_count_{0};
         bool io_uring_files_registered_{false};

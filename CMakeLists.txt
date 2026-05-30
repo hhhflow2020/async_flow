@@ -81,6 +81,9 @@ if(ASYNCFLOW_BUILD_EXAMPLES)
     add_executable(asyncflow_io_uring_datagram_example examples/io_uring_datagram.cpp)
     target_link_libraries(asyncflow_io_uring_datagram_example PRIVATE AsyncFlow::AsyncFlow)
 
+    add_executable(asyncflow_io_uring_send_zc_example examples/io_uring_send_zc.cpp)
+    target_link_libraries(asyncflow_io_uring_send_zc_example PRIVATE AsyncFlow::AsyncFlow)
+
     add_executable(asyncflow_io_tcp_connect_accept_example examples/io_tcp_connect_accept.cpp)
     target_link_libraries(asyncflow_io_tcp_connect_accept_example PRIVATE AsyncFlow::AsyncFlow)
 
