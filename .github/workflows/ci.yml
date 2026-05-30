@@ -71,9 +71,11 @@ jobs:
         run: |
           build-conan-release/build/Release/asyncflow_runtime_benchmarks \
             --benchmark_filter=BM_Runtime \
-            --benchmark_min_time=0.01s \
+            --benchmark_min_warmup_time=0.05s \
+            --benchmark_min_time=0.10s \
             --benchmark_repetitions=7 \
             --benchmark_report_aggregates_only=true \
+            --benchmark_enable_random_interleaving=true \
             --benchmark_out=build-conan-release/runtime_benchmarks.json \
             --benchmark_out_format=json
           python scripts/check_benchmark_regression.py \
