@@ -48,6 +48,28 @@ struct FakeRuntime {
         return false;
     }
 
+    static bool io_submit_read_at(
+        BenchIoThread,
+        int,
+        void*,
+        std::size_t,
+        std::uint64_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
+    static bool io_submit_write_at(
+        BenchIoThread,
+        int,
+        const void*,
+        std::size_t,
+        std::uint64_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
 #if defined(__linux__)
     static bool io_submit_send_zc(
         BenchIoThread,

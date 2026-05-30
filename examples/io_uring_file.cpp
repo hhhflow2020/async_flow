@@ -64,6 +64,7 @@ private:
     enum class State : std::uint8_t {
         Write,
         Fsync,
+        SeekStart,
         Read,
     };
 
@@ -75,6 +76,9 @@ private:
         case State::Fsync:
             return fsync_value();
 
+        case State::SeekStart:
+            return seek_start();
+
         case State::Read:
             return read_value();
         }
@@ -82,7 +86,7 @@ private:
     }
 
     af::TaskResult write_value() {
-        const af::IoStatus status = file_.write_at(*this, &value_, sizeof(value_), 0, write_);
+        const af::IoStatus status = file_.write_some(*this, &value_, sizeof(value_), write_);
         if (status.pending()) {
             return pending();
         }
@@ -101,12 +105,20 @@ private:
         if (!status.ready()) {
             return failed();
         }
+        state_ = State::SeekStart;
+        return again();
+    }
+
+    af::TaskResult seek_start() {
+        if (::lseek(file_.fd(), 0, SEEK_SET) < 0) {
+            return failed();
+        }
         state_ = State::Read;
         return again();
     }
 
     af::TaskResult read_value() {
-        const af::IoStatus status = file_.read_at(*this, &read_, sizeof(read_), 0, read_state_);
+        const af::IoStatus status = file_.read_some(*this, &read_, sizeof(read_), read_state_);
         if (status.pending()) {
             return pending();
         }
