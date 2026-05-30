@@ -283,6 +283,28 @@ struct FakeRuntime {
         return false;
     }
 
+    static bool io_submit_readv_fixed_file_at(
+        BenchIoThread,
+        int,
+        const iovec*,
+        int,
+        std::uint64_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
+    static bool io_submit_writev_fixed_file_at(
+        BenchIoThread,
+        int,
+        const iovec*,
+        int,
+        std::uint64_t,
+        void*,
+        af::IoResult*) noexcept {
+        return false;
+    }
+
     static bool io_submit_read_fixed_file_at(
         BenchIoThread,
         int,
@@ -773,6 +795,24 @@ void BM_IoFixedFileAdapterZeroByteWriteAt(benchmark::State& state) {
     }
 }
 
+void BM_IoFixedFileAdapterZeroIovReadvAt(benchmark::State& state) {
+    FakeTask task;
+    af::IoFixedFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(file.readv_at(task, nullptr, 0, 0, op));
+    }
+}
+
+void BM_IoFixedFileAdapterZeroIovWritevAt(benchmark::State& state) {
+    FakeTask task;
+    af::IoFixedFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(file.writev_at(task, nullptr, 0, 0, op));
+    }
+}
+
 void BM_IoFixedFileAdapterZeroByteRecv(benchmark::State& state) {
     FakeTask task;
     af::IoFixedFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
@@ -909,6 +949,8 @@ BENCHMARK(BM_IoFileAdapterZeroByteReadFixedAt);
 BENCHMARK(BM_IoFileAdapterZeroByteWriteFixedAt);
 BENCHMARK(BM_IoFixedFileAdapterZeroByteReadAt);
 BENCHMARK(BM_IoFixedFileAdapterZeroByteWriteAt);
+BENCHMARK(BM_IoFixedFileAdapterZeroIovReadvAt);
+BENCHMARK(BM_IoFixedFileAdapterZeroIovWritevAt);
 BENCHMARK(BM_IoFixedFileAdapterZeroByteRecv);
 BENCHMARK(BM_IoFixedFileAdapterZeroByteSend);
 BENCHMARK(BM_IoFixedFileAdapterZeroIovRecvv);

@@ -61,12 +61,14 @@ public:
         std::atomic<int>* completed,
         std::atomic<int>* error,
         std::atomic<char>* byte_read,
+        std::atomic<int>* vectored_read,
         std::atomic<char>* updated_byte_read) {
         fd_ = fd;
         updated_fd_ = updated_fd;
         completed_ = completed;
         error_ = error;
         byte_read_ = byte_read;
+        vectored_read_ = vectored_read;
         updated_byte_read_ = updated_byte_read;
         file_.reset(FixedFileThread::IO_0, 0);
         return schedule(FixedFileThread::IO_0);
@@ -76,8 +78,10 @@ private:
     enum class State : std::uint8_t {
         Register,
         Write,
+        WriteVectored,
         Fsync,
         Read,
+        ReadVectored,
         Update,
         ReadUpdated,
         Unregister,
@@ -91,11 +95,17 @@ private:
         case State::Write:
             return write_value();
 
+        case State::WriteVectored:
+            return write_vectored();
+
         case State::Fsync:
             return fsync_value();
 
         case State::Read:
             return read_value();
+
+        case State::ReadVectored:
+            return read_vectored();
 
         case State::Update:
             return update_file();
@@ -136,6 +146,25 @@ private:
             return complete(status.failed() ? status.error : EIO);
         }
         buffer_[0] = 0;
+        state_ = State::WriteVectored;
+        return again();
+    }
+
+    af::TaskResult write_vectored() {
+        write_iov_[0] = iovec{&vector_write_[0], 1};
+        write_iov_[1] = iovec{&vector_write_[1], 1};
+        const af::IoStatus status = file_.writev_at(
+            *this,
+            write_iov_,
+            2,
+            1,
+            writev_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(vector_write_)) {
+            return complete(status.failed() ? status.error : EIO);
+        }
         state_ = State::Fsync;
         return again();
     }
@@ -164,6 +193,29 @@ private:
         if (!status.ready() || status.bytes != 1U) {
             return complete(status.failed() ? status.error : EIO);
         }
+        state_ = State::ReadVectored;
+        return again();
+    }
+
+    af::TaskResult read_vectored() {
+        read_iov_[0] = iovec{&vector_read_[0], 1};
+        read_iov_[1] = iovec{&vector_read_[1], 1};
+        const af::IoStatus status = file_.readv_at(
+            *this,
+            read_iov_,
+            2,
+            1,
+            readv_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() ||
+            status.bytes != sizeof(vector_read_) ||
+            vector_read_[0] != vector_write_[0] ||
+            vector_read_[1] != vector_write_[1]) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        vectored_read_->store(pack_vectored_read(), std::memory_order_release);
         state_ = State::Update;
         return again();
     }
@@ -218,20 +270,32 @@ private:
         return done();
     }
 
+    [[nodiscard]] int pack_vectored_read() const noexcept {
+        return (static_cast<int>(static_cast<unsigned char>(vector_read_[0])) << 8) |
+               static_cast<int>(static_cast<unsigned char>(vector_read_[1]));
+    }
+
     State state_{State::Register};
     int fd_{-1};
     int updated_fd_{-1};
     af::IoFixedFile<FixedFileThread> file_{};
     alignas(64) char buffer_[64]{};
     char value_{'F'};
+    char vector_write_[2]{'I', 'O'};
+    char vector_read_[2]{};
     char updated_read_{0};
+    iovec write_iov_[2]{};
+    iovec read_iov_[2]{};
     af::IoOpState write_{};
+    af::IoOpState writev_{};
     af::IoOpState fsync_{};
     af::IoOpState read_state_{};
+    af::IoOpState readv_{};
     af::IoOpState updated_read_state_{};
     std::atomic<int>* completed_{nullptr};
     std::atomic<int>* error_{nullptr};
     std::atomic<char>* byte_read_{nullptr};
+    std::atomic<int>* vectored_read_{nullptr};
     std::atomic<char>* updated_byte_read_{nullptr};
 };
 #endif
@@ -280,6 +344,7 @@ int main() {
     std::atomic<int> completed{0};
     std::atomic<int> error{0};
     std::atomic<char> byte_read{0};
+    std::atomic<int> vectored_read{0};
     std::atomic<char> updated_byte_read{0};
     const bool started = fixed_file_async::start_task<FixedFileRoundTripTask>(
         file.get(),
@@ -287,6 +352,7 @@ int main() {
         &completed,
         &error,
         &byte_read,
+        &vectored_read,
         &updated_byte_read);
     AF_ASSERT(started);
 
@@ -311,8 +377,12 @@ int main() {
         return 1;
     }
 
+    const int vectored = vectored_read.load(std::memory_order_acquire);
     std::cout << "io_uring fixed file byte="
               << byte_read.load(std::memory_order_acquire)
+              << " vectored="
+              << static_cast<char>((vectored >> 8) & 0xff)
+              << static_cast<char>(vectored & 0xff)
               << " updated="
               << updated_byte_read.load(std::memory_order_acquire) << '\n';
     updated_file.reset();
