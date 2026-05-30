@@ -411,6 +411,18 @@ void BM_IoDatagramAdapterZeroByteRecv(benchmark::State& state) {
     }
 }
 
+#if defined(__linux__)
+void BM_IoDatagramAdapterInvalidRecvMultishot(benchmark::State& state) {
+    FakeTask task;
+    af::UdpSocket<BenchIoThread> socket(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    std::uint16_t buffer_id = 0;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(socket.recv_multishot(task, 0, &buffer_id, op));
+    }
+}
+#endif
+
 void BM_IoListenerAdapterInvalidAccept(benchmark::State& state) {
     FakeTask task;
     af::TcpListener<BenchIoThread> listener(BenchIoThread::IO_0, -1);
@@ -643,6 +655,7 @@ BENCHMARK(BM_IoStreamAdapterZeroByteSend);
 #if defined(__linux__)
 BENCHMARK(BM_IoStreamAdapterZeroByteSendZc);
 BENCHMARK(BM_IoStreamAdapterInvalidRecvMultishot);
+BENCHMARK(BM_IoDatagramAdapterInvalidRecvMultishot);
 #endif
 BENCHMARK(BM_IoDatagramAdapterZeroByteRecv);
 BENCHMARK(BM_IoListenerAdapterInvalidAccept);

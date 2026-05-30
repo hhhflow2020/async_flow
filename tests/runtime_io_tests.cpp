@@ -743,6 +743,7 @@ public:
         std::atomic<int>* unavailable_error,
         std::atomic<int>* register_error) {
         stream_.reset(IoTestThread::IO_0, fd);
+        datagram_.reset(IoTestThread::IO_0, fd);
         completed_ = completed;
         invalid_error_ = invalid_error;
         null_error_ = null_error;
@@ -792,19 +793,35 @@ private:
         }
 
         af::TcpStream<IoTestThread> invalid_stream(IoTestThread::IO_0, -1);
+        af::UdpSocket<IoTestThread> invalid_datagram(IoTestThread::IO_0, -1);
         af::IoOpState invalid_state{};
+        af::IoOpState invalid_datagram_state{};
         af::IoOpState null_state{};
+        af::IoOpState null_datagram_state{};
         af::IoOpState unavailable_state{};
+        af::IoOpState unavailable_datagram_state{};
         std::uint16_t buffer_id = 0;
         const af::IoStatus invalid_status =
             invalid_stream.recv_multishot(*this, 0, &buffer_id, invalid_state);
+        const af::IoStatus invalid_datagram_status =
+            invalid_datagram.recv_multishot(*this, 0, &buffer_id, invalid_datagram_state);
         const af::IoStatus null_status =
             stream_.recv_multishot(*this, 0, nullptr, null_state);
+        const af::IoStatus null_datagram_status =
+            datagram_.recv_multishot(*this, 0, nullptr, null_datagram_state);
         const af::IoStatus unavailable_status =
             stream_.recv_multishot(*this, 0, &buffer_id, unavailable_state);
+        const af::IoStatus unavailable_datagram_status =
+            datagram_.recv_multishot(*this, 0, &buffer_id, unavailable_datagram_state);
         if (!invalid_status.failed() || invalid_status.error != EBADF ||
+            !invalid_datagram_status.failed() || invalid_datagram_status.error != EBADF ||
             !null_status.failed() || null_status.error != EINVAL ||
+            !null_datagram_status.failed() || null_datagram_status.error != EINVAL ||
             !unavailable_status.failed() || unavailable_status.error != ENOSYS) {
+            return failed();
+        }
+        if (!unavailable_datagram_status.failed() ||
+            unavailable_datagram_status.error != ENOSYS) {
             return failed();
         }
 
@@ -817,6 +834,7 @@ private:
     }
 
     af::TcpStream<IoTestThread> stream_{};
+    af::UdpSocket<IoTestThread> datagram_{};
     std::atomic<int>* completed_{nullptr};
     std::atomic<int>* invalid_error_{nullptr};
     std::atomic<int>* null_error_{nullptr};
@@ -3339,8 +3357,30 @@ public:
         std::atomic<int>* read_count,
         std::atomic<int>* packed_read,
         std::atomic<int>* error) {
+        return do_it(
+            fd,
+            target_reads,
+            armed,
+            completed,
+            read_count,
+            packed_read,
+            error,
+            false);
+    }
+
+    bool do_it(
+        int fd,
+        int target_reads,
+        std::atomic<int>* armed,
+        std::atomic<int>* completed,
+        std::atomic<int>* read_count,
+        std::atomic<int>* packed_read,
+        std::atomic<int>* error,
+        bool datagram) {
         stream_.reset(IoTestThread::IO_0, fd);
+        datagram_.reset(IoTestThread::IO_0, fd);
         target_reads_ = target_reads;
+        datagram_mode_ = datagram;
         armed_ = armed;
         completed_ = completed;
         read_count_ = read_count;
@@ -3401,11 +3441,9 @@ private:
 
     af::TaskResult recv_one() {
         std::uint16_t buffer_id = 0;
-        const af::IoStatus status = stream_.recv_multishot(
-            *this,
-            buffer_group,
-            &buffer_id,
-            recv_);
+        const af::IoStatus status = datagram_mode_
+            ? datagram_.recv_multishot(*this, buffer_group, &buffer_id, recv_)
+            : stream_.recv_multishot(*this, buffer_group, &buffer_id, recv_);
         if (status.pending()) {
             if (!armed_once_) {
                 armed_once_ = true;
@@ -3452,8 +3490,9 @@ private:
 
     af::TaskResult finish_cancel() {
         std::uint16_t ignored = 0;
-        const af::IoStatus status =
-            stream_.recv_multishot(*this, buffer_group, &ignored, recv_);
+        const af::IoStatus status = datagram_mode_
+            ? datagram_.recv_multishot(*this, buffer_group, &ignored, recv_)
+            : stream_.recv_multishot(*this, buffer_group, &ignored, recv_);
         if (status.pending()) {
             return pending();
         }
@@ -3510,10 +3549,12 @@ private:
     static constexpr unsigned buffer_count = 2;
     State state_{State::Register};
     af::TcpStream<IoTestThread> stream_{};
+    af::UdpSocket<IoTestThread> datagram_{};
     af::IoProvidedBufferRing ring_{};
     char buffers_[buffer_count]{};
     int target_reads_{0};
     int finish_error_{0};
+    bool datagram_mode_{false};
     bool armed_once_{false};
     bool registered_{false};
     af::IoOpState recv_{};
@@ -5882,6 +5923,109 @@ TEST_F(UringIoRuntimeFixture, IoUringRecvMultishotUsesProvidedBuffers) {
         (static_cast<int>('A') << 8) | static_cast<int>('B'));
 
     close_pair(fds);
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringConnectedUdpRecvMultishotUsesProvidedBuffers) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io_uring backend unavailable";
+    }
+
+    af::UniqueFd receiver(::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
+    ASSERT_TRUE(receiver);
+    af::UniqueFd sender(::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
+    ASSERT_TRUE(sender);
+
+    sockaddr_in receiver_address{};
+    receiver_address.sin_family = AF_INET;
+    receiver_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    receiver_address.sin_port = 0;
+    ASSERT_EQ(
+        ::bind(receiver.get(), reinterpret_cast<sockaddr*>(&receiver_address), sizeof(receiver_address)),
+        0);
+    socklen_t receiver_address_size = sizeof(receiver_address);
+    ASSERT_EQ(
+        ::getsockname(
+            receiver.get(),
+            reinterpret_cast<sockaddr*>(&receiver_address),
+            &receiver_address_size),
+        0);
+
+    sockaddr_in sender_address{};
+    sender_address.sin_family = AF_INET;
+    sender_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    sender_address.sin_port = 0;
+    ASSERT_EQ(
+        ::bind(sender.get(), reinterpret_cast<sockaddr*>(&sender_address), sizeof(sender_address)),
+        0);
+    socklen_t sender_address_size = sizeof(sender_address);
+    ASSERT_EQ(
+        ::getsockname(
+            sender.get(),
+            reinterpret_cast<sockaddr*>(&sender_address),
+            &sender_address_size),
+        0);
+    ASSERT_EQ(
+        ::connect(
+            receiver.get(),
+            reinterpret_cast<sockaddr*>(&sender_address),
+            sender_address_size),
+        0);
+    ASSERT_EQ(
+        ::connect(
+            sender.get(),
+            reinterpret_cast<sockaddr*>(&receiver_address),
+            receiver_address_size),
+        0);
+
+    constexpr int target_reads = 2;
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<int> read_count{0};
+    std::atomic<int> packed_read{0};
+    std::atomic<int> error{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringRecvMultishotTask>(
+        receiver.get(),
+        target_reads,
+        &armed,
+        &completed,
+        &read_count,
+        &packed_read,
+        &error,
+        true));
+
+    if (!wait_until_at_least(armed, 1)) {
+        ASSERT_TRUE(wait_until_at_least(completed, 1));
+        const int setup_error = error.load(std::memory_order_acquire);
+        if (setup_error == EINVAL ||
+            setup_error == EOPNOTSUPP ||
+            setup_error == ENOSYS ||
+            setup_error == ENOBUFS) {
+            GTEST_SKIP() << "io_uring UDP recv_multishot unsupported";
+        }
+        FAIL() << "UDP recv_multishot was not armed, error=" << setup_error;
+    }
+
+    const char payload[] = {'U', 'D'};
+    ASSERT_EQ(::send(sender.get(), payload, 1, 0), 1);
+    ASSERT_EQ(::send(sender.get(), payload + 1, 1, 0), 1);
+
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    const int task_error = error.load(std::memory_order_acquire);
+    if (task_error == EINVAL ||
+        task_error == EOPNOTSUPP ||
+        task_error == ENOSYS ||
+        task_error == ENOBUFS) {
+        GTEST_SKIP() << "io_uring UDP recv_multishot unsupported";
+    }
+    EXPECT_EQ(task_error, 0);
+    EXPECT_EQ(read_count.load(std::memory_order_acquire), target_reads);
+    EXPECT_EQ(
+        packed_read.load(std::memory_order_acquire),
+        (static_cast<int>('U') << 8) | static_cast<int>('D'));
 #else
     GTEST_SKIP() << "io_uring backend is Linux-only";
 #endif

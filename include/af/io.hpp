@@ -3683,6 +3683,26 @@ public:
     }
 
     template <typename TaskT>
+    [[nodiscard]] IoStatus recv_multishot(
+        TaskT& task,
+        std::uint16_t buffer_group,
+        std::uint16_t* buffer_id,
+        IoOpState& state,
+        std::uint32_t flags = 0) const noexcept {
+        static_assert(
+            std::is_same_v<typename TaskT::Thread, ThreadT>,
+            "IoDatagramSocket thread type must match the task runtime thread type");
+        return af::io_recv_multishot(
+            task,
+            this->thread_,
+            this->fd_,
+            buffer_group,
+            buffer_id,
+            state,
+            flags);
+    }
+
+    template <typename TaskT>
     [[nodiscard]] IoStatus send_to_some(
         TaskT& task,
         const void* data,
