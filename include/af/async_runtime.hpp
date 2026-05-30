@@ -2016,6 +2016,65 @@ private:
         Stopping,
     };
 
+    template <typename T>
+    struct alignas(detail::hardware_cache_line_size) CacheLineAtomic {
+        std::atomic<T> value;
+
+        constexpr CacheLineAtomic() noexcept = default;
+        constexpr explicit CacheLineAtomic(T initial) noexcept : value(initial) {}
+
+        CacheLineAtomic(const CacheLineAtomic&) = delete;
+        CacheLineAtomic& operator=(const CacheLineAtomic&) = delete;
+
+        [[nodiscard]] T load(std::memory_order order = std::memory_order_seq_cst) const noexcept {
+            return value.load(order);
+        }
+
+        void store(T desired, std::memory_order order = std::memory_order_seq_cst) noexcept {
+            value.store(desired, order);
+        }
+
+        [[nodiscard]] bool compare_exchange_weak(
+            T& expected,
+            T desired,
+            std::memory_order success,
+            std::memory_order failure) noexcept {
+            return value.compare_exchange_weak(expected, desired, success, failure);
+        }
+
+        [[nodiscard]] bool compare_exchange_strong(
+            T& expected,
+            T desired,
+            std::memory_order success,
+            std::memory_order failure) noexcept {
+            return value.compare_exchange_strong(expected, desired, success, failure);
+        }
+
+        T fetch_add(T arg, std::memory_order order = std::memory_order_seq_cst) noexcept {
+            return value.fetch_add(arg, order);
+        }
+
+        T fetch_sub(T arg, std::memory_order order = std::memory_order_seq_cst) noexcept {
+            return value.fetch_sub(arg, order);
+        }
+
+        T fetch_and(T arg, std::memory_order order = std::memory_order_seq_cst) noexcept {
+            return value.fetch_and(arg, order);
+        }
+
+        void wait(T old, std::memory_order order = std::memory_order_seq_cst) const noexcept {
+            value.wait(old, order);
+        }
+
+        void notify_one() noexcept {
+            value.notify_one();
+        }
+
+        void notify_all() noexcept {
+            value.notify_all();
+        }
+    };
+
     struct alignas(detail::hardware_cache_line_size) OrderedBatchState {
         std::uint64_t last_applied_batch_id{0};
     };
@@ -2047,8 +2106,8 @@ private:
         }
     };
 
-    struct alignas(detail::hardware_cache_line_size) ExternalPostCounter {
-        std::atomic<std::uint32_t> value{0};
+    struct ExternalPostCounter {
+        CacheLineAtomic<std::uint32_t> value{0};
     };
 
     enum class OrderedGuardDecision : std::uint8_t {
@@ -6131,11 +6190,11 @@ private:
         std::size_t local_head_{0};
         std::size_t local_tail_{0};
         std::size_t local_size_{0};
-        alignas(detail::hardware_cache_line_size) std::atomic<std::uint64_t> ready_sources_{0};
-        alignas(detail::hardware_cache_line_size) std::atomic<bool> external_ready_{false};
-        alignas(detail::hardware_cache_line_size) std::atomic<std::uint32_t> wake_epoch_{0};
-        std::atomic<bool> sleeping_{false};
-        std::atomic<bool> stop_requested_{false};
+        CacheLineAtomic<std::uint64_t> ready_sources_{0};
+        CacheLineAtomic<bool> external_ready_{false};
+        CacheLineAtomic<std::uint32_t> wake_epoch_{0};
+        CacheLineAtomic<bool> sleeping_{false};
+        CacheLineAtomic<bool> stop_requested_{false};
         Task* running_task_{nullptr};
 #if defined(__linux__)
         int io_epoll_fd_{-1};
@@ -6174,7 +6233,7 @@ private:
         detail::ObjectPool<IoUringMessage> io_uring_msg_pool_;
         detail::ObjectPool<IoUringSocketAddress> io_uring_address_pool_;
         detail::ObjectPool<IoUringOperation> io_uring_op_pool_;
-        alignas(detail::hardware_cache_line_size) std::atomic<bool> io_wake_pending_{false};
+        CacheLineAtomic<bool> io_wake_pending_{false};
 #endif
         std::thread worker_;
     };
@@ -6545,13 +6604,10 @@ private:
         }
     }
 
-    alignas(detail::hardware_cache_line_size) static inline std::atomic<RuntimeStatus> status_{
-        RuntimeStatus::Stopped};
+    static inline CacheLineAtomic<RuntimeStatus> status_{RuntimeStatus::Stopped};
     static inline std::array<ExternalPostCounter, thread_count> active_external_posts_{};
-    alignas(detail::hardware_cache_line_size) static inline std::atomic<std::uint32_t> unfinished_tasks_{
-        0};
-    alignas(detail::hardware_cache_line_size) static inline std::atomic<std::uint64_t> generation_{
-        0};
+    static inline CacheLineAtomic<std::uint32_t> unfinished_tasks_{0};
+    static inline CacheLineAtomic<std::uint64_t> generation_{0};
     static inline std::vector<std::unique_ptr<Executor>> executors_;
     static inline std::vector<std::unique_ptr<SpscQueue>> spsc_queues_;
     static inline std::vector<std::unique_ptr<ExternalQueue>> external_queues_;
