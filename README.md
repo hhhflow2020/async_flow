@@ -275,6 +275,7 @@ ASYNCFLOW_STRESS_MS=1500 ctest --test-dir build-tsan/build/Debug -R RuntimeStres
 - `examples/io_timeout.cpp`：使用 `af::IoDeadline` 为单次 pending read 组合 timeout/cancel。
 - `examples/io_adapters.cpp`：使用 `af::TcpStream` 和 `af::UdpSocket` 编写业务状态机。
 - `examples/io_pollable_client.cpp`：第三方 client 暴露 fd 的接入模板：`step()` 返回 WANT_READ/WANT_WRITE，由框架驱动 readiness 并恢复状态机。
+- `examples/io_rpc_length_prefixed.cpp`：简单 length-prefixed RPC client/server：连接归属固定 IO 线程，消息处理切到逻辑线程，响应再切回 IO 线程发送。
 - `examples/io_sendfile_static.cpp`：使用 `af::TcpStream::sendfile_some()` 将静态文件内容通过 TCP socket 发送给 peer。
 - `examples/io_shutdown.cpp`：使用 `af::TcpStream::shutdown()` 在绑定 IO 线程完成 TCP half-close。
 - `examples/io_socket_lifecycle.cpp`：在指定 IO 线程完成 TCP listener 的 socket、setsockopt、bind、listen 和 accept 生命周期。
@@ -303,3 +304,9 @@ ASYNCFLOW_STRESS_MS=1500 ctest --test-dir build-tsan/build/Debug -R RuntimeStres
 - `benchmarks/io_benchmarks.cpp`、`benchmarks/queue_benchmarks.cpp` 与 `benchmarks/runtime_benchmarks.cpp`：IO adapter、底层结构和 runtime 路径分开压测。
 - `benchmarks/perf_baseline.json`：本地 runtime benchmark baseline。
 - `benchmarks/perf_baseline_github_ubuntu.json` 与 `scripts/check_benchmark_regression.py`：GitHub Ubuntu runner 性能 baseline 与回归阈值检查。
+
+## 业务 IO adapter 接入建议
+
+- 日志：业务线程只做内存拼装与 SPSC 投递，固定一个日志 IO 线程批量 `writev` 落盘/写 pipe，尽量减少跨线程竞争与 syscall 次数。
+- Redis/MySQL/Kafka/配置中心/服务发现：优先选择可暴露底层 fd 的 nonblocking client；将连接归属到固定 IO 线程，在 task 内维护状态机，按 WANT_READ/WANT_WRITE 注册 readiness；业务回调尽量只做轻量解析，重 CPU 处理再切回逻辑线程。
+- RPC：连接归属固定 IO 线程，网络读写和 buffer 生命周期都留在该线程；拆包/编解码可先在 IO 线程做轻量 framing，再把 payload 切回逻辑线程处理，响应结果再切回 IO 线程发送。
