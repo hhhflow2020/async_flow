@@ -510,6 +510,7 @@ template <typename TaskT>
 inline void clear_waiting(IoOpState& state) noexcept {
     state.waiting = false;
     state.wait_kind = IoWaitKind::None;
+    state.wait.completion_token = nullptr;
 }
 
 inline void clear_readiness_rearm_hint(IoOpState& state) noexcept {
@@ -605,6 +606,14 @@ inline void clear_readiness_rearm_hint(IoOpState& state) noexcept {
         return IoStatus::make_closed();
     }
     return IoStatus::ready(static_cast<std::size_t>(state.wait.result));
+}
+
+inline void reset_multishot_completion_wait(IoOpState& state, int fd) noexcept {
+    void* const completion_token = state.wait.completion_token;
+    state.wait = IoResult{fd, 0, 0, 0};
+    state.wait.completion_token = completion_token;
+    state.waiting = true;
+    state.wait_kind = IoWaitKind::Completion;
 }
 
 } // namespace detail
@@ -893,9 +902,7 @@ template <typename TaskT>
 
         *accepted_fd = static_cast<int>(state.wait.result);
         if (more) {
-            state.wait = IoResult{fd, 0, 0, 0};
-            state.waiting = true;
-            state.wait_kind = IoWaitKind::Completion;
+            detail::reset_multishot_completion_wait(state, fd);
         } else {
             detail::clear_waiting(state);
         }
@@ -1120,9 +1127,7 @@ template <typename TaskT>
         *buffer_id = selected_id;
         const auto bytes = static_cast<std::size_t>(state.wait.result);
         if (more) {
-            state.wait = IoResult{fd, 0, 0, 0};
-            state.waiting = true;
-            state.wait_kind = IoWaitKind::Completion;
+            detail::reset_multishot_completion_wait(state, fd);
         } else {
             detail::clear_waiting(state);
         }
@@ -1291,9 +1296,7 @@ template <typename TaskT>
         *buffer_id = selected_id;
         const auto bytes = static_cast<std::size_t>(state.wait.result);
         if (more) {
-            state.wait = IoResult{fd, 0, 0, 0};
-            state.waiting = true;
-            state.wait_kind = IoWaitKind::Completion;
+            detail::reset_multishot_completion_wait(state, fd);
         } else {
             detail::clear_waiting(state);
         }

@@ -3039,8 +3039,8 @@ private:
                 return false;
             }
 
-            IoUringOperation* operation = find_io_uring_operation(&state.wait);
-            if (operation == nullptr) {
+            auto* operation = static_cast<IoUringOperation*>(state.wait.completion_token);
+            if (operation == nullptr || operation->result != &state.wait || operation->poll_wait) {
                 state.wait.events = io_error;
                 state.wait.error = ENOENT;
                 state.wait.result = -ENOENT;
@@ -4579,6 +4579,7 @@ private:
             result->events = 0;
             result->error = 0;
             result->result = 0;
+            result->completion_token = nullptr;
 
             if (io_uring_pending_submissions_ >= io_uring_submit_batch_threshold_) {
                 const int submit_error = flush_io_uring_submissions();
@@ -4623,6 +4624,9 @@ private:
             std::uint16_t provided_buffer_group = 0,
             bool buffer_select = false) noexcept {
             AF_ASSERT(current_thread_index_ == index_ && "io_uring submit must be called from its IO thread");
+            if (result != nullptr) {
+                result->completion_token = nullptr;
+            }
             if (current_thread_index_ != index_ || task == nullptr || result == nullptr) {
                 if (result != nullptr) {
                     result->fd = fd;
@@ -4911,6 +4915,7 @@ private:
             result->events = 0;
             result->error = 0;
             result->result = 0;
+            result->completion_token = operation;
 
             if (io_uring_pending_submissions_ >= io_uring_submit_batch_threshold_) {
                 const int submit_error = flush_io_uring_submissions();
@@ -5511,6 +5516,7 @@ private:
             }
             if (zero_copy_waits_for_notification) {
                 operation->zero_copy_primary_done = true;
+                clear_io_uring_result_token(operation);
                 operation->task = nullptr;
                 operation->result = nullptr;
                 if (operation->zero_copy_notification_done) {
@@ -5563,17 +5569,6 @@ private:
 
         [[nodiscard]] static bool io_uring_result_is_fd(std::uint8_t opcode) noexcept {
             return opcode == IORING_OP_OPENAT || opcode == IORING_OP_ACCEPT;
-        }
-
-        [[nodiscard]] IoUringOperation* find_io_uring_operation(IoResult* result) noexcept {
-            IoUringOperation* operation = io_uring_operations_;
-            while (operation != nullptr) {
-                if (operation->result == result) {
-                    return operation;
-                }
-                operation = operation->next;
-            }
-            return nullptr;
         }
 
         [[nodiscard]] int submit_io_uring_cancel(IoUringOperation* operation) noexcept {
@@ -5683,7 +5678,16 @@ private:
             operation->result->result = -ECANCELED;
         }
 
+        static void clear_io_uring_result_token(IoUringOperation* operation) noexcept {
+            if (operation != nullptr &&
+                operation->result != nullptr &&
+                operation->result->completion_token == operation) {
+                operation->result->completion_token = nullptr;
+            }
+        }
+
         void destroy_io_uring_operation(IoUringOperation* operation) noexcept {
+            clear_io_uring_result_token(operation);
             if (operation->msg != nullptr) {
                 io_uring_msg_pool_.destroy(operation->msg);
                 operation->msg = nullptr;

@@ -59,6 +59,7 @@ struct IoResult {
     std::uint32_t events{0};
     int error{0};
     std::int64_t result{0};
+    void* completion_token{nullptr};
 
     [[nodiscard]] bool readable() const noexcept {
         return (events & io_readable) != 0U;
