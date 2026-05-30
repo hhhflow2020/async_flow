@@ -23,6 +23,7 @@
 #include "af/detail/runtime_traits.hpp"
 #include "af/task.hpp"
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 
 #if !defined(_WIN32)
 #include <fcntl.h>
@@ -6366,19 +6367,11 @@ private:
 
 #if defined(__linux__)
         void defer_io_delete(int fd) {
-            io_deferred_deletes_.push_back(fd);
+            io_deferred_deletes_.insert(fd);
         }
 
         void forget_deferred_io_delete(int fd) noexcept {
-            auto it = std::find(
-                io_deferred_deletes_.begin(),
-                io_deferred_deletes_.end(),
-                fd);
-            if (it == io_deferred_deletes_.end()) {
-                return;
-            }
-            *it = io_deferred_deletes_.back();
-            io_deferred_deletes_.pop_back();
+            io_deferred_deletes_.erase(fd);
         }
 
         void flush_deferred_io_deletes() noexcept {
@@ -7183,7 +7176,7 @@ private:
         int io_epoll_fd_{-1};
         int io_wake_fd_{-1};
         absl::flat_hash_map<int, IoWaitRegistration*> io_waits_;
-        std::vector<int> io_deferred_deletes_;
+        absl::flat_hash_set<int> io_deferred_deletes_;
         int io_uring_fd_{-1};
         std::byte* io_uring_sq_ring_{nullptr};
         std::byte* io_uring_cq_ring_{nullptr};
