@@ -403,6 +403,123 @@ private:
     std::atomic<int>* bytes_sent_{nullptr};
 };
 
+template <typename TaskBaseT>
+class BasicUdpVectoredRecvTask final : public TaskBaseT {
+public:
+    explicit BasicUdpVectoredRecvTask(typename TaskBaseT::FactoryToken token) : TaskBaseT(token) {}
+
+    bool do_it(
+        int fd,
+        std::atomic<int>* armed,
+        std::atomic<int>* completed,
+        std::atomic<int>* payload_seen) {
+        socket_.reset(IoTestThread::IO_0, fd);
+        armed_ = armed;
+        completed_ = completed;
+        payload_seen_ = payload_seen;
+        return this->schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        peer_size_ = sizeof(peer_);
+        iov_[0] = iovec{&payload_[0], 1};
+        iov_[1] = iovec{&payload_[1], 1};
+        const af::IoStatus status = socket_.recvv_from_some(
+            *this,
+            iov_,
+            2,
+            reinterpret_cast<sockaddr*>(&peer_),
+            &peer_size_,
+            recv_);
+        if (status.pending()) {
+            armed_->fetch_add(1, std::memory_order_release);
+            return this->pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(payload_) || peer_size_ == 0U) {
+            return this->failed();
+        }
+
+        const int combined =
+            (static_cast<unsigned char>(payload_[0]) << 8) |
+            static_cast<unsigned char>(payload_[1]);
+        payload_seen_->store(combined, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return this->done();
+    }
+
+    af::UdpSocket<IoTestThread> socket_{};
+    char payload_[2]{};
+    iovec iov_[2]{};
+    sockaddr_storage peer_{};
+    socklen_t peer_size_{sizeof(peer_)};
+    af::IoOpState recv_{};
+    std::atomic<int>* armed_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* payload_seen_{nullptr};
+};
+
+template <typename TaskBaseT>
+class BasicUdpVectoredSendToTask final : public TaskBaseT {
+public:
+    explicit BasicUdpVectoredSendToTask(typename TaskBaseT::FactoryToken token) : TaskBaseT(token) {}
+
+    bool do_it(
+        int fd,
+        sockaddr_in address,
+        socklen_t address_size,
+        char first,
+        char second,
+        std::atomic<int>* completed,
+        std::atomic<int>* bytes_sent) {
+        socket_.reset(IoTestThread::IO_0, fd);
+        address_ = address;
+        address_size_ = address_size;
+        payload_[0] = first;
+        payload_[1] = second;
+        completed_ = completed;
+        bytes_sent_ = bytes_sent;
+        return this->schedule(IoTestThread::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        iov_[0] = iovec{&payload_[0], 1};
+        iov_[1] = iovec{&payload_[1], 1};
+        const af::IoStatus status = socket_.sendv_to_some(
+            *this,
+            iov_,
+            2,
+            reinterpret_cast<const sockaddr*>(&address_),
+            address_size_,
+            send_);
+        if (status.pending()) {
+            return this->pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(payload_)) {
+            return this->failed();
+        }
+
+        bytes_sent_->store(static_cast<int>(status.bytes), std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return this->done();
+    }
+
+    af::UdpSocket<IoTestThread> socket_{};
+    sockaddr_in address_{};
+    socklen_t address_size_{sizeof(address_)};
+    char payload_[2]{};
+    iovec iov_[2]{};
+    af::IoOpState send_{};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* bytes_sent_{nullptr};
+};
+
+using UdpVectoredRecvTask = BasicUdpVectoredRecvTask<IoTaskBase>;
+using UdpVectoredSendToTask = BasicUdpVectoredSendToTask<IoTaskBase>;
+using UringUdpVectoredRecvTask = BasicUdpVectoredRecvTask<UringIoTaskBase>;
+using UringUdpVectoredSendToTask = BasicUdpVectoredSendToTask<UringIoTaskBase>;
+
 class TcpAcceptTask final : public IoTaskBase {
 public:
     explicit TcpAcceptTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
@@ -1319,13 +1436,17 @@ private:
         af::IoOpState writev_at{};
         af::IoOpState recvv{};
         af::IoOpState sendv{};
+        af::IoOpState recv_from{};
+        af::IoOpState send_to{};
         af::IoOpState bad_file{};
         af::IoOpState bad_iov_state{};
         af::IoOpState bad_count_state{};
+        af::IoOpState bad_datagram_state{};
 
         char value = 'v';
         iovec valid_iov{&value, 1};
         iovec invalid_iov{nullptr, 1};
+        af::UdpSocket<IoTestThread> datagram(IoTestThread::IO_0, -1);
 
         const af::IoStatus zero_readv = file.readv_some(*this, nullptr, 0, readv);
         const af::IoStatus zero_writev = file.writev_some(*this, nullptr, 0, writev);
@@ -1333,12 +1454,18 @@ private:
         const af::IoStatus zero_writev_at = file.writev_at(*this, nullptr, 0, 0, writev_at);
         const af::IoStatus zero_recvv = stream.recvv_some(*this, nullptr, 0, recvv);
         const af::IoStatus zero_sendv = stream.sendv_some(*this, nullptr, 0, sendv);
+        const af::IoStatus zero_recvv_from =
+            datagram.recvv_from_some(*this, nullptr, 0, nullptr, nullptr, recv_from);
+        const af::IoStatus zero_sendv_to =
+            datagram.sendv_to_some(*this, nullptr, 0, nullptr, 0, send_to);
         const af::IoStatus bad_file_status =
             file.writev_at(*this, &valid_iov, 1, 0, bad_file);
         const af::IoStatus bad_iov =
             stream.sendv_some(*this, &invalid_iov, 1, bad_iov_state);
         const af::IoStatus bad_count =
             stream.recvv_some(*this, &valid_iov, -1, bad_count_state);
+        const af::IoStatus bad_datagram =
+            datagram.sendv_to_some(*this, &invalid_iov, 1, nullptr, 0, bad_datagram_state);
 
         if (!zero_readv.ready() || zero_readv.bytes != 0U ||
             !zero_writev.ready() || zero_writev.bytes != 0U ||
@@ -1346,9 +1473,12 @@ private:
             !zero_writev_at.ready() || zero_writev_at.bytes != 0U ||
             !zero_recvv.ready() || zero_recvv.bytes != 0U ||
             !zero_sendv.ready() || zero_sendv.bytes != 0U ||
+            !zero_recvv_from.ready() || zero_recvv_from.bytes != 0U ||
+            !zero_sendv_to.ready() || zero_sendv_to.bytes != 0U ||
             !bad_file_status.failed() || bad_file_status.error != EBADF ||
             !bad_iov.failed() || bad_iov.error != EINVAL ||
-            !bad_count.failed() || bad_count.error != EINVAL) {
+            !bad_count.failed() || bad_count.error != EINVAL ||
+            !bad_datagram.failed() || bad_datagram.error != EINVAL) {
             return failed();
         }
 
@@ -1915,6 +2045,54 @@ TEST_F(UringIoRuntimeFixture, IoUringThreadReceivesUdpDatagramOrFallsBackToEpoll
 #endif
 }
 
+TEST_F(UringIoRuntimeFixture, IoUringThreadReceivesVectoredUdpDatagramOrFallsBackToEpoll) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io backend unavailable";
+    }
+
+    af::UniqueFd receiver(::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
+    ASSERT_TRUE(receiver);
+    af::UniqueFd sender(::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
+    ASSERT_TRUE(sender);
+
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = 0;
+    ASSERT_EQ(::bind(receiver.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+
+    socklen_t address_size = sizeof(address);
+    ASSERT_EQ(
+        ::getsockname(receiver.get(), reinterpret_cast<sockaddr*>(&address), &address_size),
+        0);
+
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<int> payload_seen{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringUdpVectoredRecvTask>(
+        receiver.get(),
+        &armed,
+        &completed,
+        &payload_seen));
+    ASSERT_TRUE(wait_until_at_least(armed, 1));
+
+    const char payload[2]{'q', 'r'};
+    ASSERT_EQ(::sendto(
+                  sender.get(),
+                  payload,
+                  sizeof(payload),
+                  0,
+                  reinterpret_cast<sockaddr*>(&address),
+                  address_size),
+              2);
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(payload_seen.load(std::memory_order_acquire), ('q' << 8) | 'r');
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
 TEST_F(UringIoRuntimeFixture, IoUringThreadSendsUdpDatagramOrFallsBackToEpoll) {
 #if defined(__linux__)
     if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
@@ -1962,6 +2140,59 @@ TEST_F(UringIoRuntimeFixture, IoUringThreadSendsUdpDatagramOrFallsBackToEpoll) {
                   &peer_size),
               1);
     EXPECT_EQ(received, value);
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
+TEST_F(UringIoRuntimeFixture, IoUringThreadSendsVectoredUdpDatagramOrFallsBackToEpoll) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io backend unavailable";
+    }
+
+    af::UniqueFd receiver(::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
+    ASSERT_TRUE(receiver);
+    af::UniqueFd sender(::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
+    ASSERT_TRUE(sender);
+
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = 0;
+    ASSERT_EQ(::bind(receiver.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+
+    socklen_t address_size = sizeof(address);
+    ASSERT_EQ(
+        ::getsockname(receiver.get(), reinterpret_cast<sockaddr*>(&address), &address_size),
+        0);
+
+    std::atomic<int> completed{0};
+    std::atomic<int> bytes_sent{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringUdpVectoredSendToTask>(
+        sender.get(),
+        address,
+        address_size,
+        'x',
+        'y',
+        &completed,
+        &bytes_sent));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), 2);
+
+    char received[2]{};
+    sockaddr_storage peer{};
+    socklen_t peer_size = sizeof(peer);
+    ASSERT_EQ(::recvfrom(
+                  receiver.get(),
+                  received,
+                  sizeof(received),
+                  0,
+                  reinterpret_cast<sockaddr*>(&peer),
+                  &peer_size),
+              2);
+    EXPECT_EQ(received[0], 'x');
+    EXPECT_EQ(received[1], 'y');
 #else
     GTEST_SKIP() << "io_uring backend is Linux-only";
 #endif
@@ -2122,6 +2353,55 @@ TEST_F(IoRuntimeFixture, EpollIoThreadResumesUdpRecvFromHelper) {
 #endif
 }
 
+TEST_F(IoRuntimeFixture, EpollIoThreadReceivesVectoredUdpDatagramFromHelper) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int receiver = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(receiver, 0);
+    int sender = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(sender, 0);
+
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = 0;
+    ASSERT_EQ(::bind(receiver, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+
+    socklen_t address_size = sizeof(address);
+    ASSERT_EQ(::getsockname(receiver, reinterpret_cast<sockaddr*>(&address), &address_size), 0);
+
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<int> payload_seen{0};
+    ASSERT_TRUE(IoRuntime::start_task<UdpVectoredRecvTask>(
+        receiver,
+        &armed,
+        &completed,
+        &payload_seen));
+    ASSERT_TRUE(wait_until_at_least(armed, 1));
+
+    const char payload[2]{'u', 'v'};
+    ASSERT_EQ(::sendto(
+                  sender,
+                  payload,
+                  sizeof(payload),
+                  0,
+                  reinterpret_cast<sockaddr*>(&address),
+                  address_size),
+              2);
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(payload_seen.load(std::memory_order_acquire), ('u' << 8) | 'v');
+
+    close_fd(sender);
+    close_fd(receiver);
+#else
+    GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
 TEST_F(IoRuntimeFixture, EpollIoThreadAcceptsUdpZeroLengthDatagram) {
 #if defined(__linux__)
     if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
@@ -2212,6 +2492,60 @@ TEST_F(IoRuntimeFixture, EpollIoThreadSendsUdpDatagramFromHelper) {
                   &peer_size),
               1);
     EXPECT_EQ(received, value);
+
+    close_fd(sender);
+    close_fd(receiver);
+#else
+    GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeFixture, EpollIoThreadSendsVectoredUdpDatagramFromHelper) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int receiver = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(receiver, 0);
+    int sender = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(sender, 0);
+
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = 0;
+    ASSERT_EQ(::bind(receiver, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+
+    socklen_t address_size = sizeof(address);
+    ASSERT_EQ(::getsockname(receiver, reinterpret_cast<sockaddr*>(&address), &address_size), 0);
+
+    std::atomic<int> completed{0};
+    std::atomic<int> bytes_sent{0};
+    ASSERT_TRUE(IoRuntime::start_task<UdpVectoredSendToTask>(
+        sender,
+        address,
+        address_size,
+        'd',
+        'g',
+        &completed,
+        &bytes_sent));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), 2);
+
+    char received[2]{};
+    sockaddr_storage peer{};
+    socklen_t peer_size = sizeof(peer);
+    ASSERT_EQ(::recvfrom(
+                  receiver,
+                  received,
+                  sizeof(received),
+                  0,
+                  reinterpret_cast<sockaddr*>(&peer),
+                  &peer_size),
+              2);
+    EXPECT_EQ(received[0], 'd');
+    EXPECT_EQ(received[1], 'g');
 
     close_fd(sender);
     close_fd(receiver);

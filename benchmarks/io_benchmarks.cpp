@@ -213,6 +213,24 @@ void BM_IoStreamAdapterZeroIovSendv(benchmark::State& state) {
         benchmark::DoNotOptimize(stream.sendv_some(task, nullptr, 0, op));
     }
 }
+
+void BM_IoDatagramAdapterZeroIovRecvvFrom(benchmark::State& state) {
+    FakeTask task;
+    af::UdpSocket<BenchIoThread> socket(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(socket.recvv_from_some(task, nullptr, 0, nullptr, nullptr, op));
+    }
+}
+
+void BM_IoDatagramAdapterZeroIovSendvTo(benchmark::State& state) {
+    FakeTask task;
+    af::UdpSocket<BenchIoThread> socket(BenchIoThread::IO_0, -1);
+    af::IoOpState op;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(socket.sendv_to_some(task, nullptr, 0, nullptr, 0, op));
+    }
+}
 #endif
 
 BENCHMARK(BM_IoFileAdapterZeroByteRead);
@@ -223,6 +241,8 @@ BENCHMARK(BM_IoStreamAdapterInvalidConnect);
 #if !defined(_WIN32)
 BENCHMARK(BM_IoFileAdapterZeroIovReadvAt);
 BENCHMARK(BM_IoStreamAdapterZeroIovSendv);
+BENCHMARK(BM_IoDatagramAdapterZeroIovRecvvFrom);
+BENCHMARK(BM_IoDatagramAdapterZeroIovSendvTo);
 #endif
 
 } // namespace
