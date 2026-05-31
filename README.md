@@ -44,7 +44,7 @@ using async = af::AsyncRuntime<AppRuntimeTraits>;
 using Task = async::Task;
 ```
 
-`AppRuntimeTraits` 只建议放框架直接消费的参数：线程 enum、线程总数、队列容量、满队列策略、IO 后端容量等。`io_uring_entries` 必须是 2 的幂，`io_uring_submit_batch_threshold` 不能超过 entries；`io_uring_cq_entries` 为 0 时使用内核默认 CQ 大小，非 0 时会设置 `IORING_SETUP_CQSIZE`，且必须不小于 entries；`io_uring_setup_single_issuer`、`io_uring_setup_coop_taskrun`、`io_uring_setup_defer_taskrun`、`io_uring_setup_submit_all`、`io_uring_setup_sqpoll`、`io_uring_sqpoll_idle_ms` 和 `io_uring_sqpoll_cpu` 会映射到对应 `io_uring_setup(2)` flags/params，极致性能场景可按内核能力开启。`io_wait_reserve`、`io_deferred_delete_reserve` 和 `io_uring_provided_buffer_group_reserve` 会在 IO executor 初始化时 best-effort 预留热点表空间，减少高并发 fd wait 和 provided-buffer group 注册时的 rehash/扩容抖动。业务分片范围放到具体逻辑里计算：
+`AppRuntimeTraits` 只建议放框架直接消费的参数：线程 enum、线程总数、队列容量、满队列策略、IO 后端容量等。`io_uring_entries` 必须是 2 的幂，`io_uring_submit_batch_threshold` 不能超过 entries；`io_uring_cq_entries` 为 0 时使用内核默认 CQ 大小，非 0 时会设置 `IORING_SETUP_CQSIZE`，且必须不小于 entries；`io_uring_setup_single_issuer`、`io_uring_setup_coop_taskrun`、`io_uring_setup_defer_taskrun`、`io_uring_setup_submit_all`、`io_uring_setup_sqpoll`、`io_uring_sqpoll_idle_ms` 和 `io_uring_sqpoll_cpu` 会映射到对应 `io_uring_setup(2)` flags/params，极致性能场景可按内核能力开启。`io_wait_reserve` 和 `io_uring_provided_buffer_group_reserve` 会在 IO executor 初始化时 best-effort 预留热点表空间，减少高并发 fd wait 和 provided-buffer group 注册时的 rehash/扩容抖动。业务分片范围放到具体逻辑里计算：
 
 ```cpp
 inline constexpr AppThread player_logic_begin = AppThread::Logic_0;

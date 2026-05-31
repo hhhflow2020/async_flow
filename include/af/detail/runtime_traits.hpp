@@ -145,14 +145,6 @@ struct RuntimeTraitsConfig {
         }
     }();
 
-    static constexpr std::size_t io_deferred_delete_reserve = [] {
-        if constexpr (requires { TraitsT::io_deferred_delete_reserve; }) {
-            return static_cast<std::size_t>(TraitsT::io_deferred_delete_reserve);
-        } else {
-            return io_wait_reserve;
-        }
-    }();
-
     static constexpr std::size_t io_uring_provided_buffer_group_reserve = [] {
         if constexpr (requires { TraitsT::io_uring_provided_buffer_group_reserve; }) {
             return static_cast<std::size_t>(TraitsT::io_uring_provided_buffer_group_reserve);

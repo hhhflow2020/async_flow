@@ -28,8 +28,6 @@
     static constexpr bool io_uring_setup_defer_taskrun =
         TraitConfig::io_uring_setup_defer_taskrun;
     static constexpr std::size_t io_wait_reserve = TraitConfig::io_wait_reserve;
-    static constexpr std::size_t io_deferred_delete_reserve =
-        TraitConfig::io_deferred_delete_reserve;
     static constexpr std::size_t io_uring_provided_buffer_group_reserve =
         TraitConfig::io_uring_provided_buffer_group_reserve;
     static_assert(spsc_queue_capacity > 0, "spsc_queue_capacity must be greater than zero");

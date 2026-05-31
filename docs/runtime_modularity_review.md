@@ -105,6 +105,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - `IoStream` and `IoDatagramSocket` are now small adapter shells with operation-family method fragments included inside the class body. Stream methods are grouped by recv, send, transfer/connect, and read/write aliases; datagram methods are grouped by lifecycle, recv, and send families.
 - Public file read helpers are now split into current-offset read/readv and positioned read/readv fragments, with `io_file_read_fragment.hpp` kept as a compatibility umbrella.
 - Public timeout helpers are now split into timeout completion status normalization, single timeout wait submission, and deadline arbitration fragments. `io_timeout.hpp` remains a small public umbrella while preserving inline/template visibility for timeout and cancel race handling.
+- `runtime_common_fragment.hpp` is now a 9-line umbrella over runtime status, cache-line atomic wrapper, ordered-batch state, parallel-group state, and external-post counter fragments. This keeps common state families separate while preserving class-scope inline visibility.
 - Each split so far preserved header-only/template visibility, passed `git diff --check`, Docker GCC Debug runtime tests, and, for core runtime header changes, Release runtime benchmark baseline regression.
 
 ## Current Findings
@@ -226,6 +227,28 @@ Additional validation after the `io_common` split and epoll delete race fix:
   - `BM_RuntimeParallelShards/512` mean: 1.82 ms real, 281.439 k/s.
 - Remote clang Release IO adapter canary stayed in the sub-nanosecond range for the zero-byte/zero-iov helper paths covered by existing benchmarks.
 
+Additional validation after the runtime common-state split:
+
+- `runtime_common_fragment.hpp` is now a 9-line umbrella:
+  - `runtime_status_fragment.hpp`: 10 lines.
+  - `runtime_cache_line_atomic_fragment.hpp`: 62 lines.
+  - `runtime_ordered_batch_state_fragment.hpp`: 7 lines.
+  - `runtime_parallel_group_fragment.hpp`: 33 lines.
+  - `runtime_external_post_counter_fragment.hpp`: 7 lines.
+- Removed the obsolete public `io_deferred_delete_reserve` tuning knob. The deferred epoll delete path no longer exists, so keeping the knob would expose a no-op performance API.
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_runtime_tests` build: passed.
+- Local Release runtime/scheduler/parallel targeted tests: 39/39 passed.
+- Remote clang Debug runtime/scheduler/parallel targeted tests: 39/39 passed.
+- Remote clang TSAN runtime/scheduler/parallel targeted tests: 39/39 passed with no ThreadSanitizer report.
+- Remote clang Release full runtime test suite: 132/132 passed, with 21 platform/io_uring capability tests skipped by test logic.
+- Remote clang Release runtime benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+  - `BM_RuntimeExternalStart/8192` mean: 6.91 ms real, 1.197 M/s.
+  - `BM_RuntimeCrossThreadHop/8192` mean: 11.9 ms real, 689.139 k/s.
+  - `BM_RuntimeIoThreadHop/8192` mean: 4.44 ms real, 1.846 M/s.
+  - `BM_RuntimeParallelShards/128` mean: 0.477 ms real, 268.859 k/s.
+  - `BM_RuntimeParallelShards/512` mean: 2.03 ms real, 253.068 k/s.
+
 Remaining follow-up:
 
 - Ready-source hints are now correct and bounded, but future benchmarking may justify a rotating ready-word cursor for very large `thread_count` values.
@@ -319,7 +342,7 @@ Findings to track:
 - Resolved: `runtime_executor_task_fragment.hpp` is now split by source-ready/wake signaling, local queue operations, and task execution/result dispatch; benchmark canaries were collected after the change.
 - Resolved: `basic_task_fragment.hpp` is now a class shell; the storage fields remain in one final layout block.
 - Resolved: `io_common_detail_state_fragment.hpp` is split by helper family, making IO wait/cancel/timeout audits smaller.
-- P2: `runtime_common_fragment.hpp` combines `RuntimeStatus`, `CacheLineAtomic`, ordered-batch state, parallel-group state, and external-post counters. Split these small type families when the next runtime-state change lands.
+- Resolved: `runtime_common_fragment.hpp` is split by state/type family; runtime status, cache-line atomic wrapper, ordered-batch state, parallel-group state, and external-post counters now live in focused fragments.
 - P2: examples still contain explicit atomics for readiness/completion observation in older files such as `io_epoll.cpp`, `io_timer.cpp`, `io_event.cpp`, `io_native_readiness.cpp`, and several multishot io_uring examples. For examples, prefer task-owned state machines plus `ShutdownPolicy::WaitForTasks`; test fixtures may continue using atomics when they are only assertion probes.
 
 Performance guardrails for the split:

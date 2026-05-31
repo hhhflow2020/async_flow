@@ -92,7 +92,6 @@ struct TunedIoRuntimeTraits {
     static constexpr bool io_uring_setup_single_issuer = true;
     static constexpr bool io_uring_setup_defer_taskrun = true;
     static constexpr std::size_t io_wait_reserve = 256;
-    static constexpr std::size_t io_deferred_delete_reserve = 64;
     static constexpr std::size_t io_uring_provided_buffer_group_reserve = 8;
 };
 
@@ -110,7 +109,6 @@ static_assert(TunedIoRuntime::io_uring_setup_coop_taskrun);
 static_assert(TunedIoRuntime::io_uring_setup_single_issuer);
 static_assert(TunedIoRuntime::io_uring_setup_defer_taskrun);
 static_assert(TunedIoRuntime::io_wait_reserve == 256U);
-static_assert(TunedIoRuntime::io_deferred_delete_reserve == 64U);
 static_assert(TunedIoRuntime::io_uring_provided_buffer_group_reserve == 8U);
 
 class IoRuntimeFixture : public testing::Test {

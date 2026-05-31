@@ -202,3 +202,37 @@ Interpretation:
 - The TSAN failure observed before the fix was a close-vs-`epoll_ctl(DEL)` race caused by publishing readiness before deferred delete cleanup. The new ordering removes that race and avoids fd-number reuse hazards from stale epoll interest.
 - Removing the rearm hint keeps the correctness fix from adding an avoidable `MOD -> ADD` syscall pair on normal rearm after readiness.
 - The existing IO adapter benchmarks cover helper-level fast paths, not a long-running live epoll readiness loop. A dedicated readiness rearm benchmark should be added before using syscall-rate numbers as a hard performance gate.
+
+## 2026-06-01 Runtime Common-State Split Validation
+
+This run validates the split of `runtime_common_fragment.hpp` into focused class-scope fragments and the removal of the now-obsolete `io_deferred_delete_reserve` public tuning knob.
+
+Changes under validation:
+
+- `runtime_common_fragment.hpp` is now a small umbrella over runtime status, cache-line atomic wrapper, ordered-batch state, parallel-group state, and external-post counter fragments.
+- The `io_deferred_delete_reserve` trait/public config was removed because the epoll deferred-delete backend state was removed in the preceding correctness fix.
+- README tuning guidance now documents only active IO reserve knobs: `io_wait_reserve` and `io_uring_provided_buffer_group_reserve`.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_runtime_tests` build: passed.
+- Local Release runtime/scheduler/parallel targeted tests: 39/39 passed.
+- Remote clang Debug runtime/scheduler/parallel targeted tests: 39/39 passed.
+- Remote clang TSAN runtime/scheduler/parallel targeted tests: 39/39 passed, no ThreadSanitizer report.
+- Remote clang Release full runtime suite: 132/132 passed; 21 platform/io_uring capability tests were skipped by test logic.
+
+Release runtime benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | CPU Mean | Throughput Mean |
+| --- | ---: | ---: | ---: |
+| `BM_RuntimeExternalStart/8192` | 6.91 ms | 6.91 ms | 1.197 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 11.9 ms | 4.47 ms | 689.139 k/s |
+| `BM_RuntimeIoThreadHop/8192` | 4.44 ms | 4.43 ms | 1.846 M/s |
+| `BM_RuntimeParallelShards/128` | 0.477 ms | 0.464 ms | 268.859 k/s |
+| `BM_RuntimeParallelShards/512` | 2.03 ms | 1.96 ms | 253.068 k/s |
+
+Interpretation:
+
+- The split is structural and keeps all common runtime types inside `AsyncRuntime` class scope, so hot paths remain inline/template-visible.
+- The removed tuning knob no longer controlled any storage reservation after deferred epoll delete cleanup was deleted. Removing it avoids a misleading no-op API while preserving active IO reserve knobs.
