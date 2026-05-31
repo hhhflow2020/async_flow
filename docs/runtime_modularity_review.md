@@ -10,7 +10,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 
 ## Already Improved
 
-- `include/af/async_runtime.hpp` has been split into focused runtime fragments for common helpers, dispatch, lifecycle, parallel support, state, executor control, executor task helpers, readiness wait/cancel, backend polling, poll helper conversion, executor state, and io_uring resource registration.
+- `include/af/async_runtime.hpp` has been split into focused runtime fragments for public task handles/config, common helpers, dispatch, lifecycle, parallel support, state, executor control, executor task helpers, executor IO state types, executor thread-kind helpers, readiness wait/cancel, backend polling, poll helper conversion, executor state, and io_uring resource registration.
 - The public `AsyncRuntime` API is now split into lifecycle, parallel, IO resource/wait, file-data submit, fd lifecycle submit, socket data submit, and socket message/connect submit fragments. The top-level `include/af/async_runtime.hpp` is now an overview-sized class shell instead of a multi-thousand-line mixed implementation file.
 - `tests/runtime_io_test_support.hpp` is now an umbrella header with domain fragments for core traits, basic tasks, stream, accept, file, timer/event, wait/cancel, socket lifecycle, and io_uring socket support.
 - The file IO test support has been split into boundary, normal read/write, fixed-resource, lifecycle/open, and filesystem operation fragments.
