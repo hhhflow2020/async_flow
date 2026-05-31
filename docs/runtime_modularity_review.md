@@ -108,6 +108,39 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 
 ## Current Findings
 
+### 2026-06-01 Core Runtime Correctness and Modularity Follow-up
+
+This follow-up records the active issues from the latest fixed-thread runtime review. The top-level `include/af/async_runtime.hpp` remains 226 lines and is not the immediate problem; it is a class shell that keeps template and hot-path fragments inline-visible. The current risks are correctness-sensitive scheduler behavior and second-level fragments that still mix responsibilities.
+
+Issue ledger:
+
+- P0: cross-thread SPSC wake visibility must not depend on the source-ready bitmask as the only correctness signal. A Release stress repro showed a cross-thread hop burst leaving one task undrained after the expected run count was short by several invocations. The ready bitmask should remain the fast hint path, but executor draining needs a bounded fallback scan of SPSC queues so a lost or coalesced ready edge cannot strand work. Any fix must pass the repeated cross-thread hop stress test and the Release runtime benchmark regression check before commit.
+- P1: `runtime_dispatch_fragment.hpp` still owns queue topology, same-thread local enqueue, cross-thread SPSC enqueue, external MPSC enqueue, source-ready signaling, and external-post shutdown accounting. Split it into queue topology, ready enqueue, and external-post admission fragments while preserving the exact same local/SPSC/MPSC data paths.
+- P1: `runtime_executor_core_state_fragment.hpp` mixes executor behavior (`pop_one`, `finish_done`, `finish_pending`, `finish_again`) with executor field layout. Keep the field declarations together as the cache-layout owner, but move pop/drain behavior and finish/reschedule behavior into focused inline fragments included before the state layout block.
+- P1: `runtime_executor_task_fragment.hpp` mixes ready-source marking, local queue operations, notification, and task execution/result dispatch. It can be split into ready signaling, local queue, wake/notify, and execute/finish dispatch fragments. This split touches the hottest same-thread path, so it needs same-thread, cross-thread, and external-start benchmarks after the change.
+- P2: `basic_task_fragment.hpp` combines protected task API, scheduling state machine, lifetime refs, and storage layout. Split only as class-body fragments: public/protected task helpers, schedule-state transitions, lifetime/destroy helpers, and one final storage-layout block.
+- P2: `io_common_detail_state_fragment.hpp` still combines target-thread validation, readiness wait arming, splice wait policy, status normalization, iovec validation, and multishot wait reset. Split by helper family when the next IO cancel/timeout or vectored IO change lands.
+- P2: `runtime_stress_tests.cpp` now contains both StopImmediately lifecycle stress and repeated cross-thread hop stress. Move the repeated-hop runtime/task into `tests/support/runtime_lifecycle_cross_thread_hop_support_fragment.hpp` and keep the source file as test cases only.
+- P2: several IO tests and examples remain moderately dense after the first pass. Notable current files are `runtime_io_uring_socket_datagram_tests.cpp`, `runtime_io_stream_transfer_tests.cpp`, `io_rpc_length_prefixed_server.hpp`, `io_uring_fixed_file_task.hpp`, and `io_uring_file_lifecycle_task.hpp`. Future edits should split by protocol role, transfer mode, or operation family instead of appending new states to the existing file.
+- P2: older examples such as `io_epoll.cpp`, `io_event.cpp`, `io_timer.cpp`, `io_native_readiness.cpp`, and several multishot examples still use explicit atomics to observe readiness/completion from `main`. Prefer task-owned state machines plus `ShutdownPolicy::WaitForTasks` for examples unless the example is specifically demonstrating cross-thread observation.
+
+Performance guardrails:
+
+- Keep same-thread scheduling on the executor local queue; do not route self-posts through SPSC, MPSC, MPMC, or heap-backed generic queues.
+- Keep cross-thread runtime posts on per-source SPSC queues; external posts stay on the external MPSC queue.
+- Treat the ready-source bitmask as a fast path hint, not as the only source of truth for queued cross-thread work.
+- Preserve executor field declaration order, cache-line alignment, and padding when splitting behavior out of state fragments.
+- Avoid virtual dispatch, `std::function`, owning polymorphic adapters, extra heap allocation, or extra atomics purely for file-size reduction.
+- Re-run `git diff --check`, targeted Debug tests, Docker/remote Release stress, and runtime benchmark baseline checks after every P1 split.
+
+Recommended next split order:
+
+1. Finish and validate the cross-thread SPSC visibility fix first, because it is a correctness issue hidden inside the same hot path that the modularity split will touch.
+2. Split `runtime_dispatch_fragment.hpp` into topology, ready enqueue, and external-post admission fragments.
+3. Split executor pop/finish behavior out of `runtime_executor_core_state_fragment.hpp`, leaving field layout in that file.
+4. Split `runtime_executor_task_fragment.hpp` only after the first two P1 splits benchmark cleanly.
+5. Split `runtime_stress_tests.cpp` support for repeated cross-thread hops so future scheduler regressions are easier to isolate.
+
 ### 2026-06-01 Core Fixed-Thread Runtime Modularity Audit
 
 The current core runtime is no longer bottlenecked by `include/af/async_runtime.hpp` itself. That file is 226 lines and works as a class shell: it declares `AsyncRuntime`, the nested `Executor`, and wires inline fragments into the correct class scopes. The main modularity pressure has moved into second-level hot-path fragments.
