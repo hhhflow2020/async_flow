@@ -20,6 +20,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - `runtime_executor_io_uring_submit_core_fragment.hpp` is now a small umbrella over poll wait submit, buffer/fast SQE submit, and generic SQE submit fragments. The code still lives inside `AsyncRuntime::Executor` for inline visibility.
 - `runtime_executor_io_uring_socket_submit_fragment.hpp` is now a small umbrella over recv, send, zero-copy, message, multishot, accept/connect, and socket-create submit wrappers.
 - io_uring resource registration is now split by registered buffers, provided buffer rings, and registered/fixed file table helpers while staying inline inside `AsyncRuntime::Executor`.
+- io_uring executor buffer submit helpers are now split into generic buffer SQE, fast SQE template, socket-create core, and fixed-file read/write fragments while staying inline inside `AsyncRuntime::Executor`.
 - Public fd lifecycle submit wrappers and matching io_uring executor submit wrappers are now small umbrellas over open, close/shutdown, filesystem metadata/lifecycle, and splice transfer fragments.
 - Public socket message submit wrappers are now split into recvmsg, sendmsg, and accept/connect fragments, with a small umbrella preserving inline visibility in `AsyncRuntime`.
 - Public file-data submit wrappers are now split into basic read/write/fsync, fixed-file, registered-buffer, and vectored fragments, with a small umbrella preserving inline visibility in `AsyncRuntime`.
