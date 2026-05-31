@@ -10,3 +10,6 @@
 #include "af/detail/runtime_public_io_socket_msg_submit_fragment.hpp"
 #undef AF_ASYNC_RUNTIME_FRAGMENT_INCLUDE
 
+#define AF_ASYNC_RUNTIME_FRAGMENT_INCLUDE 1
+#include "af/detail/runtime_public_io_socket_accept_connect_submit_fragment.hpp"
+#undef AF_ASYNC_RUNTIME_FRAGMENT_INCLUDE

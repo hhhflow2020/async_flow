@@ -21,6 +21,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - `runtime_executor_io_uring_socket_submit_fragment.hpp` is now a small umbrella over recv, send, zero-copy, message, multishot, accept/connect, and socket-create submit wrappers.
 - io_uring resource registration is now split by registered buffers, provided buffer rings, and registered/fixed file table helpers while staying inline inside `AsyncRuntime::Executor`.
 - Public fd lifecycle submit wrappers and matching io_uring executor submit wrappers are now small umbrellas over open, close/shutdown, filesystem metadata/lifecycle, and splice transfer fragments.
+- Public socket message submit wrappers are now split into recvmsg, sendmsg, and accept/connect fragments, with a small umbrella preserving inline visibility in `AsyncRuntime`.
 - Runtime lifecycle tests have been split into base lifecycle, backpressure, and shutdown-policy sources with shared traits/tasks in support.
 - Runtime lifecycle support is now a small umbrella over base, backpressure, and shutdown-policy task fragments.
 - Runtime parallel tests have been split into shard scheduling, ordered-start, and ordered-batch sources with shared task support.
@@ -43,10 +44,10 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 
 ### P1: io_uring Executor Internals Can Be Split Further
 
-The largest remaining runtime-internal fragments are io_uring completion/submit details and some socket/file data public IO submit wrappers.
+The largest remaining runtime-internal fragments are io_uring completion/submit details and file data/public socket data submit wrappers.
 
 Risk:
-- CQE completion details and socket/file data submit wrappers still have dense local regions.
+- CQE completion details and file data/public socket data submit wrappers still have dense local regions.
 - Concurrency/lifetime audits still require reading several dense io_uring fragments.
 
 Recommended split:
