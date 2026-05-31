@@ -972,7 +972,69 @@ ctest --test-dir build-conan/build/Release --output-on-failure
 - 业务跨线程传递应优先传 id、值对象或不可变数据，不应跨 owner thread 直接传可变业务对象引用。
 - `ThreadKind::IoUring` 依赖 Linux 内核和容器权限；不可用时 `io_uring_backend_available()` 返回 false，线程仍可作为 epoll readiness IO 线程使用，TCP/UDP helper 也会自动退回 readiness 路径。
 
-## 16. CI 与后续可选增强
+## 16. 核心框架性能与模块化检查记录
+
+### 16.1 固定线程异步任务核心检查结论
+
+已检查核心固定线程任务框架的任务生命周期、固定线程调度、队列、对象池、shutdown 边界和 cacheline 布局。当前未发现 P0/P1 级逻辑错误、明显内存泄漏、use-after-free 或数据竞争问题。
+
+已验证：
+
+- Docker GCC Debug 核心 runtime/queue/pool/stress 测试通过。
+- 本地 TSAN 核心 lifecycle/shutdown/parallel/queue/pool/stress 测试通过；IO 环境相关项按环境 skip。
+- Release runtime benchmark 通过 GitHub Ubuntu baseline 回归检查。
+
+当前热路径设计：
+
+- 固定 runtime 线程之间使用 source -> target 一条 bounded SPSC ring。
+- runtime 线程调度到自身时走 executor 本地无锁 ring，避免同线程投递也走跨线程队列。
+- 非 runtime 线程进入 executor 使用 bounded MPSC ingress。
+- 每个 task type 使用独立对象池，slot 按 cache line 对齐，并有 TLS 小缓存减少频繁回到共享 free queue。
+- `WaitForTasks` 通过 unfinished task counter 等已接收任务结束；`StopImmediately` 可用 task registry 取消并释放 pending/queued task。
+
+### 16.2 已记录性能待整改项
+
+P2：`Task::run()` 是虚函数间接调用。当前模型简洁稳定，但极小粒度任务在千万级调度下会有 indirect branch 和 i-cache 成本。可评估 CRTP/static trampoline 或 type-erased function pointer，把动态分派从每次 run 降到创建时绑定。
+
+P2：跨线程投递后的 wake 检查仍可减少共享 cacheline 访问。当前 enqueue 后会 `mark_source_ready()` 再 `notify()`；批量投递时可让 `mark_ready()` 返回 ready bit 是否从 0 变 1，只在首次变 ready 时触发 wake 检查，减少 `sleeping_` cacheline 读/CAS。
+
+P2：SPSC 队列矩阵目前是 `vector<unique_ptr<SpscQueue>>`，热路径取队列有一层 pointer chase。可改成连续矩阵存储或定制 arena，减少间接寻址并改善预取/TLB locality。
+
+P2：`thread_count > 64` 时 ready source 退化为全扫描。64 线程以内使用 bitmask 很高效；如果业务未来需要超过 64 个固定线程，应改成多 word ready bitmap。
+
+P3：`start_task()` 为通用 handle 生命周期多做一次引用计数增减。可新增无 handle 的 fast path，仅用于立即启动且不暴露 handle 的场景，减少外部投递热路径原子操作。
+
+### 16.3 模块化拆分评估
+
+当前 `include/af/async_runtime.hpp` 承担了过多职责：public runtime facade、task handle、parallel shards、有序 batch、executor run loop、队列调度、任务 registry、epoll readiness、io_uring setup/SQE submit/completion/cancel、IO fallback 和 shutdown 逻辑都在同一文件中。逻辑高内聚于 runtime，但文件过长，阅读和局部修改成本偏高。
+
+可以拆，而且不需要牺牲性能，前提是保持 header-only、模板可见、热路径函数仍在头文件内联展开。推荐不要用普通 `.cpp` 编译单元隐藏实现，否则会损失模板特化和内联机会。
+
+建议拆分边界：
+
+- `include/af/detail/runtime_common.hpp`：`RuntimeStatus`、`CacheLineAtomic`、小型 traits 派生常量、通用 helper。
+- `include/af/detail/runtime_lifecycle.hpp`：task allocate/destroy、handle release、unfinished counter、task registry、shutdown 边界。
+- `include/af/detail/runtime_dispatch.hpp`：SPSC/MPSC/local queue 投递、ready bitmap、wake/notify、`post()`/`post_blocking()`。
+- `include/af/detail/runtime_executor.hpp`：executor 成员、run loop、`execute()`、`finish_done/pending/again()`。
+- `include/af/detail/runtime_parallel.hpp`：parallel shards、ordered batch、ordered start state。
+- `include/af/detail/runtime_io_epoll.hpp`：epoll readiness wait/cancel/wake、eventfd drain、deferred delete。
+- `include/af/detail/runtime_io_uring.hpp`：io_uring setup/teardown、SQ/CQ ring、operation pool、completion、cancel。
+- `include/af/detail/runtime_io_submit.hpp`：public `io_submit_*` thin forwarding 与分支较多的 SQE builder。后续可继续拆为 socket/file/datagram/filesystem submit helper。
+
+拆分难点：
+
+- `Executor` 当前是 `AsyncRuntime<Traits>` 的 nested class，直接访问大量 private static 状态。低风险拆法不是简单把文本搬到另一个文件，而是先把 helper 下沉到 `detail` 模板类，例如 `RuntimeExecutor<RuntimeT>`、`RuntimeTaskLifecycle<RuntimeT>`、`RuntimeIoUring<RuntimeT>`，再由 `AsyncRuntime` 组合/转发。
+- IO submit API 数量多，直接大拆容易制造签名漂移。优先拆纯内部 helper，不先改 public API。
+- hot path 需要持续 benchmark 守护。每个拆分阶段都要跑 runtime benchmark baseline，避免模块化过程中引入额外 indirection。
+
+建议执行顺序：
+
+1. 先拆无行为变化的 common/parallel/lifecycle helper，保持 `async_runtime.hpp` 作为 facade。
+2. 再拆 dispatch/executor，并同步加入 wake 去重优化的 benchmark 对照。
+3. 最后拆 IO epoll/io_uring，因为这部分状态多、边界复杂，适合在核心调度稳定后单独提交。
+4. 每阶段都运行 `git diff --check`、Debug `ctest`、TSAN 核心测试、Release runtime benchmark 回归检查。
+
+## 17. CI 与后续可选增强
 
 当前 CI 覆盖普通测试、TSAN stress 和 runtime benchmark 回归检查：
 
