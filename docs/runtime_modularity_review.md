@@ -123,15 +123,19 @@ Resolved items:
 - Ready-source bits are hints, not correctness state. `pop_one()` now checks ready-source words, clears an empty source only after an SPSC pop miss, immediately rechecks that SPSC queue, and still has a bounded all-source SPSC fallback scan. This prevents lost/coalesced ready hints from stranding work while avoiding permanent scans of stale sticky bits.
 - A late owner-resume race was fixed in `BasicTask`. Running wake requests are now tagged with a run epoch, `Executor::execute()` uses a `Queued -> Starting -> Running` transition, and a post that races with `finish_pending()` can either defer to the owner or directly transition `Pending -> Queued` and enqueue the task. This prevents a stale `Running` observation from writing `requested_thread_` after the owner has already checked the slot.
 - The new scheduler stress fixtures were moved out of `tests/runtime_stress_tests.cpp` into `tests/support/runtime_scheduler_stress_support.hpp`. The source file now keeps test cases separate from reusable state-machine tasks.
+- `runtime_executor_core_state_fragment.hpp` is now the executor field-layout owner only. Queue-drain behavior lives in `runtime_executor_pop_fragment.hpp`, and finish/reschedule behavior lives in `runtime_executor_finish_fragment.hpp`. This keeps declaration order and cache placement in one file while separating behavior that changes scheduling state.
 
 Current file-size snapshot after the pass:
 
-- `include/af/async_runtime.hpp`: 227 lines.
+- `include/af/async_runtime.hpp`: 232 lines.
 - `include/af/detail/runtime_dispatch_fragment.hpp`: 7 lines.
 - `include/af/detail/runtime_queue_topology_fragment.hpp`: 30 lines.
 - `include/af/detail/runtime_ready_enqueue_fragment.hpp`: 149 lines.
 - `include/af/detail/runtime_external_post_gate_fragment.hpp`: 53 lines.
 - `include/af/detail/runtime_ready_source_set.hpp`: 70 lines.
+- `include/af/detail/runtime_executor_core_state_fragment.hpp`: 69 lines.
+- `include/af/detail/runtime_executor_pop_fragment.hpp`: 59 lines.
+- `include/af/detail/runtime_executor_finish_fragment.hpp`: 26 lines.
 - `tests/runtime_stress_tests.cpp`: 353 lines.
 - `tests/support/runtime_scheduler_stress_support.hpp`: 281 lines.
 
@@ -147,10 +151,19 @@ Validation evidence for the final pass:
 - Remote clang Release full runtime test suite: 132/132 passed, with 21 platform/io_uring capability tests skipped by test logic.
 - Remote clang Release `BM_RuntimeParallelShards/128` was run 100 times under `timeout 10s`; all iterations exited successfully.
 
+Additional validation after the mechanical executor pop/finish split:
+
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_runtime_tests` build: passed.
+- Local Release targeted scheduler/parallel tests: 16/16 passed.
+- Remote clang Debug targeted scheduler/parallel tests: 16/16 passed.
+- Remote clang TSAN targeted scheduler/parallel tests: 16/16 passed with no ThreadSanitizer report.
+- Remote clang Release full runtime test suite: 132/132 passed, with 21 platform/io_uring capability tests skipped by test logic.
+
 Remaining follow-up:
 
 - `basic_task_fragment.hpp` is still dense because it contains task API helpers, scheduling state transitions, lifetime refs, and storage layout. A later split should keep transition logic close to storage fields and preserve the current atomic ordering audit.
-- `runtime_executor_core_state_fragment.hpp` still contains both executor pop/finish behavior and field layout. It is acceptable for this pass because the file is small, but the next structural pass can move pop/finish behavior into focused inline fragments while leaving field declarations in one cache-layout owner.
+- `runtime_executor_task_fragment.hpp` still mixes ready-source marking, local queue operations, notification, and task execution/result dispatch. Split it only with same-thread, cross-thread, and external-start benchmark checks because it is on the hottest path.
 - Ready-source hints are now correct and bounded, but future benchmarking may justify a rotating ready-word cursor for very large `thread_count` values.
 
 ### 2026-06-01 Current Scheduler WIP and Modularity Re-scan
@@ -173,7 +186,7 @@ Active correctness/performance issues to track:
 - P0: cross-thread SPSC ready-source handling is still being validated. The ready-source bitmask should be treated as a fast hint and must not be the only correctness signal that queued SPSC work exists. Any change in `mark_ready()`, `pop_one()`, or `notify()` needs repeated cross-thread hop stress and Release benchmark validation before commit.
 - P0: the executor must never let stale or duplicate queue entries move a task from `Pending`, `Done`, or `Running` back to `Running`. `execute()` should continue to require a `Queued -> Running` transition.
 - P1: worker-thread notification and IO-thread native wakeup should stay separated. Worker atomic waits need a real `notify_one()` when work is posted; IO threads should prefer eventfd/kqueue native wake only when they are actually sleeping so hot IO submission does not pay avoidable syscalls.
-- P1: `runtime_executor_core_state_fragment.hpp` currently mixes `pop_one()` and finish/reschedule behavior with executor field layout. Split behavior into inline fragments, but keep field declarations in one cache-layout owner to preserve false-sharing audits.
+- Resolved after this scan: `runtime_executor_core_state_fragment.hpp` now owns only executor field layout; pop/drain and finish/reschedule behavior moved to dedicated inline fragments while preserving declaration order for false-sharing audits.
 - P1: `runtime_executor_task_fragment.hpp` should be split after the scheduler fix is stable: ready-source marking, local queue push/pop, notify glue, and execute/result dispatch are separate responsibilities but sit on the hottest path.
 - P2: tests and examples should follow the same structure rule as runtime code. Test sources should contain test cases; reusable task state machines should live in `tests/support/*_fragment.hpp`. Examples should keep `main()` thin and put each state-machine role in focused support headers.
 
@@ -189,7 +202,7 @@ Recommended immediate order:
 1. Finish and validate the cross-thread SPSC visibility/wakeup fix.
 2. Move repeated-hop stress support out of `tests/runtime_stress_tests.cpp`.
 3. Split `runtime_dispatch_fragment.hpp` into queue topology, ready enqueue, and external-post admission fragments.
-4. Split executor pop/finish behavior out of `runtime_executor_core_state_fragment.hpp`, leaving only state layout in that file.
+4. Completed: split executor pop/finish behavior out of `runtime_executor_core_state_fragment.hpp`, leaving only state layout in that file.
 5. Split `runtime_executor_task_fragment.hpp` once the preceding scheduler benchmarks are clean.
 
 ### 2026-06-01 Core Runtime Correctness and Modularity Follow-up
@@ -202,7 +215,7 @@ Issue ledger:
 
 - P0: cross-thread SPSC wake visibility must not depend on the source-ready bitmask as the only correctness signal. A Release stress repro showed a cross-thread hop burst leaving one task undrained after the expected run count was short by several invocations. The ready bitmask should remain the fast hint path, but executor draining needs a bounded fallback scan of SPSC queues so a lost or coalesced ready edge cannot strand work. Any fix must pass the repeated cross-thread hop stress test and the Release runtime benchmark regression check before commit.
 - P1: `runtime_dispatch_fragment.hpp` still owns queue topology, same-thread local enqueue, cross-thread SPSC enqueue, external MPSC enqueue, source-ready signaling, and external-post shutdown accounting. Split it into queue topology, ready enqueue, and external-post admission fragments while preserving the exact same local/SPSC/MPSC data paths.
-- P1: `runtime_executor_core_state_fragment.hpp` mixes executor behavior (`pop_one`, `finish_done`, `finish_pending`, `finish_again`) with executor field layout. Keep the field declarations together as the cache-layout owner, but move pop/drain behavior and finish/reschedule behavior into focused inline fragments included before the state layout block.
+- Resolved: `runtime_executor_core_state_fragment.hpp` now keeps the field declarations together as the cache-layout owner. `pop_one`, `finish_done`, `finish_pending`, and `finish_again` moved into focused inline fragments included before the state layout block.
 - P1: `runtime_executor_task_fragment.hpp` mixes ready-source marking, local queue operations, notification, and task execution/result dispatch. It can be split into ready signaling, local queue, wake/notify, and execute/finish dispatch fragments. This split touches the hottest same-thread path, so it needs same-thread, cross-thread, and external-start benchmarks after the change.
 - P2: `basic_task_fragment.hpp` combines protected task API, scheduling state machine, lifetime refs, and storage layout. Split only as class-body fragments: public/protected task helpers, schedule-state transitions, lifetime/destroy helpers, and one final storage-layout block.
 - P2: `io_common_detail_state_fragment.hpp` still combines target-thread validation, readiness wait arming, splice wait policy, status normalization, iovec validation, and multishot wait reset. Split by helper family when the next IO cancel/timeout or vectored IO change lands.
@@ -223,7 +236,7 @@ Recommended next split order:
 
 1. Finish and validate the cross-thread SPSC visibility fix first, because it is a correctness issue hidden inside the same hot path that the modularity split will touch.
 2. Split `runtime_dispatch_fragment.hpp` into topology, ready enqueue, and external-post admission fragments.
-3. Split executor pop/finish behavior out of `runtime_executor_core_state_fragment.hpp`, leaving field layout in that file.
+3. Completed: split executor pop/finish behavior out of `runtime_executor_core_state_fragment.hpp`, leaving field layout in that file.
 4. Split `runtime_executor_task_fragment.hpp` only after the first two P1 splits benchmark cleanly.
 5. Split `runtime_stress_tests.cpp` support for repeated cross-thread hops so future scheduler regressions are easier to isolate.
 
@@ -238,7 +251,7 @@ Findings to track:
 - P1: `runtime_dispatch_fragment.hpp` still mixes queue topology setup, runtime-thread enqueue, external-thread enqueue, SPSC source-ready marking, and external-post drain accounting. This is correct as one hot path today, but it is the next best core split candidate. Split by responsibility into queue topology, enqueue fast path, and external-post gate fragments while keeping everything inline inside `AsyncRuntime`.
 - Resolved: `runtime_public_lifecycle_fragment.hpp` is now split into lifecycle control, task creation/start helpers, post admission, and thread helpers.
 - Resolved: `runtime_lifecycle_fragment.hpp` is now split into task pool, task handle lifetime, task registry/cancel, and task accounting fragments. The StopImmediately path still preserves the order: stop workers, cancel registered pending/queued tasks, then clear executor/backend state.
-- P1: `runtime_executor_core_state_fragment.hpp` currently contains both executor state fields and behavior (`pop_one`, `finish_done`, `finish_pending`, `finish_again`). Keep the field declarations in one state-layout owner to preserve cache-line placement and false-sharing audits, but move pop/finish behavior into inline behavior fragments.
+- Resolved: `runtime_executor_core_state_fragment.hpp` now contains only executor state fields. Pop/finish behavior lives in inline behavior fragments while the field declarations stay in one state-layout owner for cache-line placement and false-sharing audits.
 - P1: `runtime_executor_task_fragment.hpp` mixes source-ready signaling, local queue operations, and task execution/result dispatch. Split ready signaling, local queue methods, and execute/finish dispatch only if benchmarks confirm no regression in the same-thread fast path.
 - P2: `basic_task_fragment.hpp` is a dense class-body fragment combining protected task API, scheduling state machine, lifetime refs, and storage layout. It can be split into class-body fragments, but the storage fields should remain in one final layout block.
 - P2: `io_common_detail_state_fragment.hpp` combines target-thread validation, readiness wait arming, splice wait policy, IO status normalization, iovec validation, and multishot wait reset. Split by helper family to make IO cancel/timeout audits smaller.
@@ -256,7 +269,7 @@ Performance guardrails for the split:
 Recommended order:
 
 1. Split `runtime_dispatch_fragment.hpp` into topology, enqueue, and external-post gate fragments. Re-run runtime benchmarks because this touches the start/post hot path.
-2. Split executor behavior out of `runtime_executor_core_state_fragment.hpp` while leaving field layout intact.
+2. Completed: split executor behavior out of `runtime_executor_core_state_fragment.hpp` while leaving field layout intact.
 3. Split `basic_task_fragment.hpp` class-body responsibilities after the executor split, because task state transitions and executor finish paths need to stay easy to audit together.
 4. Split `io_common_detail_state_fragment.hpp` by IO helper family when working on the next IO feature or cancel/timeout fix.
 

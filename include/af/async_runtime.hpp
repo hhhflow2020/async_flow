@@ -213,6 +213,11 @@ private:
 #undef AF_ASYNC_RUNTIME_EXECUTOR_FRAGMENT_INCLUDE
 
 #define AF_ASYNC_RUNTIME_EXECUTOR_FRAGMENT_INCLUDE 1
+#include "af/detail/runtime_executor_pop_fragment.hpp"
+#include "af/detail/runtime_executor_finish_fragment.hpp"
+#undef AF_ASYNC_RUNTIME_EXECUTOR_FRAGMENT_INCLUDE
+
+#define AF_ASYNC_RUNTIME_EXECUTOR_FRAGMENT_INCLUDE 1
 #include "af/detail/runtime_executor_core_state_fragment.hpp"
 #undef AF_ASYNC_RUNTIME_EXECUTOR_FRAGMENT_INCLUDE
     };
