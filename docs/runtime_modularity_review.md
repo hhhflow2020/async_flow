@@ -77,6 +77,27 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 
 ## Current Findings
 
+### Second-Pass Structure Snapshot
+
+The current top-level runtime shell is no longer the main modularity problem:
+
+- `include/af/async_runtime.hpp`: 226 lines. It is mostly a declaration shell that includes focused public/runtime/executor fragments.
+- `include/af/task.hpp`: small umbrella over task declarations, IO wait state, optional registry links, and `BasicTask`.
+- `include/af/io_types.hpp`: small umbrella over IO base types, provided buffers, status, and fd ownership.
+
+The remaining code-size pressure is now in second-level fragments and fixtures. The largest runtime-facing headers in the latest scan are:
+
+- `include/af/detail/io_file_fixed_buffer_fragment.hpp`: 299 lines. This combines fixed-file fsync, fixed-file read/write, registered-buffer read/write, and vectored write helpers.
+- `include/af/detail/io_adapters_stream_listener_fragment.hpp`: 291 lines. This combines stream adapter methods and listener adapter methods.
+- `include/af/detail/io_socket_send_fragment.hpp`: 288 lines. This combines normal send, fixed-file send, zero-copy send, and vectored zero-copy send fallback logic.
+- `include/af/detail/io_file_lifecycle_fragment.hpp`: 277 lines. This combines fsync, open/open-direct, close, statx, fallocate, rename, and unlink helpers.
+- `include/af/detail/io_socket_lifecycle_fragment.hpp`: 264 lines. This remains a broad socket lifecycle helper fragment.
+- `include/af/detail/runtime_executor_io_uring_filesystem_submit_fragment.hpp`: 261 lines. This combines several filesystem SQE preparation/submission helpers.
+- `include/af/detail/runtime_executor_io_uring_socket_msg_submit_fragment.hpp`: 258 lines. This combines recvmsg/sendmsg/multishot message submission paths.
+- `include/af/detail/runtime_public_io_resource_fragment.hpp`: 255 lines and `runtime_public_io_filesystem_submit_fragment.hpp`: 254 lines. These are still readable, but they are broad public API fragments.
+
+This means the right next step is not another large rewrite of `async_runtime.hpp`; it is a second-pass split of the largest fragments into narrower operation-family files while keeping them included inline inside the same class/function scopes.
+
 ### Latest Structure Scan: async_runtime.hpp Is Now A Shell, Detail Fragments Carry The Weight
 
 The current `include/af/async_runtime.hpp` is 226 lines and mostly wires public API fragments, executor fragments, and runtime state fragments together. `include/af/task.hpp` and `include/af/io_types.hpp` are now also overview-sized umbrellas. The remaining modularity risk is concentrated in several focused-but-still-dense fragments:
@@ -86,6 +107,34 @@ The current `include/af/async_runtime.hpp` is 226 lines and mostly wires public 
 Recommendation:
 - Do not move hot runtime code into `.cpp` files. Keep template and syscall-submit code inlineable through include fragments.
 - Keep `runtime_executor_core_state_fragment.hpp` as the single state-layout owner unless the split can preserve declaration order and cache-line placement exactly.
+
+### Recommended Second-Pass Split Order
+
+P1, public IO helpers:
+
+- Split `io_file_fixed_buffer_fragment.hpp` into fixed-file lifecycle/fsync, fixed-file read/write, registered-buffer read/write, and vectored file write helpers. This is a mechanical split with low performance risk because the functions are independent inline templates.
+- Split `io_socket_send_fragment.hpp` into basic send, fixed-file send, zero-copy scalar send, and zero-copy vectored send helpers. This improves reviewability of the branch-heavy fallback paths without adding dispatch.
+- Split `io_file_lifecycle_fragment.hpp` into open/open-direct, close/fsync, stat/fallocate, and rename/unlink helpers. This keeps file lifecycle semantics clear, especially the `UniqueFd::release()` close path.
+- Split `io_adapters_stream_listener_fragment.hpp` into stream and listener adapter fragments. This keeps thin business-facing APIs easy to scan.
+
+P1, executor submit internals:
+
+- Split `runtime_executor_io_uring_filesystem_submit_fragment.hpp` by SQE family: stat/fallocate, rename/unlink, and open/close/fsync if future additions increase density.
+- Split `runtime_executor_io_uring_socket_msg_submit_fragment.hpp` into recvmsg, sendmsg, multishot recvmsg, and zero-copy notification preparation if further io_uring message features are added.
+
+P2, tests/examples/benchmarks:
+
+- Split large file IO support fixtures by boundary tests, lifecycle state machines, fixed-resource state machines, and filesystem operation state machines.
+- Keep runtime tests grouped by backend and operation family. Avoid rebuilding a single all-in-one IO regression file.
+- Keep examples as thin executable entry points plus task/helper headers. New examples should follow the newer TCP echo/socket lifecycle/sendfile structure rather than putting full state machines in `main`.
+
+Performance constraints for these splits:
+
+- Keep all hot helpers inline/template-visible. Use umbrella fragments, not `.cpp` moves.
+- Do not introduce owning polymorphic base classes, `std::function`, heap allocation, or additional cross-thread queues just to make files smaller.
+- Preserve existing executor state layout and cache-line alignment. Splitting state declaration should be avoided unless there is a concrete cache-layout improvement.
+- Preserve branch shape in hot helpers; refactor by operation family, not by extracting tiny helper functions that add extra unpredictable branches.
+
 
 ### Latest Test/Example Scan: Long Files Remain Mostly In Fixtures
 
