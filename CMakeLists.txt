@@ -161,6 +161,9 @@ if(ASYNCFLOW_BUILD_TESTS)
         tests/runtime_io_uring_socket_datagram_tests.cpp
         tests/runtime_io_uring_socket_multishot_tests.cpp
         tests/runtime_io_uring_socket_stream_tests.cpp
+        tests/runtime_io_uring_file_batch_tests.cpp
+        tests/runtime_io_uring_file_fixed_tests.cpp
+        tests/runtime_io_uring_file_lifecycle_tests.cpp
         tests/runtime_io_uring_file_tests.cpp
         tests/runtime_io_datagram_tests.cpp
         tests/runtime_io_shutdown_tests.cpp
