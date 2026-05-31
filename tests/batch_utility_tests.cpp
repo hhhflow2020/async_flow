@@ -1,14 +1,9 @@
-#include <array>
-#include <atomic>
 #include <cstdint>
-#include <thread>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 #include "af/async_flow.hpp"
-#include "af/detail/bounded_queues.hpp"
-#include "af/detail/object_pool.hpp"
 
 namespace {
 
@@ -31,122 +26,6 @@ struct UtilityRuntimeTraits {
 using Runtime = af::AsyncRuntime<UtilityRuntimeTraits>;
 
 } // namespace
-
-TEST(QueueTests, BoundedSpscPreservesFifoAndRejectsWhenFull) {
-    af::detail::BoundedSpscQueue<int> queue(2);
-    int a = 1;
-    int b = 2;
-    int c = 3;
-
-    EXPECT_TRUE(queue.try_push(&a));
-    EXPECT_TRUE(queue.try_push(&b));
-    EXPECT_FALSE(queue.try_push(&c));
-    EXPECT_EQ(queue.try_pop(), &a);
-    EXPECT_EQ(queue.try_pop(), &b);
-    EXPECT_EQ(queue.try_pop(), nullptr);
-    EXPECT_TRUE(queue.try_push(&c));
-    EXPECT_EQ(queue.try_pop(), &c);
-}
-
-TEST(QueueTests, BoundedMpscRejectsWhenFull) {
-    af::detail::BoundedMpscQueue<int> queue(2);
-    int a = 1;
-    int b = 2;
-    int c = 3;
-
-    EXPECT_TRUE(queue.try_push(&a));
-    EXPECT_TRUE(queue.try_push(&b));
-    EXPECT_FALSE(queue.try_push(&c));
-    EXPECT_EQ(queue.try_pop(), &a);
-    EXPECT_EQ(queue.try_pop(), &b);
-    EXPECT_EQ(queue.try_pop(), nullptr);
-}
-
-TEST(QueueTests, BoundedMpscSupportsConcurrentProducers) {
-    constexpr int producer_count = 4;
-    constexpr int values_per_producer = 64;
-    constexpr int total_values = producer_count * values_per_producer;
-
-    af::detail::BoundedMpscQueue<int> queue(128);
-    std::array<std::array<int, values_per_producer>, producer_count> values{};
-    std::array<std::thread, producer_count> producers;
-    std::atomic<int> pushed{0};
-
-    for (int producer = 0; producer < producer_count; ++producer) {
-        for (int i = 0; i < values_per_producer; ++i) {
-            values[producer][i] = producer * values_per_producer + i;
-        }
-
-        producers[producer] = std::thread([producer, &queue, &values, &pushed] {
-            for (int i = 0; i < values_per_producer; ++i) {
-                while (!queue.try_push(&values[producer][i])) {
-                    std::this_thread::yield();
-                }
-                pushed.fetch_add(1, std::memory_order_release);
-            }
-        });
-    }
-
-    int popped = 0;
-    while (popped < total_values) {
-        if (queue.try_pop() != nullptr) {
-            ++popped;
-        } else {
-            std::this_thread::yield();
-        }
-    }
-
-    for (auto& producer : producers) {
-        producer.join();
-    }
-
-    EXPECT_EQ(pushed.load(std::memory_order_acquire), total_values);
-    EXPECT_EQ(queue.try_pop(), nullptr);
-}
-
-TEST(QueueTests, BoundedMpmcRejectsWhenFull) {
-    af::detail::BoundedMpmcQueue<int> queue(2);
-    int a = 1;
-    int b = 2;
-    int c = 3;
-
-    EXPECT_TRUE(queue.try_push(&a));
-    EXPECT_TRUE(queue.try_push(&b));
-    EXPECT_FALSE(queue.try_push(&c));
-    EXPECT_EQ(queue.try_pop(), &a);
-    EXPECT_EQ(queue.try_pop(), &b);
-    EXPECT_EQ(queue.try_pop(), nullptr);
-}
-
-TEST(PoolTests, ObjectPoolReusesReleasedStorage) {
-    struct Payload {
-        int value{0};
-    };
-
-    af::detail::ObjectPool<Payload, 1> pool;
-    Payload* first = pool.create();
-    first->value = 42;
-    pool.destroy(first);
-
-    Payload* second = pool.create();
-    EXPECT_EQ(second, first);
-    pool.destroy(second);
-}
-
-TEST(UtilityTests, IoOpStateResetClearsCompletionToken) {
-    int token = 0;
-    af::IoOpState state{};
-    state.wait = af::IoResult{3, af::io_readable, 0, 16};
-    state.wait.completion_token = &token;
-    state.waiting = true;
-    state.wait_kind = af::IoWaitKind::Completion;
-
-    state.reset();
-
-    EXPECT_EQ(state.wait.completion_token, nullptr);
-    EXPECT_FALSE(state.waiting);
-    EXPECT_EQ(state.wait_kind, af::IoWaitKind::None);
-}
 
 TEST(UtilityTests, SplitByShardGroupsByKey) {
     struct Op {

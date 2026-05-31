@@ -53,6 +53,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Runtime parallel tests have been split into shard scheduling, ordered-start, and ordered-batch sources with shared task support.
 - Runtime parallel support is now a small umbrella over core runtime fixtures, shard tasks, ordered-batch tasks, and ordered-start tasks.
 - Core runtime parallel implementation is now a small inline umbrella over ordered-start state, ordered-batch guard, shard runner/task, and shard dispatch fragments. This keeps the hot template path visible while separating sequencing, guard, and dispatch responsibilities.
+- Utility tests are now split by queue, object-pool, IO state, and batch/sequencer utility domains instead of collecting unrelated helpers in one source file.
 - Stream IO test support is now a small umbrella over connect, basic stream, vectored, zero-copy boundary, zero-copy send, and sendfile/splice task fragments.
 - Stream IO runtime tests are split by basic stream, vectored send/recv, zero-copy send, fd-to-fd transfer, and connect/accept coverage.
 - Datagram IO runtime tests are split by readiness/hangup, UDP receive, and UDP send/zero-copy coverage.
@@ -132,7 +133,7 @@ The current review found that `include/af/async_runtime.hpp` itself is no longer
 
 - P2: the largest files are now tests and examples, not runtime entry points. The biggest current files are file IO support fragments, accept/socket support fragments, and protocol examples. New tests should be added as small operation-family files instead of growing the existing fixture files.
 - P2: timeout/cancel race handling now lives in focused inline fragments. Keep the deadline arbitration fragment semantically intact unless new tests cover IO-first, timeout-first, user-cancel, cancel-completion-pending, and backend-unavailable paths.
-- P2: `tests/utility_tests.cpp` and a few IO fixture fragments remain large enough to hide unrelated utility coverage. Split them by utility domain or operation family when adding new tests.
+- P2: several IO fixture fragments remain large enough to hide unrelated coverage. Split them by utility domain or operation family when adding new tests.
 
 Performance guardrails for these issues:
 

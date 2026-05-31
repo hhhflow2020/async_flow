@@ -178,7 +178,10 @@ if(ASYNCFLOW_BUILD_TESTS)
         tests/runtime_ordered_start_tests.cpp
         tests/runtime_ordered_batch_tests.cpp
         tests/runtime_stress_tests.cpp
-        tests/utility_tests.cpp
+        tests/queue_tests.cpp
+        tests/pool_tests.cpp
+        tests/io_state_utility_tests.cpp
+        tests/batch_utility_tests.cpp
     )
     target_link_libraries(asyncflow_runtime_tests PRIVATE AsyncFlow::AsyncFlow GTest::gtest_main)
 
