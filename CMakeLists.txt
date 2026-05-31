@@ -145,6 +145,11 @@ if(ASYNCFLOW_BUILD_TESTS)
         tests/runtime_shutdown_policy_tests.cpp
         tests/runtime_io_setup_tests.cpp
         tests/runtime_io_epoll_tests.cpp
+        tests/runtime_io_epoll_readiness_tests.cpp
+        tests/runtime_io_epoll_cancel_timeout_tests.cpp
+        tests/runtime_io_epoll_boundary_tests.cpp
+        tests/runtime_io_epoll_socket_lifecycle_tests.cpp
+        tests/runtime_io_epoll_event_timer_tests.cpp
         tests/runtime_io_kqueue_tests.cpp
         tests/runtime_io_stream_tests.cpp
         tests/runtime_io_uring_socket_tests.cpp
