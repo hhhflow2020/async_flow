@@ -129,6 +129,9 @@ if(ASYNCFLOW_BUILD_EXAMPLES)
     add_executable(asyncflow_io_tcp_connect_accept_example examples/io_tcp_connect_accept.cpp)
     target_link_libraries(asyncflow_io_tcp_connect_accept_example PRIVATE AsyncFlow::AsyncFlow)
 
+    add_executable(asyncflow_io_tcp_echo_server_example examples/io_tcp_echo_server.cpp)
+    target_link_libraries(asyncflow_io_tcp_echo_server_example PRIVATE AsyncFlow::AsyncFlow)
+
     add_executable(asyncflow_io_vectored_example examples/io_vectored.cpp)
     target_link_libraries(asyncflow_io_vectored_example PRIVATE AsyncFlow::AsyncFlow)
 endif()
