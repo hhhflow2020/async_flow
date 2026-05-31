@@ -72,7 +72,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - The io_uring UDP recvmsg multishot example is now split into runtime/wait helpers, the provided-buffer multishot task, UDP socket setup helpers, and a thin executable entry point.
 - The io_uring accept-direct example is now split into runtime/wait helpers, socket setup/read-write helpers, the fixed-file accept round-trip task, and a thin executable entry point.
 - The io_uring fixed-file example is now split into runtime traits, temporary file lifecycle helpers, the registered-file/buffer round-trip task, and a thin executable entry point.
-- The io_uring filesystem-ops example is now split into runtime/result types, temporary path lifecycle helpers, the filesystem operation state machine, and a thin executable entry point.
+- The io_uring filesystem-ops example is now split into runtime/result types, temporary path lifecycle helpers, a small filesystem operation task shell, flow/data/namespace operation fragments, and a thin executable entry point.
 - The io_uring UDP recv multishot example is now split into runtime/wait helpers, UDP socket setup helpers, the provided-buffer recv multishot task, and a thin executable entry point.
 - The io_uring file-lifecycle example is now split into runtime traits, temporary path lifecycle helpers, the open/fallocate/read/write/stat/rename/unlink/close task, and a thin executable entry point.
 - The pollable-client adapter example is now split into runtime traits, a third-party-style pollable echo client, the AsyncFlow readiness adapter task, peer echo helpers, and a thin executable entry point.
