@@ -16,6 +16,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Basic socket IO test support is now split into stream read/write, UDP datagram, and UDP vectored task fragments with the original basic-socket header kept as an umbrella.
 - Socket lifecycle test support is now split into setup happy path, boundary validation, io_uring socket-create, and fast IO wait/done task fragments with the original lifecycle header kept as an umbrella.
 - The file IO test support has been split into boundary, normal read/write, fixed-resource, lifecycle/open, and filesystem operation fragments.
+- File IO open/lifecycle test support is now split further into batched write, openat round-trip, and full lifecycle state-machine task fragments, with the previous open/lifecycle header kept as a small umbrella.
 - Public IO adapter headers are now compatibility umbrellas: `io_socket.hpp`, `io_file.hpp`, and `io_adapters.hpp` include focused inline fragments for lifecycle, data transfer, fixed resources, file descriptors/fixed files, stream/listener, datagram, and event/timer adapters.
 - `include/af/io_datagram.hpp` is now an umbrella over focused datagram recv, send, vectored, and zero-copy helper fragments.
 - io_uring socket test support and runtime socket test sources have been split by stream, datagram, accept/connect, and multishot responsibilities.
@@ -150,7 +151,7 @@ Performance constraints for these splits:
 
 The largest remaining files are now test/support fixtures rather than runtime shell code:
 
-- File IO support fragments remain heavy: open/lifecycle 393 lines, boundary 389 lines, read/write 328 lines, filesystem boundary 303 lines, filesystem ops 295 lines.
+- File IO support fragments remain heavy in a few places: boundary 389 lines, read/write 328 lines, filesystem boundary 303 lines, filesystem ops 295 lines, while open/lifecycle support has been split into smaller operation-family task fragments.
 - A few runtime tests are still moderately large: io_uring socket multishot 275 lines, io_uring socket datagram 257 lines, stream transfer 255 lines.
 - Some examples still use explicit atomics to observe readiness/completion (`io_epoll.cpp`, `io_timer.cpp`, and a few multishot io_uring examples). Those should be converted to task-owned state machines plus `ShutdownPolicy::WaitForTasks` when practical, matching the newer IO adapter/socket lifecycle examples.
 
