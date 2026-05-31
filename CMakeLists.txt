@@ -166,6 +166,8 @@ if(ASYNCFLOW_BUILD_TESTS)
         tests/runtime_io_uring_file_lifecycle_tests.cpp
         tests/runtime_io_uring_file_tests.cpp
         tests/runtime_io_datagram_tests.cpp
+        tests/runtime_io_datagram_readiness_tests.cpp
+        tests/runtime_io_datagram_send_tests.cpp
         tests/runtime_io_shutdown_tests.cpp
         tests/runtime_parallel_shards_tests.cpp
         tests/runtime_ordered_start_tests.cpp
