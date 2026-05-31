@@ -151,7 +151,9 @@ if(ASYNCFLOW_BUILD_TESTS)
         tests/runtime_io_uring_file_tests.cpp
         tests/runtime_io_datagram_tests.cpp
         tests/runtime_io_shutdown_tests.cpp
-        tests/runtime_parallel_tests.cpp
+        tests/runtime_parallel_shards_tests.cpp
+        tests/runtime_ordered_start_tests.cpp
+        tests/runtime_ordered_batch_tests.cpp
         tests/runtime_stress_tests.cpp
         tests/utility_tests.cpp
     )
