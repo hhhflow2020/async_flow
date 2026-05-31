@@ -14,28 +14,10 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - The public `AsyncRuntime` API is now split into lifecycle, parallel, IO resource/wait, file-data submit, fd lifecycle submit, socket data submit, and socket message/connect submit fragments. The top-level `include/af/async_runtime.hpp` is now an overview-sized class shell instead of a multi-thousand-line mixed implementation file.
 - `tests/runtime_io_test_support.hpp` is now an umbrella header with domain fragments for core traits, basic tasks, stream, accept, file, timer/event, wait/cancel, socket lifecycle, and io_uring socket support.
 - The file IO test support has been split into boundary, normal read/write, fixed-resource, lifecycle/open, and filesystem operation fragments.
+- Public IO adapter headers are now compatibility umbrellas: `io_socket.hpp`, `io_file.hpp`, and `io_adapters.hpp` include focused inline fragments for lifecycle, data transfer, fixed resources, stream/listener, datagram, and event/timer adapters.
 - Each split so far preserved header-only/template visibility, passed `git diff --check`, Docker GCC Debug runtime tests, and, for core runtime header changes, Release runtime benchmark baseline regression.
 
 ## Current Findings
-
-### P1: Public IO Adapter Headers Are Now The Largest API Files
-
-`include/af/io_socket.hpp`, `include/af/io_file.hpp`, and `include/af/io_adapters.hpp` are the largest public headers after the runtime split. They are still coherent, but future IO additions will make them harder to audit unless the next features land in smaller domain headers.
-
-Risk:
-- Socket lifecycle, stream read/write, datagram, fixed-file, timeout/cancel, eventfd/timerfd, and generic adapter helpers can become visually interleaved.
-- Public API review may require scanning unrelated network and file helpers.
-
-Recommended split:
-- `io_socket_stream.hpp`
-- `io_socket_datagram.hpp`
-- `io_socket_lifecycle.hpp`
-- `io_file_data.hpp`
-- `io_file_lifecycle.hpp`
-- `io_event_timer.hpp`
-- `io_pollable_adapter.hpp`
-
-Keep `io_socket.hpp`, `io_file.hpp`, and `io_adapters.hpp` as compatibility umbrella headers.
 
 ### P1: io_uring Executor Internals Can Be Split Further
 
