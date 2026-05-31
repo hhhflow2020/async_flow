@@ -25,6 +25,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Runtime parallel tests have been split into shard scheduling, ordered-start, and ordered-batch sources with shared task support.
 - Runtime parallel support is now a small umbrella over core runtime fixtures, shard tasks, ordered-batch tasks, and ordered-start tasks.
 - Stream IO test support is now a small umbrella over connect, basic stream, vectored, zero-copy boundary, zero-copy send, and sendfile/splice task fragments.
+- Timer/event IO test support is now a small umbrella over timer/timeout tasks, eventfd tasks, timer/event boundary tasks, and filesystem boundary tasks.
 - io_uring backend executor internals are now split into setup/close, SQ submit/poll, CQ completion, and operation lifecycle fragments while remaining inline in `AsyncRuntime::Executor`.
 - io_uring fixed file/buffer test support is now a small umbrella over fixed-buffer, fixed-file read/write, fixed-file update, and openat-direct task fragments.
 - IO benchmark support now keeps the hot benchmark-facing fake task shell small and splits FakeRuntime stubs by Linux socket, POSIX message, POSIX fixed file, accept/connect, and filesystem helpers.
@@ -69,7 +70,7 @@ Recommended split:
 The io_uring socket, runtime lifecycle, runtime parallel, stream IO, and fixed-resource file support files are now split, but several IO support fragments and IO example/benchmark support files are still long.
 
 Recommended split:
-- Split timer/event and wait/cancel task support by timerfd/eventfd, deadline/cancel, and shutdown/cleanup cases.
+- Split wait/cancel task support by deadline/cancel and shutdown/cleanup cases.
 - Keep platform-specific tests in separate files such as `runtime_io_epoll_tests.cpp`, `runtime_io_kqueue_tests.cpp`, and io_uring-focused files; shared task fixtures should remain in small support fragments.
 
 ### P2: README IO Section Has Become Dense
@@ -87,7 +88,7 @@ Recommended split:
 - Portable network IO now has a common `ThreadKind::Io` entry point, but some examples and tests still intentionally target Linux-only features such as sendfile/splice, eventfd/timerfd, fixed files, provided buffers, multishot, and io_uring direct descriptors.
 - File lifecycle helpers (`openat2/statx/fallocate/renameat/unlinkat/close`) remain Linux/io_uring-centered. For macOS, decide whether the first portable file layer should be explicit IO-thread synchronous syscalls, POSIX AIO, or a separate future backend; do not hide fundamentally different file semantics behind the same high-performance claim.
 - Per-operation timeout/cancel is implemented for epoll readiness, io_uring completion, and kqueue readiness/timeout completion.
-- Some IO test/example files are still long: `runtime_io_epoll_tests.cpp`, `runtime_io_stream_tests.cpp`, `runtime_io_timer_event_tasks_fragment.hpp`, and `runtime_io_wait_cancel_tasks_fragment.hpp` are the next modularity targets.
+- Some IO test/example files are still long: `runtime_io_epoll_tests.cpp`, `runtime_io_stream_tests.cpp`, and `runtime_io_wait_cancel_tasks_fragment.hpp` are the next modularity targets.
 
 ## Performance Constraints For Refactors
 
