@@ -7,4 +7,5 @@
 #include "runtime_io_stream_vectored_tasks_fragment.hpp"
 #include "runtime_io_stream_zc_boundary_tasks_fragment.hpp"
 #include "runtime_io_stream_zc_send_tasks_fragment.hpp"
+#include "runtime_io_stream_send_zc_pending_tasks_fragment.hpp"
 #include "runtime_io_stream_sendfile_splice_tasks_fragment.hpp"

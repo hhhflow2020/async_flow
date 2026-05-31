@@ -54,7 +54,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Runtime parallel support is now a small umbrella over core runtime fixtures, shard tasks, ordered-batch tasks, and ordered-start tasks.
 - Core runtime parallel implementation is now a small inline umbrella over ordered-start state, ordered-batch guard, shard runner/task, and shard dispatch fragments. This keeps the hot template path visible while separating sequencing, guard, and dispatch responsibilities.
 - Utility tests are now split by queue, object-pool, IO state, and batch/sequencer utility domains instead of collecting unrelated helpers in one source file.
-- Stream IO test support is now a small umbrella over connect, basic stream, vectored, zero-copy boundary, zero-copy send, and sendfile/splice task fragments.
+- Stream IO test support is now a small umbrella over connect, basic stream, vectored, zero-copy boundary, zero-copy send, pending zero-copy send, sendfile, and splice task fragments.
 - Stream IO runtime tests are split by basic stream, vectored send/recv, zero-copy send, fd-to-fd transfer, and connect/accept coverage.
 - Datagram IO runtime tests are split by readiness/hangup, UDP receive, and UDP send/zero-copy coverage.
 - Timer/event IO test support is now a small umbrella over timer/timeout tasks, eventfd tasks, timer/event boundary tasks, and filesystem boundary tasks.
