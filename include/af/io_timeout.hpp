@@ -48,12 +48,6 @@ template <typename TaskT>
         return IoStatus::failed(EINVAL);
     }
 
-#if !defined(__linux__)
-    static_cast<void>(task);
-    static_cast<void>(thread);
-    static_cast<void>(state);
-    return IoStatus::failed(ENOSYS);
-#else
     if (detail::waiting_for_completion(state)) {
         if (!detail::io_wait_result_ready(state)) {
             return IoStatus::make_pending();
@@ -62,7 +56,7 @@ template <typename TaskT>
     }
 
     detail::clear_waiting(state);
-    if (!TaskT::Runtime::io_uring_backend_available(thread)) {
+    if (!TaskT::Runtime::io_backend_available(thread)) {
         return IoStatus::failed(ENOSYS);
     }
 
@@ -73,7 +67,6 @@ template <typename TaskT>
         return IoStatus::make_pending();
     }
     return IoStatus::failed(state.wait.error == 0 ? ENOSYS : state.wait.error);
-#endif
 }
 
 template <typename TaskT>
@@ -82,13 +75,6 @@ template <typename TaskT>
     typename TaskT::Thread thread,
     IoDeadline& deadline,
     IoOpState& io_state) noexcept {
-#if !defined(__linux__)
-    static_cast<void>(task);
-    static_cast<void>(thread);
-    static_cast<void>(deadline);
-    static_cast<void>(io_state);
-    return IoStatus::failed(ENOSYS);
-#else
     if (!deadline.configured()) {
         return IoStatus::failed(EINVAL);
     }
@@ -139,16 +125,28 @@ template <typename TaskT>
                     deadline.reset_runtime();
                     return IoStatus::failed(error);
                 }
+                if (deadline.wait.wait.completion_token == nullptr &&
+                    detail::io_wait_result_ready(deadline.wait)) {
+                    const IoStatus timeout = consume_deadline_wait();
+                    if (timeout.failed() && timeout.error != ECANCELED) {
+                        deadline.reset_runtime();
+                        return timeout;
+                    }
+                    deadline.reset_runtime();
+                    return IoStatus::ready(0);
+                }
                 deadline.timeout_cancel_pending = true;
                 deadline.armed = false;
                 return IoStatus::make_pending();
             }
             static_cast<void>(TaskT::Runtime::cancel_io(thread, deadline.wait));
         }
+#if defined(__linux__)
         if (!deadline.ring_timeout) {
             int error = 0;
             static_cast<void>(disarm_timerfd(deadline.timer.get(), error));
         }
+#endif
         deadline.reset_runtime();
         return IoStatus::ready(0);
     }
@@ -187,7 +185,7 @@ template <typename TaskT>
 
     deadline.wait.reset();
     deadline.expirations = 0;
-    if (TaskT::Runtime::io_uring_backend_available(thread)) {
+    if (TaskT::Runtime::io_backend_available(thread)) {
         const IoStatus status = io_wait_timeout(task, thread, deadline.delay, deadline.wait);
         if (status.pending()) {
             deadline.armed = true;
@@ -200,6 +198,9 @@ template <typename TaskT>
         deadline.wait.reset();
     }
 
+#if !defined(__linux__)
+    return IoStatus::failed(ENOSYS);
+#else
     if (!deadline.timer) {
         deadline.timer = make_timerfd();
         if (!deadline.timer) {

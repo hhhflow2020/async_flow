@@ -251,6 +251,5 @@
             result->completion_token = nullptr;
             return false;
         }
-        return executors_[index]->submit_io_uring_timeout(timeout, task, result);
+        return executors_[index]->submit_io_timeout(timeout, task, result);
     }
-

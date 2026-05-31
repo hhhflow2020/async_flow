@@ -89,6 +89,11 @@
             if (state.wait_kind == IoWaitKind::Readiness) {
                 return cancel_native_io_wait(state);
             }
+#if AF_DETAIL_HAS_KQUEUE
+            if (state.wait_kind == IoWaitKind::Completion) {
+                return cancel_kqueue_timeout(state);
+            }
+#endif
 #endif
             state.wait.events = io_error;
             state.wait.error = ENOSYS;

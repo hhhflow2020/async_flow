@@ -2,6 +2,28 @@
 #error "runtime_executor_io_uring_timeout_submit_fragment.hpp is an AsyncRuntime::Executor implementation fragment"
 #endif
 
+        [[nodiscard]] bool submit_io_timeout(
+            std::chrono::nanoseconds timeout,
+            Task* task,
+            IoResult* result) noexcept {
+#if defined(__linux__)
+            return submit_io_uring_timeout(timeout, task, result);
+#elif AF_DETAIL_HAS_KQUEUE
+            return submit_kqueue_timeout(timeout, task, result);
+#else
+            static_cast<void>(timeout);
+            static_cast<void>(task);
+            if (result != nullptr) {
+                result->fd = -1;
+                result->events = io_error;
+                result->error = ENOSYS;
+                result->result = -ENOSYS;
+                result->completion_token = nullptr;
+            }
+            return false;
+#endif
+        }
+
         [[nodiscard]] bool submit_io_uring_timeout(
             std::chrono::nanoseconds timeout,
             Task* task,

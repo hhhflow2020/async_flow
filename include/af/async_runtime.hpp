@@ -241,6 +241,9 @@ private:
 #if AF_DETAIL_HAS_NATIVE_IO_WAIT
         struct IoWaitRegistration;
 #endif
+#if AF_DETAIL_HAS_KQUEUE
+        struct KqueueTimeoutRegistration;
+#endif
 #if defined(__linux__)
         struct IoUringOperation;
 #endif
@@ -306,6 +309,16 @@ private:
 #endif
         };
 
+#endif
+
+#if AF_DETAIL_HAS_KQUEUE
+        struct KqueueTimeoutRegistration {
+            Task* task{nullptr};
+            IoResult* result{nullptr};
+            KqueueTimeoutRegistration* prev{nullptr};
+            KqueueTimeoutRegistration* next{nullptr};
+            uintptr_t ident{0};
+        };
 #endif
 
 #if defined(__linux__)

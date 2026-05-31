@@ -33,6 +33,10 @@ struct FakeRuntime {
         return false;
     }
 
+    static bool io_backend_available(BenchIoThread) noexcept {
+        return false;
+    }
+
     static bool io_submit_socket(
         BenchIoThread,
         int,

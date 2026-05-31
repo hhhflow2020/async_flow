@@ -117,6 +117,64 @@ TEST_F(IoRuntimeKqueueFixture, KqueueIoThreadCancelsPendingReadWait) {
 
     close_pair_local(fds);
 }
+
+TEST_F(IoRuntimeKqueueFixture, KqueueIoThreadTimesOutPendingRead) {
+    ASSERT_TRUE(IoRuntime::io_backend_available(IoTestThread::IO_0));
+
+    int fds[2]{-1, -1};
+    ASSERT_TRUE(make_socket_pair(fds));
+
+    std::atomic<af::IoOpState*> state{nullptr};
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<int> error{0};
+    std::atomic<char> byte_read{0};
+
+    ASSERT_TRUE(IoRuntime::start_task<TimeoutSocketReadTask>(
+        fds[0],
+        std::chrono::milliseconds(2),
+        &state,
+        &armed,
+        &completed,
+        &error,
+        &byte_read));
+    ASSERT_TRUE(wait_until_at_least(armed, 1));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(error.load(std::memory_order_acquire), ETIMEDOUT);
+
+    close_pair_local(fds);
+}
+
+TEST_F(IoRuntimeKqueueFixture, KqueueTimeoutIsCanceledWhenReadCompletesFirst) {
+    ASSERT_TRUE(IoRuntime::io_backend_available(IoTestThread::IO_0));
+
+    int fds[2]{-1, -1};
+    ASSERT_TRUE(make_socket_pair(fds));
+
+    std::atomic<af::IoOpState*> state{nullptr};
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<int> error{0};
+    std::atomic<char> byte_read{0};
+
+    ASSERT_TRUE(IoRuntime::start_task<TimeoutSocketReadTask>(
+        fds[0],
+        std::chrono::seconds(5),
+        &state,
+        &armed,
+        &completed,
+        &error,
+        &byte_read));
+    ASSERT_TRUE(wait_until_at_least(armed, 1));
+
+    const char value = 't';
+    ASSERT_EQ(::write(fds[1], &value, sizeof(value)), 1);
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(error.load(std::memory_order_acquire), 0);
+    EXPECT_EQ(byte_read.load(std::memory_order_acquire), value);
+
+    close_pair_local(fds);
+}
 #else
 TEST(IoRuntimeKqueue, KqueueBackendIsPlatformSpecific) {
     GTEST_SKIP() << "kqueue backend is only built on macOS/BSD platforms";

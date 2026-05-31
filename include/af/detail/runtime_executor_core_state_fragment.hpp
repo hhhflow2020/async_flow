@@ -97,6 +97,10 @@
 #endif
 #if AF_DETAIL_HAS_KQUEUE
         int io_kqueue_fd_{-1};
+        KqueueTimeoutRegistration* io_kqueue_timeouts_{nullptr};
+        std::uint32_t io_kqueue_timeout_count_{0};
+        uintptr_t io_kqueue_next_timeout_ident_{2};
+        detail::ObjectPool<KqueueTimeoutRegistration> io_kqueue_timeout_pool_;
 #endif
 #if defined(__linux__)
         int io_uring_fd_{-1};
