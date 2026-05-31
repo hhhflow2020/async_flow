@@ -97,6 +97,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - The bounded queue implementations are now split by SPSC, MPSC, and MPMC queue family, with `bounded_queues.hpp` kept as a compatibility umbrella. The split is mechanical and preserves queue layout, cache-line alignment, memory ordering, and template visibility.
 - Socket transfer helpers are now split by sendfile, shutdown, and splice operation family, with `io_socket_transfer_fragment.hpp` kept as a compatibility umbrella.
 - `IoFixedFile` is now a small adapter shell with read, recv, write, send, and sync member-function fragments included inside the class body. The thin adapter remains trivially copyable and inline/template-visible.
+- `IoFile` is now a small descriptor-adapter shell with read, write, registered-buffer fixed IO, and sync member-function fragments included inside the class body. The public adapter remains a thin inline view over the descriptor.
 - Public file read helpers are now split into current-offset read/readv and positioned read/readv fragments, with `io_file_read_fragment.hpp` kept as a compatibility umbrella.
 - Each split so far preserved header-only/template visibility, passed `git diff --check`, Docker GCC Debug runtime tests, and, for core runtime header changes, Release runtime benchmark baseline regression.
 
