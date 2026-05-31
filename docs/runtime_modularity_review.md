@@ -19,6 +19,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - `runtime_executor_io_uring_submit_core_fragment.hpp` is now a small umbrella over poll wait submit, buffer/fast SQE submit, and generic SQE submit fragments. The code still lives inside `AsyncRuntime::Executor` for inline visibility.
 - `runtime_executor_io_uring_socket_submit_fragment.hpp` is now a small umbrella over recv, send, zero-copy, message, multishot, accept/connect, and socket-create submit wrappers.
 - Runtime lifecycle tests have been split into base lifecycle, backpressure, and shutdown-policy sources with shared traits/tasks in support.
+- Runtime lifecycle support is now a small umbrella over base, backpressure, and shutdown-policy task fragments.
 - Each split so far preserved header-only/template visibility, passed `git diff --check`, Docker GCC Debug runtime tests, and, for core runtime header changes, Release runtime benchmark baseline regression.
 
 ## Current Findings
@@ -39,11 +40,10 @@ Recommended split:
 
 ### P2: Core Runtime Tests Still Have A Few Large Domain Files
 
-The io_uring socket and runtime lifecycle tests are now split, but `tests/runtime_parallel_tests.cpp`, `tests/support/runtime_lifecycle_test_support.hpp`, and `tests/support/runtime_io_stream_tasks_fragment.hpp` are still long.
+The io_uring socket and runtime lifecycle tests are now split, but `tests/runtime_parallel_tests.cpp`, `tests/support/runtime_io_stream_tasks_fragment.hpp`, and several IO example/benchmark support files are still long.
 
 Recommended split:
 - Split parallel tests into shard scheduling, ordered batch, retry/skip policy, and restart/reset behavior.
-- Split lifecycle test support by default runtime tasks, backpressure tasks, shutdown tasks, and StopImmediately registry tasks.
 - Split stream task support into send/recv, vectored, zero-copy/sendfile/splice, and accept/connect helpers.
 
 ### P2: README IO Section Has Become Dense
