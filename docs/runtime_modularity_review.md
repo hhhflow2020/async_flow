@@ -94,6 +94,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - `include/af/task.hpp` is now a small public umbrella over task enum/type declarations, IO wait state, optional task-registry links, and the `BasicTask` implementation. Task lifecycle and scheduling state transitions remain inline/template-visible.
 - `include/af/io_filesystem.hpp` is now a small public umbrella over open/openat2, namespace operation, allocation/truncate, and `IoDirectory` adapter fragments. Public filesystem helpers remain header-only/template-visible while keeping operation families separate.
 - The macOS/BSD kqueue backend is split by setup, timeout, poll, storage, wait, and event translation helpers. kqueue now supports native one-shot timeout completion and cancel for `io_wait_timeout()` / `arm_io_timeout()` without routing through Linux `timerfd`.
+- The bounded queue implementations are now split by SPSC, MPSC, and MPMC queue family, with `bounded_queues.hpp` kept as a compatibility umbrella. The split is mechanical and preserves queue layout, cache-line alignment, memory ordering, and template visibility.
 - Each split so far preserved header-only/template visibility, passed `git diff --check`, Docker GCC Debug runtime tests, and, for core runtime header changes, Release runtime benchmark baseline regression.
 
 ## Current Findings
