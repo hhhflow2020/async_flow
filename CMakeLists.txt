@@ -189,7 +189,9 @@ if(ASYNCFLOW_BUILD_BENCHMARKS)
     add_executable(
         asyncflow_runtime_benchmarks
         benchmarks/benchmark_main.cpp
-        benchmarks/io_adapter_benchmarks.cpp
+        benchmarks/io_adapter_datagram_benchmarks.cpp
+        benchmarks/io_adapter_resource_benchmarks.cpp
+        benchmarks/io_adapter_stream_benchmarks.cpp
         benchmarks/io_filesystem_benchmarks.cpp
         benchmarks/io_zero_copy_benchmarks.cpp
         benchmarks/io_file_benchmarks.cpp
