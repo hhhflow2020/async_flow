@@ -22,6 +22,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Runtime lifecycle support is now a small umbrella over base, backpressure, and shutdown-policy task fragments.
 - Runtime parallel tests have been split into shard scheduling, ordered-start, and ordered-batch sources with shared task support.
 - Runtime parallel support is now a small umbrella over core runtime fixtures, shard tasks, ordered-batch tasks, and ordered-start tasks.
+- Stream IO test support is now a small umbrella over connect, basic stream, vectored, zero-copy boundary, zero-copy send, and sendfile/splice task fragments.
 - Each split so far preserved header-only/template visibility, passed `git diff --check`, Docker GCC Debug runtime tests, and, for core runtime header changes, Release runtime benchmark baseline regression.
 
 ## Current Findings
@@ -42,10 +43,11 @@ Recommended split:
 
 ### P2: Core Runtime Tests Still Have A Few Large Domain Files
 
-The io_uring socket, runtime lifecycle, and runtime parallel tests are now split, but `tests/support/runtime_io_stream_tasks_fragment.hpp`, several IO support fragments, and IO example/benchmark support files are still long.
+The io_uring socket, runtime lifecycle, runtime parallel, and stream IO support files are now split, but several IO support fragments and IO example/benchmark support files are still long.
 
 Recommended split:
-- Split stream task support into send/recv, vectored, zero-copy/sendfile/splice, and accept/connect helpers.
+- Split fixed-resource file task support by fixed-file table setup, registered buffers, fixed read/write, and batch submit helpers.
+- Split timer/event and wait/cancel task support by timerfd/eventfd, deadline/cancel, and shutdown/cleanup cases.
 
 ### P2: README IO Section Has Become Dense
 
