@@ -34,6 +34,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Public socket send helpers are now split into basic send, fixed-file send, zero-copy send, and vectored zero-copy send fragments, with `io_socket_send_fragment.hpp` kept as a small inline umbrella.
 - Public file fixed-resource helpers are now split into fixed-file read/write/fsync, registered-buffer read/write, and vectored file write fragments, with `io_file_fixed_buffer_fragment.hpp` kept as a small inline umbrella.
 - Public file lifecycle helpers are now split into open/open-direct, close/fsync, metadata, and namespace-operation fragments, with `io_file_lifecycle_fragment.hpp` kept as a small inline umbrella.
+- Public stream/listener adapters are now split into `IoStream` and `IoListener` fragments, with `io_adapters_stream_listener_fragment.hpp` kept as a small inline umbrella.
 - Runtime lifecycle tests have been split into base lifecycle, backpressure, and shutdown-policy sources with shared traits/tasks in support.
 - Runtime lifecycle support is now a small umbrella over base, backpressure, and shutdown-policy task fragments.
 - Runtime parallel tests have been split into shard scheduling, ordered-start, and ordered-batch sources with shared task support.
@@ -88,9 +89,8 @@ The current top-level runtime shell is no longer the main modularity problem:
 - `include/af/task.hpp`: small umbrella over task declarations, IO wait state, optional registry links, and `BasicTask`.
 - `include/af/io_types.hpp`: small umbrella over IO base types, provided buffers, status, and fd ownership.
 
-The remaining code-size pressure is now in second-level fragments and fixtures. `include/af/detail/io_file_fixed_buffer_fragment.hpp`, `include/af/detail/io_socket_send_fragment.hpp`, and `include/af/detail/io_file_lifecycle_fragment.hpp` have been reduced to small umbrellas over operation-family helpers. The largest remaining runtime-facing headers in the latest scan are:
+The remaining code-size pressure is now in second-level fragments and fixtures. `include/af/detail/io_file_fixed_buffer_fragment.hpp`, `include/af/detail/io_socket_send_fragment.hpp`, `include/af/detail/io_file_lifecycle_fragment.hpp`, and `include/af/detail/io_adapters_stream_listener_fragment.hpp` have been reduced to small umbrellas over operation-family helpers. The largest remaining runtime-facing headers in the latest scan are:
 
-- `include/af/detail/io_adapters_stream_listener_fragment.hpp`: 291 lines. This combines stream adapter methods and listener adapter methods.
 - `include/af/detail/io_socket_lifecycle_fragment.hpp`: 264 lines. This remains a broad socket lifecycle helper fragment.
 - `include/af/detail/runtime_executor_io_uring_filesystem_submit_fragment.hpp`: 261 lines. This combines several filesystem SQE preparation/submission helpers.
 - `include/af/detail/runtime_executor_io_uring_socket_msg_submit_fragment.hpp`: 258 lines. This combines recvmsg/sendmsg/multishot message submission paths.
@@ -109,10 +109,6 @@ Recommendation:
 - Keep `runtime_executor_core_state_fragment.hpp` as the single state-layout owner unless the split can preserve declaration order and cache-line placement exactly.
 
 ### Recommended Second-Pass Split Order
-
-P1, public IO helpers:
-
-- Split `io_adapters_stream_listener_fragment.hpp` into stream and listener adapter fragments. This keeps thin business-facing APIs easy to scan.
 
 P1, executor submit internals:
 
