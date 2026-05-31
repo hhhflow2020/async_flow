@@ -70,6 +70,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - io_uring file-data submit wrappers are now split into basic read/write, timeout, fixed-file, fixed-buffer, vectored, and fsync fragments while staying inline in `AsyncRuntime::Executor`.
 - Native readiness backends now have a platform-dispatch include point: Linux uses an epoll fragment and macOS/BSD uses a kqueue fragment, while public `io_*` helpers continue to expose one API. This keeps OS-specific syscall code out of the generic executor loop and preserves header-only inlining.
 - `include/af/io_common.hpp` is now a small umbrella over focused common fragments: basic socket/error helpers, wait-state helpers, fixed-file vectored helpers, Linux eventfd/timerfd helpers, and deadline state.
+- `include/af/io_types.hpp` is now a small public umbrella over base IO typedefs/views, Linux provided-buffer rings, `IoStatus`, and `UniqueFd`. Linux-only ring storage and POSIX fd ownership are separate fragments while staying inline.
 - `include/af/task.hpp` is now a small public umbrella over task enum/type declarations, IO wait state, optional task-registry links, and the `BasicTask` implementation. Task lifecycle and scheduling state transitions remain inline/template-visible.
 - The macOS/BSD kqueue backend is split by setup, timeout, poll, storage, wait, and event translation helpers. kqueue now supports native one-shot timeout completion and cancel for `io_wait_timeout()` / `arm_io_timeout()` without routing through Linux `timerfd`.
 - Each split so far preserved header-only/template visibility, passed `git diff --check`, Docker GCC Debug runtime tests, and, for core runtime header changes, Release runtime benchmark baseline regression.
@@ -78,7 +79,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 
 ### Latest Structure Scan: async_runtime.hpp Is Now A Shell, Detail Fragments Carry The Weight
 
-The current `include/af/async_runtime.hpp` is 226 lines and mostly wires public API fragments, executor fragments, and runtime state fragments together. `include/af/task.hpp` is now also an overview-sized umbrella. The remaining modularity risk is concentrated in several focused-but-still-dense fragments:
+The current `include/af/async_runtime.hpp` is 226 lines and mostly wires public API fragments, executor fragments, and runtime state fragments together. `include/af/task.hpp` and `include/af/io_types.hpp` are now also overview-sized umbrellas. The remaining modularity risk is concentrated in several focused-but-still-dense fragments:
 
 - `include/af/detail/io_file_fixed_buffer_fragment.hpp` and related public IO adapter fragments are around 300 lines. They are acceptable for inline APIs, but future additions should go into narrower recv/send/fixed/lifecycle fragments.
 
