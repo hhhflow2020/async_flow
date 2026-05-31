@@ -31,6 +31,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Public socket accept/connect helpers are now a small umbrella over accept, accept-direct, accept-multishot, and connect fragments. POSIX fallback, io_uring direct accept, multishot completion handling, and connect readiness fallback are now separate while staying inline.
 - Public file-data submit wrappers are now split into basic read/write/fsync, fixed-file, registered-buffer, and vectored fragments, with a small umbrella preserving inline visibility in `AsyncRuntime`.
 - Public socket receive helpers are now split into basic recv/fixed-file recv, recv multishot, and recvmsg multishot parser/submit fragments, with `io_socket_recv_fragment.hpp` kept as a small inline umbrella.
+- Public socket send helpers are now split into basic send, fixed-file send, zero-copy send, and vectored zero-copy send fragments, with `io_socket_send_fragment.hpp` kept as a small inline umbrella.
 - Public file fixed-resource helpers are now split into fixed-file read/write/fsync, registered-buffer read/write, and vectored file write fragments, with `io_file_fixed_buffer_fragment.hpp` kept as a small inline umbrella.
 - Runtime lifecycle tests have been split into base lifecycle, backpressure, and shutdown-policy sources with shared traits/tasks in support.
 - Runtime lifecycle support is now a small umbrella over base, backpressure, and shutdown-policy task fragments.
@@ -86,10 +87,9 @@ The current top-level runtime shell is no longer the main modularity problem:
 - `include/af/task.hpp`: small umbrella over task declarations, IO wait state, optional registry links, and `BasicTask`.
 - `include/af/io_types.hpp`: small umbrella over IO base types, provided buffers, status, and fd ownership.
 
-The remaining code-size pressure is now in second-level fragments and fixtures. `include/af/detail/io_file_fixed_buffer_fragment.hpp` has been reduced to a small umbrella over fixed-file, registered-buffer, and vectored-write helpers. The largest remaining runtime-facing headers in the latest scan are:
+The remaining code-size pressure is now in second-level fragments and fixtures. `include/af/detail/io_file_fixed_buffer_fragment.hpp` and `include/af/detail/io_socket_send_fragment.hpp` have both been reduced to small umbrellas over operation-family helpers. The largest remaining runtime-facing headers in the latest scan are:
 
 - `include/af/detail/io_adapters_stream_listener_fragment.hpp`: 291 lines. This combines stream adapter methods and listener adapter methods.
-- `include/af/detail/io_socket_send_fragment.hpp`: 288 lines. This combines normal send, fixed-file send, zero-copy send, and vectored zero-copy send fallback logic.
 - `include/af/detail/io_file_lifecycle_fragment.hpp`: 277 lines. This combines fsync, open/open-direct, close, statx, fallocate, rename, and unlink helpers.
 - `include/af/detail/io_socket_lifecycle_fragment.hpp`: 264 lines. This remains a broad socket lifecycle helper fragment.
 - `include/af/detail/runtime_executor_io_uring_filesystem_submit_fragment.hpp`: 261 lines. This combines several filesystem SQE preparation/submission helpers.
@@ -112,7 +112,6 @@ Recommendation:
 
 P1, public IO helpers:
 
-- Split `io_socket_send_fragment.hpp` into basic send, fixed-file send, zero-copy scalar send, and zero-copy vectored send helpers. This improves reviewability of the branch-heavy fallback paths without adding dispatch.
 - Split `io_file_lifecycle_fragment.hpp` into open/open-direct, close/fsync, stat/fallocate, and rename/unlink helpers. This keeps file lifecycle semantics clear, especially the `UniqueFd::release()` close path.
 - Split `io_adapters_stream_listener_fragment.hpp` into stream and listener adapter fragments. This keeps thin business-facing APIs easy to scan.
 
