@@ -1034,6 +1034,34 @@ P3：`start_task()` 为通用 handle 生命周期多做一次引用计数增减�
 3. 最后拆 IO epoll/io_uring，因为这部分状态多、边界复杂，适合在核心调度稳定后单独提交。
 4. 每阶段都运行 `git diff --check`、Debug `ctest`、TSAN 核心测试、Release runtime benchmark 回归检查。
 
+### 16.4 模块化复查补充
+
+本次复查按文件行数和职责边界确认，`include/af/async_runtime.hpp` 约 7900 行，是当前最主要的可维护性风险点。测试侧 `tests/runtime_io_test_support.hpp` 约 6500 行，也已经承担了过多 fixture、task helper、socket/file/datagram/timer/event/uring 边界任务，应和 runtime 拆分同步治理，避免核心代码变清晰但测试支持文件继续膨胀。
+
+`async_runtime.hpp` 当前仍适合作为 public facade 和模板入口，但不适合继续承载全部实现细节。建议保持 header-only，不把热路径挪进 `.cpp`，以免破坏模板实例化、`if constexpr` 裁剪和编译期内联。实现可拆成 detail fragment 或 `detail::Runtime*<RuntimeT>` helper，两种方式都不增加运行时虚调用；初期优先使用低风险 include fragment，后续再把稳定边界提升为真正 helper 类型。
+
+优先拆分点：
+
+- common：`RuntimeStatus`、`CacheLineAtomic`、`OrderedBatchState`、`ExternalPostCounter` 等通用小类型，行为独立，适合第一步移动。
+- parallel：`ParallelGroup`、`ShardTask`、ordered guard、ordered start state，和 executor/IO 的耦合较低，适合第二步移动。
+- lifecycle：task pool、handle release、registry、unfinished counter、StopImmediately cancel，边界清晰，但必须保持任务引用计数和 registry 顺序不变。
+- dispatch：local queue、SPSC/MPSC ingress、ready bitmap、wake/notify，这里是核心热路径，拆分时应同时评估 wake 去重和 SPSC 连续矩阵存储，必须以 benchmark 守护。
+- executor：run loop、execute/finish、sleep/wake 逻辑依赖内部状态多，适合在 common/parallel/lifecycle 拆完后单独提交。
+- IO：epoll readiness、io_uring ring、SQE builder、operation pool、cancel/timeout/fallback 目前耦合最重，最后拆；拆分时应按 `epoll`、`io_uring setup/completion`、`file submit`、`socket submit`、`datagram submit` 分层。
+
+测试、示例、benchmark 也需要按同一原则整理：
+
+- `tests/runtime_io_test_support.hpp` 拆为 `runtime_io_fixture.hpp`、`runtime_io_file_tasks.hpp`、`runtime_io_socket_tasks.hpp`、`runtime_io_datagram_tasks.hpp`、`runtime_io_timer_event_tasks.hpp`、`runtime_io_uring_tasks.hpp`。
+- IO benchmark 已按 adapter/file/filesystem/vectored/zero-copy 分文件，当前结构基本合理；后续新增 benchmark 继续按功能分组，不再回到单一大文件。
+- 示例文件目前大多按业务模板独立，重点是保持每个 task 的 `run()` 状态分派调用成员函数，不把业务状态机继续堆进单个 `switch` 分支。
+
+拆分验收标准：
+
+- public API 不漂移，`async_runtime.hpp` 仍是用户主要 include 入口。
+- 热路径不增加额外堆分配、虚调用或不可内联跳转。
+- 每个拆分提交只移动一个清晰职责块，并跑 `git diff --check`、Debug 关键测试、TSAN 核心测试和 Release runtime benchmark 回归检查。
+- 每次拆分后记录文件行数变化，确保大文件确实变短，而不是把复杂度复制到新位置。
+
 ## 17. CI 与后续可选增强
 
 当前 CI 覆盖普通测试、TSAN stress 和 runtime benchmark 回归检查：
