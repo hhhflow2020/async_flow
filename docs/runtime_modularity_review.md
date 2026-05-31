@@ -55,6 +55,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - io_uring backend executor internals are now split into setup/close, SQ submit/poll, CQ completion, and operation lifecycle fragments while remaining inline in `AsyncRuntime::Executor`.
 - io_uring CQ completion is now split by CQ polling, operation completion, poll-wait completion, and fd/direct-file cancel cleanup, with `runtime_executor_io_uring_backend_completion_fragment.hpp` kept as a small inline umbrella.
 - io_uring backend setup is now split by init flow, mmap/pointer binding, feature probing, close/reset, and storage reservation, with `runtime_executor_io_uring_backend_setup_fragment.hpp` kept as a small inline umbrella.
+- kqueue timeout internals are now split by timer-unit conversion, registration tracking, submit, and cancel/complete paths, with `runtime_executor_kqueue_timeout_fragment.hpp` kept as a small inline umbrella inside `AsyncRuntime::Executor`.
 - io_uring fixed file/buffer test support is now a small umbrella over fixed-buffer, fixed-file read/write, fixed-file update, and openat-direct task fragments.
 - IO benchmark support now keeps the hot benchmark-facing fake task shell small and splits FakeRuntime stubs by Linux socket, POSIX message, POSIX fixed file, accept/connect, and filesystem helpers.
 - Runtime benchmarks are now split into shared runtime benchmark task support, external-start, thread-hop, and parallel-shard benchmark families. This keeps benchmark harness changes separate from the task/state-machine fixtures they measure.
@@ -91,7 +92,6 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 
 The current review found that `include/af/async_runtime.hpp` itself is no longer the primary modularity problem. It is 226 lines and mostly acts as an inline class shell plus fragment wiring. The remaining issues are second-level ownership boundaries:
 
-- P1: `include/af/detail/runtime_executor_kqueue_timeout_fragment.hpp` is 232 lines and mixes submit, cancel, completion, list tracking, ident allocation, and time-unit conversion. Split tracking and time conversion from submit/cancel/complete paths before adding more kqueue timer/event features.
 - P2: `include/af/io_filesystem.hpp` is 253 lines and remains a broad public helper header for `openat2`, namespace operations, allocation/truncate, and `IoDirectory`. Split public filesystem helpers by lifecycle/open, namespace, allocation, and adapter wrapper when the next filesystem helper is added.
 - P2: the largest files are now tests and examples, not runtime entry points. The biggest current files are file IO support fragments, accept/socket support fragments, and protocol examples. New tests should be added as small operation-family files instead of growing the existing fixture files.
 - P2: `benchmarks/io_adapter_benchmarks.cpp` is 258 lines and still combines several adapter benchmark families. Split by stream, datagram, and resource adapter cases before adding more IO benchmark scenarios.
@@ -131,7 +131,7 @@ Recommendation:
 
 P1, executor submit internals:
 
-- The largest socket/file submit umbrellas and io_uring completion/setup paths have been split by operation family. Next executor-internal candidate is kqueue timeout internals if future backend work adds more timer/event features.
+- The largest socket/file submit umbrellas, io_uring completion/setup paths, and kqueue timeout internals have been split by operation family. The next executor-internal split should be tied to new backend functionality rather than file size alone.
 
 P2, tests/examples/benchmarks:
 
@@ -159,16 +159,16 @@ Recommendation:
 - Continue splitting test support by operation family and boundary category, but keep fixtures close to the tests that use them.
 - Prefer example completion through runtime shutdown policy and task result structs, not main-thread atomic polling, unless the example is specifically demonstrating cross-thread observation.
 
-### P1: io_uring Executor Internals Can Be Split Further
+### P1: Executor Internals Are Now Mostly Operation-Family Fragments
 
-The largest remaining runtime-internal fragments are kqueue timeout internals and selected public socket data submit wrappers.
+The largest remaining runtime-internal fragments are no longer monolithic executor shells. Most remaining density is in selected public helper wrappers and test/example support.
 
 Risk:
-- kqueue timeout internals and public socket data submit wrappers still have dense local regions.
+- Public helper wrappers and fixture support can still grow dense local regions if new operation families are appended to existing files.
 - Concurrency/lifetime audits still require reading several dense io_uring fragments.
 
 Recommended split:
-- Consider a follow-up split of io_uring setup tuning helpers only if more backend setup knobs are added.
+- Consider follow-up splits of io_uring setup tuning helpers or kqueue event/user helpers only when more backend knobs are added.
 - Keep fragments included inside `AsyncRuntime::Executor` so hot submit helpers stay inlineable and no extra virtual/function-pointer dispatch is introduced.
 
 ### P1: Cross-Platform IO Backend Boundaries Need To Stay Explicit
@@ -204,7 +204,7 @@ Recommended split:
 
 ### Validation Note: Runtime Benchmark Time-Mode Needs Follow-Up
 
-The local macOS Release benchmark binary and the remote Linux Docker Release benchmark both completed fixed-iteration smoke runs, but CI-style time-mode runs exceeded a 180s timeout in the current validation environment before producing benchmark rows.
+The local macOS Release benchmark binary and the remote Linux Docker Release benchmark both completed fixed-iteration smoke runs, but CI-style time-mode runs exceeded a 180s timeout in the current validation environment before producing benchmark rows. Google Benchmark 1.9.5 also expects `--benchmark_min_warmup_time` as a plain double while `--benchmark_min_time` still uses the normal duration/iteration suffix form.
 
 Risk:
 - Full runtime baseline regression checks may be too sensitive to benchmark runner options or environment scheduling noise.
