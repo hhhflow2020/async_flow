@@ -18,6 +18,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - io_uring socket test support and runtime socket test sources have been split by stream, datagram, accept/connect, and multishot responsibilities.
 - `runtime_executor_io_uring_submit_core_fragment.hpp` is now a small umbrella over poll wait submit, buffer/fast SQE submit, and generic SQE submit fragments. The code still lives inside `AsyncRuntime::Executor` for inline visibility.
 - `runtime_executor_io_uring_socket_submit_fragment.hpp` is now a small umbrella over recv, send, zero-copy, message, multishot, accept/connect, and socket-create submit wrappers.
+- io_uring resource registration is now split by registered buffers, provided buffer rings, and registered/fixed file table helpers while staying inline inside `AsyncRuntime::Executor`.
 - Runtime lifecycle tests have been split into base lifecycle, backpressure, and shutdown-policy sources with shared traits/tasks in support.
 - Runtime lifecycle support is now a small umbrella over base, backpressure, and shutdown-policy task fragments.
 - Runtime parallel tests have been split into shard scheduling, ordered-start, and ordered-batch sources with shared task support.
@@ -35,15 +36,15 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 
 ### P1: io_uring Executor Internals Can Be Split Further
 
-The largest remaining runtime-internal fragments are io_uring resource management and some public IO submit wrappers.
+The largest remaining runtime-internal fragments are io_uring completion/submit details and some public IO submit wrappers.
 
 Risk:
-- Resource registration, CQE completion details, and public IO submit wrappers still have dense local regions.
+- CQE completion details and public IO submit wrappers still have dense local regions.
 - Concurrency/lifetime audits still require reading several dense io_uring fragments.
 
 Recommended split:
 - Consider a second-pass split of backend completion into CQE decoding, normal completion, multishot continuation, zero-copy notification, timeout/cancel, and teardown paths if further audit needs it.
-- Split io_uring resource management by fixed files, registered buffers, provided buffers, and setup tuning helpers.
+- Consider a follow-up split of io_uring setup tuning helpers if more backend setup knobs are added.
 - Consider splitting the generic SQE submit fragment into validation, operation preparation, and SQE filling helpers, but only if the helper shape stays inline and does not add hot-path dispatch.
 - Keep fragments included inside `AsyncRuntime::Executor` so hot submit helpers stay inlineable and no extra virtual/function-pointer dispatch is introduced.
 
