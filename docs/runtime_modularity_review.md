@@ -1,6 +1,6 @@
 # Runtime Modularity Review
 
-Date: 2026-05-31
+Date: 2026-06-01
 
 ## Scope
 
@@ -105,6 +105,38 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Each split so far preserved header-only/template visibility, passed `git diff --check`, Docker GCC Debug runtime tests, and, for core runtime header changes, Release runtime benchmark baseline regression.
 
 ## Current Findings
+
+### 2026-06-01 Core Fixed-Thread Runtime Modularity Audit
+
+The current core runtime is no longer bottlenecked by `include/af/async_runtime.hpp` itself. That file is 226 lines and works as a class shell: it declares `AsyncRuntime`, the nested `Executor`, and wires inline fragments into the correct class scopes. The main modularity pressure has moved into second-level hot-path fragments.
+
+Findings to track:
+
+- P1: `runtime_dispatch_fragment.hpp` still mixes queue topology setup, runtime-thread enqueue, external-thread enqueue, SPSC source-ready marking, and external-post drain accounting. This is correct as one hot path today, but it is the next best core split candidate. Split by responsibility into queue topology, enqueue fast path, and external-post gate fragments while keeping everything inline inside `AsyncRuntime`.
+- P1: `runtime_public_lifecycle_fragment.hpp` mixes init/shutdown, idle waiting, task creation, post admission, and thread-index helpers. Split lifecycle control from public task creation/post helpers so shutdown reasoning and task scheduling reasoning do not live in the same file.
+- P1: `runtime_lifecycle_fragment.hpp` mixes task object-pool allocation, optional task registry, StopImmediately cancellation, and unfinished-task accounting. Split into task pool, task registry/cancel, and task accounting fragments. The StopImmediately path is correctness-sensitive, so the split must preserve the order: stop workers, cancel registered pending/queued tasks, then clear executor/backend state.
+- P1: `runtime_executor_core_state_fragment.hpp` currently contains both executor state fields and behavior (`pop_one`, `finish_done`, `finish_pending`, `finish_again`). Keep the field declarations in one state-layout owner to preserve cache-line placement and false-sharing audits, but move pop/finish behavior into inline behavior fragments.
+- P1: `runtime_executor_task_fragment.hpp` mixes source-ready signaling, local queue operations, and task execution/result dispatch. Split ready signaling, local queue methods, and execute/finish dispatch only if benchmarks confirm no regression in the same-thread fast path.
+- P2: `basic_task_fragment.hpp` is a dense class-body fragment combining protected task API, scheduling state machine, lifetime refs, and storage layout. It can be split into class-body fragments, but the storage fields should remain in one final layout block.
+- P2: `io_common_detail_state_fragment.hpp` combines target-thread validation, readiness wait arming, splice wait policy, IO status normalization, iovec validation, and multishot wait reset. Split by helper family to make IO cancel/timeout audits smaller.
+- P2: `runtime_common_fragment.hpp` combines `RuntimeStatus`, `CacheLineAtomic`, ordered-batch state, parallel-group state, and external-post counters. Split these small type families when the next runtime-state change lands.
+- P2: examples still contain explicit atomics for readiness/completion observation in older files such as `io_epoll.cpp`, `io_timer.cpp`, `io_event.cpp`, `io_native_readiness.cpp`, and several multishot io_uring examples. For examples, prefer task-owned state machines plus `ShutdownPolicy::WaitForTasks`; test fixtures may continue using atomics when they are only assertion probes.
+
+Performance guardrails for the split:
+
+- Do not move hot scheduling, queue, task state, IO submit, IO completion, or task-resume code into `.cpp` files. These paths need template/inline visibility.
+- Do not introduce virtual adapters, `std::function`, heap allocation, or extra cross-thread queues for modularity.
+- Do not split executor state fields across files unless the change is a deliberate cache-layout change with benchmark evidence.
+- Keep same-thread scheduling on the local no-lock queue path and cross-thread scheduling on the per-source SPSC path. Any cleanup that routes same-thread posts through MPSC/MPMC would be a performance regression.
+- After each P1 split, run `git diff --check`, Debug `ctest`, Docker GCC Debug `ctest`, and Release runtime benchmark baseline regression.
+
+Recommended order:
+
+1. Split `runtime_public_lifecycle_fragment.hpp` and `runtime_lifecycle_fragment.hpp` first. This reduces shutdown/task-lifetime reasoning cost without touching queue layout.
+2. Split `runtime_dispatch_fragment.hpp` into topology, enqueue, and external-post gate fragments. Re-run runtime benchmarks because this touches the start/post hot path.
+3. Split executor behavior out of `runtime_executor_core_state_fragment.hpp` while leaving field layout intact.
+4. Split `basic_task_fragment.hpp` class-body responsibilities after the executor split, because task state transitions and executor finish paths need to stay easy to audit together.
+5. Split `io_common_detail_state_fragment.hpp` by IO helper family when working on the next IO feature or cancel/timeout fix.
 
 ### 2026-05-31 Core Runtime Modularity Recheck
 
