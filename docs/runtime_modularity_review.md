@@ -24,6 +24,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Runtime parallel support is now a small umbrella over core runtime fixtures, shard tasks, ordered-batch tasks, and ordered-start tasks.
 - Stream IO test support is now a small umbrella over connect, basic stream, vectored, zero-copy boundary, zero-copy send, and sendfile/splice task fragments.
 - io_uring backend executor internals are now split into setup/close, SQ submit/poll, CQ completion, and operation lifecycle fragments while remaining inline in `AsyncRuntime::Executor`.
+- io_uring fixed file/buffer test support is now a small umbrella over fixed-buffer, fixed-file read/write, fixed-file update, and openat-direct task fragments.
 - Each split so far preserved header-only/template visibility, passed `git diff --check`, Docker GCC Debug runtime tests, and, for core runtime header changes, Release runtime benchmark baseline regression.
 
 ## Current Findings
@@ -44,10 +45,9 @@ Recommended split:
 
 ### P2: Core Runtime Tests Still Have A Few Large Domain Files
 
-The io_uring socket, runtime lifecycle, runtime parallel, and stream IO support files are now split, but several IO support fragments and IO example/benchmark support files are still long.
+The io_uring socket, runtime lifecycle, runtime parallel, stream IO, and fixed-resource file support files are now split, but several IO support fragments and IO example/benchmark support files are still long.
 
 Recommended split:
-- Split fixed-resource file task support by fixed-file table setup, registered buffers, fixed read/write, and batch submit helpers.
 - Split timer/event and wait/cancel task support by timerfd/eventfd, deadline/cancel, and shutdown/cleanup cases.
 
 ### P2: README IO Section Has Become Dense
