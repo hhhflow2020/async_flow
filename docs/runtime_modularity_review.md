@@ -54,6 +54,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - The Linux epoll executor backend is now a small platform umbrella over setup/wake, storage/deferred-delete, poll, wait registration, and cancel fragments. This mirrors the kqueue split while keeping all syscall paths inline inside `AsyncRuntime::Executor`.
 - io_uring backend executor internals are now split into setup/close, SQ submit/poll, CQ completion, and operation lifecycle fragments while remaining inline in `AsyncRuntime::Executor`.
 - io_uring CQ completion is now split by CQ polling, operation completion, poll-wait completion, and fd/direct-file cancel cleanup, with `runtime_executor_io_uring_backend_completion_fragment.hpp` kept as a small inline umbrella.
+- io_uring backend setup is now split by init flow, mmap/pointer binding, feature probing, close/reset, and storage reservation, with `runtime_executor_io_uring_backend_setup_fragment.hpp` kept as a small inline umbrella.
 - io_uring fixed file/buffer test support is now a small umbrella over fixed-buffer, fixed-file read/write, fixed-file update, and openat-direct task fragments.
 - IO benchmark support now keeps the hot benchmark-facing fake task shell small and splits FakeRuntime stubs by Linux socket, POSIX message, POSIX fixed file, accept/connect, and filesystem helpers.
 - Runtime benchmarks are now split into shared runtime benchmark task support, external-start, thread-hop, and parallel-shard benchmark families. This keeps benchmark harness changes separate from the task/state-machine fixtures they measure.
@@ -90,7 +91,6 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 
 The current review found that `include/af/async_runtime.hpp` itself is no longer the primary modularity problem. It is 226 lines and mostly acts as an inline class shell plus fragment wiring. The remaining issues are second-level ownership boundaries:
 
-- P1: `include/af/detail/runtime_executor_io_uring_backend_setup_fragment.hpp` is 230 lines and mixes ring setup, mmap pointer binding, feature detection, shutdown, and backend storage reservation. Split setup/mmap, feature probing, close/reset, and reserve-storage helpers if more setup knobs are added.
 - P1: `include/af/detail/runtime_executor_kqueue_timeout_fragment.hpp` is 232 lines and mixes submit, cancel, completion, list tracking, ident allocation, and time-unit conversion. Split tracking and time conversion from submit/cancel/complete paths before adding more kqueue timer/event features.
 - P2: `include/af/io_filesystem.hpp` is 253 lines and remains a broad public helper header for `openat2`, namespace operations, allocation/truncate, and `IoDirectory`. Split public filesystem helpers by lifecycle/open, namespace, allocation, and adapter wrapper when the next filesystem helper is added.
 - P2: the largest files are now tests and examples, not runtime entry points. The biggest current files are file IO support fragments, accept/socket support fragments, and protocol examples. New tests should be added as small operation-family files instead of growing the existing fixture files.
@@ -131,7 +131,7 @@ Recommendation:
 
 P1, executor submit internals:
 
-- The largest socket/file submit umbrellas and io_uring completion paths have been split by operation family. Next executor-internal candidates are setup/tuning and kqueue timeout internals if future backend work adds more knobs.
+- The largest socket/file submit umbrellas and io_uring completion/setup paths have been split by operation family. Next executor-internal candidate is kqueue timeout internals if future backend work adds more timer/event features.
 
 P2, tests/examples/benchmarks:
 
@@ -161,15 +161,14 @@ Recommendation:
 
 ### P1: io_uring Executor Internals Can Be Split Further
 
-The largest remaining runtime-internal fragments are io_uring setup/tuning details, kqueue timeout internals, and selected public socket data submit wrappers.
+The largest remaining runtime-internal fragments are kqueue timeout internals and selected public socket data submit wrappers.
 
 Risk:
-- io_uring setup/tuning details, kqueue timeout internals, and public socket data submit wrappers still have dense local regions.
+- kqueue timeout internals and public socket data submit wrappers still have dense local regions.
 - Concurrency/lifetime audits still require reading several dense io_uring fragments.
 
 Recommended split:
-- Consider a second-pass split of backend setup into mmap binding, feature probing, close/reset, and storage reservation if further audit needs it.
-- Consider a follow-up split of io_uring setup tuning helpers if more backend setup knobs are added.
+- Consider a follow-up split of io_uring setup tuning helpers only if more backend setup knobs are added.
 - Keep fragments included inside `AsyncRuntime::Executor` so hot submit helpers stay inlineable and no extra virtual/function-pointer dispatch is introduced.
 
 ### P1: Cross-Platform IO Backend Boundaries Need To Stay Explicit
