@@ -62,3 +62,37 @@ The pressure run covered concurrent init/shutdown/start_task, StopImmediately pe
 - Add a dedicated long-running perf benchmark mode that initializes the runtime once and loops inside the benchmark body. That would remove startup noise and make cache-miss and branch-miss comparisons more meaningful.
 - Keep CI baseline checks focused on runtime key paths, but keep IO benchmarks out of strict CI regression gates unless the runner provides stable IO characteristics.
 - For future performance commits, collect both fixed-iteration perf counters and normal benchmark regression output. The former catches microarchitectural surprises; the latter catches user-visible throughput regressions.
+
+## 2026-06-01 Scheduler Correctness Pass
+
+This run validates the scheduler modularity/correctness pass on the requested remote Linux host with `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2`.
+
+Builds:
+
+- Debug clang: `asyncflow_runtime_tests`.
+- Debug clang + ThreadSanitizer: `asyncflow_runtime_tests` with `ASYNCFLOW_ENABLE_TSAN=ON`.
+- Release clang: `asyncflow_runtime_tests` and `asyncflow_runtime_benchmarks`.
+
+Correctness and race checks:
+
+- Remote clang Debug targeted scheduler/parallel tests: 16/16 passed.
+- Remote clang TSAN targeted scheduler/parallel tests: 16/16 passed, no TSAN report.
+- Remote clang Release targeted scheduler/parallel tests: 16/16 passed.
+- Remote clang Release full runtime suite: 132/132 passed; 21 platform/io_uring capability tests were skipped by test logic.
+- Remote clang Release `BM_RuntimeParallelShards/128` timeout pressure loop: 100/100 iterations completed under `timeout 10s`.
+
+Release benchmark snapshot after the ready-source clear/recheck optimization:
+
+| Case | Time | CPU | Throughput |
+| --- | ---: | ---: | ---: |
+| `BM_RuntimeExternalStart/8192` | 7.19 ms | 7.18 ms | 1.139 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 12.3 ms | 4.81 ms | 664.567 k/s |
+| `BM_RuntimeIoThreadHop/8192` | 4.64 ms | 4.63 ms | 1.765 M/s |
+| `BM_RuntimeParallelShards/128` | 0.542 ms | 0.521 ms | 236.041 k/s |
+| `BM_RuntimeParallelShards/512` | 1.90 ms | 1.85 ms | 269.002 k/s |
+
+Interpretation:
+
+- The pass did not introduce deadlock in the targeted owner-resume or cross-thread hop paths under Debug, TSAN, Release, or the 100-iteration timeout loop.
+- The TSAN run specifically covers repeated cross-thread SPSC hops, above-64-thread ready-source words, and parallel shard owner resume races.
+- The benchmark values are fixed-iteration canaries. They are suitable for detecting gross regressions in this pass, not as a stable long-term microarchitectural baseline.

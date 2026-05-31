@@ -20,6 +20,7 @@
 #include "af/detail/config.hpp"
 #include "af/detail/io_uring_support.hpp"
 #include "af/detail/object_pool.hpp"
+#include "af/detail/runtime_ready_source_set.hpp"
 #include "af/detail/runtime_traits.hpp"
 #include "af/task.hpp"
 #include "absl/container/flat_hash_map.h"

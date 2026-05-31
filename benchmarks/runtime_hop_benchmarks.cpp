@@ -63,7 +63,15 @@ void BM_RuntimeIoThreadHop(benchmark::State& state) {
     state.SetItemsProcessed(state.iterations() * state.range(0));
 }
 
-BENCHMARK(BM_RuntimeCrossThreadHop)->Arg(1024)->Arg(8192)->Unit(benchmark::kMillisecond);
-BENCHMARK(BM_RuntimeIoThreadHop)->Arg(1024)->Arg(8192)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_RuntimeCrossThreadHop)
+    ->Arg(1024)
+    ->Arg(8192)
+    ->UseRealTime()
+    ->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_RuntimeIoThreadHop)
+    ->Arg(1024)
+    ->Arg(8192)
+    ->UseRealTime()
+    ->Unit(benchmark::kMillisecond);
 
 } // namespace

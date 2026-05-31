@@ -91,6 +91,7 @@
             }
 
             case TaskState::Created:
+            case TaskState::Starting:
             case TaskState::Running:
                 AF_ASSERT(false && "registered task cannot be cancelled in this state");
                 return;

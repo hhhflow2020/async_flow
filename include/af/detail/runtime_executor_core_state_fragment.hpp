@@ -7,31 +7,39 @@
                 return task;
             }
 
-            if constexpr (thread_count <= 64U) {
-                std::uint64_t mask = ready_sources_.load(std::memory_order_acquire);
+            for (std::size_t word = 0; word < decltype(ready_sources_)::word_count; ++word) {
+                std::uint64_t mask = ready_sources_.load_word(word);
                 while (mask != 0U) {
-                    const auto source = static_cast<std::uint16_t>(std::countr_zero(mask));
-                    const std::uint64_t bit = 1ULL << source;
-                    if (Task* task = spsc_queue(source, index_).try_pop()) {
-                        return task;
-                    }
-
-                    ready_sources_.fetch_and(~bit, std::memory_order_acq_rel);
-                    if (Task* task = spsc_queue(source, index_).try_pop()) {
-                        mark_ready(source);
-                        return task;
-                    }
-
+                    const std::uint16_t source = static_cast<std::uint16_t>(
+                        decltype(ready_sources_)::word_base(word) + std::countr_zero(mask));
+                    const std::uint64_t bit = 1ULL << (source & 63U);
                     mask &= ~bit;
-                }
-            } else {
-                for (std::uint16_t checked = 0; checked < thread_count; ++checked) {
-                    const std::uint16_t source =
-                        static_cast<std::uint16_t>((next_source_ + checked) % thread_count);
+                    if (source == index_) {
+                        continue;
+                    }
                     if (Task* task = spsc_queue(source, index_).try_pop()) {
                         next_source_ = static_cast<std::uint16_t>((source + 1U) % thread_count);
                         return task;
                     }
+                    ready_sources_.clear(source);
+                    if (Task* task = spsc_queue(source, index_).try_pop()) {
+                        next_source_ = static_cast<std::uint16_t>((source + 1U) % thread_count);
+                        mark_ready(source);
+                        return task;
+                    }
+                }
+            }
+
+            for (std::uint16_t checked = 0; checked < thread_count; ++checked) {
+                const std::uint16_t source =
+                    static_cast<std::uint16_t>((next_source_ + checked) % thread_count);
+                if (source == index_) {
+                    continue;
+                }
+                if (Task* task = spsc_queue(source, index_).try_pop()) {
+                    next_source_ = static_cast<std::uint16_t>((source + 1U) % thread_count);
+                    mark_ready(source);
+                    return task;
                 }
             }
 
@@ -70,7 +78,7 @@
             const std::uint16_t requested = task->take_requested_thread();
             AF_ASSERT(requested == invalid_thread_index);
             task->state_.store(TaskState::Queued, std::memory_order_release);
-            enqueue_ready_blocking_from(index_, index_, task);
+            enqueue_ready_blocking_from_runtime_thread(index_, index_, task);
         }
 
         std::uint16_t index_;
@@ -80,7 +88,7 @@
         std::size_t local_head_{0};
         std::size_t local_tail_{0};
         std::size_t local_size_{0};
-        CacheLineAtomic<std::uint64_t> ready_sources_{0};
+        detail::ReadySourceSet<thread_count> ready_sources_;
         CacheLineAtomic<bool> external_ready_{false};
         CacheLineAtomic<std::uint32_t> wake_epoch_{0};
         CacheLineAtomic<bool> sleeping_{false};

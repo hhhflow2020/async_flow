@@ -3,19 +3,7 @@
 #endif
 
         void mark_ready(std::uint16_t source) noexcept {
-            if constexpr (thread_count <= 64U) {
-                const std::uint64_t bit = 1ULL << source;
-                std::uint64_t mask = ready_sources_.load(std::memory_order_acquire);
-                while ((mask & bit) == 0U &&
-                       !ready_sources_.compare_exchange_weak(
-                           mask,
-                           mask | bit,
-                           std::memory_order_release,
-                           std::memory_order_acquire)) {
-                }
-            } else {
-                static_cast<void>(source);
-            }
+            ready_sources_.mark(source);
         }
 
         void notify_external_ready() noexcept {
@@ -50,13 +38,17 @@
         }
 
         void execute(Task* task) noexcept {
-            const TaskState previous = task->state_.exchange(
-                TaskState::Running,
-                std::memory_order_acq_rel);
-            AF_ASSERT(previous == TaskState::Queued);
-            if (previous != TaskState::Queued) {
+            TaskState expected = TaskState::Queued;
+            if (!task->state_.compare_exchange_strong(
+                    expected,
+                    TaskState::Starting,
+                    std::memory_order_acq_rel,
+                    std::memory_order_acquire)) {
+                AF_ASSERT(false && "executor popped a task that was not queued");
                 return;
             }
+            task->prepare_running_epoch();
+            task->state_.store(TaskState::Running, std::memory_order_release);
 
             TaskResult result = TaskResult::Done;
             Task* previous_running_task = running_task_;

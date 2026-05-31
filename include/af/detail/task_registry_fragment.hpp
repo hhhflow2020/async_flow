@@ -15,7 +15,7 @@ struct ScheduleRequest {
     TaskState previous{TaskState::Done};
 };
 
-inline constexpr std::uint32_t no_requested_thread = 0;
+inline constexpr std::uint64_t no_requested_thread = 0;
 
 template <typename RuntimeT>
 inline constexpr bool task_registry_enabled_v = [] {

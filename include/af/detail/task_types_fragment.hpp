@@ -34,6 +34,7 @@ enum class ThreadKind : std::uint8_t {
 enum class TaskState : std::uint8_t {
     Created,
     Queued,
+    Starting,
     Running,
     Pending,
     Done,

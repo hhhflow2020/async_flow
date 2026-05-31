@@ -36,6 +36,10 @@ void BM_RuntimeExternalStart(benchmark::State& state) {
     state.SetItemsProcessed(state.iterations() * state.range(0));
 }
 
-BENCHMARK(BM_RuntimeExternalStart)->Arg(1024)->Arg(8192)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_RuntimeExternalStart)
+    ->Arg(1024)
+    ->Arg(8192)
+    ->UseRealTime()
+    ->Unit(benchmark::kMillisecond);
 
 } // namespace

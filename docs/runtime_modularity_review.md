@@ -108,7 +108,54 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 
 ## Current Findings
 
+### 2026-06-01 Scheduler Correctness And Modularity Pass
+
+This pass resolves the active fixed-thread scheduler issues that were blocking the next modularity step.
+
+Resolved items:
+
+- `runtime_dispatch_fragment.hpp` is now a 7-line umbrella. Queue topology, ready enqueue paths, and external-post admission accounting live in separate inline fragments:
+  - `runtime_queue_topology_fragment.hpp`: SPSC/external queue aliases, queue initialization, and queue lookup.
+  - `runtime_ready_enqueue_fragment.hpp`: explicit local-queue, cross-thread SPSC, external MPSC, blocking enqueue, and ready-source marking paths.
+  - `runtime_external_post_gate_fragment.hpp`: external post admission, active-post release, and shutdown drain wait.
+- Runtime-thread self-post is now explicit. `enqueue_ready_blocking_from_runtime_thread(source, target, task)` dispatches to `enqueue_local_from_runtime_thread_blocking()` when `source == target`, instead of hiding the local queue behind a generic enqueue helper.
+- The previous `thread_count <= 64` ready-source hint limit is gone. `ReadySourceSet<ThreadCount>` stores ready sources across cache-line-aligned 64-bit words and supports runtimes above 64 threads.
+- Ready-source bits are hints, not correctness state. `pop_one()` now checks ready-source words, clears an empty source only after an SPSC pop miss, immediately rechecks that SPSC queue, and still has a bounded all-source SPSC fallback scan. This prevents lost/coalesced ready hints from stranding work while avoiding permanent scans of stale sticky bits.
+- A late owner-resume race was fixed in `BasicTask`. Running wake requests are now tagged with a run epoch, `Executor::execute()` uses a `Queued -> Starting -> Running` transition, and a post that races with `finish_pending()` can either defer to the owner or directly transition `Pending -> Queued` and enqueue the task. This prevents a stale `Running` observation from writing `requested_thread_` after the owner has already checked the slot.
+- The new scheduler stress fixtures were moved out of `tests/runtime_stress_tests.cpp` into `tests/support/runtime_scheduler_stress_support.hpp`. The source file now keeps test cases separate from reusable state-machine tasks.
+
+Current file-size snapshot after the pass:
+
+- `include/af/async_runtime.hpp`: 227 lines.
+- `include/af/detail/runtime_dispatch_fragment.hpp`: 7 lines.
+- `include/af/detail/runtime_queue_topology_fragment.hpp`: 30 lines.
+- `include/af/detail/runtime_ready_enqueue_fragment.hpp`: 149 lines.
+- `include/af/detail/runtime_external_post_gate_fragment.hpp`: 53 lines.
+- `include/af/detail/runtime_ready_source_set.hpp`: 70 lines.
+- `tests/runtime_stress_tests.cpp`: 353 lines.
+- `tests/support/runtime_scheduler_stress_support.hpp`: 281 lines.
+
+Validation evidence for the final pass:
+
+- Local `git diff --check`: passed.
+- Local Release build: `asyncflow_runtime_tests` and `asyncflow_runtime_benchmarks` built.
+- Local Release targeted scheduler/parallel tests repeated until failure 20 times: 16/16 passed.
+- Local TSAN targeted scheduler/parallel tests: 16/16 passed.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2` Debug targeted scheduler/parallel tests: 16/16 passed.
+- Remote clang TSAN targeted scheduler/parallel tests: 16/16 passed with no ThreadSanitizer report.
+- Remote clang Release targeted scheduler/parallel tests: 16/16 passed.
+- Remote clang Release full runtime test suite: 132/132 passed, with 21 platform/io_uring capability tests skipped by test logic.
+- Remote clang Release `BM_RuntimeParallelShards/128` was run 100 times under `timeout 10s`; all iterations exited successfully.
+
+Remaining follow-up:
+
+- `basic_task_fragment.hpp` is still dense because it contains task API helpers, scheduling state transitions, lifetime refs, and storage layout. A later split should keep transition logic close to storage fields and preserve the current atomic ordering audit.
+- `runtime_executor_core_state_fragment.hpp` still contains both executor pop/finish behavior and field layout. It is acceptable for this pass because the file is small, but the next structural pass can move pop/finish behavior into focused inline fragments while leaving field declarations in one cache-layout owner.
+- Ready-source hints are now correct and bounded, but future benchmarking may justify a rotating ready-word cursor for very large `thread_count` values.
+
 ### 2026-06-01 Current Scheduler WIP and Modularity Re-scan
+
+Status: superseded by the scheduler correctness and modularity pass above. This section is kept as the historical issue ledger that led to the fix.
 
 This scan records the current state before continuing the next runtime split. There are active scheduler hot-path changes in the worktree, so the modularity work must treat correctness validation as part of the structure boundary, not as a cosmetic cleanup.
 
@@ -147,6 +194,8 @@ Recommended immediate order:
 
 ### 2026-06-01 Core Runtime Correctness and Modularity Follow-up
 
+Status: superseded by the scheduler correctness and modularity pass above. Items marked P0/P1 here were the pre-fix review notes.
+
 This follow-up records the active issues from the latest fixed-thread runtime review. The top-level `include/af/async_runtime.hpp` remains 226 lines and is not the immediate problem; it is a class shell that keeps template and hot-path fragments inline-visible. The current risks are correctness-sensitive scheduler behavior and second-level fragments that still mix responsibilities.
 
 Issue ledger:
@@ -179,6 +228,8 @@ Recommended next split order:
 5. Split `runtime_stress_tests.cpp` support for repeated cross-thread hops so future scheduler regressions are easier to isolate.
 
 ### 2026-06-01 Core Fixed-Thread Runtime Modularity Audit
+
+Status: partially superseded by the scheduler correctness and modularity pass above. The remaining guidance about preserving inline hot paths and executor cache layout still applies.
 
 The current core runtime is no longer bottlenecked by `include/af/async_runtime.hpp` itself. That file is 226 lines and works as a class shell: it declares `AsyncRuntime`, the nested `Executor`, and wires inline fragments into the correct class scopes. The main modularity pressure has moved into second-level hot-path fragments.
 

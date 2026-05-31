@@ -38,6 +38,10 @@ void BM_RuntimeParallelShards(benchmark::State& state) {
     state.SetItemsProcessed(state.iterations() * state.range(0));
 }
 
-BENCHMARK(BM_RuntimeParallelShards)->Arg(128)->Arg(512)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_RuntimeParallelShards)
+    ->Arg(128)
+    ->Arg(512)
+    ->UseRealTime()
+    ->Unit(benchmark::kMillisecond);
 
 } // namespace

@@ -3,10 +3,10 @@
 #endif
 
         void notify_force() noexcept {
+            wake_epoch_.fetch_add(1, std::memory_order_release);
             if (notify_native_io_backend()) {
                 return;
             }
-            wake_epoch_.fetch_add(1, std::memory_order_release);
             wake_epoch_.notify_one();
         }
 
@@ -49,9 +49,13 @@
                     sleeping_.store(false, std::memory_order_relaxed);
                     execute(task);
                 } else {
+                    if (wake_epoch_.load(std::memory_order_acquire) != observed) {
+                        sleeping_.store(false, std::memory_order_relaxed);
+                        continue;
+                    }
                     if (io_thread() && io_backend_available()) {
                         static_cast<void>(poll_io(-1));
-                    } else if (wake_epoch_.load(std::memory_order_acquire) == observed) {
+                    } else {
                         wake_epoch_.wait(observed, std::memory_order_acquire);
                     }
                     sleeping_.store(false, std::memory_order_relaxed);
