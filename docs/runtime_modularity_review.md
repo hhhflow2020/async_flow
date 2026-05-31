@@ -15,6 +15,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - `tests/runtime_io_test_support.hpp` is now an umbrella header with domain fragments for core traits, basic tasks, stream, accept, file, timer/event, wait/cancel, socket lifecycle, and io_uring socket support.
 - The file IO test support has been split into boundary, normal read/write, fixed-resource, lifecycle/open, and filesystem operation fragments.
 - Public IO adapter headers are now compatibility umbrellas: `io_socket.hpp`, `io_file.hpp`, and `io_adapters.hpp` include focused inline fragments for lifecycle, data transfer, fixed resources, stream/listener, datagram, and event/timer adapters.
+- `include/af/io_datagram.hpp` is now an umbrella over focused datagram recv, send, vectored, and zero-copy helper fragments.
 - io_uring socket test support and runtime socket test sources have been split by stream, datagram, accept/connect, and multishot responsibilities.
 - `runtime_executor_io_uring_submit_core_fragment.hpp` is now a small umbrella over poll wait submit, buffer/fast SQE submit, and generic SQE submit fragments. The code still lives inside `AsyncRuntime::Executor` for inline visibility.
 - `runtime_executor_io_uring_socket_submit_fragment.hpp` is now a small umbrella over recv, send, zero-copy, message, multishot, accept/connect, and socket-create submit wrappers.
@@ -85,7 +86,7 @@ Recommended split:
 - Portable network IO now has a common `ThreadKind::Io` entry point, but some examples and tests still intentionally target Linux-only features such as sendfile/splice, eventfd/timerfd, fixed files, provided buffers, multishot, and io_uring direct descriptors.
 - File lifecycle helpers (`openat2/statx/fallocate/renameat/unlinkat/close`) remain Linux/io_uring-centered. For macOS, decide whether the first portable file layer should be explicit IO-thread synchronous syscalls, POSIX AIO, or a separate future backend; do not hide fundamentally different file semantics behind the same high-performance claim.
 - Per-operation timeout/cancel is implemented for epoll readiness, io_uring completion, and kqueue readiness/timeout completion.
-- Some IO test/example/benchmark files are still long: `runtime_io_epoll_tests.cpp`, `runtime_io_stream_tests.cpp`, `runtime_io_timer_event_tasks_fragment.hpp`, `runtime_io_wait_cancel_tasks_fragment.hpp`, `io_datagram.hpp`, and `io_benchmark_support.hpp` are the next modularity targets.
+- Some IO test/example/benchmark files are still long: `runtime_io_epoll_tests.cpp`, `runtime_io_stream_tests.cpp`, `runtime_io_timer_event_tasks_fragment.hpp`, `runtime_io_wait_cancel_tasks_fragment.hpp`, and `io_benchmark_support.hpp` are the next modularity targets.
 
 ## Performance Constraints For Refactors
 
