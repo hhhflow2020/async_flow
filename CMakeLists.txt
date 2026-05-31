@@ -162,7 +162,9 @@ if(ASYNCFLOW_BUILD_TESTS)
         tests/runtime_io_uring_socket_tests.cpp
         tests/runtime_io_uring_socket_accept_tests.cpp
         tests/runtime_io_uring_socket_datagram_tests.cpp
-        tests/runtime_io_uring_socket_multishot_tests.cpp
+        tests/runtime_io_uring_socket_stream_multishot_tests.cpp
+        tests/runtime_io_uring_socket_udp_multishot_tests.cpp
+        tests/runtime_io_uring_socket_recvmsg_multishot_tests.cpp
         tests/runtime_io_uring_socket_stream_tests.cpp
         tests/runtime_io_uring_file_batch_tests.cpp
         tests/runtime_io_uring_file_fixed_tests.cpp
