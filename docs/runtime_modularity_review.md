@@ -17,6 +17,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Socket lifecycle test support is now split into setup happy path, boundary validation, io_uring socket-create, and fast IO wait/done task fragments with the original lifecycle header kept as an umbrella.
 - The file IO test support has been split into boundary, normal read/write, fixed-resource, lifecycle/open, and filesystem operation fragments.
 - File IO boundary test support is now split further into plain file adapter boundary, registered fixed-buffer boundary, and fixed-file/direct-descriptor boundary fragments. The fixed-file/direct-descriptor path is further split into resource registration/direct-open, direct-accept, and fixed-file data transfer boundary tasks.
+- File IO read/write test support is now split further into basic offset read/write, vectored offset read/write, and current-offset state-machine fragments, with the previous read/write header kept as a small umbrella.
 - File IO open/lifecycle test support is now split further into batched write, openat round-trip, and full lifecycle state-machine task fragments, with the previous open/lifecycle header kept as a small umbrella.
 - Public IO adapter headers are now compatibility umbrellas: `io_socket.hpp`, `io_file.hpp`, and `io_adapters.hpp` include focused inline fragments for lifecycle, data transfer, fixed resources, file descriptors/fixed files, stream/listener, datagram, and event/timer adapters.
 - `include/af/io_datagram.hpp` is now an umbrella over focused datagram recv, send, vectored, and zero-copy helper fragments.
@@ -152,7 +153,7 @@ Performance constraints for these splits:
 
 The largest remaining files are now test/support fixtures rather than runtime shell code:
 
-- File IO support fragments remain heavy in a few places: read/write 328 lines, filesystem boundary 303 lines, filesystem ops 295 lines, while boundary and open/lifecycle support have been split into smaller operation-family task fragments.
+- File IO support fragments remain heavy in a few places: filesystem boundary 303 lines and filesystem ops 295 lines, while boundary, read/write, and open/lifecycle support have been split into smaller operation-family task fragments.
 - A few runtime tests are still moderately large: io_uring socket multishot 275 lines, io_uring socket datagram 257 lines, stream transfer 255 lines.
 - Some examples still use explicit atomics to observe readiness/completion (`io_epoll.cpp`, `io_timer.cpp`, and a few multishot io_uring examples). Those should be converted to task-owned state machines plus `ShutdownPolicy::WaitForTasks` when practical, matching the newer IO adapter/socket lifecycle examples.
 
