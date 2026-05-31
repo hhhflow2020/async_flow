@@ -33,6 +33,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Runtime lifecycle support is now a small umbrella over base, backpressure, and shutdown-policy task fragments.
 - Runtime parallel tests have been split into shard scheduling, ordered-start, and ordered-batch sources with shared task support.
 - Runtime parallel support is now a small umbrella over core runtime fixtures, shard tasks, ordered-batch tasks, and ordered-start tasks.
+- Core runtime parallel implementation is now a small inline umbrella over ordered-start state, ordered-batch guard, shard runner/task, and shard dispatch fragments. This keeps the hot template path visible while separating sequencing, guard, and dispatch responsibilities.
 - Stream IO test support is now a small umbrella over connect, basic stream, vectored, zero-copy boundary, zero-copy send, and sendfile/splice task fragments.
 - Stream IO runtime tests are split by basic stream, vectored send/recv, zero-copy send, fd-to-fd transfer, and connect/accept coverage.
 - Datagram IO runtime tests are split by readiness/hangup, UDP receive, and UDP send/zero-copy coverage.
@@ -74,14 +75,12 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 
 The current `include/af/async_runtime.hpp` is 226 lines and mostly wires public API fragments, executor fragments, and runtime state fragments together. It is no longer a multi-thousand-line implementation file. The remaining modularity risk is concentrated in several focused-but-still-dense fragments:
 
-- `include/af/detail/runtime_parallel_fragment.hpp` is 327 lines and still mixes ordered-start sequencing, shard task definition, ordered-batch guard logic, and shard dispatch.
 - `include/af/detail/runtime_executor_epoll_backend_fragment.hpp` is 304 lines and still mixes epoll setup/wakeup, polling, deferred delete flushing, wait registration, and cancel.
 - `include/af/detail/runtime_public_io_socket_data_submit_fragment.hpp` is 295 lines and repeats public argument validation plus executor lookup for recv/send/fixed/multishot/zero-copy variants.
 - `include/af/detail/io_socket_accept_connect_fragment.hpp`, `include/af/detail/io_file_fixed_buffer_fragment.hpp`, and related public IO adapter fragments are around 300 lines. They are acceptable for inline APIs, but future additions should go into narrower recv/send/fixed/lifecycle fragments.
 
 Recommendation:
 - Do not move hot runtime code into `.cpp` files. Keep template and syscall-submit code inlineable through include fragments.
-- Split `runtime_parallel_fragment.hpp` into ordered-start state, shard task/runner, ordered-batch guard, and public dispatch fragments.
 - Split `runtime_executor_epoll_backend_fragment.hpp` into setup/wake, poll-completion, wait-registration, and cancel/deferred-delete fragments.
 - Split public socket data submit wrappers into recv, send, zero-copy, and multishot fragments; optionally introduce a tiny inline executor lookup/validation helper only if benchmark confirms no regression.
 - Keep `runtime_executor_core_state_fragment.hpp` as the single state-layout owner unless the split can preserve declaration order and cache-line placement exactly.
