@@ -1,249 +1,13 @@
 #include <atomic>
-#include <cerrno>
-#include <chrono>
-#include <cstdint>
 #include <iostream>
-#include <thread>
 
-#include "af/async_flow.hpp"
-
-#if defined(__linux__)
-#include <sys/socket.h>
-#include <unistd.h>
-#endif
-
-namespace {
-
-enum class RecvThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    IO_0,
-    enum_thread_index_end,
-};
-
-struct RecvRuntimeTraits {
-    using Thread = RecvThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(RecvThread::enum_thread_index_end);
-    static constexpr std::size_t spsc_queue_capacity = 1024;
-    static constexpr std::size_t external_queue_capacity = 1024;
-    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
-    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
-
-    static constexpr af::ThreadKind thread_kind(RecvThread thread) noexcept {
-        return thread == RecvThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
-    }
-};
-
-using recv_async = af::AsyncRuntime<RecvRuntimeTraits>;
-using RecvTaskBase = recv_async::Task;
-
-bool wait_until_armed_or_error(std::atomic<int>& armed, std::atomic<int>& error) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (armed.load(std::memory_order_acquire) == 0 &&
-           error.load(std::memory_order_acquire) == 0) {
-        if (std::chrono::steady_clock::now() > deadline) {
-            return false;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    return true;
-}
-
-#if defined(__linux__)
-class RecvMultishotTask final : public RecvTaskBase {
-public:
-    explicit RecvMultishotTask(RecvTaskBase::FactoryToken token) : RecvTaskBase(token) {}
-
-    bool do_it(
-        int fd,
-        std::atomic<int>* armed,
-        int* packed_read,
-        std::atomic<int>* error) {
-        stream_.reset(RecvThread::IO_0, fd);
-        armed_ = armed;
-        packed_read_ = packed_read;
-        error_ = error;
-        return schedule(RecvThread::IO_0);
-    }
-
-private:
-    enum class State : std::uint8_t {
-        Register,
-        Recv,
-        Cancel,
-        Unregister,
-    };
-
-    af::TaskResult run() override {
-        switch (state_) {
-        case State::Register:
-            return register_ring();
-        case State::Recv:
-            return recv_one();
-        case State::Cancel:
-            return finish_cancel();
-        case State::Unregister:
-            return unregister_ring();
-        }
-        return complete(EIO);
-    }
-
-    af::TaskResult register_ring() {
-        int init_error = 0;
-        if (!ring_.init(buffer_count, init_error)) {
-            return complete(init_error == 0 ? EIO : init_error);
-        }
-
-        af::IoProvidedBuffer provided[buffer_count]{};
-        for (std::uint16_t i = 0; i < buffer_count; ++i) {
-            provided[i] = af::IoProvidedBuffer{&buffers_[i], sizeof(buffers_[i]), i};
-        }
-        int add_error = 0;
-        if (!ring_.add(provided, buffer_count, add_error)) {
-            return complete(add_error == 0 ? EIO : add_error);
-        }
-
-        int register_error = 0;
-        if (!recv_async::io_register_provided_buffer_ring(
-                RecvThread::IO_0,
-                ring_.ring(),
-                ring_.entries(),
-                buffer_group,
-                &register_error)) {
-            return complete(register_error == 0 ? EIO : register_error);
-        }
-        registered_ = true;
-        state_ = State::Recv;
-        return again();
-    }
-
-    af::TaskResult recv_one() {
-        std::uint16_t buffer_id = 0;
-        const af::IoStatus status =
-            stream_.recv_multishot(*this, buffer_group, &buffer_id, recv_);
-        if (status.pending()) {
-            if (!armed_once_) {
-                armed_once_ = true;
-                armed_->fetch_add(1, std::memory_order_release);
-            }
-            return pending();
-        }
-        if (status.failed()) {
-            return complete(status.error);
-        }
-        if (!status.ready() || status.bytes != 1U || buffer_id >= buffer_count) {
-            return complete(EIO);
-        }
-
-        const int shifted = received_ == 0 ? 8 : 0;
-        *packed_read_ |= static_cast<int>(
-            static_cast<unsigned char>(buffers_[buffer_id])) << shifted;
-        ++received_;
-
-        const af::IoProvidedBuffer buffer{
-            &buffers_[buffer_id],
-            sizeof(buffers_[buffer_id]),
-            buffer_id};
-        int add_error = 0;
-        if (!ring_.add(&buffer, 1, add_error)) {
-            return stop_recv(add_error == 0 ? EIO : add_error);
-        }
-
-        if (received_ < target_reads) {
-            return pending();
-        }
-        if (!recv_.waiting) {
-            state_ = State::Unregister;
-            return again();
-        }
-        finish_error_ = 0;
-        if (!recv_async::cancel_io(RecvThread::IO_0, recv_)) {
-            return complete(recv_.wait.error == 0 ? EIO : recv_.wait.error);
-        }
-        state_ = State::Cancel;
-        return pending();
-    }
-
-    af::TaskResult finish_cancel() {
-        std::uint16_t ignored = 0;
-        const af::IoStatus status =
-            stream_.recv_multishot(*this, buffer_group, &ignored, recv_);
-        if (status.pending()) {
-            return pending();
-        }
-        if (!status.failed() || status.error != ECANCELED) {
-            return complete(status.failed() ? status.error : EIO);
-        }
-        state_ = State::Unregister;
-        return again();
-    }
-
-    af::TaskResult unregister_ring() {
-        if (registered_) {
-            int unregister_error = 0;
-            if (!recv_async::io_unregister_provided_buffer_ring(
-                    RecvThread::IO_0,
-                    buffer_group,
-                    &unregister_error)) {
-                return complete(unregister_error == 0 ? EIO : unregister_error);
-            }
-            registered_ = false;
-        }
-        return complete(finish_error_);
-    }
-
-    af::TaskResult complete(int error) {
-        if (registered_) {
-            int unregister_error = 0;
-            if (recv_async::io_unregister_provided_buffer_ring(
-                    RecvThread::IO_0,
-                    buffer_group,
-                    &unregister_error)) {
-                registered_ = false;
-            }
-        }
-        error_->store(error, std::memory_order_release);
-        return done();
-    }
-
-    af::TaskResult stop_recv(int error) {
-        finish_error_ = error == 0 ? EIO : error;
-        if (!recv_.waiting) {
-            state_ = State::Unregister;
-            return again();
-        }
-        if (!recv_async::cancel_io(RecvThread::IO_0, recv_)) {
-            return complete(recv_.wait.error == 0 ? finish_error_ : recv_.wait.error);
-        }
-        state_ = State::Cancel;
-        return pending();
-    }
-
-    static constexpr std::uint16_t buffer_group = 9;
-    static constexpr unsigned buffer_count = 2;
-    static constexpr int target_reads = 2;
-
-    State state_{State::Register};
-    af::TcpStream<RecvThread> stream_{};
-    af::IoProvidedBufferRing ring_{};
-    char buffers_[buffer_count]{};
-    int received_{0};
-    int finish_error_{0};
-    bool armed_once_{false};
-    bool registered_{false};
-    af::IoOpState recv_{};
-    std::atomic<int>* armed_{nullptr};
-    int* packed_read_{nullptr};
-    std::atomic<int>* error_{nullptr};
-};
-#endif
-
-} // namespace
+#include "support/io_uring_recv_multishot_socket_pair.hpp"
+#include "support/io_uring_recv_multishot_task.hpp"
 
 int main() {
 #if defined(__linux__)
+    using namespace io_uring_recv_multishot_example;
+
     recv_async::init();
     if (!recv_async::io_uring_backend_available(RecvThread::IO_0)) {
         std::cout << "io_uring backend unavailable\n";
@@ -251,20 +15,18 @@ int main() {
         return 0;
     }
 
-    int fds[2]{-1, -1};
-    if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds) != 0) {
+    RecvMultishotSocketPair sockets{};
+    if (!sockets.create()) {
         std::cout << "socketpair failed\n";
         recv_async::shutdown();
         return 1;
     }
-    af::UniqueFd receiver(fds[0]);
-    af::UniqueFd sender(fds[1]);
 
     std::atomic<int> armed{0};
     int packed_read = 0;
     std::atomic<int> error{0};
     const bool started = recv_async::start_task<RecvMultishotTask>(
-        receiver.get(),
+        sockets.receiver.get(),
         &armed,
         &packed_read,
         &error);
@@ -289,7 +51,7 @@ int main() {
     }
 
     const char payload[] = {'M', 'R'};
-    if (::write(sender.get(), payload, sizeof(payload)) != static_cast<ssize_t>(sizeof(payload))) {
+    if (!write_payload_once(sockets.sender.get(), payload, sizeof(payload))) {
         std::cout << "write payload failed\n";
         recv_async::shutdown();
         return 1;

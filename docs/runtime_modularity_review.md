@@ -52,6 +52,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - The io_uring UDP recv multishot example is now split into runtime/wait helpers, UDP socket setup helpers, the provided-buffer recv multishot task, and a thin executable entry point.
 - The io_uring file-lifecycle example is now split into runtime traits, temporary path lifecycle helpers, the open/fallocate/read/write/stat/rename/unlink/close task, and a thin executable entry point.
 - The pollable-client adapter example is now split into runtime traits, a third-party-style pollable echo client, the AsyncFlow readiness adapter task, peer echo helpers, and a thin executable entry point.
+- The io_uring stream recv multishot example is now split into runtime/wait helpers, socketpair setup helpers, the provided-buffer recv multishot task, and a thin executable entry point.
 - io_uring file-data submit wrappers are now split into basic read/write, timeout, fixed-file, fixed-buffer, vectored, and fsync fragments while staying inline in `AsyncRuntime::Executor`.
 - Native readiness backends now have a platform-dispatch include point: Linux uses an epoll fragment and macOS/BSD uses a kqueue fragment, while public `io_*` helpers continue to expose one API. This keeps OS-specific syscall code out of the generic executor loop and preserves header-only inlining.
 - `include/af/io_common.hpp` is now a small umbrella over focused common fragments: basic socket/error helpers, wait-state helpers, fixed-file vectored helpers, Linux eventfd/timerfd helpers, and deadline state.
