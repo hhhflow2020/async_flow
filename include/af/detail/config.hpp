@@ -17,6 +17,24 @@
 #define AF_ASSERT(expr) static_cast<void>(sizeof(expr))
 #endif
 
+#if defined(__linux__)
+#define AF_DETAIL_HAS_EPOLL 1
+#else
+#define AF_DETAIL_HAS_EPOLL 0
+#endif
+
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+#define AF_DETAIL_HAS_KQUEUE 1
+#else
+#define AF_DETAIL_HAS_KQUEUE 0
+#endif
+
+#if AF_DETAIL_HAS_EPOLL || AF_DETAIL_HAS_KQUEUE
+#define AF_DETAIL_HAS_NATIVE_IO_WAIT 1
+#else
+#define AF_DETAIL_HAS_NATIVE_IO_WAIT 0
+#endif
+
 namespace af::detail {
 
 inline constexpr std::size_t hardware_cache_line_size = 64;

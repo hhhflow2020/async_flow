@@ -32,13 +32,19 @@
 #include <sys/uio.h>
 #endif
 
-#if defined(__linux__)
+#if AF_DETAIL_HAS_EPOLL
 #include <algorithm>
 #include <linux/openat2.h>
 #include <poll.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
+#include <unistd.h>
+#endif
+
+#if AF_DETAIL_HAS_KQUEUE
+#include <sys/event.h>
+#include <sys/time.h>
 #include <unistd.h>
 #endif
 
@@ -232,8 +238,10 @@ private:
 #undef AF_ASYNC_RUNTIME_FRAGMENT_INCLUDE
 
     class alignas(detail::hardware_cache_line_size) Executor {
-#if defined(__linux__)
+#if AF_DETAIL_HAS_NATIVE_IO_WAIT
         struct IoWaitRegistration;
+#endif
+#if defined(__linux__)
         struct IoUringOperation;
 #endif
 
@@ -243,11 +251,7 @@ private:
 #undef AF_ASYNC_RUNTIME_EXECUTOR_FRAGMENT_INCLUDE
 
         [[nodiscard]] bool io_backend_available() const noexcept {
-#if defined(__linux__)
-            return io_epoll_fd_ >= 0;
-#else
-            return false;
-#endif
+            return native_io_backend_available();
         }
 
         [[nodiscard]] bool io_uring_backend_available() const noexcept {
@@ -291,14 +295,20 @@ private:
 #undef AF_ASYNC_RUNTIME_EXECUTOR_FRAGMENT_INCLUDE
 
     private:
-#if defined(__linux__)
+#if AF_DETAIL_HAS_NATIVE_IO_WAIT
         struct IoWaitRegistration {
             int fd{-1};
+            std::uint32_t events{0};
             Task* task{nullptr};
             IoResult* result{nullptr};
+#if defined(__linux__)
             IoUringOperation* poll_operation{nullptr};
+#endif
         };
 
+#endif
+
+#if defined(__linux__)
         struct IoUringOperation {
             Task* task{nullptr};
             IoResult* result{nullptr};
@@ -330,7 +340,23 @@ private:
 #endif
 
         [[nodiscard]] bool io_thread() const noexcept {
-            return kind_ == ThreadKind::Epoll || kind_ == ThreadKind::IoUring;
+            return native_io_thread()
+#if defined(__linux__)
+                || io_uring_thread()
+#endif
+                ;
+        }
+
+        [[nodiscard]] bool native_io_thread() const noexcept {
+#if AF_DETAIL_HAS_EPOLL
+            return kind_ == ThreadKind::Io ||
+                   kind_ == ThreadKind::Epoll ||
+                   kind_ == ThreadKind::IoUring;
+#elif AF_DETAIL_HAS_KQUEUE
+            return kind_ == ThreadKind::Io || kind_ == ThreadKind::Kqueue;
+#else
+            return false;
+#endif
         }
 
         [[nodiscard]] bool io_uring_thread() const noexcept {
@@ -339,6 +365,10 @@ private:
 
 #define AF_ASYNC_RUNTIME_EXECUTOR_FRAGMENT_INCLUDE 1
 #include "af/detail/runtime_executor_io_uring_submit_core_fragment.hpp"
+#undef AF_ASYNC_RUNTIME_EXECUTOR_FRAGMENT_INCLUDE
+
+#define AF_ASYNC_RUNTIME_EXECUTOR_FRAGMENT_INCLUDE 1
+#include "af/detail/runtime_executor_native_io_backend_fragment.hpp"
 #undef AF_ASYNC_RUNTIME_EXECUTOR_FRAGMENT_INCLUDE
 
 #define AF_ASYNC_RUNTIME_EXECUTOR_FRAGMENT_INCLUDE 1

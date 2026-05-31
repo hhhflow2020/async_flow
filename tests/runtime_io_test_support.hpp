@@ -19,13 +19,16 @@
 #include <sys/uio.h>
 #endif
 
-#if defined(__linux__)
+#if !defined(_WIN32)
 #include <fcntl.h>
-#include <linux/openat2.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#endif
+
+#if defined(__linux__)
+#include <linux/openat2.h>
 #endif
 
 namespace {
@@ -38,11 +41,17 @@ namespace {
 #include "support/runtime_io_basic_tasks_fragment.hpp"
 #undef AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE
 
-#if defined(__linux__)
+#if !defined(_WIN32)
 #define AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE 1
 #include "support/runtime_io_basic_socket_tasks_fragment.hpp"
 #undef AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE
 
+#define AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE 1
+#include "support/runtime_io_wait_cancel_tasks_fragment.hpp"
+#undef AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE
+#endif
+
+#if defined(__linux__)
 #define AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE 1
 #include "support/runtime_io_accept_tasks_fragment.hpp"
 #undef AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE
@@ -57,10 +66,6 @@ namespace {
 
 #define AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE 1
 #include "support/runtime_io_uring_socket_tasks_fragment.hpp"
-#undef AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE
-
-#define AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE 1
-#include "support/runtime_io_wait_cancel_tasks_fragment.hpp"
 #undef AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE
 
 #define AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE 1

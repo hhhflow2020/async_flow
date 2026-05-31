@@ -31,7 +31,7 @@ struct IoTestRuntimeTraits {
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
 
     static constexpr af::ThreadKind thread_kind(IoTestThread thread) noexcept {
-        return thread == IoTestThread::IO_0 ? af::ThreadKind::Epoll : af::ThreadKind::Worker;
+        return thread == IoTestThread::IO_0 ? af::ThreadKind::Io : af::ThreadKind::Worker;
     }
 };
 
@@ -50,7 +50,7 @@ struct FastIoRuntimeTraits {
     static constexpr bool enable_task_registry = true;
 
     static constexpr af::ThreadKind thread_kind(IoTestThread thread) noexcept {
-        return thread == IoTestThread::IO_0 ? af::ThreadKind::Epoll : af::ThreadKind::Worker;
+        return thread == IoTestThread::IO_0 ? af::ThreadKind::Io : af::ThreadKind::Worker;
     }
 };
 
@@ -134,4 +134,3 @@ protected:
         UringIoRuntime::shutdown();
     }
 };
-

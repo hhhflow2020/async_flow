@@ -45,6 +45,9 @@ if(ASYNCFLOW_BUILD_EXAMPLES)
     add_executable(asyncflow_io_epoll_example examples/io_epoll.cpp)
     target_link_libraries(asyncflow_io_epoll_example PRIVATE AsyncFlow::AsyncFlow)
 
+    add_executable(asyncflow_io_native_readiness_example examples/io_native_readiness.cpp)
+    target_link_libraries(asyncflow_io_native_readiness_example PRIVATE AsyncFlow::AsyncFlow)
+
     add_executable(asyncflow_io_timer_example examples/io_timer.cpp)
     target_link_libraries(asyncflow_io_timer_example PRIVATE AsyncFlow::AsyncFlow)
 
@@ -142,6 +145,7 @@ if(ASYNCFLOW_BUILD_TESTS)
         tests/runtime_shutdown_policy_tests.cpp
         tests/runtime_io_setup_tests.cpp
         tests/runtime_io_epoll_tests.cpp
+        tests/runtime_io_kqueue_tests.cpp
         tests/runtime_io_stream_tests.cpp
         tests/runtime_io_uring_socket_tests.cpp
         tests/runtime_io_uring_socket_accept_tests.cpp

@@ -86,11 +86,19 @@
         CacheLineAtomic<bool> sleeping_{false};
         CacheLineAtomic<bool> stop_requested_{false};
         Task* running_task_{nullptr};
-#if defined(__linux__)
+#if AF_DETAIL_HAS_NATIVE_IO_WAIT
+        absl::flat_hash_map<int, IoWaitRegistration*> io_waits_;
+        detail::ObjectPool<IoWaitRegistration> io_wait_pool_;
+#endif
+#if AF_DETAIL_HAS_EPOLL
         int io_epoll_fd_{-1};
         int io_wake_fd_{-1};
-        absl::flat_hash_map<int, IoWaitRegistration*> io_waits_;
         absl::flat_hash_set<int> io_deferred_deletes_;
+#endif
+#if AF_DETAIL_HAS_KQUEUE
+        int io_kqueue_fd_{-1};
+#endif
+#if defined(__linux__)
         int io_uring_fd_{-1};
         std::byte* io_uring_sq_ring_{nullptr};
         std::byte* io_uring_cq_ring_{nullptr};
@@ -118,10 +126,11 @@
         bool io_uring_files_registered_{false};
         unsigned io_uring_registered_file_count_{0};
         IoUringOperation* io_uring_operations_{nullptr};
-        detail::ObjectPool<IoWaitRegistration> io_wait_pool_;
         detail::ObjectPool<detail::IoUringMessage> io_uring_msg_pool_;
         detail::ObjectPool<detail::IoUringSocketAddress> io_uring_address_pool_;
         detail::ObjectPool<IoUringOperation> io_uring_op_pool_;
+#endif
+#if AF_DETAIL_HAS_EPOLL || AF_DETAIL_HAS_KQUEUE
         CacheLineAtomic<bool> io_wake_pending_{false};
 #endif
         std::thread worker_;
