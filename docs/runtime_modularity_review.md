@@ -47,6 +47,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - io_uring backend executor internals are now split into setup/close, SQ submit/poll, CQ completion, and operation lifecycle fragments while remaining inline in `AsyncRuntime::Executor`.
 - io_uring fixed file/buffer test support is now a small umbrella over fixed-buffer, fixed-file read/write, fixed-file update, and openat-direct task fragments.
 - IO benchmark support now keeps the hot benchmark-facing fake task shell small and splits FakeRuntime stubs by Linux socket, POSIX message, POSIX fixed file, accept/connect, and filesystem helpers.
+- Runtime benchmarks are now split into shared runtime benchmark task support, external-start, thread-hop, and parallel-shard benchmark families. This keeps benchmark harness changes separate from the task/state-machine fixtures they measure.
 - The length-prefixed RPC example is now split into runtime traits, server/process task, client task, and a thin executable entry point.
 - The vectored IO example is now split into runtime/common helpers, stream readv/writev tasks, datagram recvmsg/sendmsg tasks, and a thin executable entry point.
 - The io_uring UDP recvmsg multishot example is now split into runtime/wait helpers, the provided-buffer multishot task, UDP socket setup helpers, and a thin executable entry point.
@@ -90,12 +91,10 @@ The largest remaining files are now test/support fixtures rather than runtime sh
 
 - File IO support fragments remain heavy: open/lifecycle 393 lines, boundary 389 lines, read/write 328 lines, filesystem boundary 303 lines, filesystem ops 295 lines.
 - A few runtime tests are still moderately large: io_uring socket multishot 275 lines, io_uring socket datagram 257 lines, stream transfer 255 lines.
-- `benchmarks/runtime_benchmarks.cpp` is 304 lines and still combines wait helpers, task definitions, and multiple benchmark families.
 - Some examples still use explicit atomics to observe readiness/completion (`io_epoll.cpp`, `io_timer.cpp`, and a few multishot io_uring examples). Those should be converted to task-owned state machines plus `ShutdownPolicy::WaitForTasks` when practical, matching the newer IO adapter/socket lifecycle examples.
 
 Recommendation:
 - Continue splitting test support by operation family and boundary category, but keep fixtures close to the tests that use them.
-- Split `runtime_benchmarks.cpp` into runtime task helpers and benchmark families so performance baselines stay easy to audit.
 - Prefer example completion through runtime shutdown policy and task result structs, not main-thread atomic polling, unless the example is specifically demonstrating cross-thread observation.
 
 ### P1: io_uring Executor Internals Can Be Split Further
@@ -151,7 +150,7 @@ Risk:
 - A long time-mode run can hide whether a refactor introduced a real regression or whether the benchmark harness is over-running.
 
 Recommended split:
-- Move runtime benchmark task definitions and wait helpers out of `benchmarks/runtime_benchmarks.cpp` before changing benchmark semantics.
+- Keep benchmark task definitions and wait helpers in focused support headers before changing benchmark semantics.
 - Add a short fixed-iteration smoke benchmark mode for local validation.
 - Keep the CI baseline check on Linux, but audit the `--benchmark_min_time` / warmup options and timeout behavior separately from source modularization commits.
 

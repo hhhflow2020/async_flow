@@ -195,7 +195,9 @@ if(ASYNCFLOW_BUILD_BENCHMARKS)
         benchmarks/io_file_benchmarks.cpp
         benchmarks/io_vectored_benchmarks.cpp
         benchmarks/queue_benchmarks.cpp
-        benchmarks/runtime_benchmarks.cpp
+        benchmarks/runtime_external_start_benchmarks.cpp
+        benchmarks/runtime_hop_benchmarks.cpp
+        benchmarks/runtime_parallel_benchmarks.cpp
     )
     target_link_libraries(asyncflow_runtime_benchmarks PRIVATE AsyncFlow::AsyncFlow benchmark::benchmark)
 endif()

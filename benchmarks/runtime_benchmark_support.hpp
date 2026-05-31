@@ -1,13 +1,13 @@
+#pragma once
+
 #include <atomic>
 #include <cstdint>
 #include <thread>
 #include <vector>
 
-#include <benchmark/benchmark.h>
-
 #include "af/async_flow.hpp"
 
-namespace {
+namespace af_bench::runtime {
 
 enum class BenchThread : std::int16_t {
     enum_thread_index_start = -1,
@@ -36,7 +36,7 @@ struct BenchRuntimeTraits {
 using Runtime = af::AsyncRuntime<BenchRuntimeTraits>;
 using Task = Runtime::Task;
 
-void wait_zero(std::atomic<int>& remaining) {
+inline void wait_zero(std::atomic<int>& remaining) {
     while (remaining.load(std::memory_order_acquire) != 0) {
         const int observed = remaining.load(std::memory_order_acquire);
         if (observed != 0) {
@@ -45,7 +45,7 @@ void wait_zero(std::atomic<int>& remaining) {
     }
 }
 
-void undo_remaining(std::atomic<int>& remaining) {
+inline void undo_remaining(std::atomic<int>& remaining) {
     if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
         remaining.notify_one();
     }
@@ -189,116 +189,4 @@ private:
     std::atomic<std::uint64_t>* sum_{nullptr};
 };
 
-void BM_RuntimeExternalStart(benchmark::State& state) {
-    Runtime::init();
-    for (auto _ : state) {
-        const int task_count = static_cast<int>(state.range(0));
-        std::atomic<int> remaining{0};
-        bool launch_failed = false;
-        for (int i = 0; i < task_count; ++i) {
-            const auto thread = static_cast<BenchThread>(i & 3);
-            remaining.fetch_add(1, std::memory_order_relaxed);
-            const bool ok = Runtime::start_task<CountTask>(thread, &remaining);
-            if (!ok) {
-                undo_remaining(remaining);
-                state.SkipWithError("Runtime::start_task<CountTask> failed");
-                launch_failed = true;
-                break;
-            }
-        }
-        wait_zero(remaining);
-        if (launch_failed) {
-            break;
-        }
-    }
-    Runtime::shutdown();
-
-    state.SetItemsProcessed(state.iterations() * state.range(0));
-}
-
-void BM_RuntimeCrossThreadHop(benchmark::State& state) {
-    Runtime::init();
-    for (auto _ : state) {
-        const int task_count = static_cast<int>(state.range(0));
-        std::atomic<int> remaining{0};
-        bool launch_failed = false;
-        for (int i = 0; i < task_count; ++i) {
-            remaining.fetch_add(1, std::memory_order_relaxed);
-            const bool ok = Runtime::start_task<HopTask>(8, &remaining);
-            if (!ok) {
-                undo_remaining(remaining);
-                state.SkipWithError("Runtime::start_task<HopTask> failed");
-                launch_failed = true;
-                break;
-            }
-        }
-        wait_zero(remaining);
-        if (launch_failed) {
-            break;
-        }
-    }
-    Runtime::shutdown();
-
-    state.SetItemsProcessed(state.iterations() * state.range(0));
-}
-
-void BM_RuntimeIoThreadHop(benchmark::State& state) {
-    Runtime::init();
-    for (auto _ : state) {
-        const int task_count = static_cast<int>(state.range(0));
-        std::atomic<int> remaining{0};
-        bool launch_failed = false;
-        for (int i = 0; i < task_count; ++i) {
-            remaining.fetch_add(1, std::memory_order_relaxed);
-            const bool ok = Runtime::start_task<IoHopTask>(&remaining);
-            if (!ok) {
-                undo_remaining(remaining);
-                state.SkipWithError("Runtime::start_task<IoHopTask> failed");
-                launch_failed = true;
-                break;
-            }
-        }
-        wait_zero(remaining);
-        if (launch_failed) {
-            break;
-        }
-    }
-    Runtime::shutdown();
-
-    state.SetItemsProcessed(state.iterations() * state.range(0));
-}
-
-void BM_RuntimeParallelShards(benchmark::State& state) {
-    Runtime::init();
-    for (auto _ : state) {
-        const int task_count = static_cast<int>(state.range(0));
-        std::atomic<int> remaining{0};
-        std::atomic<std::uint64_t> sum{0};
-        bool launch_failed = false;
-        for (int i = 0; i < task_count; ++i) {
-            remaining.fetch_add(1, std::memory_order_relaxed);
-            const bool ok = Runtime::start_task<ParallelShardTask>(&remaining, &sum);
-            if (!ok) {
-                undo_remaining(remaining);
-                state.SkipWithError("Runtime::start_task<ParallelShardTask> failed");
-                launch_failed = true;
-                break;
-            }
-        }
-        wait_zero(remaining);
-        benchmark::DoNotOptimize(sum.load(std::memory_order_relaxed));
-        if (launch_failed) {
-            break;
-        }
-    }
-    Runtime::shutdown();
-
-    state.SetItemsProcessed(state.iterations() * state.range(0));
-}
-
-BENCHMARK(BM_RuntimeExternalStart)->Arg(1024)->Arg(8192)->Unit(benchmark::kMillisecond);
-BENCHMARK(BM_RuntimeCrossThreadHop)->Arg(1024)->Arg(8192)->Unit(benchmark::kMillisecond);
-BENCHMARK(BM_RuntimeIoThreadHop)->Arg(1024)->Arg(8192)->Unit(benchmark::kMillisecond);
-BENCHMARK(BM_RuntimeParallelShards)->Arg(128)->Arg(512)->Unit(benchmark::kMillisecond);
-
-} // namespace
+} // namespace af_bench::runtime
