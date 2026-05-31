@@ -142,6 +142,19 @@ Recommended split:
 - Move deep IO behavior, performance tuning, fixed files, registered buffers, multishot, timeout/cancel, and zero-copy guidance into `docs/io_runtime.md`.
 - Move benchmark and CI baseline details into `docs/performance.md`.
 
+### Validation Note: Runtime Benchmark Time-Mode Needs Follow-Up
+
+The local macOS Release benchmark binary and the remote Linux Docker Release benchmark both completed fixed-iteration smoke runs, but CI-style time-mode runs exceeded a 180s timeout in the current validation environment before producing benchmark rows.
+
+Risk:
+- Full runtime baseline regression checks may be too sensitive to benchmark runner options or environment scheduling noise.
+- A long time-mode run can hide whether a refactor introduced a real regression or whether the benchmark harness is over-running.
+
+Recommended split:
+- Move runtime benchmark task definitions and wait helpers out of `benchmarks/runtime_benchmarks.cpp` before changing benchmark semantics.
+- Add a short fixed-iteration smoke benchmark mode for local validation.
+- Keep the CI baseline check on Linux, but audit the `--benchmark_min_time` / warmup options and timeout behavior separately from source modularization commits.
+
 ## Remaining IO Gaps
 
 - macOS/BSD now has a native kqueue readiness backend and one-shot timeout support. Event/user-trigger helpers are still Linux-specific (`eventfd`) or io_uring-specific; next step: add kqueue user-event helpers behind the same public event adapter shape.
