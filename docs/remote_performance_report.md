@@ -132,3 +132,26 @@ Release benchmark canary after the task-fragment split:
 | `BM_RuntimeIoThreadHop/8192` | 4.65 ms | 4.63 ms | 1.763 M/s |
 | `BM_RuntimeParallelShards/128` | 0.507 ms | 0.486 ms | 252.415 k/s |
 | `BM_RuntimeParallelShards/512` | 1.93 ms | 1.86 ms | 265.746 k/s |
+
+## 2026-06-01 BasicTask Fragment Split Validation
+
+A follow-up mechanical split turned `basic_task_fragment.hpp` into a class shell over public task API, protected helper API, lifetime reference handling, scheduling/wake state-machine logic, and storage layout fragments. The task storage fields remain together in `basic_task_storage_fragment.hpp`; task lifecycle and scheduling code remain inline/template-visible.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_runtime_tests` build: passed.
+- Local Release task/scheduler/parallel targeted tests: 24/24 passed.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2` Debug task/scheduler/parallel targeted tests: 24/24 passed.
+- Remote clang TSAN task/scheduler/parallel targeted tests: 24/24 passed with no ThreadSanitizer report.
+- Remote clang Release full runtime suite: 132/132 passed; 21 platform/io_uring capability tests were skipped by test logic.
+
+Release benchmark canary after the `BasicTask` split, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | CPU Mean | Throughput Mean |
+| --- | ---: | ---: | ---: |
+| `BM_RuntimeExternalStart/8192` | 7.23 ms | 7.22 ms | 1.138 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 12.8 ms | 4.50 ms | 643.541 k/s |
+| `BM_RuntimeIoThreadHop/8192` | 4.44 ms | 4.43 ms | 1.845 M/s |
+| `BM_RuntimeParallelShards/128` | 0.519 ms | 0.511 ms | 246.555 k/s |
+| `BM_RuntimeParallelShards/512` | 1.97 ms | 1.94 ms | 261.281 k/s |
