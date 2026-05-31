@@ -26,6 +26,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - io_uring executor buffer submit helpers are now split into generic buffer SQE, fast SQE template, socket-create core, and fixed-file read/write fragments while staying inline inside `AsyncRuntime::Executor`.
 - io_uring generic submit is now split into argument classification, validation, operation preparation, SQE filling, and the small core submit flow while staying inline inside `AsyncRuntime::Executor`.
 - Public fd lifecycle submit wrappers and matching io_uring executor submit wrappers are now small umbrellas over open, close/shutdown, filesystem metadata/lifecycle, and splice transfer fragments.
+- Public filesystem submit wrappers and matching io_uring executor SQE submit wrappers are now split by metadata, allocation/truncate, and namespace operation families, with small umbrellas preserving inline visibility.
 - Public socket message submit wrappers are now split into recvmsg, sendmsg, and accept/connect fragments, with a small umbrella preserving inline visibility in `AsyncRuntime`.
 - Public socket data submit wrappers are now a small umbrella over basic recv, recv multishot, basic send, and zero-copy send fragments. Public API validation and executor handoff remain inline in `AsyncRuntime`.
 - Public socket accept/connect helpers are now a small umbrella over accept, accept-direct, accept-multishot, and connect fragments. POSIX fallback, io_uring direct accept, multishot completion handling, and connect readiness fallback are now separate while staying inline.
@@ -92,9 +93,9 @@ The current top-level runtime shell is no longer the main modularity problem:
 The remaining code-size pressure is now in second-level fragments and fixtures. `include/af/detail/io_file_fixed_buffer_fragment.hpp`, `include/af/detail/io_socket_send_fragment.hpp`, `include/af/detail/io_file_lifecycle_fragment.hpp`, and `include/af/detail/io_adapters_stream_listener_fragment.hpp` have been reduced to small umbrellas over operation-family helpers. The largest remaining runtime-facing headers in the latest scan are:
 
 - `include/af/detail/io_socket_lifecycle_fragment.hpp`: 264 lines. This remains a broad socket lifecycle helper fragment.
-- `include/af/detail/runtime_executor_io_uring_filesystem_submit_fragment.hpp`: 261 lines. This combines several filesystem SQE preparation/submission helpers.
 - `include/af/detail/runtime_executor_io_uring_socket_msg_submit_fragment.hpp`: 258 lines. This combines recvmsg/sendmsg/multishot message submission paths.
-- `include/af/detail/runtime_public_io_resource_fragment.hpp`: 255 lines and `runtime_public_io_filesystem_submit_fragment.hpp`: 254 lines. These are still readable, but they are broad public API fragments.
+- `include/af/detail/runtime_public_io_resource_fragment.hpp`: 255 lines. This is still readable, but it is a broad public API fragment.
+- `include/af/io_filesystem.hpp`: 253 lines. The public helper layer remains focused on filesystem helper entry points, while the underlying runtime submit layer is now split.
 
 This means the right next step is not another large rewrite of `async_runtime.hpp`; it is a second-pass split of the largest fragments into narrower operation-family files while keeping them included inline inside the same class/function scopes.
 
@@ -112,7 +113,6 @@ Recommendation:
 
 P1, executor submit internals:
 
-- Split `runtime_executor_io_uring_filesystem_submit_fragment.hpp` by SQE family: stat/fallocate, rename/unlink, and open/close/fsync if future additions increase density.
 - Split `runtime_executor_io_uring_socket_msg_submit_fragment.hpp` into recvmsg, sendmsg, multishot recvmsg, and zero-copy notification preparation if further io_uring message features are added.
 
 P2, tests/examples/benchmarks:
