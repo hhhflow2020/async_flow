@@ -78,20 +78,51 @@ TEST_F(IoRuntimeEpollFixture, FixedFileHelpersHandleInvalidAndUnavailableBackend
 
     std::atomic<int> completed{0};
     std::atomic<int> register_error{0};
-    std::atomic<int> unavailable_error{0};
-    std::atomic<int> invalid_error{0};
-    std::atomic<int> null_error{0};
-    ASSERT_TRUE(IoRuntime::start_task<FixedFileBoundaryTask>(
+    std::atomic<int> resource_unavailable_error{0};
+    std::atomic<int> resource_invalid_error{0};
+    std::atomic<int> resource_null_error{0};
+    ASSERT_TRUE(IoRuntime::start_task<FixedFileResourceBoundaryTask>(
         &completed,
         &register_error,
-        &unavailable_error,
-        &invalid_error,
-        &null_error));
-    ASSERT_TRUE(wait_until_at_least(completed, 1));
+        &resource_unavailable_error,
+        &resource_invalid_error,
+        &resource_null_error));
+
+    std::atomic<int> accept_bad_fd_error{0};
+    std::atomic<int> accept_null_output_error{0};
+    std::atomic<int> accept_bad_address_error{0};
+    std::atomic<int> accept_bad_index_error{0};
+    std::atomic<int> accept_unavailable_error{0};
+    ASSERT_TRUE(IoRuntime::start_task<FixedFileAcceptDirectBoundaryTask>(
+        &completed,
+        &accept_bad_fd_error,
+        &accept_null_output_error,
+        &accept_bad_address_error,
+        &accept_bad_index_error,
+        &accept_unavailable_error));
+
+    std::atomic<int> data_unavailable_error{0};
+    std::atomic<int> data_invalid_error{0};
+    std::atomic<int> data_null_error{0};
+    ASSERT_TRUE(IoRuntime::start_task<FixedFileDataBoundaryTask>(
+        &completed,
+        &data_unavailable_error,
+        &data_invalid_error,
+        &data_null_error));
+
+    ASSERT_TRUE(wait_until_at_least(completed, 3));
     EXPECT_EQ(register_error.load(std::memory_order_acquire), ENOSYS);
-    EXPECT_EQ(unavailable_error.load(std::memory_order_acquire), ENOSYS);
-    EXPECT_EQ(invalid_error.load(std::memory_order_acquire), EBADF);
-    EXPECT_EQ(null_error.load(std::memory_order_acquire), EINVAL);
+    EXPECT_EQ(resource_unavailable_error.load(std::memory_order_acquire), ENOSYS);
+    EXPECT_EQ(resource_invalid_error.load(std::memory_order_acquire), EBADF);
+    EXPECT_EQ(resource_null_error.load(std::memory_order_acquire), EINVAL);
+    EXPECT_EQ(accept_bad_fd_error.load(std::memory_order_acquire), EBADF);
+    EXPECT_EQ(accept_null_output_error.load(std::memory_order_acquire), EINVAL);
+    EXPECT_EQ(accept_bad_address_error.load(std::memory_order_acquire), EINVAL);
+    EXPECT_EQ(accept_bad_index_error.load(std::memory_order_acquire), EBADF);
+    EXPECT_EQ(accept_unavailable_error.load(std::memory_order_acquire), ENOSYS);
+    EXPECT_EQ(data_unavailable_error.load(std::memory_order_acquire), ENOSYS);
+    EXPECT_EQ(data_invalid_error.load(std::memory_order_acquire), EBADF);
+    EXPECT_EQ(data_null_error.load(std::memory_order_acquire), EINVAL);
 #else
     GTEST_SKIP() << "epoll backend is Linux-only";
 #endif

@@ -1,15 +1,15 @@
 #if !defined(AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE)
-#error "runtime_io_file_boundary_tasks_fragment.hpp is a runtime_io_file_tasks implementation fragment"
+#error "runtime_io_file_fixed_file_boundary_tasks_fragment.hpp is a runtime_io_file_boundary_tasks implementation fragment"
 #endif
 
 #define AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE 1
-#include "runtime_io_file_adapter_boundary_tasks_fragment.hpp"
+#include "runtime_io_file_fixed_file_resource_boundary_tasks_fragment.hpp"
 #undef AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE
 
 #define AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE 1
-#include "runtime_io_file_fixed_buffer_boundary_tasks_fragment.hpp"
+#include "runtime_io_file_fixed_file_accept_boundary_tasks_fragment.hpp"
 #undef AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE
 
 #define AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE 1
-#include "runtime_io_file_fixed_file_boundary_tasks_fragment.hpp"
+#include "runtime_io_file_fixed_file_data_boundary_tasks_fragment.hpp"
 #undef AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE
