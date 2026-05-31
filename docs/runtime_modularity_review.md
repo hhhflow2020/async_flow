@@ -98,6 +98,29 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 
 ## Current Findings
 
+### 2026-05-31 Core Runtime Modularity Recheck
+
+Latest scan result: `include/af/async_runtime.hpp` is 226 lines and is no longer a monolithic implementation file. It now mainly declares the public `AsyncRuntime` shell, the nested `Executor` shell, and includes operation-family fragments inside the right class scope so template/hot-path code remains inline-visible.
+
+Current issue ledger:
+
+- P1: do not move hot runtime submit/wait/completion/task-resume code into `.cpp` files just to reduce header length. That would make the code look cleaner while risking lost inlining, extra call overhead, and weaker optimizer visibility. Continue using inline fragments included inside `AsyncRuntime` or `AsyncRuntime::Executor`.
+- P1: keep `runtime_executor_core_state_fragment.hpp` as the single executor state-layout owner unless a split explicitly preserves declaration order, alignment, and cache-line placement. Splitting state for aesthetics can silently introduce false sharing or make queue/cache layout audits harder.
+- P1: future changes must not append new operation families directly into `async_runtime.hpp`. New public methods should enter through the existing public IO/resource/lifecycle/parallel umbrellas, and new executor operations should enter through the matching backend submit/completion fragments.
+- P2: `include/af/detail/bounded_queues.hpp` still contains SPSC, MPSC, and MPMC bounded queues in one file. The implementation is performance-sensitive and cache-line aligned, so a split is acceptable only as a mechanical separation into queue-family headers with no layout or memory-order changes, followed by queue benchmarks.
+- P2: `include/af/detail/io_socket_transfer_fragment.hpp` still groups sendfile, shutdown, splice, and non-Linux stubs. It should be split into sendfile, splice, and shutdown fragments if more transfer operations are added.
+- P2: `include/af/detail/io_adapters_fixed_file_fragment.hpp` is a broad fixed-file adapter surface covering file read/write, socket recv/send, registered buffers, vectored operations, and fsync. It is still thin and inline, but future growth should be split by adapter method family rather than introducing a polymorphic adapter hierarchy.
+- P2: several test support files remain dense state-machine collections: stream sendfile/splice support, file lifecycle support, fixed-file read/write support, and io_uring multishot recv/recvmsg support. These should continue moving toward operation-family task fragments when touched.
+- P2: several examples remain long because they combine protocol framing, socket IO, task state machines, and result reporting. The biggest current examples are the length-prefixed RPC server/client, io_uring fixed-file round trip, file lifecycle, and UDP recv/recvmsg multishot examples. Prefer protocol/helper headers plus small task headers for future edits.
+- P2: `tests/utility_tests.cpp` is now one of the largest standalone tests. It should be split by utility domain if new utility coverage is added.
+
+Assessment:
+
+- `async_runtime.hpp` itself should stay as a shell. A further split of this file would mostly move include wiring around and would not materially improve runtime code ownership.
+- The best next modularity work is second-level: split remaining dense fragments when they gain new functionality, not as a broad churn pass.
+- Performance-sensitive files should be split only along existing operation-family boundaries: queue family, socket transfer type, fixed-file adapter method group, backend submit/completion family, and test/example task family.
+- The example style is mostly converging toward member-function state handlers. Where a `run()` switch still exists, keep it as a tiny dispatcher and keep per-state logic in named member functions.
+
 ### 2026-05-31 Active Issue Ledger
 
 The current review found that `include/af/async_runtime.hpp` itself is no longer the primary modularity problem. It is 226 lines and mostly acts as an inline class shell plus fragment wiring. The remaining issues are second-level ownership boundaries:
