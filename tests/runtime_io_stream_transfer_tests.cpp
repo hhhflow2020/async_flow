@@ -61,26 +61,47 @@ TEST_F(IoRuntimeStreamFixture, SendfileWaitsForSocketWritableWhenBufferIsFull) {
     const char payload = 'P';
     ASSERT_EQ(::write(file, &payload, sizeof(payload)), static_cast<ssize_t>(sizeof(payload)));
 
-    int fds[2]{-1, -1};
-    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
-    ASSERT_TRUE(fill_until_blocked(fds[0]));
+    int listener = -1;
+    sockaddr_in address{};
+    socklen_t address_size = sizeof(address);
+    ASSERT_TRUE(create_tcp_listener(listener, address, address_size));
+
+    int client = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(client, 0);
+    const int rc = ::connect(client, reinterpret_cast<sockaddr*>(&address), address_size);
+    ASSERT_TRUE(rc == 0 || errno == EINPROGRESS);
+
+    int server = accept_tcp_until_ready(listener);
+    ASSERT_GE(server, 0);
+    int send_buffer = 4096;
+    ASSERT_EQ(
+        ::setsockopt(
+            server,
+            SOL_SOCKET,
+            SO_SNDBUF,
+            &send_buffer,
+            static_cast<socklen_t>(sizeof(send_buffer))),
+        0);
+    ASSERT_TRUE(fill_until_blocked(server));
 
     std::atomic<int> pending_seen{0};
     std::atomic<int> completed{0};
     std::atomic<std::size_t> bytes_sent{0};
     ASSERT_TRUE(IoRuntime::start_task<PendingSendfileTask>(
-        fds[0],
+        server,
         file,
         &pending_seen,
         &completed,
         &bytes_sent));
     ASSERT_TRUE(wait_until_at_least(pending_seen, 1));
 
-    drain_available(fds[1]);
+    drain_available(client);
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), 1U);
 
-    close_pair(fds);
+    close_fd(server);
+    close_fd(client);
+    close_fd(listener);
     close_fd(file);
 #else
     GTEST_SKIP() << "sendfile is Linux-only";
