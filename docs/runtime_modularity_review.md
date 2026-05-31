@@ -17,21 +17,22 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Public IO adapter headers are now compatibility umbrellas: `io_socket.hpp`, `io_file.hpp`, and `io_adapters.hpp` include focused inline fragments for lifecycle, data transfer, fixed resources, stream/listener, datagram, and event/timer adapters.
 - io_uring socket test support and runtime socket test sources have been split by stream, datagram, accept/connect, and multishot responsibilities.
 - `runtime_executor_io_uring_submit_core_fragment.hpp` is now a small umbrella over poll wait submit, buffer/fast SQE submit, and generic SQE submit fragments. The code still lives inside `AsyncRuntime::Executor` for inline visibility.
+- `runtime_executor_io_uring_socket_submit_fragment.hpp` is now a small umbrella over recv, send, zero-copy, message, multishot, accept/connect, and socket-create submit wrappers.
 - Each split so far preserved header-only/template visibility, passed `git diff --check`, Docker GCC Debug runtime tests, and, for core runtime header changes, Release runtime benchmark baseline regression.
 
 ## Current Findings
 
 ### P1: io_uring Executor Internals Can Be Split Further
 
-The largest remaining runtime-internal fragments are `runtime_executor_io_uring_socket_submit_fragment.hpp`, `runtime_executor_io_uring_backend_fragment.hpp`, `runtime_executor_io_uring_file_data_submit_fragment.hpp`, and the generic SQE submit fragment.
+The largest remaining runtime-internal fragments are `runtime_executor_io_uring_backend_fragment.hpp`, `runtime_executor_io_uring_file_data_submit_fragment.hpp`, the generic SQE submit fragment, and io_uring resource management.
 
 Risk:
-- Socket stream, datagram, accept/connect, zero-copy, multishot handling, CQE completion, and fallback bookkeeping are still close together in a few dense executor fragments.
+- CQE completion, multishot continuation, zero-copy notification, timeout/cancel, fallback bookkeeping, file data submit wrappers, and resource registration are still close together in a few dense executor fragments.
 - Concurrency/lifetime audits still require reading several dense io_uring fragments.
 
 Recommended split:
-- Split socket submit by stream, datagram, accept/connect, multishot, and zero-copy send.
 - Split backend completion into CQE decoding, normal completion, multishot continuation, zero-copy notification, timeout/cancel, and teardown paths.
+- Split file data submit wrappers by normal read/write, positioned/vectored, fixed files, fixed buffers, and filesystem-sync helpers.
 - Consider splitting the generic SQE submit fragment into validation, operation preparation, and SQE filling helpers, but only if the helper shape stays inline and does not add hot-path dispatch.
 - Keep fragments included inside `AsyncRuntime::Executor` so hot submit helpers stay inlineable and no extra virtual/function-pointer dispatch is introduced.
 
