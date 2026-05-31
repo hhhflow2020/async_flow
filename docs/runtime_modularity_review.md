@@ -108,6 +108,43 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 
 ## Current Findings
 
+### 2026-06-01 Current Scheduler WIP and Modularity Re-scan
+
+This scan records the current state before continuing the next runtime split. There are active scheduler hot-path changes in the worktree, so the modularity work must treat correctness validation as part of the structure boundary, not as a cosmetic cleanup.
+
+Current file-size snapshot:
+
+- `include/af/async_runtime.hpp`: 226 lines. This is still an acceptable overview shell that declares `AsyncRuntime`, declares the nested `Executor`, and includes inline fragments in the required class scopes.
+- `include/af/detail/runtime_dispatch_fragment.hpp`: 195 lines. It remains the main core-runtime split candidate because it owns queue topology, same-thread local enqueue, cross-thread SPSC enqueue, external MPSC enqueue, ready-source signaling, and external-post admission accounting.
+- `include/af/detail/basic_task_fragment.hpp`: 218 lines. It still mixes protected task API, scheduling transitions, lifetime references, and storage layout.
+- `include/af/detail/io_common_detail_state_fragment.hpp`: 209 lines. It still mixes IO target validation, wait-state arming, splice wait policy, status normalization, iovec validation, and multishot wait reset.
+- `tests/runtime_stress_tests.cpp`: 317 lines. The new repeated cross-thread hop stress fixture should move into a support fragment once the scheduler fix is validated.
+- The largest remaining examples/tests are now fixture/state-machine files, not the runtime shell: `io_rpc_length_prefixed_server.hpp`, `io_uring_fixed_file_task.hpp`, `runtime_io_uring_socket_datagram_tests.cpp`, `runtime_io_stream_transfer_tests.cpp`, and `io_uring_file_lifecycle_task.hpp`.
+
+Active correctness/performance issues to track:
+
+- P0: cross-thread SPSC ready-source handling is still being validated. The ready-source bitmask should be treated as a fast hint and must not be the only correctness signal that queued SPSC work exists. Any change in `mark_ready()`, `pop_one()`, or `notify()` needs repeated cross-thread hop stress and Release benchmark validation before commit.
+- P0: the executor must never let stale or duplicate queue entries move a task from `Pending`, `Done`, or `Running` back to `Running`. `execute()` should continue to require a `Queued -> Running` transition.
+- P1: worker-thread notification and IO-thread native wakeup should stay separated. Worker atomic waits need a real `notify_one()` when work is posted; IO threads should prefer eventfd/kqueue native wake only when they are actually sleeping so hot IO submission does not pay avoidable syscalls.
+- P1: `runtime_executor_core_state_fragment.hpp` currently mixes `pop_one()` and finish/reschedule behavior with executor field layout. Split behavior into inline fragments, but keep field declarations in one cache-layout owner to preserve false-sharing audits.
+- P1: `runtime_executor_task_fragment.hpp` should be split after the scheduler fix is stable: ready-source marking, local queue push/pop, notify glue, and execute/result dispatch are separate responsibilities but sit on the hottest path.
+- P2: tests and examples should follow the same structure rule as runtime code. Test sources should contain test cases; reusable task state machines should live in `tests/support/*_fragment.hpp`. Examples should keep `main()` thin and put each state-machine role in focused support headers.
+
+Modularity rule for the next pass:
+
+- Keep all hot runtime paths inline/template-visible through fragments; do not move scheduling, queue, submit, completion, or task-resume code into `.cpp` files for aesthetics.
+- Split by operation family or state-machine role, not by tiny helper extraction. The goal is clearer ownership without adding unpredictable branches, virtual dispatch, `std::function`, heap allocation, or extra atomics.
+- Preserve same-thread local queue, cross-thread per-source SPSC queues, and external MPSC queues as distinct paths. A cleaner-looking generic queue path would be a performance regression.
+- After each P1 split, run `git diff --check`, targeted Debug tests, remote/Docker Release scheduler stress, and runtime benchmark regression checks.
+
+Recommended immediate order:
+
+1. Finish and validate the cross-thread SPSC visibility/wakeup fix.
+2. Move repeated-hop stress support out of `tests/runtime_stress_tests.cpp`.
+3. Split `runtime_dispatch_fragment.hpp` into queue topology, ready enqueue, and external-post admission fragments.
+4. Split executor pop/finish behavior out of `runtime_executor_core_state_fragment.hpp`, leaving only state layout in that file.
+5. Split `runtime_executor_task_fragment.hpp` once the preceding scheduler benchmarks are clean.
+
 ### 2026-06-01 Core Runtime Correctness and Modularity Follow-up
 
 This follow-up records the active issues from the latest fixed-thread runtime review. The top-level `include/af/async_runtime.hpp` remains 226 lines and is not the immediate problem; it is a class shell that keeps template and hot-path fragments inline-visible. The current risks are correctness-sensitive scheduler behavior and second-level fragments that still mix responsibilities.
