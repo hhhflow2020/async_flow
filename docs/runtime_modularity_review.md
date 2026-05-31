@@ -28,6 +28,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Public fd lifecycle submit wrappers and matching io_uring executor submit wrappers are now small umbrellas over open, close/shutdown, filesystem metadata/lifecycle, and splice transfer fragments.
 - Public socket message submit wrappers are now split into recvmsg, sendmsg, and accept/connect fragments, with a small umbrella preserving inline visibility in `AsyncRuntime`.
 - Public socket data submit wrappers are now a small umbrella over basic recv, recv multishot, basic send, and zero-copy send fragments. Public API validation and executor handoff remain inline in `AsyncRuntime`.
+- Public socket accept/connect helpers are now a small umbrella over accept, accept-direct, accept-multishot, and connect fragments. POSIX fallback, io_uring direct accept, multishot completion handling, and connect readiness fallback are now separate while staying inline.
 - Public file-data submit wrappers are now split into basic read/write/fsync, fixed-file, registered-buffer, and vectored fragments, with a small umbrella preserving inline visibility in `AsyncRuntime`.
 - Public socket receive helpers are now split into basic recv/fixed-file recv, recv multishot, and recvmsg multishot parser/submit fragments, with `io_socket_recv_fragment.hpp` kept as a small inline umbrella.
 - Runtime lifecycle tests have been split into base lifecycle, backpressure, and shutdown-policy sources with shared traits/tasks in support.
@@ -77,7 +78,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 
 The current `include/af/async_runtime.hpp` is 226 lines and mostly wires public API fragments, executor fragments, and runtime state fragments together. It is no longer a multi-thousand-line implementation file. The remaining modularity risk is concentrated in several focused-but-still-dense fragments:
 
-- `include/af/detail/io_socket_accept_connect_fragment.hpp`, `include/af/detail/io_file_fixed_buffer_fragment.hpp`, and related public IO adapter fragments are around 300 lines. They are acceptable for inline APIs, but future additions should go into narrower recv/send/fixed/lifecycle fragments.
+- `include/af/detail/io_file_fixed_buffer_fragment.hpp` and related public IO adapter fragments are around 300 lines. They are acceptable for inline APIs, but future additions should go into narrower recv/send/fixed/lifecycle fragments.
 
 Recommendation:
 - Do not move hot runtime code into `.cpp` files. Keep template and syscall-submit code inlineable through include fragments.
