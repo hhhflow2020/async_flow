@@ -84,6 +84,25 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 
 ## Current Findings
 
+### 2026-05-31 Active Issue Ledger
+
+The current review found that `include/af/async_runtime.hpp` itself is no longer the primary modularity problem. It is 226 lines and mostly acts as an inline class shell plus fragment wiring. The remaining issues are second-level ownership boundaries:
+
+- P1: `include/af/detail/runtime_public_io_resource_fragment.hpp` is 255 lines and mixes backend availability queries, io_uring buffer registration, provided-buffer registration, fixed-file table registration, readiness wait, cancellation, and timeout submission. Split it into availability, buffer resources, file resources, and wait/cancel/timeout public fragments.
+- P1: `include/af/detail/runtime_executor_io_uring_backend_completion_fragment.hpp` is 215 lines and still mixes CQ polling, normal completion, poll-wait completion, multishot continuation, zero-copy notification, fd/direct-file cleanup, and async-cancel submission. Split it only by completion family while keeping every helper inline inside `AsyncRuntime::Executor`.
+- P1: `include/af/detail/runtime_executor_io_uring_backend_setup_fragment.hpp` is 230 lines and mixes ring setup, mmap pointer binding, feature detection, shutdown, and backend storage reservation. Split setup/mmap, feature probing, close/reset, and reserve-storage helpers if more setup knobs are added.
+- P1: `include/af/detail/runtime_executor_kqueue_timeout_fragment.hpp` is 232 lines and mixes submit, cancel, completion, list tracking, ident allocation, and time-unit conversion. Split tracking and time conversion from submit/cancel/complete paths before adding more kqueue timer/event features.
+- P2: `include/af/io_filesystem.hpp` is 253 lines and remains a broad public helper header for `openat2`, namespace operations, allocation/truncate, and `IoDirectory`. Split public filesystem helpers by lifecycle/open, namespace, allocation, and adapter wrapper when the next filesystem helper is added.
+- P2: the largest files are now tests and examples, not runtime entry points. The biggest current files are file IO support fragments, accept/socket support fragments, and protocol examples. New tests should be added as small operation-family files instead of growing the existing fixture files.
+- P2: `benchmarks/io_adapter_benchmarks.cpp` is 258 lines and still combines several adapter benchmark families. Split by stream, datagram, and resource adapter cases before adding more IO benchmark scenarios.
+
+Performance guardrails for these issues:
+
+- Keep header-only/template visibility for hot submit, wait, completion, and task-resume paths.
+- Do not introduce virtual dispatch, owning polymorphic adapters, `std::function`, or heap allocation solely to make files smaller.
+- Do not split executor state layout unless the change preserves cache-line placement and declaration order or is explicitly intended as a cache-layout improvement.
+- Prefer operation-family fragments over tiny helper extraction. Tiny helpers that add unpredictable branches or obscure the fast path are worse than a moderately sized inline fragment.
+
 ### Second-Pass Structure Snapshot
 
 The current top-level runtime shell is no longer the main modularity problem:
