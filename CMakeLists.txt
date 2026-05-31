@@ -152,6 +152,10 @@ if(ASYNCFLOW_BUILD_TESTS)
         tests/runtime_io_epoll_event_timer_tests.cpp
         tests/runtime_io_kqueue_tests.cpp
         tests/runtime_io_stream_tests.cpp
+        tests/runtime_io_stream_vectored_tests.cpp
+        tests/runtime_io_stream_zero_copy_tests.cpp
+        tests/runtime_io_stream_transfer_tests.cpp
+        tests/runtime_io_stream_connect_accept_tests.cpp
         tests/runtime_io_uring_socket_tests.cpp
         tests/runtime_io_uring_socket_accept_tests.cpp
         tests/runtime_io_uring_socket_datagram_tests.cpp
