@@ -1,0 +1,226 @@
+#if !defined(AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE)
+#error "runtime_io_uring_socket_recv_multishot_tasks_fragment.hpp is a runtime_io_uring_socket_tasks implementation fragment"
+#endif
+
+#if defined(__linux__)
+class UringRecvMultishotTask final : public UringIoTaskBase {
+public:
+    explicit UringRecvMultishotTask(UringIoTaskBase::FactoryToken token)
+        : UringIoTaskBase(token) {}
+
+    bool do_it(
+        int fd,
+        int target_reads,
+        std::atomic<int>* armed,
+        std::atomic<int>* completed,
+        std::atomic<int>* read_count,
+        std::atomic<int>* packed_read,
+        std::atomic<int>* error) {
+        return do_it(
+            fd,
+            target_reads,
+            armed,
+            completed,
+            read_count,
+            packed_read,
+            error,
+            false);
+    }
+
+    bool do_it(
+        int fd,
+        int target_reads,
+        std::atomic<int>* armed,
+        std::atomic<int>* completed,
+        std::atomic<int>* read_count,
+        std::atomic<int>* packed_read,
+        std::atomic<int>* error,
+        bool datagram) {
+        stream_.reset(IoTestThread::IO_0, fd);
+        datagram_.reset(IoTestThread::IO_0, fd);
+        target_reads_ = target_reads;
+        datagram_mode_ = datagram;
+        armed_ = armed;
+        completed_ = completed;
+        read_count_ = read_count;
+        packed_read_ = packed_read;
+        error_ = error;
+        return schedule(IoTestThread::IO_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Register,
+        Recv,
+        Cancel,
+        Unregister,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Register:
+            return register_ring();
+        case State::Recv:
+            return recv_one();
+        case State::Cancel:
+            return finish_cancel();
+        case State::Unregister:
+            return unregister_ring();
+        }
+        return failed();
+    }
+
+    af::TaskResult register_ring() {
+        int init_error = 0;
+        if (!ring_.init(buffer_count, init_error)) {
+            return complete(init_error == 0 ? EIO : init_error);
+        }
+        af::IoProvidedBuffer buffers[buffer_count]{};
+        for (std::uint16_t i = 0; i < buffer_count; ++i) {
+            buffers[i] = af::IoProvidedBuffer{&buffers_[i], sizeof(buffers_[i]), i};
+        }
+        int add_error = 0;
+        if (!ring_.add(buffers, buffer_count, add_error)) {
+            return complete(add_error == 0 ? EIO : add_error);
+        }
+
+        int register_error = 0;
+        if (!UringIoRuntime::io_register_provided_buffer_ring(
+                IoTestThread::IO_0,
+                ring_.ring(),
+                ring_.entries(),
+                buffer_group,
+                &register_error)) {
+            return complete(register_error == 0 ? EIO : register_error);
+        }
+        registered_ = true;
+        state_ = State::Recv;
+        return again();
+    }
+
+    af::TaskResult recv_one() {
+        std::uint16_t buffer_id = 0;
+        const af::IoStatus status = datagram_mode_
+            ? datagram_.recv_multishot(*this, buffer_group, &buffer_id, recv_)
+            : stream_.recv_multishot(*this, buffer_group, &buffer_id, recv_);
+        if (status.pending()) {
+            if (!armed_once_) {
+                armed_once_ = true;
+                armed_->fetch_add(1, std::memory_order_release);
+            }
+            return pending();
+        }
+        if (status.failed()) {
+            return complete(status.error);
+        }
+        if (!status.ready() || status.bytes != 1U || buffer_id >= buffer_count) {
+            return complete(EIO);
+        }
+
+        const int previous = read_count_->fetch_add(1, std::memory_order_acq_rel);
+        const int shifted = previous == 0 ? 8 : 0;
+        packed_read_->fetch_or(
+            static_cast<int>(static_cast<unsigned char>(buffers_[buffer_id])) << shifted,
+            std::memory_order_acq_rel);
+
+        const af::IoProvidedBuffer buffer{
+            &buffers_[buffer_id],
+            sizeof(buffers_[buffer_id]),
+            buffer_id};
+        int add_error = 0;
+        if (!ring_.add(&buffer, 1, add_error)) {
+            return stop_recv(add_error == 0 ? EIO : add_error);
+        }
+
+        if (previous + 1 < target_reads_) {
+            return pending();
+        }
+        if (!recv_.waiting) {
+            state_ = State::Unregister;
+            return again();
+        }
+        finish_error_ = 0;
+        if (!UringIoRuntime::cancel_io(IoTestThread::IO_0, recv_)) {
+            return complete(recv_.wait.error == 0 ? EIO : recv_.wait.error);
+        }
+        state_ = State::Cancel;
+        return pending();
+    }
+
+    af::TaskResult finish_cancel() {
+        std::uint16_t ignored = 0;
+        const af::IoStatus status = datagram_mode_
+            ? datagram_.recv_multishot(*this, buffer_group, &ignored, recv_)
+            : stream_.recv_multishot(*this, buffer_group, &ignored, recv_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.failed() || status.error != ECANCELED) {
+            return complete(status.failed() ? status.error : EIO);
+        }
+        state_ = State::Unregister;
+        return again();
+    }
+
+    af::TaskResult unregister_ring() {
+        if (registered_) {
+            int unregister_error = 0;
+            if (!UringIoRuntime::io_unregister_provided_buffer_ring(
+                    IoTestThread::IO_0,
+                    buffer_group,
+                    &unregister_error)) {
+                return complete(unregister_error == 0 ? EIO : unregister_error);
+            }
+            registered_ = false;
+        }
+        return complete(finish_error_);
+    }
+
+    af::TaskResult complete(int error) {
+        if (registered_) {
+            int unregister_error = 0;
+            if (UringIoRuntime::io_unregister_provided_buffer_ring(
+                    IoTestThread::IO_0,
+                    buffer_group,
+                    &unregister_error)) {
+                registered_ = false;
+            }
+        }
+        error_->store(error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    af::TaskResult stop_recv(int error) {
+        finish_error_ = error == 0 ? EIO : error;
+        if (!recv_.waiting) {
+            state_ = State::Unregister;
+            return again();
+        }
+        if (!UringIoRuntime::cancel_io(IoTestThread::IO_0, recv_)) {
+            return complete(recv_.wait.error == 0 ? finish_error_ : recv_.wait.error);
+        }
+        state_ = State::Cancel;
+        return pending();
+    }
+
+    static constexpr std::uint16_t buffer_group = 7;
+    static constexpr unsigned buffer_count = 2;
+    State state_{State::Register};
+    af::TcpStream<IoTestThread> stream_{};
+    af::UdpSocket<IoTestThread> datagram_{};
+    af::IoProvidedBufferRing ring_{};
+    char buffers_[buffer_count]{};
+    int target_reads_{0};
+    int finish_error_{0};
+    bool datagram_mode_{false};
+    bool armed_once_{false};
+    bool registered_{false};
+    af::IoOpState recv_{};
+    std::atomic<int>* armed_{nullptr};
+    std::atomic<int>* completed_{nullptr};
+    std::atomic<int>* read_count_{nullptr};
+    std::atomic<int>* packed_read_{nullptr};
+    std::atomic<int>* error_{nullptr};
+};
+#endif
