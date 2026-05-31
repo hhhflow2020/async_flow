@@ -215,10 +215,20 @@ TEST_F(IoRuntimeEpollFixture, OpenAtHelperHandlesInvalidOperations) {
     }
 
     std::atomic<int> completed{0};
-    std::atomic<int> error{0};
-    ASSERT_TRUE(IoRuntime::start_task<OpenAtBoundaryTask>(&completed, &error));
-    ASSERT_TRUE(wait_until_at_least(completed, 1));
-    EXPECT_EQ(error.load(std::memory_order_acquire), ENOSYS);
+    std::atomic<int> open_error{0};
+    std::atomic<int> metadata_error{0};
+    std::atomic<int> namespace_error{0};
+    ASSERT_TRUE(IoRuntime::start_task<OpenAtBoundaryTask>(&completed, &open_error));
+    ASSERT_TRUE(IoRuntime::start_task<FilesystemMetadataBoundaryTask>(
+        &completed,
+        &metadata_error));
+    ASSERT_TRUE(IoRuntime::start_task<FilesystemNamespaceBoundaryTask>(
+        &completed,
+        &namespace_error));
+    ASSERT_TRUE(wait_until_at_least(completed, 3));
+    EXPECT_EQ(open_error.load(std::memory_order_acquire), ENOSYS);
+    EXPECT_EQ(metadata_error.load(std::memory_order_acquire), ENOSYS);
+    EXPECT_EQ(namespace_error.load(std::memory_order_acquire), ENOSYS);
 #else
     GTEST_SKIP() << "openat helper is Linux-only";
 #endif
