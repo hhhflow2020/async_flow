@@ -77,6 +77,14 @@ Recommended split:
 - Move deep IO behavior, performance tuning, fixed files, registered buffers, multishot, timeout/cancel, and zero-copy guidance into `docs/io_runtime.md`.
 - Move benchmark and CI baseline details into `docs/performance.md`.
 
+## Remaining IO Gaps
+
+- macOS/BSD now has a native kqueue readiness backend for socket/fd readable and writable waits, but timeout/event helpers are still Linux-specific (`timerfd/eventfd`) or io_uring-specific. Next step: add kqueue timer/user-event helpers behind the same public timeout/event adapter shape.
+- Portable network IO now has a common `ThreadKind::Io` entry point, but some examples and tests still intentionally target Linux-only features such as sendfile/splice, eventfd/timerfd, fixed files, provided buffers, multishot, and io_uring direct descriptors.
+- File lifecycle helpers (`openat2/statx/fallocate/renameat/unlinkat/close`) remain Linux/io_uring-centered. For macOS, decide whether the first portable file layer should be explicit IO-thread synchronous syscalls, POSIX AIO, or a separate future backend; do not hide fundamentally different file semantics behind the same high-performance claim.
+- Per-operation timeout/cancel is implemented for epoll readiness and io_uring completion. kqueue readiness cancel is covered; kqueue timeout composition is still missing.
+- Some IO test/example/benchmark files are still long: `runtime_io_epoll_tests.cpp`, `runtime_io_stream_tests.cpp`, `runtime_io_timer_event_tasks_fragment.hpp`, `runtime_io_wait_cancel_tasks_fragment.hpp`, `io_datagram.hpp`, and `io_benchmark_support.hpp` are the next modularity targets.
+
 ## Performance Constraints For Refactors
 
 - Preserve the fixed-thread ownership model: syscall, io_uring submit, completion, readiness fallback, and task resume all stay on the owning IO executor.
