@@ -33,6 +33,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Public socket accept/connect helpers are now a small umbrella over accept, accept-direct, accept-multishot, and connect fragments. POSIX fallback, io_uring direct accept, multishot completion handling, and connect readiness fallback are now separate while staying inline.
 - Public socket lifecycle helpers are now split into create, socket options, socket name lookup, and listener bind/listen fragments, with `io_socket_lifecycle_fragment.hpp` kept as a small inline umbrella.
 - Public file-data submit wrappers are now split into basic read/write/fsync, fixed-file, registered-buffer, and vectored fragments, with a small umbrella preserving inline visibility in `AsyncRuntime`.
+- Public IO resource wrappers are now split into backend availability, buffer resources, file resources, and wait/cancel/timeout fragments, with `runtime_public_io_resource_fragment.hpp` kept as a small inline umbrella.
 - Public socket receive helpers are now split into basic recv/fixed-file recv, recv multishot, and recvmsg multishot parser/submit fragments, with `io_socket_recv_fragment.hpp` kept as a small inline umbrella.
 - Public socket send helpers are now split into basic send, fixed-file send, zero-copy send, and vectored zero-copy send fragments, with `io_socket_send_fragment.hpp` kept as a small inline umbrella.
 - Public file fixed-resource helpers are now split into fixed-file read/write/fsync, registered-buffer read/write, and vectored file write fragments, with `io_file_fixed_buffer_fragment.hpp` kept as a small inline umbrella.
@@ -88,7 +89,6 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 
 The current review found that `include/af/async_runtime.hpp` itself is no longer the primary modularity problem. It is 226 lines and mostly acts as an inline class shell plus fragment wiring. The remaining issues are second-level ownership boundaries:
 
-- P1: `include/af/detail/runtime_public_io_resource_fragment.hpp` is 255 lines and mixes backend availability queries, io_uring buffer registration, provided-buffer registration, fixed-file table registration, readiness wait, cancellation, and timeout submission. Split it into availability, buffer resources, file resources, and wait/cancel/timeout public fragments.
 - P1: `include/af/detail/runtime_executor_io_uring_backend_completion_fragment.hpp` is 215 lines and still mixes CQ polling, normal completion, poll-wait completion, multishot continuation, zero-copy notification, fd/direct-file cleanup, and async-cancel submission. Split it only by completion family while keeping every helper inline inside `AsyncRuntime::Executor`.
 - P1: `include/af/detail/runtime_executor_io_uring_backend_setup_fragment.hpp` is 230 lines and mixes ring setup, mmap pointer binding, feature detection, shutdown, and backend storage reservation. Split setup/mmap, feature probing, close/reset, and reserve-storage helpers if more setup knobs are added.
 - P1: `include/af/detail/runtime_executor_kqueue_timeout_fragment.hpp` is 232 lines and mixes submit, cancel, completion, list tracking, ident allocation, and time-unit conversion. Split tracking and time conversion from submit/cancel/complete paths before adding more kqueue timer/event features.
@@ -113,7 +113,6 @@ The current top-level runtime shell is no longer the main modularity problem:
 
 The remaining code-size pressure is now in second-level fragments and fixtures. `include/af/detail/io_file_fixed_buffer_fragment.hpp`, `include/af/detail/io_socket_send_fragment.hpp`, `include/af/detail/io_file_lifecycle_fragment.hpp`, `include/af/detail/io_socket_lifecycle_fragment.hpp`, and `include/af/detail/io_adapters_stream_listener_fragment.hpp` have been reduced to small umbrellas over operation-family helpers. The largest remaining runtime-facing headers in the latest scan are:
 
-- `include/af/detail/runtime_public_io_resource_fragment.hpp`: 255 lines. This is still readable, but it is a broad public API fragment.
 - `include/af/io_filesystem.hpp`: 253 lines. The public helper layer remains focused on filesystem helper entry points, while the underlying runtime submit layer is now split.
 
 This means the right next step is not another large rewrite of `async_runtime.hpp`; it is a second-pass split of the largest fragments into narrower operation-family files while keeping them included inline inside the same class/function scopes.
