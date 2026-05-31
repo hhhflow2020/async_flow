@@ -83,6 +83,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - `include/af/io_common.hpp` is now a small umbrella over focused common fragments: basic socket/error helpers, wait-state helpers, fixed-file vectored helpers, Linux eventfd/timerfd helpers, and deadline state.
 - `include/af/io_types.hpp` is now a small public umbrella over base IO typedefs/views, Linux provided-buffer rings, `IoStatus`, and `UniqueFd`. Linux-only ring storage and POSIX fd ownership are separate fragments while staying inline.
 - `include/af/task.hpp` is now a small public umbrella over task enum/type declarations, IO wait state, optional task-registry links, and the `BasicTask` implementation. Task lifecycle and scheduling state transitions remain inline/template-visible.
+- `include/af/io_filesystem.hpp` is now a small public umbrella over open/openat2, namespace operation, allocation/truncate, and `IoDirectory` adapter fragments. Public filesystem helpers remain header-only/template-visible while keeping operation families separate.
 - The macOS/BSD kqueue backend is split by setup, timeout, poll, storage, wait, and event translation helpers. kqueue now supports native one-shot timeout completion and cancel for `io_wait_timeout()` / `arm_io_timeout()` without routing through Linux `timerfd`.
 - Each split so far preserved header-only/template visibility, passed `git diff --check`, Docker GCC Debug runtime tests, and, for core runtime header changes, Release runtime benchmark baseline regression.
 
@@ -92,7 +93,6 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 
 The current review found that `include/af/async_runtime.hpp` itself is no longer the primary modularity problem. It is 226 lines and mostly acts as an inline class shell plus fragment wiring. The remaining issues are second-level ownership boundaries:
 
-- P2: `include/af/io_filesystem.hpp` is 253 lines and remains a broad public helper header for `openat2`, namespace operations, allocation/truncate, and `IoDirectory`. Split public filesystem helpers by lifecycle/open, namespace, allocation, and adapter wrapper when the next filesystem helper is added.
 - P2: the largest files are now tests and examples, not runtime entry points. The biggest current files are file IO support fragments, accept/socket support fragments, and protocol examples. New tests should be added as small operation-family files instead of growing the existing fixture files.
 - P2: `benchmarks/io_adapter_benchmarks.cpp` is 258 lines and still combines several adapter benchmark families. Split by stream, datagram, and resource adapter cases before adding more IO benchmark scenarios.
 
@@ -113,7 +113,7 @@ The current top-level runtime shell is no longer the main modularity problem:
 
 The remaining code-size pressure is now in second-level fragments and fixtures. `include/af/detail/io_file_fixed_buffer_fragment.hpp`, `include/af/detail/io_socket_send_fragment.hpp`, `include/af/detail/io_file_lifecycle_fragment.hpp`, `include/af/detail/io_socket_lifecycle_fragment.hpp`, and `include/af/detail/io_adapters_stream_listener_fragment.hpp` have been reduced to small umbrellas over operation-family helpers. The largest remaining runtime-facing headers in the latest scan are:
 
-- `include/af/io_filesystem.hpp`: 253 lines. The public helper layer remains focused on filesystem helper entry points, while the underlying runtime submit layer is now split.
+- `include/af/io_filesystem.hpp`: now an overview-sized public umbrella. Public filesystem helpers and the underlying runtime submit layer are both split by operation family.
 
 This means the right next step is not another large rewrite of `async_runtime.hpp`; it is a second-pass split of the largest fragments into narrower operation-family files while keeping them included inline inside the same class/function scopes.
 
