@@ -70,6 +70,36 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 
 ## Current Findings
 
+### Latest Structure Scan: async_runtime.hpp Is Now A Shell, Detail Fragments Carry The Weight
+
+The current `include/af/async_runtime.hpp` is 226 lines and mostly wires public API fragments, executor fragments, and runtime state fragments together. It is no longer a multi-thousand-line implementation file. The remaining modularity risk is concentrated in several focused-but-still-dense fragments:
+
+- `include/af/detail/runtime_parallel_fragment.hpp` is 327 lines and still mixes ordered-start sequencing, shard task definition, ordered-batch guard logic, and shard dispatch.
+- `include/af/detail/runtime_executor_epoll_backend_fragment.hpp` is 304 lines and still mixes epoll setup/wakeup, polling, deferred delete flushing, wait registration, and cancel.
+- `include/af/detail/runtime_public_io_socket_data_submit_fragment.hpp` is 295 lines and repeats public argument validation plus executor lookup for recv/send/fixed/multishot/zero-copy variants.
+- `include/af/detail/io_socket_accept_connect_fragment.hpp`, `include/af/detail/io_file_fixed_buffer_fragment.hpp`, and related public IO adapter fragments are around 300 lines. They are acceptable for inline APIs, but future additions should go into narrower recv/send/fixed/lifecycle fragments.
+
+Recommendation:
+- Do not move hot runtime code into `.cpp` files. Keep template and syscall-submit code inlineable through include fragments.
+- Split `runtime_parallel_fragment.hpp` into ordered-start state, shard task/runner, ordered-batch guard, and public dispatch fragments.
+- Split `runtime_executor_epoll_backend_fragment.hpp` into setup/wake, poll-completion, wait-registration, and cancel/deferred-delete fragments.
+- Split public socket data submit wrappers into recv, send, zero-copy, and multishot fragments; optionally introduce a tiny inline executor lookup/validation helper only if benchmark confirms no regression.
+- Keep `runtime_executor_core_state_fragment.hpp` as the single state-layout owner unless the split can preserve declaration order and cache-line placement exactly.
+
+### Latest Test/Example Scan: Long Files Remain Mostly In Fixtures
+
+The largest remaining files are now test/support fixtures rather than runtime shell code:
+
+- File IO support fragments remain heavy: open/lifecycle 393 lines, boundary 389 lines, read/write 328 lines, filesystem boundary 303 lines, filesystem ops 295 lines.
+- A few runtime tests are still moderately large: io_uring socket multishot 275 lines, io_uring socket datagram 257 lines, stream transfer 255 lines.
+- `benchmarks/runtime_benchmarks.cpp` is 304 lines and still combines wait helpers, task definitions, and multiple benchmark families.
+- Some examples still use explicit atomics to observe readiness/completion (`io_epoll.cpp`, `io_timer.cpp`, and a few multishot io_uring examples). Those should be converted to task-owned state machines plus `ShutdownPolicy::WaitForTasks` when practical, matching the newer IO adapter/socket lifecycle examples.
+
+Recommendation:
+- Continue splitting test support by operation family and boundary category, but keep fixtures close to the tests that use them.
+- Split `runtime_benchmarks.cpp` into runtime task helpers and benchmark families so performance baselines stay easy to audit.
+- Prefer example completion through runtime shutdown policy and task result structs, not main-thread atomic polling, unless the example is specifically demonstrating cross-thread observation.
+
 ### P1: io_uring Executor Internals Can Be Split Further
 
 The largest remaining runtime-internal fragments are io_uring completion/submit details and public socket data submit wrappers.
