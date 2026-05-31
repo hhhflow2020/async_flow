@@ -13,6 +13,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - `include/af/async_runtime.hpp` has been split into focused runtime fragments for public task handles/config, common helpers, dispatch, lifecycle, parallel support, state, executor control, executor task helpers, executor IO state types, executor thread-kind helpers, readiness wait/cancel, backend polling, poll helper conversion, executor state, and io_uring resource registration.
 - The public `AsyncRuntime` API is now split into lifecycle, parallel, IO resource/wait, file-data submit, fd lifecycle submit, socket data submit, and socket message/connect submit fragments. The top-level `include/af/async_runtime.hpp` is now an overview-sized class shell instead of a multi-thousand-line mixed implementation file.
 - `tests/runtime_io_test_support.hpp` is now an umbrella header with domain fragments for core traits, basic tasks, stream, accept, file, timer/event, wait/cancel, socket lifecycle, and io_uring socket support.
+- Portable accept/multishot receive test support is now split into basic TCP accept, accept-multishot boundary, and recv/recvmsg-multishot boundary task fragments, with the previous accept header kept as a small umbrella.
 - Basic socket IO test support is now split into stream read/write, UDP datagram, and UDP vectored task fragments with the original basic-socket header kept as an umbrella.
 - Socket lifecycle test support is now split into setup happy path, boundary validation, io_uring socket-create, and fast IO wait/done task fragments with the original lifecycle header kept as an umbrella.
 - The file IO test support has been split into boundary, normal read/write, fixed-resource, lifecycle/open, and filesystem operation fragments.
@@ -153,7 +154,7 @@ Performance constraints for these splits:
 
 The largest remaining files are now test/support fixtures rather than runtime shell code:
 
-- File IO support fragments remain heavy in a few places: filesystem boundary 303 lines and filesystem ops 295 lines, while boundary, read/write, and open/lifecycle support have been split into smaller operation-family task fragments.
+- File IO support fragments remain heavy in a few places: filesystem boundary 303 lines and filesystem ops 295 lines, while boundary, read/write, and open/lifecycle support have been split into smaller operation-family task fragments. Accept support is now split; the next accept-specific hotspot is io_uring socket accept/direct/multishot support.
 - A few runtime tests are still moderately large: io_uring socket multishot 275 lines, io_uring socket datagram 257 lines, stream transfer 255 lines.
 - Some examples still use explicit atomics to observe readiness/completion (`io_epoll.cpp`, `io_timer.cpp`, and a few multishot io_uring examples). Those should be converted to task-owned state machines plus `ShutdownPolicy::WaitForTasks` when practical, matching the newer IO adapter/socket lifecycle examples.
 
