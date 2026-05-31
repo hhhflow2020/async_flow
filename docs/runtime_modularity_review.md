@@ -11,62 +11,52 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 ## Already Improved
 
 - `include/af/async_runtime.hpp` has been split into focused runtime fragments for common helpers, dispatch, lifecycle, parallel support, state, executor control, executor task helpers, readiness wait/cancel, backend polling, poll helper conversion, executor state, and io_uring resource registration.
-- The latest split moved io_uring buffer/file/provided-buffer registration and update logic into `include/af/detail/runtime_executor_io_uring_resource_fragment.hpp`, leaving the public `Executor` surface at that point as an include-only boundary.
-- Validation after the latest split passed `git diff --check`, Docker GCC Debug runtime tests, and Release runtime benchmark baseline regression.
+- The public `AsyncRuntime` API is now split into lifecycle, parallel, IO resource/wait, file-data submit, fd lifecycle submit, socket data submit, and socket message/connect submit fragments. The top-level `include/af/async_runtime.hpp` is now an overview-sized class shell instead of a multi-thousand-line mixed implementation file.
+- `tests/runtime_io_test_support.hpp` is now an umbrella header with domain fragments for core traits, basic tasks, stream, accept, file, timer/event, wait/cancel, socket lifecycle, and io_uring socket support.
+- The file IO test support has been split into boundary, normal read/write, fixed-resource, lifecycle/open, and filesystem operation fragments.
+- Each split so far preserved header-only/template visibility, passed `git diff --check`, Docker GCC Debug runtime tests, and, for core runtime header changes, Release runtime benchmark baseline regression.
 
 ## Current Findings
 
-### P1: `async_runtime.hpp` Still Mixes Public API and Executor io_uring Submit Logic
+### P1: Public IO Adapter Headers Are Now The Largest API Files
 
-`include/af/async_runtime.hpp` is still about 5.9k lines. The first half exposes many public forwarding APIs, while the nested `Executor` still contains a long io_uring submit block and generic operation construction/completion logic.
-
-Risk:
-- The file remains hard to audit for concurrency and lifetime invariants.
-- Preprocessor boundaries around Linux-only code are easy to break during future changes.
-- Reviewers must scan unrelated socket, file, timeout, fixed-file, multishot, and zero-copy code in one place.
-
-Recommended split:
-- `runtime_executor_io_uring_file_submit_fragment.hpp`
-- `runtime_executor_io_uring_socket_submit_fragment.hpp`
-- `runtime_executor_io_uring_datagram_submit_fragment.hpp`
-- `runtime_executor_io_uring_submit_core_fragment.hpp`
-- `runtime_executor_io_uring_completion_fragment.hpp`
-- `runtime_executor_io_uring_backend_fragment.hpp`
-
-Keep these included inside `AsyncRuntime::Executor` so hot submit helpers stay inlineable and no extra virtual/function-pointer dispatch is introduced.
-
-### P1: `tests/runtime_io_test_support.hpp` Is Too Large
-
-`tests/runtime_io_test_support.hpp` is currently the largest file at about 6.5k lines. It mixes runtime traits, fixtures, epoll tasks, stream tasks, datagram tasks, io_uring file tasks, io_uring socket tasks, timeout/cancel helpers, and filesystem helpers.
+`include/af/io_socket.hpp`, `include/af/io_file.hpp`, and `include/af/io_adapters.hpp` are the largest public headers after the runtime split. They are still coherent, but future IO additions will make them harder to audit unless the next features land in smaller domain headers.
 
 Risk:
-- Test coverage is broad, but the support file is difficult to navigate.
-- Adding new IO edge cases tends to grow one shared file instead of a domain-local helper.
-- Build errors from one helper can be noisy and unrelated to the test being changed.
+- Socket lifecycle, stream read/write, datagram, fixed-file, timeout/cancel, eventfd/timerfd, and generic adapter helpers can become visually interleaved.
+- Public API review may require scanning unrelated network and file helpers.
 
 Recommended split:
-- `tests/support/runtime_io_traits.hpp`
-- `tests/support/runtime_io_fixtures.hpp`
-- `tests/support/runtime_io_epoll_tasks.hpp`
-- `tests/support/runtime_io_stream_tasks.hpp`
-- `tests/support/runtime_io_datagram_tasks.hpp`
-- `tests/support/runtime_io_uring_file_tasks.hpp`
-- `tests/support/runtime_io_uring_socket_tasks.hpp`
-- `tests/support/runtime_io_timeout_cancel_tasks.hpp`
+- `io_socket_stream.hpp`
+- `io_socket_datagram.hpp`
+- `io_socket_lifecycle.hpp`
+- `io_file_data.hpp`
+- `io_file_lifecycle.hpp`
+- `io_event_timer.hpp`
+- `io_pollable_adapter.hpp`
 
-The test `.cpp` files should include only the support headers they need.
+Keep `io_socket.hpp`, `io_file.hpp`, and `io_adapters.hpp` as compatibility umbrella headers.
 
-### P2: Public Runtime Forwarders Are Verbose
+### P1: io_uring Executor Internals Can Be Split Further
 
-The public `AsyncRuntime` section contains many small wrappers that validate thread index and forward to the executor. This is not a runtime performance problem, but it makes the core type visually heavy.
+The largest remaining runtime-internal fragments are `runtime_executor_io_uring_submit_core_fragment.hpp`, `runtime_executor_io_uring_socket_submit_fragment.hpp`, and `runtime_executor_io_uring_backend_fragment.hpp`.
+
+Risk:
+- Operation construction, SQE preparation, CQE completion, multishot handling, and fallback bookkeeping are still close together.
+- Concurrency/lifetime audits still require reading several dense io_uring fragments.
 
 Recommended split:
-- `runtime_public_task_api_fragment.hpp`
-- `runtime_public_io_wait_api_fragment.hpp`
-- `runtime_public_io_uring_api_fragment.hpp`
-- `runtime_public_parallel_api_fragment.hpp`
+- Split submit core into operation allocation/release, SQE acquisition/submission, CQE decoding, and completion dispatch fragments.
+- Split socket submit by stream, datagram, accept/connect, multishot, and zero-copy send.
+- Keep fragments included inside `AsyncRuntime::Executor` so hot submit helpers stay inlineable and no extra virtual/function-pointer dispatch is introduced.
 
-This should be done only after executor internals are split further, because the executor code is the larger audit burden.
+### P2: IO Tests Still Have A Few Large Domain Files
+
+The support umbrella is now small, but `tests/support/runtime_io_uring_socket_tasks_fragment.hpp` and `tests/runtime_io_uring_socket_tests.cpp` are still long.
+
+Recommended split:
+- Split io_uring socket task support by stream, datagram, multishot, direct accept, and zero-copy send.
+- Split io_uring socket tests into stream, datagram, multishot, and direct/fixed-file test files.
 
 ### P2: README IO Section Has Become Dense
 
@@ -76,19 +66,6 @@ Recommended split:
 - Keep README focused on quick start and core semantics.
 - Move deep IO behavior, performance tuning, fixed files, registered buffers, multishot, timeout/cancel, and zero-copy guidance into `docs/io_runtime.md`.
 - Move benchmark and CI baseline details into `docs/performance.md`.
-
-### P3: IO Adapter Headers Are Manageable But Near Future Split Points
-
-`include/af/io_socket.hpp`, `include/af/io_file.hpp`, and `include/af/io_adapters.hpp` are still within a manageable range, but they are natural split points if more protocol helpers are added.
-
-Possible future split:
-- Socket lifecycle helpers.
-- Stream read/write helpers.
-- Datagram helpers.
-- Fixed-file helpers.
-- Eventfd/timerfd adapters.
-
-Do this only when new features make the current files noticeably harder to review.
 
 ## Performance Constraints For Refactors
 
