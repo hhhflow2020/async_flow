@@ -22,7 +22,6 @@
 #if AF_DETAIL_HAS_EPOLL
         int io_epoll_fd_{-1};
         int io_wake_fd_{-1};
-        absl::flat_hash_set<int> io_deferred_deletes_;
 #endif
 #if AF_DETAIL_HAS_KQUEUE
         int io_kqueue_fd_{-1};

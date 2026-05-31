@@ -49,14 +49,10 @@ struct IoOpState {
     IoResult wait{};
     IoWaitKind wait_kind{IoWaitKind::None};
     bool waiting{false};
-    bool readiness_rearm_hint{false};
-    int readiness_fd{-1};
 
     void reset() noexcept {
         wait = IoResult{};
         wait_kind = IoWaitKind::None;
         waiting = false;
-        readiness_rearm_hint = false;
-        readiness_fd = -1;
     }
 };

@@ -21,8 +21,6 @@
             return did_work;
         }
 
-        void flush_native_io_backend_deferred_deletes() noexcept {}
-
         [[nodiscard]] bool register_native_io_wait(
             int fd,
             std::uint32_t events,

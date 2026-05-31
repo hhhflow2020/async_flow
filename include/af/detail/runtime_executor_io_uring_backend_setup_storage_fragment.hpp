@@ -8,9 +8,6 @@
                 if constexpr (io_wait_reserve != 0U) {
                     io_waits_.reserve(io_wait_reserve);
                 }
-                if constexpr (io_deferred_delete_reserve != 0U) {
-                    io_deferred_deletes_.reserve(io_deferred_delete_reserve);
-                }
                 if constexpr (io_uring_provided_buffer_group_reserve != 0U) {
                     io_uring_provided_buffer_groups_.reserve(
                         io_uring_provided_buffer_group_reserve);

@@ -89,8 +89,6 @@
             IoWaitRegistration* registration = it->second;
             remove_kqueue_filters(*registration);
             io_waits_.erase(it);
-            state.readiness_rearm_hint = false;
-            state.readiness_fd = -1;
 
             state.wait.fd = fd;
             state.wait.events = io_error;

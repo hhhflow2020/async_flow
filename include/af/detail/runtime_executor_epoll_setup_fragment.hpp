@@ -55,7 +55,6 @@
 
         void close_native_io_backend() noexcept {
             clear_io_waits();
-            io_deferred_deletes_.clear();
             if (io_wake_fd_ >= 0) {
                 ::close(io_wake_fd_);
                 io_wake_fd_ = -1;

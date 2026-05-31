@@ -34,7 +34,7 @@
 
                 const int fd = registration->fd;
                 io_waits_.erase(fd);
-                defer_io_delete(fd);
+                static_cast<void>(::epoll_ctl(io_epoll_fd_, EPOLL_CTL_DEL, fd, nullptr));
 
                 registration->result->fd = fd;
                 registration->result->events = io_events_from_native(

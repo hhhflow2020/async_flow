@@ -38,8 +38,6 @@
                 operation->cancel_requested = true;
                 operation->task = nullptr;
                 operation->result = nullptr;
-                state.readiness_rearm_hint = false;
-                state.readiness_fd = -1;
 
                 state.wait.fd = fd;
                 state.wait.events = io_error;
@@ -53,9 +51,6 @@
             }
             io_waits_.erase(it);
             static_cast<void>(::epoll_ctl(io_epoll_fd_, EPOLL_CTL_DEL, fd, nullptr));
-            forget_deferred_io_delete(fd);
-            state.readiness_rearm_hint = false;
-            state.readiness_fd = -1;
 
             state.wait.fd = fd;
             state.wait.events = io_error;

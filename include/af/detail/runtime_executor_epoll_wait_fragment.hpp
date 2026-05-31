@@ -8,6 +8,7 @@
             Task* task,
             IoResult* result,
             bool prefer_rearm) noexcept {
+            static_cast<void>(prefer_rearm);
             if (io_epoll_fd_ < 0 || fd < 0 || events == 0U ||
                 io_waits_.find(fd) != io_waits_.end()) {
                 result->fd = fd;
@@ -54,7 +55,6 @@
             const IoUringPollSubmitResult poll_result =
                 try_submit_io_uring_poll_wait(fd, events, task, result, registration);
             if (poll_result == IoUringPollSubmitResult::Submitted) {
-                forget_deferred_io_delete(fd);
                 *result = IoResult{fd, 0, 0};
                 return true;
             }
@@ -79,13 +79,10 @@
             event.events = native_events;
             event.data.ptr = registration;
 
-            const int first_op = prefer_rearm ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
-            const int fallback_op = prefer_rearm ? EPOLL_CTL_ADD : EPOLL_CTL_MOD;
-            const int fallback_error = prefer_rearm ? ENOENT : EEXIST;
-            if (::epoll_ctl(io_epoll_fd_, first_op, fd, &event) != 0) {
+            if (::epoll_ctl(io_epoll_fd_, EPOLL_CTL_ADD, fd, &event) != 0) {
                 const int first_error = errno;
-                if (first_error != fallback_error ||
-                    ::epoll_ctl(io_epoll_fd_, fallback_op, fd, &event) != 0) {
+                if (first_error != EEXIST ||
+                    ::epoll_ctl(io_epoll_fd_, EPOLL_CTL_MOD, fd, &event) != 0) {
                     io_waits_.erase(fd);
                     io_wait_pool_.destroy(registration);
                     result->fd = fd;
@@ -95,7 +92,6 @@
                 }
             }
 
-            forget_deferred_io_delete(fd);
             *result = IoResult{fd, 0, 0};
             return true;
         }

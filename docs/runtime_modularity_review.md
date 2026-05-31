@@ -63,7 +63,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Wait/cancel IO test support is now a small umbrella over basic wait/bad-fd tasks, cancel state-machine tasks, deadline timeout tasks, and zero-byte/vectored boundary tasks.
 - io_uring socket multishot test support is now split between recv/provided-buffer and recvmsg/peer-address task fragments, with the original multishot header kept as a small compatibility umbrella.
 - Epoll runtime tests are split by setup, readiness, cancel/timeout, boundary, socket lifecycle, and event/timer adapter coverage.
-- The Linux epoll executor backend is now a small platform umbrella over setup/wake, storage/deferred-delete, poll, wait registration, and cancel fragments. This mirrors the kqueue split while keeping all syscall paths inline inside `AsyncRuntime::Executor`.
+- The Linux epoll executor backend is now a small platform umbrella over setup/wake, storage, poll, wait registration, and cancel fragments. This mirrors the kqueue split while keeping all syscall paths inline inside `AsyncRuntime::Executor`.
 - io_uring backend executor internals are now split into setup/close, SQ submit/poll, CQ completion, and operation lifecycle fragments while remaining inline in `AsyncRuntime::Executor`.
 - io_uring CQ completion is now split by CQ polling, operation completion, poll-wait completion, and fd/direct-file cancel cleanup, with `runtime_executor_io_uring_backend_completion_fragment.hpp` kept as a small inline umbrella.
 - io_uring backend setup is now split by init flow, mmap/pointer binding, feature probing, close/reset, and storage reservation, with `runtime_executor_io_uring_backend_setup_fragment.hpp` kept as a small inline umbrella.
@@ -93,6 +93,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - io_uring file-data submit wrappers are now split into basic read/write, timeout, fixed-file, fixed-buffer, vectored, and fsync fragments while staying inline in `AsyncRuntime::Executor`.
 - Native readiness backends now have a platform-dispatch include point: Linux uses an epoll fragment and macOS/BSD uses a kqueue fragment, while public `io_*` helpers continue to expose one API. This keeps OS-specific syscall code out of the generic executor loop and preserves header-only inlining.
 - `include/af/io_common.hpp` is now a small umbrella over focused common fragments: basic socket/error helpers, wait-state helpers, fixed-file vectored helpers, Linux eventfd/timerfd helpers, and deadline state.
+- `io_common_detail_state_fragment.hpp` is now a small implementation umbrella. Target-thread/socket-name helpers, readiness wait arming, readiness wait state, io_uring status normalization, and iovec validation now live in focused `io_common_*_fragment.hpp` files.
 - `include/af/io_types.hpp` is now a small public umbrella over base IO typedefs/views, Linux provided-buffer rings, `IoStatus`, and `UniqueFd`. Linux-only ring storage and POSIX fd ownership are separate fragments while staying inline.
 - `include/af/task.hpp` is now a small public umbrella over task enum/type declarations, IO wait state, optional task-registry links, and the `BasicTask` implementation. Task lifecycle and scheduling state transitions remain inline/template-visible.
 - `include/af/io_filesystem.hpp` is now a small public umbrella over open/openat2, namespace operation, allocation/truncate, and `IoDirectory` adapter fragments. Public filesystem helpers remain header-only/template-visible while keeping operation families separate.
@@ -202,9 +203,31 @@ Additional validation after the mechanical `BasicTask` split:
   - `BM_RuntimeParallelShards/128` mean: 0.519 ms real, 246.555 k/s.
   - `BM_RuntimeParallelShards/512` mean: 1.97 ms real, 261.281 k/s.
 
+Additional validation after the `io_common` split and epoll delete race fix:
+
+- `io_common_detail_state_fragment.hpp` is now a 13-line umbrella:
+  - `io_common_target_fragment.hpp`: 39 lines.
+  - `io_common_wait_arm_fragment.hpp`: 48 lines.
+  - `io_common_wait_state_fragment.hpp`: 35 lines.
+  - `io_common_uring_status_fragment.hpp`: 34 lines.
+  - `io_common_iovec_fragment.hpp`: 47 lines.
+- Remote clang TSAN exposed a real deferred epoll delete race: a test could close an fd after the runtime posted the resumed task while the IO executor still had a deferred `EPOLL_CTL_DEL` pending for the same numeric fd.
+- The fix deletes the epoll interest on the IO thread before exposing the readiness result and waking the task. The obsolete deferred-delete set and `IoOpState` readiness rearm hint were removed; epoll now registers with `EPOLL_CTL_ADD` first and only falls back to `MOD` for defensive `EEXIST`.
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_runtime_tests` build: passed.
+- Local Release targeted IO tests: 82/82 passed; platform/io_uring capability tests skipped by local test logic where unsupported.
+- Remote clang Debug targeted IO tests: 82/82 passed.
+- Remote clang TSAN targeted IO tests: 82/82 passed with no ThreadSanitizer report.
+- Remote clang Release full runtime test suite: 132/132 passed, with 21 platform/io_uring capability tests skipped by test logic.
+- Remote clang Release runtime benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+  - `BM_RuntimeExternalStart/8192` mean: 7.17 ms real, 1.144 M/s.
+  - `BM_RuntimeCrossThreadHop/8192` mean: 12.4 ms real, 665.491 k/s.
+  - `BM_RuntimeIoThreadHop/8192` mean: 4.41 ms real, 1.860 M/s.
+  - `BM_RuntimeParallelShards/512` mean: 1.82 ms real, 281.439 k/s.
+- Remote clang Release IO adapter canary stayed in the sub-nanosecond range for the zero-byte/zero-iov helper paths covered by existing benchmarks.
+
 Remaining follow-up:
 
-- `io_common_detail_state_fragment.hpp` still mixes IO target validation, wait-state arming, splice wait policy, status normalization, iovec validation, and multishot wait reset. Split it when the next IO cancel/timeout or vectored IO change lands.
 - Ready-source hints are now correct and bounded, but future benchmarking may justify a rotating ready-word cursor for very large `thread_count` values.
 
 ### 2026-06-01 Current Scheduler WIP and Modularity Re-scan
@@ -218,7 +241,7 @@ Current file-size snapshot:
 - `include/af/async_runtime.hpp`: 226 lines. This is still an acceptable overview shell that declares `AsyncRuntime`, declares the nested `Executor`, and includes inline fragments in the required class scopes.
 - `include/af/detail/runtime_dispatch_fragment.hpp`: 195 lines. It remains the main core-runtime split candidate because it owns queue topology, same-thread local enqueue, cross-thread SPSC enqueue, external MPSC enqueue, ready-source signaling, and external-post admission accounting.
 - Resolved after this scan: `include/af/detail/basic_task_fragment.hpp` is now a small class shell over public, protected-helper, lifetime, scheduling, and storage fragments.
-- `include/af/detail/io_common_detail_state_fragment.hpp`: 209 lines. It still mixes IO target validation, wait-state arming, splice wait policy, status normalization, iovec validation, and multishot wait reset.
+- Resolved after this scan: `include/af/detail/io_common_detail_state_fragment.hpp` is now a small umbrella over IO target, wait-arm, wait-state, io_uring-status, and iovec helper fragments.
 - `tests/runtime_stress_tests.cpp`: 317 lines. The new repeated cross-thread hop stress fixture should move into a support fragment once the scheduler fix is validated.
 - The largest remaining examples/tests are now fixture/state-machine files, not the runtime shell: `io_rpc_length_prefixed_server.hpp`, `io_uring_fixed_file_task.hpp`, `runtime_io_uring_socket_datagram_tests.cpp`, `runtime_io_stream_transfer_tests.cpp`, and `io_uring_file_lifecycle_task.hpp`.
 
@@ -259,7 +282,7 @@ Issue ledger:
 - Resolved: `runtime_executor_core_state_fragment.hpp` now keeps the field declarations together as the cache-layout owner. `pop_one`, `finish_done`, `finish_pending`, and `finish_again` moved into focused inline fragments included before the state layout block.
 - Resolved: `runtime_executor_task_fragment.hpp` is split into ready signaling/wake, local queue, and execute/finish dispatch fragments. The split was followed by same-thread, cross-thread, external-start, IO-thread hop, and parallel-shard benchmark canaries.
 - Resolved: `basic_task_fragment.hpp` now uses class-body fragments for public/protected task helpers, schedule-state transitions, lifetime/destroy helpers, and one final storage-layout block.
-- P2: `io_common_detail_state_fragment.hpp` still combines target-thread validation, readiness wait arming, splice wait policy, status normalization, iovec validation, and multishot wait reset. Split by helper family when the next IO cancel/timeout or vectored IO change lands.
+- Resolved: `io_common_detail_state_fragment.hpp` is split by helper family, and the epoll readiness path no longer depends on a deferred-delete/rearm-hint cleanup path.
 - P2: `runtime_stress_tests.cpp` now contains both StopImmediately lifecycle stress and repeated cross-thread hop stress. Move the repeated-hop runtime/task into `tests/support/runtime_lifecycle_cross_thread_hop_support_fragment.hpp` and keep the source file as test cases only.
 - P2: several IO tests and examples remain moderately dense after the first pass. Notable current files are `runtime_io_uring_socket_datagram_tests.cpp`, `runtime_io_stream_transfer_tests.cpp`, `io_rpc_length_prefixed_server.hpp`, `io_uring_fixed_file_task.hpp`, and `io_uring_file_lifecycle_task.hpp`. Future edits should split by protocol role, transfer mode, or operation family instead of appending new states to the existing file.
 - P2: older examples such as `io_epoll.cpp`, `io_event.cpp`, `io_timer.cpp`, `io_native_readiness.cpp`, and several multishot examples still use explicit atomics to observe readiness/completion from `main`. Prefer task-owned state machines plus `ShutdownPolicy::WaitForTasks` for examples unless the example is specifically demonstrating cross-thread observation.
@@ -295,7 +318,7 @@ Findings to track:
 - Resolved: `runtime_executor_core_state_fragment.hpp` now contains only executor state fields. Pop/finish behavior lives in inline behavior fragments while the field declarations stay in one state-layout owner for cache-line placement and false-sharing audits.
 - Resolved: `runtime_executor_task_fragment.hpp` is now split by source-ready/wake signaling, local queue operations, and task execution/result dispatch; benchmark canaries were collected after the change.
 - Resolved: `basic_task_fragment.hpp` is now a class shell; the storage fields remain in one final layout block.
-- P2: `io_common_detail_state_fragment.hpp` combines target-thread validation, readiness wait arming, splice wait policy, IO status normalization, iovec validation, and multishot wait reset. Split by helper family to make IO cancel/timeout audits smaller.
+- Resolved: `io_common_detail_state_fragment.hpp` is split by helper family, making IO wait/cancel/timeout audits smaller.
 - P2: `runtime_common_fragment.hpp` combines `RuntimeStatus`, `CacheLineAtomic`, ordered-batch state, parallel-group state, and external-post counters. Split these small type families when the next runtime-state change lands.
 - P2: examples still contain explicit atomics for readiness/completion observation in older files such as `io_epoll.cpp`, `io_timer.cpp`, `io_event.cpp`, `io_native_readiness.cpp`, and several multishot io_uring examples. For examples, prefer task-owned state machines plus `ShutdownPolicy::WaitForTasks`; test fixtures may continue using atomics when they are only assertion probes.
 
@@ -312,7 +335,7 @@ Recommended order:
 1. Split `runtime_dispatch_fragment.hpp` into topology, enqueue, and external-post gate fragments. Re-run runtime benchmarks because this touches the start/post hot path.
 2. Completed: split executor behavior out of `runtime_executor_core_state_fragment.hpp` while leaving field layout intact.
 3. Completed: split `basic_task_fragment.hpp` class-body responsibilities after the executor split, keeping task state transitions and storage layout auditable.
-4. Split `io_common_detail_state_fragment.hpp` by IO helper family when working on the next IO feature or cancel/timeout fix.
+4. Completed: split `io_common_detail_state_fragment.hpp` by IO helper family and remove the stale epoll readiness rearm hint.
 
 ### 2026-05-31 Core Runtime Modularity Recheck
 
@@ -413,7 +436,7 @@ After splitting `IoFile`, the largest remaining files are mostly tests/examples.
 - `include/af/io_timeout.hpp`: now a small public umbrella. The deadline arbitration fragment remains intentionally larger than the status/wait fragments because it preserves the race ordering between IO completion, timeout completion, and cancel completion.
 - `include/af/detail/io_uring_support.hpp`: 216 lines. Mostly Linux ABI wrappers and setup structs; split only if new setup/resource capabilities are added.
 - `include/af/detail/basic_task_fragment.hpp`: now a small class shell over focused inline fragments. Task lifecycle remains inline and avoids ownership abstractions.
-- `include/af/detail/io_common_detail_state_fragment.hpp`: 209 lines. Shared IO wait-state helpers; split only along state/helper responsibilities.
+- Resolved after this scan: `include/af/detail/io_common_detail_state_fragment.hpp` is now a small umbrella over focused IO common helper fragments.
 - `include/af/detail/runtime_executor_io_uring_file_resource_fragment.hpp`: 206 lines. Fixed-file resource registration/update path; acceptable as one operation family.
 - `include/af/detail/io_adapters_datagram_fragment.hpp`: now a small class shell. Its methods are split by bind/lifecycle, recv/multishot, and send/zero-copy groups.
 - `include/af/detail/io_adapters_stream_fragment.hpp`: now a small class shell. Its methods are split by recv, send, transfer/connect, and read/write alias groups.

@@ -25,7 +25,6 @@
                     did_work = true;
                 }
 #endif
-                flush_native_io_backend_deferred_deletes();
 
                 if (stop_requested_.load(std::memory_order_acquire)) {
                     if (!did_work) {

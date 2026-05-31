@@ -24,7 +24,6 @@
 #include "af/detail/runtime_traits.hpp"
 #include "af/task.hpp"
 #include "absl/container/flat_hash_map.h"
-#include "absl/container/flat_hash_set.h"
 
 #if !defined(_WIN32)
 #include <fcntl.h>

@@ -155,3 +155,50 @@ Release benchmark canary after the `BasicTask` split, 3 repetitions with `--benc
 | `BM_RuntimeIoThreadHop/8192` | 4.44 ms | 4.43 ms | 1.845 M/s |
 | `BM_RuntimeParallelShards/128` | 0.519 ms | 0.511 ms | 246.555 k/s |
 | `BM_RuntimeParallelShards/512` | 1.97 ms | 1.94 ms | 261.281 k/s |
+
+## 2026-06-01 IO Common Split And Epoll Delete Race Fix
+
+This run validates the IO common helper split and the epoll readiness correctness fix on the requested remote Linux host with `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2`.
+
+Changes under validation:
+
+- `io_common_detail_state_fragment.hpp` is now a small umbrella over target/socket-name helpers, readiness wait arming, wait-state helpers, io_uring status normalization, and iovec validation fragments.
+- The deferred epoll delete path was removed. `EPOLL_CTL_DEL` now runs on the IO thread before the task is woken, so user code cannot close or reuse the numeric fd before the runtime removes the old epoll interest.
+- The stale readiness rearm hint was removed from `IoOpState`. After deleting the epoll interest before wakeup, keeping the hint would make the next wait try `EPOLL_CTL_MOD` first and then fall back to `ADD`, adding an avoidable failed syscall to the hot rearm path.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_runtime_tests` build: passed.
+- Local Release targeted IO tests: 82/82 passed; unsupported local platform/io_uring cases were skipped by test logic.
+- Remote clang Debug targeted IO tests: 82/82 passed.
+- Remote clang TSAN targeted IO tests: 82/82 passed, no ThreadSanitizer report.
+- Remote clang Release full runtime suite: 132/132 passed; 21 platform/io_uring capability tests were skipped by test logic.
+
+Release runtime benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | CPU Mean | Throughput Mean |
+| --- | ---: | ---: | ---: |
+| `BM_RuntimeExternalStart/8192` | 7.17 ms | 7.16 ms | 1.144 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 12.4 ms | 4.56 ms | 665.491 k/s |
+| `BM_RuntimeIoThreadHop/8192` | 4.41 ms | 4.40 ms | 1.860 M/s |
+| `BM_RuntimeParallelShards/128` | 0.521 ms | 0.498 ms | 248.966 k/s |
+| `BM_RuntimeParallelShards/512` | 1.82 ms | 1.77 ms | 281.439 k/s |
+
+Existing IO adapter benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | CPU Mean |
+| --- | ---: | ---: |
+| `BM_IoDatagramAdapterZeroByteRecv` | 0.650 ns | 0.650 ns |
+| `BM_IoFileAdapterZeroByteRead` | 0.628 ns | 0.627 ns |
+| `BM_IoTimeoutInvalidDelay` | 0.837 ns | 0.836 ns |
+| `BM_IoStreamAdapterZeroByteSend` | 0.628 ns | 0.627 ns |
+| `BM_IoSendfileZeroCount` | 0.627 ns | 0.627 ns |
+| `BM_IoSpliceZeroCount` | 0.628 ns | 0.627 ns |
+| `BM_IoStreamAdapterZeroIovSendv` | 0.629 ns | 0.629 ns |
+
+Interpretation:
+
+- The TSAN failure observed before the fix was a close-vs-`epoll_ctl(DEL)` race caused by publishing readiness before deferred delete cleanup. The new ordering removes that race and avoids fd-number reuse hazards from stale epoll interest.
+- Removing the rearm hint keeps the correctness fix from adding an avoidable `MOD -> ADD` syscall pair on normal rearm after readiness.
+- The existing IO adapter benchmarks cover helper-level fast paths, not a long-running live epoll readiness loop. A dedicated readiness rearm benchmark should be added before using syscall-rate numbers as a hard performance gate.

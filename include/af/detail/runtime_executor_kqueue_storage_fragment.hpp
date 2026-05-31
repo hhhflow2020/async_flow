@@ -2,8 +2,6 @@
 #error "runtime_executor_kqueue_storage_fragment.hpp is an AsyncRuntime::Executor implementation fragment"
 #endif
 
-        void flush_native_io_backend_deferred_deletes() noexcept {}
-
         void clear_io_waits() noexcept {
             for (auto& entry : io_waits_) {
                 io_wait_pool_.destroy(entry.second);
