@@ -100,6 +100,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - `IoFile` is now a small descriptor-adapter shell with read, write, registered-buffer fixed IO, and sync member-function fragments included inside the class body. The public adapter remains a thin inline view over the descriptor.
 - `IoStream` and `IoDatagramSocket` are now small adapter shells with operation-family method fragments included inside the class body. Stream methods are grouped by recv, send, transfer/connect, and read/write aliases; datagram methods are grouped by lifecycle, recv, and send families.
 - Public file read helpers are now split into current-offset read/readv and positioned read/readv fragments, with `io_file_read_fragment.hpp` kept as a compatibility umbrella.
+- Public timeout helpers are now split into timeout completion status normalization, single timeout wait submission, and deadline arbitration fragments. `io_timeout.hpp` remains a small public umbrella while preserving inline/template visibility for timeout and cancel race handling.
 - Each split so far preserved header-only/template visibility, passed `git diff --check`, Docker GCC Debug runtime tests, and, for core runtime header changes, Release runtime benchmark baseline regression.
 
 ## Current Findings
@@ -130,7 +131,7 @@ Assessment:
 The current review found that `include/af/async_runtime.hpp` itself is no longer the primary modularity problem. It is 226 lines and mostly acts as an inline class shell plus fragment wiring. The remaining issues are second-level ownership boundaries:
 
 - P2: the largest files are now tests and examples, not runtime entry points. The biggest current files are file IO support fragments, accept/socket support fragments, and protocol examples. New tests should be added as small operation-family files instead of growing the existing fixture files.
-- P2: `include/af/io_timeout.hpp` is a dense timeout/cancel state machine. It should be split only into semantic pieces such as timeout status helpers, standalone timeout wait, and deadline arbitration. Do not extract tiny helpers that obscure the race ordering between IO completion, timeout completion, and cancel completion.
+- P2: timeout/cancel race handling now lives in focused inline fragments. Keep the deadline arbitration fragment semantically intact unless new tests cover IO-first, timeout-first, user-cancel, cancel-completion-pending, and backend-unavailable paths.
 - P2: `tests/utility_tests.cpp` and a few IO fixture fragments remain large enough to hide unrelated utility coverage. Split them by utility domain or operation family when adding new tests.
 
 Performance guardrails for these issues:
@@ -200,7 +201,7 @@ Recommendation:
 
 After splitting `IoFile`, the largest remaining files are mostly tests/examples. Runtime-facing candidates worth tracking:
 
-- `include/af/io_timeout.hpp`: 230 lines. High-risk to edit casually because it encodes timeout/cancel race arbitration.
+- `include/af/io_timeout.hpp`: now a small public umbrella. The deadline arbitration fragment remains intentionally larger than the status/wait fragments because it preserves the race ordering between IO completion, timeout completion, and cancel completion.
 - `include/af/detail/io_uring_support.hpp`: 216 lines. Mostly Linux ABI wrappers and setup structs; split only if new setup/resource capabilities are added.
 - `include/af/detail/basic_task_fragment.hpp`: 214 lines. Task lifecycle hot path; keep inline and avoid ownership abstractions.
 - `include/af/detail/io_common_detail_state_fragment.hpp`: 209 lines. Shared IO wait-state helpers; split only along state/helper responsibilities.
@@ -210,7 +211,7 @@ After splitting `IoFile`, the largest remaining files are mostly tests/examples.
 
 Recommended next order:
 
-- Consider `io_timeout.hpp`, but only with focused tests around IO-first, timeout-first, user-cancel, and backend-unavailable paths.
+- Avoid further timeout splitting unless the change adds focused tests around IO-first, timeout-first, user-cancel, and backend-unavailable paths.
 - Leave executor state and task lifecycle fragments intact unless a concrete cache-layout or correctness improvement justifies the change.
 
 ### P1: Executor Internals Are Now Mostly Operation-Family Fragments
