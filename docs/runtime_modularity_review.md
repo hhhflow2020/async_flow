@@ -124,7 +124,7 @@ Resolved items:
 - The previous `thread_count <= 64` ready-source hint limit is gone. `ReadySourceSet<ThreadCount>` stores ready sources across cache-line-aligned 64-bit words and supports runtimes above 64 threads.
 - Ready-source bits are hints, not correctness state. `pop_one()` now checks ready-source words, clears an empty source only after an SPSC pop miss, immediately rechecks that SPSC queue, and still has a bounded all-source SPSC fallback scan. This prevents lost/coalesced ready hints from stranding work while avoiding permanent scans of stale sticky bits.
 - A late owner-resume race was fixed in `BasicTask`. Running wake requests are now tagged with a run epoch, `Executor::execute()` uses a `Queued -> Starting -> Running` transition, and a post that races with `finish_pending()` can either defer to the owner or directly transition `Pending -> Queued` and enqueue the task. This prevents a stale `Running` observation from writing `requested_thread_` after the owner has already checked the slot.
-- Scheduler and runtime stress fixtures are no longer concentrated in one source. Reusable scheduler state machines live in `tests/support/runtime_scheduler_stress_support.hpp`, lifecycle stress helpers live in `tests/support/runtime_lifecycle_stress_support.hpp`, and test cases are split by lifecycle, cross-thread, and parallel concerns.
+- Scheduler and runtime stress fixtures are no longer concentrated in one source. Reusable scheduler state machines are split by repeat-hop, above-64 wide-hop, parallel owner-resume, and wait-helper fragments; lifecycle stress helpers live in `tests/support/runtime_lifecycle_stress_support.hpp`, and test cases are split by lifecycle, cross-thread, and parallel concerns.
 - `runtime_executor_core_state_fragment.hpp` is now the executor field-layout owner only. Queue-drain behavior lives in `runtime_executor_pop_fragment.hpp`, and finish/reschedule behavior lives in `runtime_executor_finish_fragment.hpp`. This keeps declaration order and cache placement in one file while separating behavior that changes scheduling state.
 - `runtime_executor_task_fragment.hpp` is now a 7-line umbrella. Ready-source/wake signaling, local queue push/pop, and execute/result dispatch live in `runtime_executor_ready_signal_fragment.hpp`, `runtime_executor_local_queue_fragment.hpp`, and `runtime_executor_execute_fragment.hpp`.
 - `basic_task_fragment.hpp` is now a 20-line class shell. Public task API, protected task helpers, lifetime reference handling, scheduling/wake state machine, and storage layout live in dedicated class-body fragments. Storage fields remain together in `basic_task_storage_fragment.hpp`.
@@ -154,7 +154,11 @@ Current file-size snapshot after the pass:
 - `tests/runtime_cross_thread_stress_tests.cpp`: 123 lines.
 - `tests/runtime_parallel_stress_tests.cpp`: 96 lines.
 - `tests/support/runtime_lifecycle_stress_support.hpp`: 109 lines.
-- `tests/support/runtime_scheduler_stress_support.hpp`: 281 lines.
+- `tests/support/runtime_scheduler_stress_support.hpp`: 20 lines.
+- `tests/support/runtime_scheduler_stress_repeat_hop_fragment.hpp`: 83 lines.
+- `tests/support/runtime_scheduler_stress_wide_hop_fragment.hpp`: 70 lines.
+- `tests/support/runtime_scheduler_stress_parallel_resume_fragment.hpp`: 112 lines.
+- `tests/support/runtime_scheduler_stress_wait_fragment.hpp`: 15 lines.
 
 Validation evidence for the final pass:
 
@@ -256,7 +260,7 @@ Additional validation after the runtime stress source split:
 
 - Removed the old combined `tests/runtime_stress_tests.cpp`.
 - Split runtime stress cases into `tests/runtime_lifecycle_stress_tests.cpp`, `tests/runtime_cross_thread_stress_tests.cpp`, and `tests/runtime_parallel_stress_tests.cpp`.
-- Added `tests/support/runtime_lifecycle_stress_support.hpp` for lifecycle stress runtime/task scaffolding. Cross-thread hop and parallel shard stress scaffolding remain in `tests/support/runtime_scheduler_stress_support.hpp`.
+- Added `tests/support/runtime_lifecycle_stress_support.hpp` for lifecycle stress runtime/task scaffolding. Cross-thread hop and parallel shard stress scaffolding initially remained in `tests/support/runtime_scheduler_stress_support.hpp`; a later pass split that support header into smaller scenario fragments.
 - No runtime scheduling or IO behavior changed in this pass; the split is test-structure only.
 - Local `git diff --check`: passed.
 - Local Release `asyncflow_runtime_tests` build: passed.
@@ -291,6 +295,21 @@ Additional validation after the stream transfer test helper split:
 - Remote clang Debug splice-targeted tests: 1/1 passed.
 - Remote clang TSAN sendfile-targeted tests: 4/4 passed, with 2 io_uring-poll capability tests skipped by test logic and no ThreadSanitizer report.
 - Remote clang TSAN splice-targeted tests: 1/1 passed with no ThreadSanitizer report.
+- Remote clang Release full runtime test suite: 132/132 passed, with 21 platform/io_uring capability tests skipped by test logic.
+
+Additional validation after the scheduler stress support split:
+
+- `tests/support/runtime_scheduler_stress_support.hpp` is now a 20-line umbrella.
+- Repeat cross-thread hop support lives in `tests/support/runtime_scheduler_stress_repeat_hop_fragment.hpp`.
+- Above-64 ready-source hop support lives in `tests/support/runtime_scheduler_stress_wide_hop_fragment.hpp`.
+- Parallel owner-resume stress support lives in `tests/support/runtime_scheduler_stress_parallel_resume_fragment.hpp`.
+- The shared zero-wait helper lives in `tests/support/runtime_scheduler_stress_wait_fragment.hpp`.
+- No runtime scheduling, queue selection, memory ordering, task state transition, or public API behavior changed in this pass; only test support ownership changed.
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_runtime_tests` build: passed.
+- Local Release `RuntimeStressTests`: 4/4 passed.
+- Remote clang Debug `RuntimeStressTests`: 4/4 passed.
+- Remote clang TSAN `RuntimeStressTests`: 4/4 passed with no ThreadSanitizer report.
 - Remote clang Release full runtime test suite: 132/132 passed, with 21 platform/io_uring capability tests skipped by test logic.
 
 Remaining follow-up:

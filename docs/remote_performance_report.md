@@ -292,3 +292,21 @@ Interpretation:
 
 - This pass changed only test fixture setup and cleanup ownership. Runtime scheduling, IO backend behavior, queue selection, memory ordering, and public APIs were unchanged.
 - The split keeps sendfile/splice behavior assertions in the test source while moving temporary files, blocked sockets, and pipe pairs into reusable support helpers.
+
+## 2026-06-01 Scheduler Stress Support Split Validation
+
+This run validates the support-header split that turned `tests/support/runtime_scheduler_stress_support.hpp` into an umbrella over focused stress scenario fragments.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_runtime_tests` build: passed.
+- Local Release `RuntimeStressTests`: 4/4 passed.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2` Debug `RuntimeStressTests`: 4/4 passed.
+- Remote clang TSAN `RuntimeStressTests`: 4/4 passed with no ThreadSanitizer report.
+- Remote clang Release full runtime suite: 132/132 passed; 21 platform/io_uring capability tests were skipped by test logic.
+
+Interpretation:
+
+- This pass changed only test support layout. Runtime scheduling, queue choice, task state transitions, memory ordering, and public APIs were unchanged.
+- The split gives repeat-hop, above-64-thread ready-source, and parallel owner-resume stress state machines separate ownership boundaries while preserving the same strict stress tests.
