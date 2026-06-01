@@ -1546,3 +1546,26 @@ Correctness checks:
 Interpretation:
 
 - This is a naming/include-structure cleanup, not a performance-sensitive code change. A new benchmark run was not collected for this pass because the generated filesystem helper logic is unchanged.
+
+## 2026-06-01 IO Common Header Fragment Rename
+
+This run validates removal of active `*_fragment.hpp` naming from the public shared IO helper entry point.
+
+Changes under validation:
+
+- `include/af/io_common.hpp` now includes `io_common_base.hpp`, `io_common_state.hpp`, `io_common_fixed_file.hpp`, `io_common_linux_event_timer.hpp`, and `io_common_deadline.hpp`.
+- `io_common_state.hpp` now includes `io_common_target.hpp`, `io_common_wait_arm.hpp`, `io_common_wait_state.hpp`, `io_common_uring_status.hpp`, and `io_common_iovec.hpp`.
+- The old `AF_IO_COMMON_FRAGMENT_INCLUDE` guard was replaced with `AF_IO_COMMON_DETAIL_INCLUDE`.
+- The `io_common_state.hpp` include order is protected because `io_common_uring_status.hpp` depends on wait-state helpers declared earlier.
+- No IO wait state layout, readiness wait arming, io_uring status normalization, fixed-file vectored helper, Linux eventfd/timerfd helper, deadline state, or public API behavior changed.
+
+Correctness checks:
+
+- Local `git diff --check`: passed before this documentation update.
+- Local scan for active `io_common_*fragment.hpp` references under `include/af`: no matches.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.0` Debug `asyncflow_runtime_tests` build and full runtime suite under `--security-opt seccomp=unconfined`: passed; 143 tests, 140 passed, 3 skipped, 0 failed.
+- Remote clang Release `asyncflow_runtime_tests` build and full runtime suite under `--security-opt seccomp=unconfined`: passed; 143 tests, 140 passed, 3 skipped, 0 failed.
+
+Interpretation:
+
+- This is a naming/include-structure cleanup, not a performance-sensitive code change. A new benchmark run was not collected for this pass because the generated shared IO helper logic is unchanged.
