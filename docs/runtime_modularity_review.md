@@ -80,7 +80,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - The io_uring UDP recv multishot example is now split into runtime/wait helpers, UDP socket setup helpers, a small provided-buffer recv task shell, flow/ring/recv fragments, and a thin executable entry point.
 - The io_uring file-lifecycle example is now split into runtime traits, temporary path lifecycle helpers, a small task shell, flow/file-operation/namespace-operation fragments, and a thin executable entry point.
 - The pollable-client adapter example is now split into runtime traits, a third-party-style pollable echo client, the AsyncFlow readiness adapter task, peer echo helpers, and a thin executable entry point.
-- The io_uring stream recv multishot example is now split into runtime/wait helpers, socketpair setup helpers, the provided-buffer recv multishot task, and a thin executable entry point.
+- The io_uring stream recv multishot example is now split into runtime/wait helpers, socketpair setup helpers, a small provided-buffer recv task shell, flow/ring/recv fragments, and a thin executable entry point.
 - The TCP connect/accept example is now split into runtime traits, portable loopback socket setup, server/client state-machine tasks, and a thin executable entry point. It uses the unified `ThreadKind::Io`/`ThreadKind::IoUring` API so Linux can prefer io_uring while macOS/BSD uses the native kqueue readiness backend.
 - The TCP echo server example demonstrates a fully asynchronous 2-IO-thread/1-compute-thread flow: accept/read on IO threads, uppercase-to-lowercase transform on the compute thread, then send on the owning IO thread. Its runtime traits, socket setup, server acceptor, session state machine, client driver, and executable entry point are split into focused headers.
 - The datagram round-trip example is now split into runtime traits, portable UDP loopback socket setup, server/client state-machine tasks, and a thin executable entry point. It uses the same unified API shape as TCP: Linux prefers io_uring with epoll fallback and macOS/BSD uses kqueue readiness.
@@ -391,6 +391,19 @@ Additional validation after the io_uring UDP recv multishot task split:
 - Remote clang TSAN `asyncflow_io_uring_udp_recv_multishot_example` build/run: passed with `io_uring backend unavailable` and no ThreadSanitizer report.
 - Remote clang Release `asyncflow_io_uring_udp_recv_multishot_example` build/run: passed with `io_uring backend unavailable`.
 
+Additional validation after the io_uring stream recv multishot task split:
+
+- `examples/support/io_uring_recv_multishot_task.hpp` is now a 63-line task shell.
+- `examples/support/io_uring_recv_multishot_task_flow.hpp` owns the state dispatcher and completion cleanup.
+- `examples/support/io_uring_recv_multishot_task_ring.hpp` owns provided-buffer ring registration and unregistration.
+- `examples/support/io_uring_recv_multishot_task_recv.hpp` owns recv multishot completion, buffer recycling, cancel, and stop handling.
+- No runtime scheduling, IO backend, queue, memory-ordering, or public API behavior changed in this pass; only example support ownership changed.
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_io_uring_recv_multishot_example` build: passed; local run reported `io_uring recv_multishot example is Linux-only`.
+- Remote clang Debug `asyncflow_io_uring_recv_multishot_example` build/run: passed with `io_uring backend unavailable`.
+- Remote clang TSAN `asyncflow_io_uring_recv_multishot_example` build/run: passed with `io_uring backend unavailable` and no ThreadSanitizer report.
+- Remote clang Release `asyncflow_io_uring_recv_multishot_example` build/run: passed with `io_uring backend unavailable`.
+
 Remaining follow-up:
 
 - Ready-source hints are now correct and bounded, but future benchmarking may justify a rotating ready-word cursor for very large `thread_count` values.
@@ -513,7 +526,7 @@ Current issue ledger:
 - P1: future changes must not append new operation families directly into `async_runtime.hpp`. New public methods should enter through the existing public IO/resource/lifecycle/parallel umbrellas, and new executor operations should enter through the matching backend submit/completion fragments.
 - P2: `include/af/detail/bounded_queues.hpp` still contains SPSC, MPSC, and MPMC bounded queues in one file. The implementation is performance-sensitive and cache-line aligned, so a split is acceptable only as a mechanical separation into queue-family headers with no layout or memory-order changes, followed by queue benchmarks.
 - P2: several test support files remain dense state-machine collections: stream sendfile/splice support, file lifecycle support, fixed-file read/write support, and io_uring multishot recv/recvmsg support. These should continue moving toward operation-family task fragments when touched.
-- P2: several examples remain long because they combine protocol framing, socket IO, task state machines, and result reporting. The fixed-file round trip, file lifecycle, UDP recvmsg multishot, UDP recv multishot, and length-prefixed RPC client/server paths have been reduced to focused fragments; the biggest current examples are now the remaining stream recv multishot task variant and older readiness examples. Prefer protocol/helper headers plus small task headers for future edits.
+- P2: several examples remain long because they combine protocol framing, socket IO, task state machines, and result reporting. The fixed-file round trip, file lifecycle, UDP recvmsg multishot, UDP recv multishot, stream recv multishot, and length-prefixed RPC client/server paths have been reduced to focused fragments; the biggest current examples are now older readiness examples and remaining setup-heavy example entry points. Prefer protocol/helper headers plus small task headers for future edits.
 - P2: `tests/utility_tests.cpp` is now one of the largest standalone tests. It should be split by utility domain if new utility coverage is added.
 
 Assessment:
