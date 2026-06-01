@@ -1,5 +1,5 @@
-#if !defined(AF_IO_URING_SUPPORT_FRAGMENT_INCLUDE)
-#error "io_uring_support_abi_fragment.hpp is an io_uring_support implementation fragment"
+#if !defined(AF_IO_URING_SUPPORT_DETAIL_INCLUDE)
+#error "io_uring_support_abi.hpp is internal to af/detail/io_uring_support.hpp"
 #endif
 
 #ifndef IORING_CQE_F_MORE

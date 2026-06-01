@@ -1641,3 +1641,25 @@ Correctness checks:
 Interpretation:
 
 - This is a naming/include-structure cleanup, not a performance-sensitive code change. A new benchmark run was not collected for this pass because the generated socket IO helper logic is unchanged.
+
+## 2026-06-01 io_uring Support Header Fragment Rename
+
+This run validates removal of active `*_fragment.hpp` naming from the Linux `io_uring_support.hpp` helper entry point.
+
+Changes under validation:
+
+- `include/af/detail/io_uring_support.hpp` now includes `io_uring_support_abi.hpp`, `io_uring_support_opcode.hpp`, `io_uring_support_types.hpp`, `io_uring_support_syscall.hpp`, and `io_uring_support_sqe.hpp`.
+- The old `AF_IO_URING_SUPPORT_FRAGMENT_INCLUDE` guard was replaced with `AF_IO_URING_SUPPORT_DETAIL_INCLUDE`.
+- The include order is explicitly fixed because syscall/setup and SQE helpers depend on support request types declared earlier.
+- No fallback macro value, opcode constant, request struct layout, syscall argument, setup flag handling, SQE field value, branch, lock, allocation, memory ordering, or public API behavior changed.
+
+Correctness checks:
+
+- Local `git diff --check`: passed before this documentation update.
+- Local scan for active `io_uring_support_*fragment.hpp` includes/guards under `include/af/detail`: no matches.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.0` Debug build and full runtime suite under `--security-opt seccomp=unconfined`: passed; 143 tests, 140 passed, 3 skipped, 0 failed.
+- Remote clang Release build and full runtime suite under `--security-opt seccomp=unconfined`: passed; 143 tests, 140 passed, 3 skipped, 0 failed.
+
+Interpretation:
+
+- This is a naming/include-structure cleanup, not a performance-sensitive code change. A new benchmark run was not collected for this pass because the generated Linux io_uring support helper logic is unchanged.

@@ -11,11 +11,13 @@
 #include <sys/uio.h>
 #include <unistd.h>
 
-#define AF_IO_URING_SUPPORT_FRAGMENT_INCLUDE
-#include "af/detail/io_uring_support_abi_fragment.hpp"
-#include "af/detail/io_uring_support_opcode_fragment.hpp"
-#include "af/detail/io_uring_support_types_fragment.hpp"
-#include "af/detail/io_uring_support_syscall_fragment.hpp"
-#include "af/detail/io_uring_support_sqe_fragment.hpp"
-#undef AF_IO_URING_SUPPORT_FRAGMENT_INCLUDE
+#define AF_IO_URING_SUPPORT_DETAIL_INCLUDE
+// clang-format off
+#include "af/detail/io_uring_support_abi.hpp"
+#include "af/detail/io_uring_support_opcode.hpp"
+#include "af/detail/io_uring_support_types.hpp"
+#include "af/detail/io_uring_support_syscall.hpp"
+#include "af/detail/io_uring_support_sqe.hpp"
+// clang-format on
+#undef AF_IO_URING_SUPPORT_DETAIL_INCLUDE
 #endif

@@ -92,7 +92,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - The io_uring send zero-copy example is now split into runtime traits, listener setup, async accept/send_zc server task, async connect/read verification client task, and a thin executable entry point. The network path no longer uses main-thread blocking accept/read polling.
 - The IO adapter example is now split into POSIX socket setup helpers, stream adapter tasks, UDP adapter tasks, result types, and a thin executable entry point. Main no longer uses atomic readiness polling before writing to sockets; stream and UDP peer activity is driven by runtime tasks on the IO thread.
 - io_uring file-data submit wrappers are now split into basic read/write, timeout, fixed-file, fixed-buffer, vectored, and fsync fragments while staying inline in `AsyncRuntime::Executor`.
-- `include/af/detail/io_uring_support.hpp` is now a small Linux-only umbrella over ABI fallback definitions, opcode constants, support request/types, syscall/setup wrappers, and SQE fill helpers.
+- `include/af/detail/io_uring_support.hpp` is now a small Linux-only umbrella over ABI fallback definitions, opcode constants, support request/types, syscall/setup wrappers, and SQE fill helpers with normal module names instead of `*_fragment.hpp`. Its include order is fixed because syscall/setup and SQE helpers depend on support request types declared earlier.
 - Native readiness backends now have a platform-dispatch include point: Linux uses an epoll fragment and macOS/BSD uses a kqueue fragment, while public `io_*` helpers continue to expose one API. This keeps OS-specific syscall code out of the generic executor loop and preserves header-only inlining.
 - `include/af/io_common.hpp` is now a small umbrella over focused common headers: basic socket/error helpers, wait-state helpers, fixed-file vectored helpers, Linux eventfd/timerfd helpers, and deadline state. The active internal headers use normal module names (`io_common_base.hpp`, `io_common_state.hpp`, `io_common_fixed_file.hpp`, `io_common_linux_event_timer.hpp`, `io_common_deadline.hpp`) instead of `*_fragment.hpp`.
 - `io_common_state.hpp` is now a small implementation umbrella. Target-thread/socket-name helpers, readiness wait arming, readiness wait state, io_uring status normalization, and iovec validation now live in focused `io_common_*` headers with normal module names. Its include order is fixed because `io_common_uring_status.hpp` depends on wait-state helpers declared earlier.
@@ -240,12 +240,12 @@ Historical file-size snapshot after that scheduler pass. For current core-runtim
 - `include/af/detail/runtime_executor_io_wait_fragment.hpp`: 102 lines.
 - `include/af/detail/io_common_uring_status_fragment.hpp`: 37 lines.
 - `include/af/detail/io_timeout_status_fragment.hpp`: 37 lines.
-- `include/af/detail/io_uring_support.hpp`: 21 lines.
-- `include/af/detail/io_uring_support_abi_fragment.hpp`: 63 lines.
-- `include/af/detail/io_uring_support_opcode_fragment.hpp`: 16 lines.
-- `include/af/detail/io_uring_support_types_fragment.hpp`: 59 lines.
-- `include/af/detail/io_uring_support_syscall_fragment.hpp`: 51 lines.
-- `include/af/detail/io_uring_support_sqe_fragment.hpp`: 41 lines.
+- `include/af/detail/io_uring_support.hpp`: 23 lines.
+- `include/af/detail/io_uring_support_abi.hpp`: 63 lines.
+- `include/af/detail/io_uring_support_opcode.hpp`: 17 lines.
+- `include/af/detail/io_uring_support_types.hpp`: 61 lines.
+- `include/af/detail/io_uring_support_syscall.hpp`: 44 lines.
+- `include/af/detail/io_uring_support_sqe.hpp`: 38 lines.
 - `include/af/detail/basic_task_fragment.hpp`: 317 lines, intentionally kept as one cohesive class definition with no class-body `#include` splicing.
 - `include/af/detail/object_pool.hpp`: 196 lines, intentionally kept as one cohesive class definition with no class-body `#include` splicing.
 - `include/af/detail/io_adapters_stream.hpp`: 156 lines, intentionally kept as one cohesive `IoStream` class definition with no class-body `#include` splicing.
@@ -1068,12 +1068,12 @@ Additional validation after the registered-buffer resource split:
 
 Additional validation after the io_uring support split:
 
-- `io_uring_support.hpp` is now a 21-line Linux-only umbrella:
-  - `io_uring_support_abi_fragment.hpp`: 63 lines.
-  - `io_uring_support_opcode_fragment.hpp`: 16 lines.
-  - `io_uring_support_types_fragment.hpp`: 59 lines.
-  - `io_uring_support_syscall_fragment.hpp`: 51 lines.
-  - `io_uring_support_sqe_fragment.hpp`: 41 lines.
+- `io_uring_support.hpp` is now a 23-line Linux-only umbrella with normal module names:
+  - `io_uring_support_abi.hpp`: 63 lines.
+  - `io_uring_support_opcode.hpp`: 17 lines.
+  - `io_uring_support_types.hpp`: 61 lines.
+  - `io_uring_support_syscall.hpp`: 44 lines.
+  - `io_uring_support_sqe.hpp`: 38 lines.
 - The split is structural: no fallback macro value, opcode constant, request struct layout, syscall argument, setup flag handling, SQE field value, branch, lock, allocation, or memory ordering changed.
 - Local `git diff --check`: passed.
 - Remote clang Debug full runtime test suite: 138 total, 135 passed, 3 skipped, 0 failed.
