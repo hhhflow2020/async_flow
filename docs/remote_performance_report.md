@@ -310,3 +310,20 @@ Interpretation:
 
 - This pass changed only test support layout. Runtime scheduling, queue choice, task state transitions, memory ordering, and public APIs were unchanged.
 - The split gives repeat-hop, above-64-thread ready-source, and parallel owner-resume stress state machines separate ownership boundaries while preserving the same strict stress tests.
+
+## 2026-06-01 Length-Prefixed RPC Server Example Split Validation
+
+This run validates the example support split that turned `examples/support/io_rpc_length_prefixed_server.hpp` into an umbrella over focused server/process task fragments.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_io_rpc_length_prefixed_example` build: passed.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2` Debug `asyncflow_io_rpc_length_prefixed_example` build/run: passed with `rpc response_ok=1`.
+- Remote clang TSAN `asyncflow_io_rpc_length_prefixed_example` build/run: passed with `rpc response_ok=1` and no ThreadSanitizer report.
+- Remote clang Release `asyncflow_io_rpc_length_prefixed_example` build/run: passed with `rpc response_ok=1`.
+
+Interpretation:
+
+- This pass changed only example support layout. Runtime scheduling, IO backend behavior, queue selection, memory ordering, and public APIs were unchanged.
+- The split separates the IO-thread accept/read/write server state machine from the logic-thread request processing task while preserving the explicit `rpc_async::post(RpcThread::IO_0, server_)` handoff.
