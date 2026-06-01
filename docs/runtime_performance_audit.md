@@ -151,6 +151,14 @@ Recent batch-size evidence:
   improved the medium single-destroyer `/16384` object-pool row in one run
   (66.881 M/s -> 68.323 M/s), but fan-in was flat and tiny rows were mixed. This
   supports keeping it as explicit benchmark coverage rather than a default.
+- A shuffled remote-release canary was added because the original cross-thread
+  destroy benchmark releases objects in creation order and therefore often
+  returns adjacent same-block slots. The shuffled `/16384` rows are much harder:
+  512-slot chunks measured 69.491 M/s ordered but 31.425 M/s shuffled in the
+  baseline run. A grouped remote-flush prototype was rejected because the extra
+  grouping work regressed the large shuffled row to 26.639 M/s. This keeps
+  shuffled remote release as a known remaining specialization target rather than
+  hiding it behind an unconditional generic grouping path.
 - Runtime-level `BM_RuntimeCrossThreadHopTaskPoolBatch` A/B did not show a
   regression for large bursts: batch 8 reached 638.910 k/s at `/8192`, batch 32
   reached 646.037 k/s, and batch 64 reached 648.161 k/s. The `/1024` case still

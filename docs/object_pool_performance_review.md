@@ -81,6 +81,11 @@ Source: `include/af/detail/object_pool.hpp`.
 - Added 128-slot remote-release benchmark canaries. These cover the explicit
   `RemoteReleaseBatchSize=128` plus `LocalCacheCapacity=128` shape without
   changing the generic or runtime defaults.
+- Added shuffled remote-release benchmark canaries. The older cross-thread
+  destroy benchmark releases objects in creation order, which tends to keep
+  returned slots grouped by block. The shuffled canary exposes the harder case
+  where remote completions arrive out of block order and a remote-release batch
+  may contain many owning blocks.
 - Wired `task_pool_local_cache_set_size`,
   `task_pool_direct_release_set_size`, and
   `task_pool_local_cache_capacity` through runtime traits/config into the static
@@ -492,6 +497,27 @@ The current conclusion is that generic per-block sharding is not justified. If
 high fan-in remains a bottleneck in real runtime benchmarks, the next candidate
 should be executor-local pool specialization or producer-aware remote-return
 aggregation, not another unconditional shard count inside `ObjectPool`.
+
+The shuffled remote-release canary shows a real remaining hard case. With
+remote-batched cross-thread release and shuffled destruction order, throughput
+drops sharply because a 64-slot remote-release cache can contain slots from many
+blocks:
+
+| Chunk | Ordered `/16384` | Shuffled `/16384` |
+| --- | ---: | ---: |
+| 256 | 67.231 M/s | 30.367 M/s |
+| 512 | 69.491 M/s | 31.425 M/s |
+| 1024 | 69.861 M/s | 34.130 M/s |
+
+A remote-batch grouped-flush prototype was tested and reverted. The first
+in-place grouping variant improved nothing reliably and made several shuffled
+rows worse. A second stack-array grouping variant kept the ordered rows in the
+same broad band but still failed the large shuffled canary: the 512-slot
+shuffled `/16384` row measured 26.639 M/s, below the 31.425 M/s baseline. The
+extra grouping work outweighed the reduction in per-block `push_many()` calls
+for this batch size. The kept implementation therefore continues to flush
+adjacent same-block runs only. The shuffled benchmark remains because it covers
+a workload shape the older ordered cross-thread benchmark did not.
 
 Runtime task-pool batch A/B on `BM_RuntimeCrossThreadHopTaskPoolBatch`:
 

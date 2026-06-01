@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <benchmark/benchmark.h>
@@ -12,6 +13,21 @@
 #include "af/detail/object_pool.hpp"
 
 namespace {
+
+[[nodiscard]] std::vector<std::size_t> shuffled_indices(std::size_t count) {
+    std::vector<std::size_t> indices(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        indices[i] = i;
+    }
+
+    std::uint64_t state = 0x9e3779b97f4a7c15ULL ^ count;
+    for (std::size_t i = count; i > 1U; --i) {
+        state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+        const auto swap_index = static_cast<std::size_t>(state % i);
+        std::swap(indices[i - 1U], indices[swap_index]);
+    }
+    return indices;
+}
 
 void BM_SpscQueuePushPop(benchmark::State& state) {
     af::detail::BoundedSpscQueue<int> queue(65536);
@@ -245,6 +261,53 @@ void RunObjectPoolCrossThreadDestroyBatch(benchmark::State& state) {
 }
 
 template <typename Payload, typename Pool>
+void RunObjectPoolShuffledCrossThreadDestroyBatch(benchmark::State& state) {
+    Pool pool;
+    const auto object_count = static_cast<std::size_t>(state.range(0));
+    std::vector<Payload*> objects(object_count);
+    const std::vector<std::size_t> destroy_order = shuffled_indices(object_count);
+    std::atomic<std::uint64_t> published{0};
+    std::atomic<std::uint64_t> consumed{0};
+    std::atomic<bool> stop{false};
+
+    std::thread destroyer([&] {
+        std::uint64_t seen = 0;
+        while (!stop.load(std::memory_order_acquire)) {
+            const std::uint64_t target = published.load(std::memory_order_acquire);
+            if (target == seen) {
+                std::this_thread::yield();
+                continue;
+            }
+
+            for (std::size_t index : destroy_order) {
+                pool.destroy(objects[index]);
+            }
+
+            seen = target;
+            consumed.store(target, std::memory_order_release);
+        }
+    });
+
+    std::uint64_t iteration = 0;
+    for (auto _ : state) {
+        for (std::size_t i = 0; i < objects.size(); ++i) {
+            objects[i] = pool.create();
+            benchmark::DoNotOptimize(objects[i]);
+        }
+
+        published.store(++iteration, std::memory_order_release);
+        while (consumed.load(std::memory_order_acquire) != iteration) {
+            std::this_thread::yield();
+        }
+    }
+
+    stop.store(true, std::memory_order_release);
+    destroyer.join();
+
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+
+template <typename Payload, typename Pool>
 void RunObjectPoolFanInDestroyBatch(benchmark::State& state) {
     Pool pool;
     const auto object_count = static_cast<std::size_t>(state.range(0));
@@ -439,6 +502,18 @@ void BM_ObjectPoolTunedChunkRemoteBatchCrossThreadDestroyBatch(
     };
 
     RunObjectPoolCrossThreadDestroyBatch<
+        Payload,
+        af::detail::ObjectPool<Payload, ChunkSize, 64>>(state);
+}
+
+template <std::size_t ChunkSize>
+void BM_ObjectPoolTunedChunkRemoteBatchShuffledCrossThreadDestroyBatch(
+    benchmark::State& state) {
+    struct Payload {
+        std::uint64_t values[8]{};
+    };
+
+    RunObjectPoolShuffledCrossThreadDestroyBatch<
         Payload,
         af::detail::ObjectPool<Payload, ChunkSize, 64>>(state);
 }
@@ -767,6 +842,15 @@ BENCHMARK_TEMPLATE(BM_ObjectPoolTunedChunkRemoteBatchCrossThreadDestroyBatch, 51
     ->Arg(1024)
     ->Arg(16384);
 BENCHMARK_TEMPLATE(BM_ObjectPoolTunedChunkRemoteBatchCrossThreadDestroyBatch, 1024)
+    ->Arg(1024)
+    ->Arg(16384);
+BENCHMARK_TEMPLATE(BM_ObjectPoolTunedChunkRemoteBatchShuffledCrossThreadDestroyBatch, 256)
+    ->Arg(1024)
+    ->Arg(16384);
+BENCHMARK_TEMPLATE(BM_ObjectPoolTunedChunkRemoteBatchShuffledCrossThreadDestroyBatch, 512)
+    ->Arg(1024)
+    ->Arg(16384);
+BENCHMARK_TEMPLATE(BM_ObjectPoolTunedChunkRemoteBatchShuffledCrossThreadDestroyBatch, 1024)
     ->Arg(1024)
     ->Arg(16384);
 BENCHMARK(BM_ObjectPoolCachedIndexRemoteBatchCrossThreadDestroyBatch)
