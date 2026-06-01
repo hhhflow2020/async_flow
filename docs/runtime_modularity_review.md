@@ -24,7 +24,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - File IO open/lifecycle test support is now split further into batched write, openat round-trip, and full lifecycle task fragments. The full lifecycle task is now kept as one cohesive state-machine class, and the previous open/lifecycle header is kept as a small umbrella.
 - Filesystem boundary test support is now split into open/close, metadata/allocation, and namespace/openat2 operation-family fragments, with the previous filesystem boundary header kept as a small umbrella.
 - File IO filesystem operation test support is now kept as one cohesive filesystem state-machine class instead of a class-body include shell; broader file IO support remains split by boundary, read/write, fixed-resource, lifecycle, and filesystem-operation responsibilities.
-- Public IO helper headers remain focused umbrellas: `io_socket.hpp` still includes inline operation-family fragments, while `io_file.hpp` and `io_adapters.hpp` now include normal internal headers for file helpers, file descriptors/fixed files, stream/listener, datagram, aliases, and event/timer adapters.
+- Public IO helper headers remain focused umbrellas: `io_socket.hpp`, `io_file.hpp`, and `io_adapters.hpp` now include normal internal headers for socket helpers, file helpers, file descriptors/fixed files, stream/listener, datagram, aliases, and event/timer adapters.
 - `include/af/io_datagram.hpp` is now an umbrella over focused datagram recv, send, vectored, and zero-copy helper headers with normal module names instead of `*_fragment.hpp`.
 - io_uring socket test support and runtime socket test sources have been split by stream, datagram, accept/connect, and multishot responsibilities.
 - io_uring socket stream test support is now split further into recv/cancel, send/zero-copy send, and vectored stream task fragments, with the previous stream header kept as a small umbrella.
@@ -42,12 +42,12 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Public socket message submit wrappers are now split into recvmsg, sendmsg, and accept/connect fragments, with a small umbrella preserving inline visibility in `AsyncRuntime`.
 - Public socket data submit wrappers are now a small umbrella over basic recv, recv multishot, basic send, and zero-copy send fragments. Public API validation and executor handoff remain inline in `AsyncRuntime`.
 - Public socket accept/connect helpers are now a small umbrella over accept, accept-direct, accept-multishot, and connect fragments. POSIX fallback, io_uring direct accept, multishot completion handling, and connect readiness fallback are now separate while staying inline.
-- Public socket lifecycle helpers are now split into create, socket options, socket name lookup, and listener bind/listen fragments, with `io_socket_lifecycle_fragment.hpp` kept as a small inline umbrella.
+- Public socket lifecycle helpers are now split into create, socket options, socket name lookup, and listener bind/listen headers, with `io_socket_lifecycle.hpp` kept as a small inline umbrella.
 - Public file-data submit wrappers are now split into basic read/write/fsync, fixed-file, registered-buffer, and vectored fragments, with a small umbrella preserving inline visibility in `AsyncRuntime`.
 - Public IO resource wrappers are now split into backend availability, buffer resources, file resources, and wait/cancel/timeout fragments, with `runtime_public_io_resource_fragment.hpp` kept as a small inline umbrella.
 - Public io_uring availability now exposes setup/runtime failure diagnostics through `io_uring_backend_error(thread)`, so tests can distinguish a missing backend from `EPERM`/`ENOSYS`/mapping failures instead of relying on a silent boolean.
-- Public socket receive helpers are now split into basic recv/fixed-file recv, recv multishot, and recvmsg multishot parser/submit fragments, with `io_socket_recv_fragment.hpp` kept as a small inline umbrella.
-- Public socket send helpers are now split into basic send, fixed-file send, zero-copy send, and vectored zero-copy send fragments, with `io_socket_send_fragment.hpp` kept as a small inline umbrella.
+- Public socket receive helpers are now split into basic recv/fixed-file recv, recv multishot, and recvmsg multishot parser/submit headers, with `io_socket_recv.hpp` kept as a small inline umbrella.
+- Public socket send helpers are now split into basic send, fixed-file send, zero-copy send, and vectored zero-copy send headers, with `io_socket_send.hpp` kept as a small inline umbrella.
 - Public file fixed-resource helpers are now split into fixed-file read/write/fsync, registered-buffer read/write, and vectored file write headers, with `io_file_fixed_buffer.hpp` kept as a small inline umbrella.
 - Public file lifecycle helpers are now split into open/open-direct, close/fsync, metadata, and namespace-operation headers, with `io_file_lifecycle.hpp` kept as a small inline umbrella.
 - Public stream/listener adapters are now split into `IoStream` and `IoListener` internal headers, with `io_adapters_stream_listener.hpp` kept as a small inline umbrella.
@@ -101,7 +101,8 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - `include/af/io_filesystem.hpp` is now a small public umbrella over open/openat2, namespace operation, allocation/truncate, and `IoDirectory` adapter headers with normal module names instead of `*_fragment.hpp`. Public filesystem helpers remain header-only/template-visible while keeping operation families separate.
 - The macOS/BSD kqueue backend is split by setup, timeout, poll, storage, wait, and event translation helpers. kqueue now supports native one-shot timeout completion and cancel for `io_wait_timeout()` / `arm_io_timeout()` without routing through Linux `timerfd`.
 - The bounded queue implementations are now split by SPSC, MPSC, and MPMC queue family, with `bounded_queues.hpp` kept as a compatibility umbrella. The split is mechanical and preserves queue layout, cache-line alignment, memory ordering, and template visibility.
-- Socket transfer helpers are now split by sendfile, shutdown, and splice operation family, with `io_socket_transfer_fragment.hpp` kept as a compatibility umbrella.
+- Socket transfer helpers are now split by sendfile, shutdown, and splice operation family, with `io_socket_transfer.hpp` kept as a small inline umbrella.
+- `include/af/io_socket.hpp` is now a small public umbrella over lifecycle, accept/connect, recv, send, transfer, and vectored helper headers with normal module names instead of `*_fragment.hpp`.
 - `IoFixedFile`, `IoFile`, `IoStream`, and `IoDatagramSocket` are now cohesive thin adapter class definitions in normally named internal headers. The previous class-body method-fragment split has been reverted because it made each adapter harder to audit without creating an independent abstraction boundary.
 - Public file read helpers are now split into current-offset read/readv and positioned read/readv headers, with `io_file_read.hpp` kept as a small inline umbrella.
 - `include/af/io_file.hpp` is now a small public umbrella over current-offset read, positioned write/read, fixed-file/registered-buffer/vectored write, lifecycle/open/close/fsync, metadata, namespace, and current-offset write headers with normal module names instead of `*_fragment.hpp`.
@@ -842,7 +843,7 @@ Historical second-pass snapshot before the runtime core de-fragmenting correctio
 - `include/af/task.hpp`: small umbrella over task declarations, IO wait state, optional registry links, and `BasicTask`.
 - `include/af/io_types.hpp`: small umbrella over IO base types, provided buffers, status, and fd ownership.
 
-The remaining code-size pressure is now in second-level fragments and fixtures. `include/af/detail/io_file_fixed_buffer_fragment.hpp`, `include/af/detail/io_socket_send_fragment.hpp`, `include/af/detail/io_file_lifecycle_fragment.hpp`, and `include/af/detail/io_socket_lifecycle_fragment.hpp` have been reduced to small umbrellas over operation-family helpers. The `io_adapters` public adapter path now uses normally named internal headers. The largest remaining runtime-facing headers in the latest scan are:
+The remaining code-size pressure is now in second-level fragments and fixtures. The public file/socket helper entry points have been reduced to small umbrellas over normally named operation-family headers, and the `io_adapters` public adapter path now uses normally named internal headers. The largest remaining runtime-facing headers in the latest scan are:
 
 - `include/af/io_filesystem.hpp`: now an overview-sized public umbrella. Public filesystem helpers and the underlying runtime submit layer are both split by operation family.
 

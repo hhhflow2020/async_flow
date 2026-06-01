@@ -4,28 +4,15 @@
 
 namespace af {
 
-#define AF_IO_SOCKET_FRAGMENT_INCLUDE 1
-#include "af/detail/io_socket_lifecycle_fragment.hpp"
-#undef AF_IO_SOCKET_FRAGMENT_INCLUDE
-
-#define AF_IO_SOCKET_FRAGMENT_INCLUDE 1
-#include "af/detail/io_socket_accept_connect_fragment.hpp"
-#undef AF_IO_SOCKET_FRAGMENT_INCLUDE
-
-#define AF_IO_SOCKET_FRAGMENT_INCLUDE 1
-#include "af/detail/io_socket_recv_fragment.hpp"
-#undef AF_IO_SOCKET_FRAGMENT_INCLUDE
-
-#define AF_IO_SOCKET_FRAGMENT_INCLUDE 1
-#include "af/detail/io_socket_send_fragment.hpp"
-#undef AF_IO_SOCKET_FRAGMENT_INCLUDE
-
-#define AF_IO_SOCKET_FRAGMENT_INCLUDE 1
-#include "af/detail/io_socket_transfer_fragment.hpp"
-#undef AF_IO_SOCKET_FRAGMENT_INCLUDE
-
-#define AF_IO_SOCKET_FRAGMENT_INCLUDE 1
-#include "af/detail/io_socket_vectored_fragment.hpp"
-#undef AF_IO_SOCKET_FRAGMENT_INCLUDE
+#define AF_IO_SOCKET_DETAIL_INCLUDE 1
+// clang-format off
+#include "af/detail/io_socket_lifecycle.hpp"
+#include "af/detail/io_socket_accept_connect.hpp"
+#include "af/detail/io_socket_recv.hpp"
+#include "af/detail/io_socket_send.hpp"
+#include "af/detail/io_socket_transfer.hpp"
+#include "af/detail/io_socket_vectored.hpp"
+// clang-format on
+#undef AF_IO_SOCKET_DETAIL_INCLUDE
 
 } // namespace af

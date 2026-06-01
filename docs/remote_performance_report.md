@@ -1615,3 +1615,29 @@ Correctness checks:
 Interpretation:
 
 - This is a naming/include-structure cleanup, not a performance-sensitive code change. A new benchmark run was not collected for this pass because the generated file IO helper logic is unchanged.
+
+## 2026-06-01 IO Socket Header Fragment Rename
+
+This run validates removal of active `*_fragment.hpp` naming from the public socket IO helper entry point.
+
+Changes under validation:
+
+- `include/af/io_socket.hpp` now includes `io_socket_lifecycle.hpp`, `io_socket_accept_connect.hpp`, `io_socket_recv.hpp`, `io_socket_send.hpp`, `io_socket_transfer.hpp`, and `io_socket_vectored.hpp`.
+- `io_socket_lifecycle.hpp` now includes `io_socket_create.hpp`, `io_socket_options.hpp`, `io_socket_name.hpp`, and `io_socket_listener.hpp`.
+- `io_socket_accept_connect.hpp` now includes `io_socket_accept.hpp`, `io_socket_accept_direct.hpp`, `io_socket_accept_multishot.hpp`, and `io_socket_connect.hpp`.
+- `io_socket_recv.hpp` now includes `io_socket_recv_basic.hpp`, `io_socket_recv_multishot.hpp`, and `io_socket_recvmsg_multishot.hpp`.
+- `io_socket_send.hpp` now includes `io_socket_send_basic.hpp`, `io_socket_send_fixed_file.hpp`, `io_socket_send_zc.hpp`, and `io_socket_sendv_zc.hpp`.
+- `io_socket_transfer.hpp` now includes `io_socket_sendfile.hpp`, `io_socket_shutdown.hpp`, and `io_socket_splice.hpp`.
+- The old `AF_IO_SOCKET_FRAGMENT_INCLUDE` guard was replaced with `AF_IO_SOCKET_DETAIL_INCLUDE`.
+- No socket create/options/name/listener, accept/connect, recv/send, multishot, zero-copy, transfer, vectored IO, wait/cancel ordering, or public API behavior changed.
+
+Correctness checks:
+
+- Local `git diff --check`: passed before this documentation update.
+- Local scan for active `io_socket_*fragment.hpp` includes under `include/af`: no matches.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.0` Debug build and full runtime suite under `--security-opt seccomp=unconfined`: passed; 143 tests, 140 passed, 3 skipped, 0 failed.
+- Remote clang Release build and full runtime suite under `--security-opt seccomp=unconfined`: passed; 143 tests, 140 passed, 3 skipped, 0 failed.
+
+Interpretation:
+
+- This is a naming/include-structure cleanup, not a performance-sensitive code change. A new benchmark run was not collected for this pass because the generated socket IO helper logic is unchanged.
