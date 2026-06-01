@@ -272,3 +272,23 @@ Interpretation:
 
 - This pass changed only test fixture setup. Runtime scheduling, IO backend behavior, queue selection, memory ordering, and public APIs were unchanged.
 - The split makes epoll and io_uring datagram tests share one UDP loopback fixture helper, reducing duplicated socket lifecycle setup in the test bodies.
+
+## 2026-06-01 Stream Transfer Test Helper Split Validation
+
+This run validates the test support split that moved repeated sendfile/splice fixture setup out of `tests/runtime_io_stream_transfer_tests.cpp` and into `tests/support/runtime_io_stream_transfer_helpers_fragment.hpp`.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_runtime_tests` build: passed.
+- Local Release sendfile/splice-targeted tests: 5/5 passed, all skipped by local platform/backend logic.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2` Debug sendfile-targeted tests: 4/4 passed; 2 io_uring-poll capability tests were skipped by test logic.
+- Remote clang Debug splice-targeted tests: 1/1 passed.
+- Remote clang TSAN sendfile-targeted tests: 4/4 passed with no ThreadSanitizer report; 2 io_uring-poll capability tests were skipped by test logic.
+- Remote clang TSAN splice-targeted tests: 1/1 passed with no ThreadSanitizer report.
+- Remote clang Release full runtime suite: 132/132 passed; 21 platform/io_uring capability tests were skipped by test logic.
+
+Interpretation:
+
+- This pass changed only test fixture setup and cleanup ownership. Runtime scheduling, IO backend behavior, queue selection, memory ordering, and public APIs were unchanged.
+- The split keeps sendfile/splice behavior assertions in the test source while moving temporary files, blocked sockets, and pipe pairs into reusable support helpers.

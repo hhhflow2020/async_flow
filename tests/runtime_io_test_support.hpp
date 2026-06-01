@@ -220,6 +220,10 @@ void close_fd(int& fd) {
         fd = -1;
     }
 }
+
+#define AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE 1
+#include "support/runtime_io_stream_transfer_helpers_fragment.hpp"
+#undef AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE
 #endif
 
 } // namespace
