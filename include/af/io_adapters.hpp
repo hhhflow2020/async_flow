@@ -4,28 +4,15 @@
 
 namespace af {
 
-#define AF_IO_ADAPTERS_FRAGMENT_INCLUDE 1
-#include "af/detail/io_adapters_descriptor_fragment.hpp"
-#undef AF_IO_ADAPTERS_FRAGMENT_INCLUDE
-
-#define AF_IO_ADAPTERS_FRAGMENT_INCLUDE 1
-#include "af/detail/io_adapters_file_fragment.hpp"
-#undef AF_IO_ADAPTERS_FRAGMENT_INCLUDE
-
-#define AF_IO_ADAPTERS_FRAGMENT_INCLUDE 1
-#include "af/detail/io_adapters_stream_listener_fragment.hpp"
-#undef AF_IO_ADAPTERS_FRAGMENT_INCLUDE
-
-#define AF_IO_ADAPTERS_FRAGMENT_INCLUDE 1
-#include "af/detail/io_adapters_datagram_fragment.hpp"
-#undef AF_IO_ADAPTERS_FRAGMENT_INCLUDE
-
-#define AF_IO_ADAPTERS_FRAGMENT_INCLUDE 1
-#include "af/detail/io_adapters_aliases_fragment.hpp"
-#undef AF_IO_ADAPTERS_FRAGMENT_INCLUDE
-
-#define AF_IO_ADAPTERS_FRAGMENT_INCLUDE 1
-#include "af/detail/io_adapters_event_timer_fragment.hpp"
-#undef AF_IO_ADAPTERS_FRAGMENT_INCLUDE
+#define AF_IO_ADAPTERS_DETAIL_INCLUDE 1
+// clang-format off
+#include "af/detail/io_adapters_descriptor.hpp"
+#include "af/detail/io_adapters_file.hpp"
+#include "af/detail/io_adapters_stream_listener.hpp"
+#include "af/detail/io_adapters_datagram.hpp"
+#include "af/detail/io_adapters_aliases.hpp"
+#include "af/detail/io_adapters_event_timer.hpp"
+// clang-format on
+#undef AF_IO_ADAPTERS_DETAIL_INCLUDE
 
 } // namespace af

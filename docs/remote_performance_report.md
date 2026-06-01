@@ -1569,3 +1569,25 @@ Correctness checks:
 Interpretation:
 
 - This is a naming/include-structure cleanup, not a performance-sensitive code change. A new benchmark run was not collected for this pass because the generated shared IO helper logic is unchanged.
+
+## 2026-06-01 IO Adapters Header Fragment Rename
+
+This run validates removal of active `*_fragment.hpp` naming from the public IO adapter entry point.
+
+Changes under validation:
+
+- `include/af/io_adapters.hpp` now includes `io_adapters_descriptor.hpp`, `io_adapters_file.hpp`, `io_adapters_stream_listener.hpp`, `io_adapters_datagram.hpp`, `io_adapters_aliases.hpp`, and `io_adapters_event_timer.hpp`.
+- `io_adapters_file.hpp` now includes `io_adapters_file_descriptor.hpp` and `io_adapters_fixed_file.hpp`; `io_adapters_stream_listener.hpp` now includes `io_adapters_listener.hpp` and `io_adapters_stream.hpp`.
+- The old `AF_IO_ADAPTERS_FRAGMENT_INCLUDE` guard was replaced with `AF_IO_ADAPTERS_DETAIL_INCLUDE`.
+- No adapter object layout, fd/fixed-file ownership behavior, forwarding helper, queue selection, syscall/io_uring routing, or public API behavior changed.
+
+Correctness checks:
+
+- Local `git diff --check`: passed before this documentation update.
+- Local scan for active `io_adapters_*fragment.hpp` references under `include/af`: no matches.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.0` Debug `asyncflow_runtime_tests` build and full runtime suite under `--security-opt seccomp=unconfined`: passed; 143 tests, 140 passed, 3 skipped, 0 failed.
+- Remote clang Release `asyncflow_runtime_tests` build and full runtime suite under `--security-opt seccomp=unconfined`: passed; 143 tests, 140 passed, 3 skipped, 0 failed.
+
+Interpretation:
+
+- This is a naming/include-structure cleanup, not a performance-sensitive code change. A new benchmark run was not collected for this pass because the generated adapter forwarding logic is unchanged.
