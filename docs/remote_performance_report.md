@@ -1683,3 +1683,23 @@ Correctness checks:
 Interpretation:
 
 - This is dead internal-header cleanup. A new build or benchmark run was not collected for this pass because the deleted entrypoint wrappers are not reachable from active code.
+
+## 2026-06-01 Stale Runtime Fragment Child Cleanup
+
+This run removes the remaining clean framework runtime fragment child headers that were only referenced from other obsolete fragment headers.
+
+Changes under validation:
+
+- Removed 137 clean `include/af/detail/runtime*_fragment.hpp` child headers that had no active non-fragment include path.
+- Preserved the pre-existing dirty `runtime_executor_io_uring_backend_completion_operation_fragment.hpp` worktree file without editing or staging it.
+- After the deletion, the only framework `include/af/detail/*fragment.hpp` file left in the worktree is that pre-existing dirty file.
+- No active scheduler, executor, IO backend, public IO, task lifecycle, queue, state layout, syscall, lock, allocation, memory ordering, or public API behavior changed.
+
+Correctness checks:
+
+- Local scan for `#include "af/detail/*fragment.hpp"` in non-fragment framework headers, tests, examples, benchmarks, CMake, and Conan metadata: no matches.
+- Local `git diff --check`: passed before this documentation update.
+
+Interpretation:
+
+- This is dead internal-header cleanup. A new build or benchmark run was not collected for this pass because the deleted child fragments are not reachable from active code.
