@@ -5,9 +5,9 @@
 namespace af {
 
 // clang-format off
-#include "af/detail/io_timeout_status.hpp"
-#include "af/detail/io_timeout_wait.hpp"
-#include "af/detail/io_timeout_deadline.hpp"
+#include "af/detail/io/timeout/io_timeout_status.hpp"
+#include "af/detail/io/timeout/io_timeout_wait.hpp"
+#include "af/detail/io/timeout/io_timeout_deadline.hpp"
 // clang-format on
 
 } // namespace af

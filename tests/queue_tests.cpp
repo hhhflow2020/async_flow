@@ -4,7 +4,7 @@
 
 #include <gtest/gtest.h>
 
-#include "af/detail/bounded_queues.hpp"
+#include "af/detail/queue/bounded_queues.hpp"
 
 TEST(QueueTests, BoundedSpscPreservesFifoAndRejectsWhenFull) {
     af::detail::BoundedSpscQueue<int> queue(2);

@@ -19,10 +19,10 @@ struct open_how;
 namespace af {
 
 // clang-format off
-#include "af/detail/io_filesystem_open.hpp"
-#include "af/detail/io_filesystem_namespace.hpp"
-#include "af/detail/io_filesystem_allocation.hpp"
-#include "af/detail/io_filesystem_directory.hpp"
+#include "af/detail/io/filesystem/io_filesystem_open.hpp"
+#include "af/detail/io/filesystem/io_filesystem_namespace.hpp"
+#include "af/detail/io/filesystem/io_filesystem_allocation.hpp"
+#include "af/detail/io/filesystem/io_filesystem_directory.hpp"
 // clang-format on
 
 } // namespace af

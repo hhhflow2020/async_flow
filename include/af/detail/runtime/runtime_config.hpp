@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <limits>
 
-#include "af/detail/runtime_traits.hpp"
+#include "af/detail/runtime/runtime_traits.hpp"
 
 namespace af::detail {
 

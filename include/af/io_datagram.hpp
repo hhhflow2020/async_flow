@@ -4,9 +4,9 @@
 
 namespace af {
 
-#include "af/detail/io_datagram_recv.hpp"
-#include "af/detail/io_datagram_send.hpp"
-#include "af/detail/io_datagram_vectored.hpp"
-#include "af/detail/io_datagram_zero_copy.hpp"
+#include "af/detail/io/datagram/io_datagram_recv.hpp"
+#include "af/detail/io/datagram/io_datagram_send.hpp"
+#include "af/detail/io/datagram/io_datagram_vectored.hpp"
+#include "af/detail/io/datagram/io_datagram_zero_copy.hpp"
 
 } // namespace af

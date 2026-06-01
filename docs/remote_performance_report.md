@@ -96,6 +96,35 @@ Interpretation:
 - kqueue and direct fixed-file capability skips remain expected for this Linux
   host/container validation lane.
 
+## 2026-06-02 Framework Detail Directory Layout Split
+
+This run validates the framework header directory split on the requested remote
+Linux host with `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.0`.
+
+Changes under validation:
+
+- `.clang-format` was added and all C/C++ files under
+  `include`, `tests`, `examples`, and `benchmarks` were formatted.
+- `include/af/detail` now keeps only `config.hpp` at the root. Internal
+  implementation headers moved into responsibility directories:
+  `runtime`, `io/*`, `queue`, `task`, and `memory`.
+- Public umbrella headers under `include/af/*.hpp` were kept as the public
+  include surface and updated to include the new internal paths.
+
+Correctness checks:
+
+- Local `git diff --check`: passed.
+- Remote GCC Release default build of runtime tests and benchmarks: passed.
+- Remote GCC Release full runtime suite: 161/161 passed; 3 platform/capability
+  tests were skipped by test logic.
+
+Interpretation:
+
+- The source tree is now organized by module ownership without changing runtime
+  behavior, queue algorithms, IO semantics, or public umbrella headers.
+- The validation build covered both runtime tests and benchmark translation
+  units after the include-path move.
+
 ## 2026-06-01 Scheduler Correctness Pass
 
 This run validates the scheduler modularity/correctness pass on the requested remote Linux host with `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2`.

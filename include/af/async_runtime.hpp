@@ -17,15 +17,15 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
-#include "af/detail/bounded_queues.hpp"
+#include "af/detail/queue/bounded_queues.hpp"
 #include "af/detail/config.hpp"
-#include "af/detail/io_uring_support.hpp"
-#include "af/detail/object_pool.hpp"
-#include "af/detail/runtime_common_state.hpp"
-#include "af/detail/runtime_config.hpp"
-#include "af/detail/runtime_public_io.hpp"
-#include "af/detail/runtime_ready_source_set.hpp"
-#include "af/detail/runtime_task_handle.hpp"
+#include "af/detail/io/uring/io_uring_support.hpp"
+#include "af/detail/memory/object_pool.hpp"
+#include "af/detail/runtime/runtime_common_state.hpp"
+#include "af/detail/runtime/runtime_config.hpp"
+#include "af/detail/runtime/runtime_public_io.hpp"
+#include "af/detail/runtime/runtime_ready_source_set.hpp"
+#include "af/detail/runtime/runtime_task_handle.hpp"
 #include "af/task.hpp"
 
 #if !defined(_WIN32)
@@ -343,9 +343,9 @@ private:
 } // namespace af
 
 #define AF_ASYNC_RUNTIME_IMPL_INCLUDE 1
-#include "af/detail/runtime_dispatch.hpp"
-#include "af/detail/runtime_executor.hpp"
-#include "af/detail/runtime_parallel.hpp"
-#include "af/detail/runtime_public_api.hpp"
-#include "af/detail/runtime_task_lifecycle.hpp"
+#include "af/detail/runtime/runtime_dispatch.hpp"
+#include "af/detail/runtime/runtime_executor.hpp"
+#include "af/detail/runtime/runtime_parallel.hpp"
+#include "af/detail/runtime/runtime_public_api.hpp"
+#include "af/detail/runtime/runtime_task_lifecycle.hpp"
 #undef AF_ASYNC_RUNTIME_IMPL_INCLUDE

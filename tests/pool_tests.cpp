@@ -6,7 +6,7 @@
 
 #include <gtest/gtest.h>
 
-#include "af/detail/object_pool.hpp"
+#include "af/detail/memory/object_pool.hpp"
 
 TEST(PoolTests, ObjectPoolReusesReleasedStorage) {
     struct Payload {

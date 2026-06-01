@@ -110,9 +110,41 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Public timeout helpers are now split into timeout completion status normalization, single timeout wait submission, and deadline arbitration headers with normal module names. `io_timeout.hpp` remains a small public umbrella while preserving inline/template visibility for timeout and cancel race handling.
 - Runtime common state now lives in `runtime_common_state.hpp` as real named types: runtime status, cache-line atomic wrapper, ordered-batch state, parallel-group state, and external-post counter.
 - Runtime dispatch now lives in `runtime_dispatch.hpp`; explicit ready-route selection, non-blocking enqueue, blocking enqueue, and post/pending admission stay in one scheduler-owned implementation file. The same-thread local queue path and cross-thread SPSC path remain separate named helpers.
+- `include/af/detail` is no longer a flat internal header directory. The root now keeps only shared `config.hpp`; implementation headers are grouped under `detail/runtime`, `detail/io/*`, `detail/queue`, `detail/task`, and `detail/memory`. Public `include/af/*.hpp` umbrella headers remain the stable include surface.
 - Each split so far preserved header-only/template visibility, passed `git diff --check`, Docker GCC Debug runtime tests, and, for core runtime header changes, Release runtime benchmark baseline regression.
 
 ## Current Findings
+
+### 2026-06-02 Detail Directory Layout Pass
+
+Status: current framework layout.
+
+Resolved item:
+
+- P1: `include/af/detail` had accumulated 107 root-level internal headers, making module ownership harder to scan. The framework now groups internal implementation headers by responsibility while preserving the public umbrella include surface.
+
+Current layout:
+
+- `include/af/detail/config.hpp`: shared platform/config helpers.
+- `include/af/detail/queue/`: bounded SPSC, MPSC, and MPMC queues.
+- `include/af/detail/memory/`: object pool.
+- `include/af/detail/task/`: task state, registry, and `BasicTask`.
+- `include/af/detail/runtime/`: runtime config/state, executor, scheduler, lifecycle, dispatch, parallel, and public-runtime implementation components.
+- `include/af/detail/io/common/`: common IO state/status/wait/deadline helpers.
+- `include/af/detail/io/types/`: IO result/status/fd/provided-buffer support types.
+- `include/af/detail/io/adapters/`: thin adapter classes.
+- `include/af/detail/io/socket/`: socket lifecycle, accept/connect, recv/send, transfer, zero-copy, and vectored helpers.
+- `include/af/detail/io/file/`: file read/write/fixed-resource/lifecycle helpers.
+- `include/af/detail/io/filesystem/`: filesystem open, namespace, allocation, and directory helpers.
+- `include/af/detail/io/datagram/`: datagram recv/send/vectored/zero-copy helpers.
+- `include/af/detail/io/timeout/`: timeout status/wait/deadline helpers.
+- `include/af/detail/io/uring/`: Linux io_uring support ABI/opcode/setup/syscall/SQE helpers.
+
+Validation:
+
+- Local `git diff --check`: passed.
+- Remote GCC Release default build of runtime tests and benchmarks: passed.
+- Remote GCC Release full runtime suite: 161/161 passed; three platform/capability tests were skipped by test logic.
 
 ### 2026-06-01 Runtime Core De-Fragmenting Correction
 
@@ -127,15 +159,15 @@ Issue recorded:
 Current core-runtime layout:
 
 - `include/af/async_runtime.hpp`: 391 lines. It declares the `AsyncRuntime` API aliases, public methods, private runtime state, and static members. It no longer includes fragment headers inside the class body.
-- `include/af/detail/runtime_config.hpp`: config validation and public tuning values. The thread-count boundary is still `> 0` and `<= UINT16_MAX`; there is no 64-thread cap.
-- `include/af/detail/runtime_task_handle.hpp`: public task-handle lifetime wrapper.
-- `include/af/detail/runtime_common_state.hpp`: runtime status, cache-line atomic wrapper, ordered-batch state, parallel-group state, and external-post counter.
-- `include/af/detail/runtime_public_api.hpp`: lifecycle, task creation/start/post, thread helpers, public parallel entry points, and ordered-start public APIs.
-- `include/af/detail/runtime_public_io.hpp`: CRTP public IO API component inherited by `AsyncRuntime`.
-- `include/af/detail/runtime_dispatch.hpp`: queue topology, local/SPSC/external enqueue paths, ready-route selection, and external-post admission accounting.
-- `include/af/detail/runtime_task_lifecycle.hpp`: task object pools, handle release, optional StopImmediately registry/cancel, and unfinished-task accounting.
-- `include/af/detail/runtime_parallel.hpp`: ordered-start, ordered-batch guard, shard task/runner, and shard dispatch.
-- `include/af/detail/runtime_executor.hpp`: standalone `detail::Executor<RuntimeT, TraitsT>` declaration/state-layout component. Lifecycle/notify behavior lives in `runtime_executor_lifecycle.hpp`; io_uring backend status and resource registration lives in `runtime_executor_io_resources.hpp`; IO backend setup/poll/completion/operation cleanup lives in `runtime_executor_io_backend.hpp`; Linux epoll readiness setup/poll/wait/cancel lives in `runtime_executor_epoll_backend.hpp`; private Linux io_uring submit helpers live in `runtime_executor_io_submit_core.hpp`; ready/local-queue execution and run-loop scheduling live in `runtime_executor_scheduler.hpp`.
+- `include/af/detail/runtime/runtime_config.hpp`: config validation and public tuning values. The thread-count boundary is still `> 0` and `<= UINT16_MAX`; there is no 64-thread cap.
+- `include/af/detail/runtime/runtime_task_handle.hpp`: public task-handle lifetime wrapper.
+- `include/af/detail/runtime/runtime_common_state.hpp`: runtime status, cache-line atomic wrapper, ordered-batch state, parallel-group state, and external-post counter.
+- `include/af/detail/runtime/runtime_public_api.hpp`: lifecycle, task creation/start/post, thread helpers, public parallel entry points, and ordered-start public APIs.
+- `include/af/detail/runtime/runtime_public_io.hpp`: CRTP public IO API component inherited by `AsyncRuntime`.
+- `include/af/detail/runtime/runtime_dispatch.hpp`: queue topology, local/SPSC/external enqueue paths, ready-route selection, and external-post admission accounting.
+- `include/af/detail/runtime/runtime_task_lifecycle.hpp`: task object pools, handle release, optional StopImmediately registry/cancel, and unfinished-task accounting.
+- `include/af/detail/runtime/runtime_parallel.hpp`: ordered-start, ordered-batch guard, shard task/runner, and shard dispatch.
+- `include/af/detail/runtime/runtime_executor.hpp`: standalone `detail::Executor<RuntimeT, TraitsT>` declaration/state-layout component. Lifecycle/notify behavior lives in `runtime_executor_lifecycle.hpp`; io_uring backend status and resource registration lives in `runtime_executor_io_resources.hpp`; IO backend setup/poll/completion/operation cleanup lives in `runtime_executor_io_backend.hpp`; Linux epoll readiness setup/poll/wait/cancel lives in `runtime_executor_epoll_backend.hpp`; private Linux io_uring submit helpers live in `runtime_executor_io_submit_core.hpp`; ready/local-queue execution and run-loop scheduling lives in `runtime_executor_scheduler.hpp`.
 
 Correctness and performance audit points:
 

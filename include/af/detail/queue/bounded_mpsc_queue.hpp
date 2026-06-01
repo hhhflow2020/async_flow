@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <memory>
 
-#include "af/detail/bounded_queue_common.hpp"
+#include "af/detail/queue/bounded_queue_common.hpp"
 #include "af/detail/config.hpp"
 
 namespace af::detail {
