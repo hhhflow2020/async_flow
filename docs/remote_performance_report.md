@@ -1663,3 +1663,23 @@ Correctness checks:
 Interpretation:
 
 - This is a naming/include-structure cleanup, not a performance-sensitive code change. A new benchmark run was not collected for this pass because the generated Linux io_uring support helper logic is unchanged.
+
+## 2026-06-01 Stale Runtime Fragment Entrypoint Cleanup
+
+This run removes obsolete top-level runtime fragment entrypoint headers that were left behind after the active runtime moved to normal `runtime_*.hpp` and `runtime_executor_*.hpp` implementation headers.
+
+Changes under validation:
+
+- Removed 26 unreferenced `include/af/detail/runtime*_fragment.hpp` entrypoint wrappers.
+- The removed files were not referenced by active framework headers, tests, examples, benchmarks, CMake, or Conan metadata outside documentation.
+- No active scheduler, executor, IO backend, public IO, task lifecycle, queue, state layout, syscall, lock, allocation, memory ordering, or public API behavior changed.
+- Existing dirty files outside this cleanup were left untouched.
+
+Correctness checks:
+
+- Local reference scan for each deleted basename under `include/af`, `tests`, `examples`, `benchmarks`, `CMakeLists.txt`, and `conanfile.txt`: no matches outside documentation.
+- Local `git diff --check`: passed before this documentation update.
+
+Interpretation:
+
+- This is dead internal-header cleanup. A new build or benchmark run was not collected for this pass because the deleted entrypoint wrappers are not reachable from active code.

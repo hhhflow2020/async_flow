@@ -143,7 +143,7 @@ Correctness and performance audit points:
 - `BasicTask` now explicitly friends `detail::Executor<RuntimeT, TraitsT>` because the executor is no longer nested inside `AsyncRuntime`.
 - Public IO was moved behind a CRTP base to create a real API component boundary without adding virtual dispatch, allocation, `std::function`, or extra queues.
 - Executor lifecycle/resource/IO-backend/scheduler behavior is now class-out-of-line template code included after the complete class declaration. This keeps private-state access and inlining while avoiding class-body include splicing.
-- The remaining old runtime executor fragment headers are historical implementation fragments and are no longer included by the active `async_runtime.hpp` / `runtime_executor.hpp` path. Do not use them as the model for new core-runtime structure.
+- Unreferenced top-level runtime fragment entrypoints have been removed from the active framework tree. Remaining old runtime fragment headers are historical child implementation fragments and are no longer included by the active `async_runtime.hpp` / `runtime_executor.hpp` path. Do not use them as the model for new core-runtime structure.
 
 Validation after this correction:
 
@@ -159,6 +159,8 @@ Remaining follow-up:
 - P2: non-core IO headers such as `io_common` and several `io_*` public umbrellas still use fragment includes. They should be cleaned opportunistically when the split can follow real operation-family or class boundaries.
 
 ### 2026-06-01 Scheduler Correctness And Modularity Pass
+
+Status: superseded for current file layout. This section remains historical evidence for the scheduler fixes, but unreferenced top-level runtime fragment entrypoint files from that intermediate layout were later removed because they were no longer included by active framework headers.
 
 This pass resolves the active fixed-thread scheduler issues that were blocking the next modularity step.
 
