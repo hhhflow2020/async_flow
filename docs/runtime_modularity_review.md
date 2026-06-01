@@ -21,9 +21,9 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - The file IO test support has been split into boundary, normal read/write, fixed-resource, lifecycle/open, and filesystem operation fragments.
 - File IO boundary test support is now split further into plain file adapter boundary, registered fixed-buffer boundary, and fixed-file/direct-descriptor boundary fragments. The fixed-file/direct-descriptor path is further split into resource registration/direct-open, direct-accept, and fixed-file data transfer boundary tasks.
 - File IO read/write test support is now split further into basic offset read/write, vectored offset read/write, and current-offset state-machine fragments, with the previous read/write header kept as a small umbrella.
-- File IO open/lifecycle test support is now split further into batched write, openat round-trip, and full lifecycle task fragments. The full lifecycle task is a small shell over flow, file-operation, and namespace-operation fragments, and the previous open/lifecycle header is kept as a small umbrella.
+- File IO open/lifecycle test support is now split further into batched write, openat round-trip, and full lifecycle task fragments. The full lifecycle task is now kept as one cohesive state-machine class, and the previous open/lifecycle header is kept as a small umbrella.
 - Filesystem boundary test support is now split into open/close, metadata/allocation, and namespace/openat2 operation-family fragments, with the previous filesystem boundary header kept as a small umbrella.
-- File IO filesystem operation test support is now split into a small task shell plus flow, data-operation, and namespace-operation fragments, preserving the single task object layout while separating operation-family logic.
+- File IO filesystem operation test support is now kept as one cohesive filesystem state-machine class instead of a class-body include shell; broader file IO support remains split by boundary, read/write, fixed-resource, lifecycle, and filesystem-operation responsibilities.
 - Public IO adapter headers are now compatibility umbrellas: `io_socket.hpp`, `io_file.hpp`, and `io_adapters.hpp` include focused inline fragments for lifecycle, data transfer, fixed resources, file descriptors/fixed files, stream/listener, datagram, and event/timer adapters.
 - `include/af/io_datagram.hpp` is now an umbrella over focused datagram recv, send, vectored, and zero-copy helper fragments.
 - io_uring socket test support and runtime socket test sources have been split by stream, datagram, accept/connect, and multishot responsibilities.
@@ -62,14 +62,14 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Datagram IO runtime tests are split by readiness/hangup, UDP receive, and UDP send/zero-copy coverage.
 - Timer/event IO test support is now a small umbrella over timer/timeout tasks, eventfd tasks, timer/event boundary tasks, and filesystem boundary tasks.
 - Wait/cancel IO test support is now a small umbrella over basic wait/bad-fd tasks, cancel state-machine tasks, deadline timeout tasks, and zero-byte/vectored boundary tasks.
-- io_uring socket multishot test support is now split between recv/provided-buffer and recvmsg/peer-address task fragments, with the original multishot header kept as a small compatibility umbrella. The recv/provided-buffer task is now a small shell over flow, provided-buffer ring, and recv/cancel fragments.
+- io_uring socket multishot test support is now split between recv/provided-buffer and recvmsg/peer-address task fragments, with the original multishot header kept as a small compatibility umbrella. The recv/provided-buffer task is kept as one cohesive state-machine class instead of a class-body include shell.
 - Epoll runtime tests are split by setup, readiness, cancel/timeout, boundary, socket lifecycle, and event/timer adapter coverage.
 - The Linux epoll executor backend is now a small platform umbrella over setup/wake, storage, poll, wait registration, and cancel fragments. This mirrors the kqueue split while keeping all syscall paths inline inside `AsyncRuntime::Executor`.
 - io_uring backend executor internals are now split into setup/close, SQ submit/poll, CQ completion, and operation lifecycle fragments while remaining inline in `AsyncRuntime::Executor`.
 - io_uring CQ completion is now split by CQ polling, operation completion, poll-wait completion, and fd/direct-file cancel cleanup, with `runtime_executor_io_uring_backend_completion_fragment.hpp` kept as a small inline umbrella.
 - io_uring backend setup is now split by init flow, mmap/pointer binding, feature probing, close/reset, and storage reservation, with `runtime_executor_io_uring_backend_setup_fragment.hpp` kept as a small inline umbrella.
 - kqueue timeout internals are now split by timer-unit conversion, registration tracking, submit, and cancel/complete paths, with `runtime_executor_kqueue_timeout_fragment.hpp` kept as a small inline umbrella inside `AsyncRuntime::Executor`.
-- io_uring fixed file/buffer test support is now a small umbrella over fixed-buffer, fixed-file read/write, fixed-file update, and openat-direct task fragments. The fixed-file read/write task is a 53-line shell over flow, registration, and IO-operation fragments.
+- io_uring fixed file/buffer test support is now a small umbrella over fixed-buffer, fixed-file read/write, fixed-file update, and openat-direct task fragments. The fixed-file read/write task is kept as one cohesive state-machine class instead of a class-body include shell.
 - IO benchmark support now keeps the hot benchmark-facing fake task shell small and splits FakeRuntime stubs by Linux socket, POSIX message, POSIX fixed file, accept/connect, and filesystem helpers. Adapter benchmark cases are also split by stream/listener, datagram, and resource/file-like families.
 - Runtime benchmarks are now split into shared runtime benchmark task support, external-start, thread-hop, and parallel-shard benchmark families. This keeps benchmark harness changes separate from the task/state-machine fixtures they measure.
 - The length-prefixed RPC example is now split into runtime traits, server/process task fragments, client flow/request/response fragments, and a thin executable entry point.
@@ -555,10 +555,9 @@ Additional validation after the io_uring file test support de-fragmenting pass:
 
 Additional validation after the io_uring stream/UDP recv multishot test support split and backend diagnosis:
 
-- `tests/support/runtime_io_uring_socket_recv_multishot_tasks_fragment.hpp` is now an 84-line task shell.
-- `tests/support/runtime_io_uring_socket_recv_multishot_task_flow_fragment.hpp` owns the state dispatcher.
-- `tests/support/runtime_io_uring_socket_recv_multishot_task_ring_fragment.hpp` owns provided-buffer ring register/unregister and completion publishing.
-- `tests/support/runtime_io_uring_socket_recv_multishot_task_recv_fragment.hpp` owns stream/UDP recv multishot completion, buffer recycling, stop, and cancel handling.
+Status: superseded by the io_uring filesystem/multishot test support de-fragmenting pass below. The earlier split was mechanically correct, but it used class-body `#include` splicing and did not create an independent abstraction boundary.
+
+- `tests/support/runtime_io_uring_socket_recv_multishot_tasks_fragment.hpp` was temporarily an 84-line task shell over flow, provided-buffer ring, and recv/cancel fragments.
 - `AsyncRuntime::io_uring_backend_error(thread)` now exposes io_uring setup/runtime failure errno without changing the hot submit/completion path when the backend is available.
 - Initial remote host evidence: `CONFIG_IO_URING=y`, `kernel.io_uring_disabled=2`, `kernel.io_uring_group=-1`, and host-root direct `io_uring_setup` returned `EPERM`.
 - After temporary host enablement, `kernel.io_uring_disabled=0`, host-root direct `io_uring_setup` succeeded, `seccomp=unconfined` and `--privileged` containers succeeded, and only the default Docker seccomp profile still returned `EPERM`.
@@ -569,6 +568,17 @@ Additional validation after the io_uring stream/UDP recv multishot test support 
 - Remote clang TSAN full `asyncflow_runtime_tests` under `--security-opt seccomp=unconfined`: 130/133 passed, 3 skipped, no ThreadSanitizer report.
 - Remote clang Release full `asyncflow_runtime_tests` under `--security-opt seccomp=unconfined`: 130/133 passed, 3 skipped, 0 failed.
 - The first broad Debug run exposed two failing io_uring poll-readiness sendfile tests. The test fixture used a full AF_UNIX socketpair for `sendfile`; switching it to the same full TCP connection shape used by the epoll sendfile wait test made both poll-resume and cancel cases pass in Debug, TSAN, and Release.
+
+Additional validation after the io_uring filesystem/multishot test support de-fragmenting pass:
+
+- `tests/support/runtime_io_uring_socket_recv_multishot_tasks_fragment.hpp` is now a cohesive `UringRecvMultishotTask` class definition again, with the state dispatcher, provided-buffer ring lifecycle, recv completion, buffer recycling, stop, and cancel handling kept in declaration order.
+- `tests/support/runtime_io_file_filesystem_ops_tasks_fragment.hpp` is now a cohesive `UringFilesystemOpsTask` class definition again, with mkdir/open/write/truncate/fsync/stat/close/link/symlink/unlink/rmdir handling kept in declaration order.
+- Removed six fragment headers that existed only to splice private methods into those two class bodies.
+- No runtime scheduling, IO backend, queue, memory-ordering, public API, task field layout, or test assertion behavior changed in this pass; only over-fragmented test support source layout changed.
+- Local `git diff --check`: passed.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.0` fresh Debug `asyncflow_runtime_tests` build: passed.
+- Remote clang Debug targeted run under `--security-opt seccomp=unconfined`: 4/4 passed for `UringIoRuntimeSocketMultishotFixture.*` and `UringIoRuntimeFileFixture.IoUringFilesystemOpsRunOnIoThread`.
+- Remote clang Debug full `asyncflow_runtime_tests` under `--security-opt seccomp=unconfined`: 141 tests, 138 passed, 3 skipped.
 
 Additional validation after the explicit ready-queue route and self-post stress tests:
 

@@ -475,6 +475,8 @@ Interpretation:
 
 This run validates the test support split that turned `tests/support/runtime_io_uring_socket_recv_multishot_tasks_fragment.hpp` into an 84-line task shell over flow, provided-buffer ring, and recv/cancel fragments. It also investigates why the remote io_uring-only tests skip.
 
+Status: superseded by the io_uring filesystem/multishot test support de-fragmenting validation later on 2026-06-01. The split validated here was mechanically correct, but the class-body `#include` splice style is no longer the desired modularity pattern.
+
 Correctness and race checks:
 
 - Local `git diff --check`: passed.
@@ -1193,6 +1195,28 @@ Correctness and race checks:
 - Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.0` fresh Debug `asyncflow_runtime_tests` build: passed.
 - Remote clang Debug `UringIoRuntimeFileFixture.*` targeted run: 11 tests loaded and skipped by test logic with `io_uring backend unavailable`.
 - Remote clang Debug full `asyncflow_runtime_tests` run: 141 tests, 118 passed, 23 skipped.
+
+Interpretation:
+
+- This pass changed only test support layout. Runtime scheduling, IO backend behavior, queue selection, memory ordering, public APIs, task field layout, and test assertions were unchanged.
+- No Release benchmark was run for this pass because no production runtime path or benchmarked helper path changed.
+
+## 2026-06-01 io_uring Filesystem/Multishot Test Support De-Fragmenting Validation
+
+This run validates the cleanup that removes class-body `#include` splicing from the io_uring recv-multishot and filesystem-ops test support tasks.
+
+Changes under validation:
+
+- `UringRecvMultishotTask` now keeps its state dispatcher, provided-buffer ring lifecycle, recv completion, buffer recycling, stop, and cancel handling in one cohesive class definition.
+- `UringFilesystemOpsTask` now keeps its state dispatcher plus mkdir, openat2, write, ftruncate, fsync, statx, close, link, symlink, unlink, and rmdir handling in one cohesive class definition.
+- Removed the six task fragment headers that existed only to splice private methods into those two class bodies.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.0` fresh Debug `asyncflow_runtime_tests` build: passed.
+- Remote clang Debug targeted run under `--security-opt seccomp=unconfined`: 4/4 passed for `UringIoRuntimeSocketMultishotFixture.*` and `UringIoRuntimeFileFixture.IoUringFilesystemOpsRunOnIoThread`.
+- Remote clang Debug full `asyncflow_runtime_tests` under `--security-opt seccomp=unconfined`: 141 tests, 138 passed, 3 skipped.
 
 Interpretation:
 
