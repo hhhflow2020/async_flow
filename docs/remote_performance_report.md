@@ -730,3 +730,27 @@ Interpretation:
 
 - This is a modularity split only. Accept variants stay grouped together because basic accept, direct accept, and multishot accept share the `IORING_OP_ACCEPT` submit family and validation boundary.
 - The TSAN target covers epoll accept/connect helpers, io_uring accept/connect paths, accept-multishot unavailable-backend validation, shutdown wait for accepted tasks, and the direct-accept capability skip path.
+
+## 2026-06-01 Fixed-File Resource Split Validation
+
+This run validates the structural split of the io_uring fixed-file table resource helper.
+
+Changes under validation:
+
+- `runtime_executor_io_uring_file_resource_fragment.hpp` is now a 7-line umbrella.
+- `runtime_executor_io_uring_file_register_fragment.hpp` owns `IORING_REGISTER_FILES`.
+- `runtime_executor_io_uring_file_unregister_fragment.hpp` owns `IORING_UNREGISTER_FILES`.
+- `runtime_executor_io_uring_file_update_fragment.hpp` owns `IORING_REGISTER_FILES_UPDATE`.
+- The split keeps all helpers inline in `AsyncRuntime::Executor`; it does not move fixed-file table state, change `io_uring_register` arguments, alter pending-submit flush ordering, add locks, add allocations, or change error handling.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2` Debug fixed-file/resource targeted tests: 6 total, 4 passed, 2 skipped.
+- Remote clang TSAN fixed-file/resource targeted tests: 6 total, 4 passed, 2 skipped, no ThreadSanitizer report.
+- Remote clang Release full runtime suite: 138 total, 135 passed, 3 skipped, 0 failed.
+
+Interpretation:
+
+- This is a modularity split only. The registration, unregister, and update paths are now separately auditable while preserving the executor-thread-only ownership model.
+- The TSAN target covers fixed-file read/write/fsync, fixed-file table update, registered-buffer IO, unavailable-backend fixed-file boundary handling, and direct descriptor capability skip paths.

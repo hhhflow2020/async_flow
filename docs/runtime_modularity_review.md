@@ -33,7 +33,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - io_uring file runtime tests are now split by basic file data, fixed resources/direct descriptors, submit batching, and lifecycle/filesystem operation responsibilities.
 - `runtime_executor_io_uring_submit_core_fragment.hpp` is now a small umbrella over poll wait submit, buffer/fast SQE submit, and generic SQE submit fragments. The code still lives inside `AsyncRuntime::Executor` for inline visibility.
 - `runtime_executor_io_uring_socket_submit_fragment.hpp` is now a small umbrella over recv, send, zero-copy, message, multishot, accept/connect, and socket-create submit wrappers.
-- io_uring resource registration is now split by registered buffers, provided buffer rings, and registered/fixed file table helpers while staying inline inside `AsyncRuntime::Executor`.
+- io_uring resource registration is now split by registered buffers, provided buffer rings, and fixed-file table helpers while staying inline inside `AsyncRuntime::Executor`. The fixed-file table helper is now a small umbrella over register, unregister, and update paths.
 - io_uring executor buffer submit helpers are now split into generic buffer SQE, fast SQE template, socket-create core, and fixed-file read/write fragments while staying inline inside `AsyncRuntime::Executor`.
 - io_uring generic submit is now split into argument classification, validation, operation preparation, SQE filling, and the small core submit flow while staying inline inside `AsyncRuntime::Executor`.
 - Public fd lifecycle submit wrappers and matching io_uring executor submit wrappers are now small umbrellas over open, close/shutdown, filesystem metadata/lifecycle, and splice transfer fragments.
@@ -165,6 +165,10 @@ Current file-size snapshot after the pass:
 - `include/af/detail/runtime_executor_io_uring_socket_accept_connect_submit_fragment.hpp`: 6 lines.
 - `include/af/detail/runtime_executor_io_uring_socket_accept_submit_fragment.hpp`: 139 lines.
 - `include/af/detail/runtime_executor_io_uring_socket_connect_submit_fragment.hpp`: 41 lines.
+- `include/af/detail/runtime_executor_io_uring_file_resource_fragment.hpp`: 7 lines.
+- `include/af/detail/runtime_executor_io_uring_file_register_fragment.hpp`: 60 lines.
+- `include/af/detail/runtime_executor_io_uring_file_unregister_fragment.hpp`: 67 lines.
+- `include/af/detail/runtime_executor_io_uring_file_update_fragment.hpp`: 85 lines.
 - `include/af/detail/basic_task_fragment.hpp`: 20 lines.
 - `include/af/detail/basic_task_public_fragment.hpp`: 29 lines.
 - `include/af/detail/basic_task_protected_fragment.hpp`: 72 lines.
@@ -774,6 +778,18 @@ Additional validation after the socket accept/connect submit split:
 - Remote clang TSAN accept/connect targeted tests: 13 total, 12 passed, 1 skipped, with no ThreadSanitizer report.
 - Remote clang Release full runtime test suite: 138 total, 135 passed, 3 skipped, 0 failed.
 
+Additional validation after the fixed-file resource split:
+
+- `runtime_executor_io_uring_file_resource_fragment.hpp` is now a 7-line umbrella:
+  - `runtime_executor_io_uring_file_register_fragment.hpp`: 60 lines.
+  - `runtime_executor_io_uring_file_unregister_fragment.hpp`: 67 lines.
+  - `runtime_executor_io_uring_file_update_fragment.hpp`: 85 lines.
+- The split is structural: no fixed-file table state fields moved, no `io_uring_register` opcode/argument changed, no busy/flush ordering changed, and no locks or allocations were added.
+- Local `git diff --check`: passed.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2` Debug fixed-file/resource targeted tests: 6 total, 4 passed, 2 skipped.
+- Remote clang TSAN fixed-file/resource targeted tests: 6 total, 4 passed, 2 skipped, with no ThreadSanitizer report.
+- Remote clang Release full runtime test suite: 138 total, 135 passed, 3 skipped, 0 failed.
+
 ### Latest Test/Example Scan: Long Files Remain Mostly In Fixtures
 
 The largest remaining files are now test/support fixtures rather than runtime shell code:
@@ -794,7 +810,7 @@ After splitting `IoFile`, the largest remaining files are mostly tests/examples.
 - `include/af/detail/io_uring_support.hpp`: 216 lines. Mostly Linux ABI wrappers and setup structs; split only if new setup/resource capabilities are added.
 - `include/af/detail/basic_task_fragment.hpp`: now a small class shell over focused inline fragments. Task lifecycle remains inline and avoids ownership abstractions.
 - Resolved after this scan: `include/af/detail/io_common_detail_state_fragment.hpp` is now a small umbrella over focused IO common helper fragments.
-- `include/af/detail/runtime_executor_io_uring_file_resource_fragment.hpp`: 206 lines. Fixed-file resource registration/update path; acceptable as one operation family.
+- Resolved after this scan: `include/af/detail/runtime_executor_io_uring_file_resource_fragment.hpp` is now a small umbrella over fixed-file table register, unregister, and update fragments.
 - `include/af/detail/io_adapters_datagram_fragment.hpp`: now a small class shell. Its methods are split by bind/lifecycle, recv/multishot, and send/zero-copy groups.
 - `include/af/detail/io_adapters_stream_fragment.hpp`: now a small class shell. Its methods are split by recv, send, transfer/connect, and read/write alias groups.
 
