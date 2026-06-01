@@ -18,20 +18,13 @@ struct open_how;
 
 namespace af {
 
-#define AF_IO_FILESYSTEM_FRAGMENT_INCLUDE 1
-#include "af/detail/io_filesystem_open_fragment.hpp"
-#undef AF_IO_FILESYSTEM_FRAGMENT_INCLUDE
-
-#define AF_IO_FILESYSTEM_FRAGMENT_INCLUDE 1
-#include "af/detail/io_filesystem_namespace_fragment.hpp"
-#undef AF_IO_FILESYSTEM_FRAGMENT_INCLUDE
-
-#define AF_IO_FILESYSTEM_FRAGMENT_INCLUDE 1
-#include "af/detail/io_filesystem_allocation_fragment.hpp"
-#undef AF_IO_FILESYSTEM_FRAGMENT_INCLUDE
-
-#define AF_IO_FILESYSTEM_FRAGMENT_INCLUDE 1
-#include "af/detail/io_filesystem_directory_fragment.hpp"
-#undef AF_IO_FILESYSTEM_FRAGMENT_INCLUDE
+#define AF_IO_FILESYSTEM_DETAIL_INCLUDE 1
+// clang-format off
+#include "af/detail/io_filesystem_open.hpp"
+#include "af/detail/io_filesystem_namespace.hpp"
+#include "af/detail/io_filesystem_allocation.hpp"
+#include "af/detail/io_filesystem_directory.hpp"
+// clang-format on
+#undef AF_IO_FILESYSTEM_DETAIL_INCLUDE
 
 } // namespace af

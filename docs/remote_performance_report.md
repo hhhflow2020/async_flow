@@ -1526,3 +1526,23 @@ Correctness checks:
 Interpretation:
 
 - This is a naming/include-structure cleanup, not a performance-sensitive code change. A new benchmark run was not collected for this pass because the generated timeout/datagram logic is unchanged.
+
+## 2026-06-01 Filesystem Header Fragment Rename
+
+This run validates removal of active `*_fragment.hpp` naming from the public filesystem IO entry point.
+
+Changes under validation:
+
+- `include/af/io_filesystem.hpp` now includes `io_filesystem_open.hpp`, `io_filesystem_namespace.hpp`, `io_filesystem_allocation.hpp`, and `io_filesystem_directory.hpp`.
+- The old `AF_IO_FILESYSTEM_FRAGMENT_INCLUDE` guard was replaced with `AF_IO_FILESYSTEM_DETAIL_INCLUDE`.
+- No open/openat2, namespace-operation, allocation/truncate, `IoDirectory`, or public API behavior changed.
+
+Correctness checks:
+
+- Local `git diff --check`: passed before this documentation update.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.0` Debug `asyncflow_runtime_tests` build and full runtime suite under `--security-opt seccomp=unconfined`: passed; 143 tests, 140 passed, 3 skipped, 0 failed.
+- Remote clang Release `asyncflow_runtime_tests` build and full runtime suite under `--security-opt seccomp=unconfined`: passed; 143 tests, 140 passed, 3 skipped, 0 failed.
+
+Interpretation:
+
+- This is a naming/include-structure cleanup, not a performance-sensitive code change. A new benchmark run was not collected for this pass because the generated filesystem helper logic is unchanged.
