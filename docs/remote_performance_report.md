@@ -135,6 +135,8 @@ Release benchmark canary after the task-fragment split:
 
 ## 2026-06-01 BasicTask Fragment Split Validation
 
+Status: superseded by the BasicTask de-fragmenting pass later on 2026-06-01. The split validated here was mechanically correct, but the class-body `#include` splice style is no longer the desired modularity pattern.
+
 A follow-up mechanical split turned `basic_task_fragment.hpp` into a class shell over public task API, protected helper API, lifetime reference handling, scheduling/wake state-machine logic, and storage layout fragments. The task storage fields remain together in `basic_task_storage_fragment.hpp`; task lifecycle and scheduling code remain inline/template-visible.
 
 Correctness and race checks:
@@ -793,6 +795,8 @@ Interpretation:
 
 ## 2026-06-01 BasicTask Schedule Split Validation
 
+Status: superseded by the BasicTask de-fragmenting pass later on 2026-06-01. The schedule fragment files listed here were removed because they split a single class by private implementation regions rather than by independent data structure, algorithm, function family, or class boundary.
+
 This run validates the structural split of the `BasicTask` scheduling and running-wake state-machine fragment on the requested remote Linux host with `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2`.
 
 Changes under validation:
@@ -1069,3 +1073,38 @@ Interpretation:
 - The previous behavior could let a task observe cancel completion and finish while the pending io_uring operation still held task/result ownership until the CQE path ran.
 - Deferring user-visible `ECANCELED` until CQE completion preserves single-owner lifetime semantics without adding synchronization or changing queue routing.
 - The benchmark canary stays within the existing noisy range for runtime paths and leaves helper-level zero-byte fast paths in the same sub-nanosecond range.
+
+## 2026-06-01 BasicTask De-Fragmenting Validation
+
+This run validates the cleanup that removes the class-body `#include` splice pattern from `BasicTask`.
+
+Changes under validation:
+
+- `basic_task_fragment.hpp` is now one cohesive `BasicTask` class definition again.
+- Removed the public/protected/lifetime/schedule/storage BasicTask fragment headers that existed only to splice code into class access sections.
+- Kept task lifecycle, scheduling, Running wake, requested-thread encoding, and storage inline/template-visible in the same class. This is a readability/maintainability cleanup, not a runtime behavior change.
+- Future splits should use independent data structures, algorithms, function families, or classes as boundaries instead of access-section fragments.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Remote clang Debug `asyncflow_runtime_tests` build: passed.
+- Remote clang Debug task/lifecycle/scheduler/parallel targeted tests: 47/47 passed.
+- Remote clang TSAN task/lifecycle/scheduler/parallel targeted tests: 41/41 passed, no ThreadSanitizer report.
+- Remote clang Release task/lifecycle/scheduler/parallel targeted tests: 41/41 passed.
+
+Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | CPU Mean | Throughput Mean |
+| --- | ---: | ---: | ---: |
+| `BM_RuntimeExternalStart/8192` | 6.39 ms | 6.37 ms | 1.299 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 13.9 ms | 4.72 ms | 591.198 k/s |
+| `BM_RuntimeIoThreadHop/8192` | 5.65 ms | 5.63 ms | 1.458 M/s |
+| `BM_RuntimeParallelShards/128` | 0.570 ms | 0.544 ms | 226.356 k/s |
+| `BM_RuntimeParallelShards/512` | 1.85 ms | 1.79 ms | 276.807 k/s |
+
+Interpretation:
+
+- The cleanup removes an over-fragmented structure without changing scheduling state transitions, queue routing, memory ordering, locks, allocations, or task storage fields.
+- Keeping `BasicTask` readable in declaration order improves maintainability for future scheduler audits, especially around Running -> Pending wake resolution.
+- The benchmark canary stays within the recent noisy remote range for scheduler paths.

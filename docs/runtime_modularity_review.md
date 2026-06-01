@@ -137,8 +137,8 @@ Resolved items:
 - `runtime_executor_control_fragment.hpp` is now a 6-line umbrella over executor lifecycle and notify/wake control fragments. This keeps thread lifecycle and IO/native wake decisions separately auditable without changing executor state layout.
 - `runtime_public_parallel_api_fragment.hpp` is now a 7-line umbrella over shard splitting, parallel shard dispatch overloads, and ordered-start public APIs. The split keeps these public scheduling templates inline while separating data partitioning from owner-resume orchestration.
 - Public socket accept/connect submit wrappers and matching io_uring executor submit wrappers are now small umbrellas over accept and connect operation families. The accept-direct and accept-multishot paths remain grouped with accept because they share validation and SQE opcode semantics.
-- `basic_task_fragment.hpp` is now a 20-line class shell. Public task API, protected task helpers, lifetime reference handling, scheduling/wake state machine, and storage layout live in dedicated class-body fragments. Storage fields remain together in `basic_task_storage_fragment.hpp`.
-- `basic_task_schedule_fragment.hpp` is now an 8-line umbrella over schedule constants, Created/Pending schedule admission, Running wake resolution, and requested-thread encoding helpers. The Running -> Pending wake boundary remains separately auditable in the Running wake fragment.
+- The previous aggressive `BasicTask` class-body fragment split has been reverted. `basic_task_fragment.hpp` is now one cohesive class definition again, so public API, protected task helpers, lifetime reference handling, scheduling/wake state machine, and storage fields can be read in declaration order without `#include` splicing inside the class body.
+- The modularity rule for task internals is now stricter: split only when there is an independent data structure, algorithm, function family, or class boundary. Do not split a single class by access section, field block, or a few private member functions just to reduce line count.
 - `runtime_executor_io_uring_generic_submit_sqe_fragment.hpp` is now an 8-line umbrella over SQE dispatch/common initialization, filesystem/path SQE fields, socket/message SQE fields, and buffer/data SQE fields.
 - `object_pool.hpp` is now a small shell over storage layout, slot acquire/release, and lifecycle fragments. The split preserves the TLS cache, cache-line slot sizing, MPMC free-list, and atomic block/hot-block fields.
 
@@ -199,16 +199,7 @@ Current file-size snapshot after the pass:
 - `include/af/detail/io_uring_support_types_fragment.hpp`: 59 lines.
 - `include/af/detail/io_uring_support_syscall_fragment.hpp`: 51 lines.
 - `include/af/detail/io_uring_support_sqe_fragment.hpp`: 41 lines.
-- `include/af/detail/basic_task_fragment.hpp`: 20 lines.
-- `include/af/detail/basic_task_public_fragment.hpp`: 29 lines.
-- `include/af/detail/basic_task_protected_fragment.hpp`: 72 lines.
-- `include/af/detail/basic_task_lifetime_fragment.hpp`: 26 lines.
-- `include/af/detail/basic_task_schedule_fragment.hpp`: 8 lines.
-- `include/af/detail/basic_task_schedule_constants_fragment.hpp`: 8 lines.
-- `include/af/detail/basic_task_schedule_state_fragment.hpp`: 52 lines.
-- `include/af/detail/basic_task_running_wake_fragment.hpp`: 92 lines.
-- `include/af/detail/basic_task_requested_thread_fragment.hpp`: 28 lines.
-- `include/af/detail/basic_task_storage_fragment.hpp`: 18 lines.
+- `include/af/detail/basic_task_fragment.hpp`: 317 lines, intentionally kept as one cohesive class definition with no class-body `#include` splicing.
 - `include/af/detail/object_pool.hpp`: 38 lines.
 - `include/af/detail/object_pool_storage_fragment.hpp`: 68 lines.
 - `include/af/detail/object_pool_slot_ops_fragment.hpp`: 80 lines.
@@ -270,6 +261,8 @@ Additional validation after the mechanical executor task split:
 
 Additional validation after the mechanical `BasicTask` split:
 
+Status: superseded by the BasicTask de-fragmenting pass below. The earlier class-body split was mechanically correct but is no longer considered the desired modularity style.
+
 - Local `git diff --check`: passed.
 - Local Release `asyncflow_runtime_tests` build: passed.
 - Local Release task/scheduler/parallel targeted tests: 24/24 passed.
@@ -282,6 +275,23 @@ Additional validation after the mechanical `BasicTask` split:
   - `BM_RuntimeIoThreadHop/8192` mean: 4.44 ms real, 1.845 M/s.
   - `BM_RuntimeParallelShards/128` mean: 0.519 ms real, 246.555 k/s.
   - `BM_RuntimeParallelShards/512` mean: 1.97 ms real, 261.281 k/s.
+
+Additional validation after the `BasicTask` de-fragmenting pass:
+
+- Removed the class-body include splice in `basic_task_fragment.hpp`.
+- Deleted the now-obsolete public/protected/lifetime/schedule/storage BasicTask fragment headers.
+- Kept all task lifecycle and scheduling logic inline/template-visible inside one readable `BasicTask` definition; no queue route, task state transition, atomic ordering, lock, allocation, or vtable behavior changed.
+- Local `git diff --check`: passed.
+- Remote clang Debug build of `asyncflow_runtime_tests`: passed.
+- Remote clang Debug task/lifecycle/scheduler/parallel targeted tests: 47/47 passed.
+- Remote clang TSAN task/lifecycle/scheduler/parallel targeted tests: 41/41 passed with no ThreadSanitizer report.
+- Remote clang Release task/lifecycle/scheduler/parallel targeted tests: 41/41 passed.
+- Remote clang Release runtime benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+  - `BM_RuntimeExternalStart/8192` mean: 6.39 ms real, 1.299 M/s.
+  - `BM_RuntimeCrossThreadHop/8192` mean: 13.9 ms real, 591.198 k/s.
+  - `BM_RuntimeIoThreadHop/8192` mean: 5.65 ms real, 1.458 M/s.
+  - `BM_RuntimeParallelShards/128` mean: 0.570 ms real, 226.356 k/s.
+  - `BM_RuntimeParallelShards/512` mean: 1.85 ms real, 276.807 k/s.
 
 Additional validation after the `io_common` split and epoll delete race fix:
 
@@ -589,7 +599,7 @@ Current file-size snapshot:
 
 - `include/af/async_runtime.hpp`: 226 lines. This is still an acceptable overview shell that declares `AsyncRuntime`, declares the nested `Executor`, and includes inline fragments in the required class scopes.
 - `include/af/detail/runtime_dispatch_fragment.hpp`: 195 lines. It remains the main core-runtime split candidate because it owns queue topology, same-thread local enqueue, cross-thread SPSC enqueue, external MPSC enqueue, ready-source signaling, and external-post admission accounting.
-- Resolved after this scan: `include/af/detail/basic_task_fragment.hpp` is now a small class shell over public, protected-helper, lifetime, scheduling, and storage fragments.
+- Superseded after this scan: `include/af/detail/basic_task_fragment.hpp` was temporarily split into class-body fragments, but that style has since been reverted because it made the class harder to read and maintain.
 - Resolved after this scan: `include/af/detail/io_common_detail_state_fragment.hpp` is now a small umbrella over IO target, wait-arm, wait-state, io_uring-status, and iovec helper fragments.
 - Resolved after this scan: the old combined `tests/runtime_stress_tests.cpp` was removed. Runtime stress test cases are split by concern, and reusable stress state machines live in support headers.
 - The largest remaining examples/tests are now fixture/state-machine files, not the runtime shell. `runtime_io_uring_socket_datagram_tests.cpp`, `runtime_io_stream_transfer_tests.cpp`, `io_rpc_length_prefixed_server.hpp`, `io_uring_fixed_file_task.hpp`, `io_uring_file_lifecycle_task.hpp`, `io_uring_udp_recvmsg_multishot_task.hpp`, and `io_uring_udp_recv_multishot_task.hpp` have been reduced by moving repeated setup or role-specific tasks into support fragments.
@@ -630,7 +640,7 @@ Issue ledger:
 - P1: `runtime_dispatch_fragment.hpp` still owns queue topology, same-thread local enqueue, cross-thread SPSC enqueue, external MPSC enqueue, source-ready signaling, and external-post shutdown accounting. Split it into queue topology, ready enqueue, and external-post admission fragments while preserving the exact same local/SPSC/MPSC data paths.
 - Resolved: `runtime_executor_core_state_fragment.hpp` now keeps the field declarations together as the cache-layout owner. `pop_one`, `finish_done`, `finish_pending`, and `finish_again` moved into focused inline fragments included before the state layout block.
 - Resolved: `runtime_executor_task_fragment.hpp` is split into ready signaling/wake, local queue, and execute/finish dispatch fragments. The split was followed by same-thread, cross-thread, external-start, IO-thread hop, and parallel-shard benchmark canaries.
-- Resolved: `basic_task_fragment.hpp` now uses class-body fragments for public/protected task helpers, schedule-state transitions, lifetime/destroy helpers, and one final storage-layout block.
+- Superseded: `basic_task_fragment.hpp` no longer uses class-body fragments. The task state machine is kept inline in one cohesive class definition.
 - Resolved: `io_common_detail_state_fragment.hpp` is split by helper family, and the epoll readiness path no longer depends on a deferred-delete/rearm-hint cleanup path.
 - Resolved: the old combined runtime stress source was removed. Lifecycle, cross-thread hop, and parallel shard stress cases now live in separate test sources; reusable state machines live in support headers.
 - P2: several IO tests and examples remain moderately dense after the first pass. `runtime_io_uring_socket_datagram_tests.cpp` and `runtime_io_stream_transfer_tests.cpp` were reduced by extracting repeated fixture setup into shared test support; `io_rpc_length_prefixed_client.hpp`, `io_rpc_length_prefixed_server.hpp`, `io_uring_fixed_file_task.hpp`, and `io_uring_file_lifecycle_task.hpp` were reduced to small task/umbrella shells over role or operation-family fragments. Future edits should split by protocol role, transfer mode, or operation family instead of appending new states to the existing file.
@@ -666,7 +676,7 @@ Findings to track:
 - Resolved: `runtime_lifecycle_fragment.hpp` is now split into task pool, task handle lifetime, task registry/cancel, and task accounting fragments. The StopImmediately path still preserves the order: stop workers, cancel registered pending/queued tasks, then clear executor/backend state.
 - Resolved: `runtime_executor_core_state_fragment.hpp` now contains only executor state fields. Pop/finish behavior lives in inline behavior fragments while the field declarations stay in one state-layout owner for cache-line placement and false-sharing audits.
 - Resolved: `runtime_executor_task_fragment.hpp` is now split by source-ready/wake signaling, local queue operations, and task execution/result dispatch; benchmark canaries were collected after the change.
-- Resolved: `basic_task_fragment.hpp` is now a class shell; the storage fields remain in one final layout block.
+- Superseded: `basic_task_fragment.hpp` is no longer a class shell over fragments; the storage fields and state-machine methods are visible together in declaration order.
 - Resolved: `io_common_detail_state_fragment.hpp` is split by helper family, making IO wait/cancel/timeout audits smaller.
 - Resolved: `runtime_common_fragment.hpp` is split by state/type family; runtime status, cache-line atomic wrapper, ordered-batch state, parallel-group state, and external-post counters now live in focused fragments.
 - P2: examples still contain explicit atomics for readiness/completion observation in older files such as `io_epoll.cpp`, `io_timer.cpp`, `io_event.cpp`, `io_native_readiness.cpp`, and several multishot io_uring examples. For examples, prefer task-owned state machines plus `ShutdownPolicy::WaitForTasks`; test fixtures may continue using atomics when they are only assertion probes.
@@ -683,7 +693,7 @@ Recommended order:
 
 1. Split `runtime_dispatch_fragment.hpp` into topology, enqueue, and external-post gate fragments. Re-run runtime benchmarks because this touches the start/post hot path.
 2. Completed: split executor behavior out of `runtime_executor_core_state_fragment.hpp` while leaving field layout intact.
-3. Completed: split `basic_task_fragment.hpp` class-body responsibilities after the executor split, keeping task state transitions and storage layout auditable.
+3. Superseded: the `basic_task_fragment.hpp` class-body split was reverted; future modularity work should split independent classes/algorithms/functions, not access-section fragments.
 4. Completed: split `io_common_detail_state_fragment.hpp` by IO helper family and remove the stale epoll readiness rearm hint.
 
 ### 2026-05-31 Core Runtime Modularity Recheck
@@ -847,6 +857,8 @@ Additional validation after the ready enqueue route split:
   - `BM_RuntimeParallelShards/512` mean: 1.83 ms real, 280.185 k/s.
 
 Additional validation after the `BasicTask` schedule split:
+
+Status: superseded by the BasicTask de-fragmenting pass. These files were removed when the class-body splice style was rejected.
 
 - `basic_task_schedule_fragment.hpp` is now an 8-line umbrella:
   - `basic_task_schedule_constants_fragment.hpp`: 8 lines.
@@ -1017,7 +1029,7 @@ After splitting `IoFile`, the largest remaining files are mostly tests/examples.
 
 - `include/af/io_timeout.hpp`: now a small public umbrella. The deadline arbitration fragment remains intentionally larger than the status/wait fragments because it preserves the race ordering between IO completion, timeout completion, and cancel completion.
 - Resolved after this scan: `include/af/detail/io_uring_support.hpp` is now a small umbrella over Linux io_uring ABI fallback definitions, opcode constants, request/types, syscall/setup wrappers, and SQE fill helpers.
-- `include/af/detail/basic_task_fragment.hpp`: now a small class shell over focused inline fragments. Task lifecycle remains inline and avoids ownership abstractions.
+- `include/af/detail/basic_task_fragment.hpp`: no longer a class shell over class-body fragments; task lifecycle and scheduling now remain inline in one cohesive class definition.
 - Resolved after this scan: `include/af/detail/io_common_detail_state_fragment.hpp` is now a small umbrella over focused IO common helper fragments.
 - Resolved after this scan: `include/af/detail/runtime_executor_io_uring_file_resource_fragment.hpp` is now a small umbrella over fixed-file table register, unregister, and update fragments.
 - `include/af/detail/io_adapters_datagram_fragment.hpp`: now a small class shell. Its methods are split by bind/lifecycle, recv/multishot, and send/zero-copy groups.
