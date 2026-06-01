@@ -550,3 +550,37 @@ Interpretation:
 - The new single-thread fanout stress test would strand work if same-thread runtime posts were accidentally routed through the self SPSC queue instead of the executor local FIFO.
 - The `again()` stress test covers the `finish_again()` self-reschedule path and verifies it also drains through local queue behavior without relying on cross-thread ready hints.
 - The route naming change adds no locks, no heap allocation, no additional queue type, and no executor state-layout changes.
+
+## 2026-06-01 Ready-Source Word Cursor Rotation
+
+This run validates the follow-up scheduler hot-path change that rotates multi-word ready-source hint scans. The executor no longer starts every ready-source pass at word 0 when `thread_count` spans more than one 64-bit ready-source word.
+
+Changes under validation:
+
+- `runtime_executor_pop_fragment.hpp` advances an executor-private ready-word cursor after a successful hinted SPSC pop.
+- `runtime_executor_core_state_fragment.hpp` stores the cursor next to `next_source_` as a `std::uint16_t`.
+- Ready-source bits remain fast hints only; the bounded all-source SPSC fallback scan remains the correctness backstop.
+- The change adds no locks, no atomics, no heap allocation, and no queue topology change.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2` Debug targeted scheduler stress tests: 5/5 passed.
+- Remote clang TSAN targeted scheduler stress tests: 5/5 passed, no ThreadSanitizer report.
+- Remote clang Release targeted scheduler stress tests: 5/5 passed.
+- Remote clang Release full runtime test suite: 135 total, 132 passed, 3 skipped, 0 failed.
+
+Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | CPU Mean | Throughput Mean |
+| --- | ---: | ---: | ---: |
+| `BM_RuntimeExternalStart/8192` | 6.88 ms | 6.87 ms | 1.194 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 11.6 ms | 4.28 ms | 709.526 k/s |
+| `BM_RuntimeIoThreadHop/8192` | 4.22 ms | 4.22 ms | 1.940 M/s |
+| `BM_RuntimeParallelShards/128` | 0.541 ms | 0.529 ms | 237.390 k/s |
+
+Interpretation:
+
+- The rotation addresses the remaining multi-word ready-source scan bias without weakening the local-queue-vs-SPSC separation added in the previous pass.
+- TSAN and the above-64 scheduler stress coverage did not expose races or stranded work after adding the cursor.
+- The current benchmark canary is sufficient for gross regression detection. A future perf-counter run with 128+/256+ configured worker threads would be needed before making claims about large-thread-count cache and branch behavior.

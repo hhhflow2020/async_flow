@@ -5,6 +5,7 @@
         std::uint16_t index_;
         ThreadKind kind_{ThreadKind::Worker};
         std::uint16_t next_source_{0};
+        std::uint16_t next_ready_word_{0};
         std::vector<Task*> local_queue_;
         std::size_t local_head_{0};
         std::size_t local_tail_{0};

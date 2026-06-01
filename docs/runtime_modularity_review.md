@@ -138,8 +138,8 @@ Current file-size snapshot after the pass:
 - `include/af/detail/runtime_ready_enqueue_fragment.hpp`: 165 lines.
 - `include/af/detail/runtime_external_post_gate_fragment.hpp`: 53 lines.
 - `include/af/detail/runtime_ready_source_set.hpp`: 70 lines.
-- `include/af/detail/runtime_executor_core_state_fragment.hpp`: 69 lines.
-- `include/af/detail/runtime_executor_pop_fragment.hpp`: 59 lines.
+- `include/af/detail/runtime_executor_core_state_fragment.hpp`: 70 lines.
+- `include/af/detail/runtime_executor_pop_fragment.hpp`: 82 lines.
 - `include/af/detail/runtime_executor_finish_fragment.hpp`: 26 lines.
 - `include/af/detail/runtime_executor_task_fragment.hpp`: 7 lines.
 - `include/af/detail/runtime_executor_ready_signal_fragment.hpp`: 16 lines.
@@ -466,9 +466,25 @@ Additional validation after the explicit ready-queue route and self-post stress 
   - `BM_RuntimeIoThreadHop/8192` mean: 4.23 ms real, 1.936 M/s.
   - `BM_RuntimeParallelShards/128` mean: 0.500 ms real, 256.161 k/s.
 
+Additional validation after the ready-source word cursor rotation:
+
+- `runtime_executor_pop_fragment.hpp` now rotates multi-word ready-source hint scans with executor-owned `next_ready_word_` instead of starting every hint pass at word 0. This reduces scan bias for runtimes whose ready-source set spans multiple 64-bit words.
+- `runtime_executor_core_state_fragment.hpp` keeps the new `std::uint16_t` cursor next to `next_source_`. It is executor-private state, so the change adds no locks, no atomics, no heap allocation, and no queue topology change.
+- Ready-source bits remain hints, not correctness state. The bounded all-source SPSC fallback scan is unchanged, so stale/lost/coalesced hint edges still cannot strand cross-thread work.
+- Local `git diff --check`: passed.
+- Remote clang Debug targeted scheduler stress tests: 5/5 passed.
+- Remote clang TSAN targeted scheduler stress tests: 5/5 passed, no ThreadSanitizer report.
+- Remote clang Release targeted scheduler stress tests: 5/5 passed.
+- Remote clang Release full runtime test suite: 135 total, 132 passed, 3 platform/kernel capability tests skipped, 0 failed.
+- Remote clang Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+  - `BM_RuntimeExternalStart/8192` mean: 6.88 ms real, 1.194 M/s.
+  - `BM_RuntimeCrossThreadHop/8192` mean: 11.6 ms real, 709.526 k/s.
+  - `BM_RuntimeIoThreadHop/8192` mean: 4.22 ms real, 1.940 M/s.
+  - `BM_RuntimeParallelShards/128` mean: 0.541 ms real, 237.390 k/s.
+
 Remaining follow-up:
 
-- Ready-source hints are now correct and bounded, but future benchmarking may justify a rotating ready-word cursor for very large `thread_count` values.
+- Add a dedicated large-thread-count benchmark/perf-counter run before using ready-word fairness as a hard regression gate. Current coverage validates above-64 correctness and scheduler canaries, but does not isolate 128+/256+ worker ready-word cache/branch behavior.
 
 ### 2026-06-01 Current Scheduler WIP and Modularity Re-scan
 
