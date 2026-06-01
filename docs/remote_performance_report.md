@@ -638,3 +638,35 @@ Interpretation:
 
 - The targeted stress test did not reproduce a lost wake or owner hang across Debug, TSAN, or Release. The state-machine audit matches the observed behavior: either the running wake slot is consumed by `finish_pending()`, or a concurrent post observes Pending and performs the `Pending -> Queued` transition itself.
 - The ObjectPool split is structural. It preserves the free-list, TLS cache, cache-line slot sizing, and block/hot-block atomics while making storage and lifecycle responsibilities auditable separately.
+
+## 2026-06-01 Executor Lifecycle/Notify Split Validation
+
+This run validates the structural split of `runtime_executor_control_fragment.hpp` into lifecycle and notify/wake-control fragments.
+
+Changes under validation:
+
+- `runtime_executor_control_fragment.hpp` is now a 6-line umbrella.
+- `runtime_executor_lifecycle_fragment.hpp` owns constructor/destructor, start, stop request, and join behavior.
+- `runtime_executor_notify_fragment.hpp` owns wake publication and IO/native-wake fallback behavior.
+- The split does not move executor fields, alter queue topology, change task state transitions, add locks, add allocations, or change the existing atomics in `notify()`.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2` Debug targeted runtime/backpressure/shutdown/IO/stress tests: 21/21 passed.
+- Remote clang TSAN targeted runtime/backpressure/shutdown/IO/stress tests: 21/21 passed, no ThreadSanitizer report.
+- Remote clang Release full runtime suite: 138 total, 135 passed, 3 skipped, 0 failed.
+
+Release runtime benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | CPU Mean | Throughput Mean |
+| --- | ---: | ---: | ---: |
+| `BM_RuntimeExternalStart/8192` | 7.70 ms | 7.69 ms | 1.064 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 12.6 ms | 4.49 ms | 655.313 k/s |
+| `BM_RuntimeIoThreadHop/8192` | 4.19 ms | 4.18 ms | 1.957 M/s |
+| `BM_RuntimeParallelShards/128` | 0.525 ms | 0.499 ms | 246.320 k/s |
+
+Interpretation:
+
+- The change is a modularity split only. Lifecycle and wake behavior are now separately reviewable while preserving header-only inlining and the existing hot-path branch shape.
+- The targeted TSAN run covers the same high-risk wake paths: repeated cross-thread hops, above-64-thread ready-source words, owner resume under parallel shard bursts, the Running-to-Pending wake boundary, self-post local queue routing, shutdown, and epoll wake/cancel/timeout cases.

@@ -130,6 +130,7 @@ Resolved items:
 - Scheduler and runtime stress fixtures are no longer concentrated in one source. Reusable scheduler state machines are split by repeat-hop, above-64 wide-hop, parallel owner-resume, and wait-helper fragments; lifecycle stress helpers live in `tests/support/runtime_lifecycle_stress_support.hpp`, and test cases are split by lifecycle, cross-thread, and parallel concerns.
 - `runtime_executor_core_state_fragment.hpp` is now the executor field-layout owner only. Queue-drain behavior lives in `runtime_executor_pop_fragment.hpp`, and finish/reschedule behavior lives in `runtime_executor_finish_fragment.hpp`. This keeps declaration order and cache placement in one file while separating behavior that changes scheduling state.
 - `runtime_executor_task_fragment.hpp` is now a 7-line umbrella. Ready-source/wake signaling, local queue push/pop, and execute/result dispatch live in `runtime_executor_ready_signal_fragment.hpp`, `runtime_executor_local_queue_fragment.hpp`, and `runtime_executor_execute_fragment.hpp`.
+- `runtime_executor_control_fragment.hpp` is now a 6-line umbrella over executor lifecycle and notify/wake control fragments. This keeps thread lifecycle and IO/native wake decisions separately auditable without changing executor state layout.
 - `basic_task_fragment.hpp` is now a 20-line class shell. Public task API, protected task helpers, lifetime reference handling, scheduling/wake state machine, and storage layout live in dedicated class-body fragments. Storage fields remain together in `basic_task_storage_fragment.hpp`.
 - `object_pool.hpp` is now a small shell over storage layout, slot acquire/release, and lifecycle fragments. The split preserves the TLS cache, cache-line slot sizing, MPMC free-list, and atomic block/hot-block fields.
 
@@ -149,6 +150,9 @@ Current file-size snapshot after the pass:
 - `include/af/detail/runtime_executor_ready_signal_fragment.hpp`: 16 lines.
 - `include/af/detail/runtime_executor_local_queue_fragment.hpp`: 25 lines.
 - `include/af/detail/runtime_executor_execute_fragment.hpp`: 46 lines.
+- `include/af/detail/runtime_executor_control_fragment.hpp`: 6 lines.
+- `include/af/detail/runtime_executor_lifecycle_fragment.hpp`: 33 lines.
+- `include/af/detail/runtime_executor_notify_fragment.hpp`: 27 lines.
 - `include/af/detail/basic_task_fragment.hpp`: 20 lines.
 - `include/af/detail/basic_task_public_fragment.hpp`: 29 lines.
 - `include/af/detail/basic_task_protected_fragment.hpp`: 72 lines.
@@ -708,6 +712,21 @@ Performance constraints for these splits:
 - Preserve existing executor state layout and cache-line alignment. Splitting state declaration should be avoided unless there is a concrete cache-layout improvement.
 - Preserve branch shape in hot helpers; refactor by operation family, not by extracting tiny helper functions that add extra unpredictable branches.
 
+Additional validation after the executor lifecycle/notify split:
+
+- `runtime_executor_control_fragment.hpp` is now a 6-line umbrella:
+  - `runtime_executor_lifecycle_fragment.hpp`: 33 lines.
+  - `runtime_executor_notify_fragment.hpp`: 27 lines.
+- The split is structural: no executor fields moved, no queue route changed, no locks or heap allocations were added, and `notify()` keeps the existing worker atomic-wait path separate from the IO-thread native-wake path.
+- Local `git diff --check`: passed.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2` Debug targeted runtime/backpressure/shutdown/IO/stress tests: 21/21 passed.
+- Remote clang TSAN targeted runtime/backpressure/shutdown/IO/stress tests: 21/21 passed with no ThreadSanitizer report.
+- Remote clang Release full runtime test suite: 138 total, 135 passed, 3 skipped, 0 failed.
+- Remote clang Release runtime benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+  - `BM_RuntimeExternalStart/8192` mean: 7.70 ms real, 1.064 M/s.
+  - `BM_RuntimeCrossThreadHop/8192` mean: 12.6 ms real, 655.313 k/s.
+  - `BM_RuntimeIoThreadHop/8192` mean: 4.19 ms real, 1.957 M/s.
+  - `BM_RuntimeParallelShards/128` mean: 0.525 ms real, 246.320 k/s.
 
 ### Latest Test/Example Scan: Long Files Remain Mostly In Fixtures
 
