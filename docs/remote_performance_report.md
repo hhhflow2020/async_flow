@@ -1591,3 +1591,27 @@ Correctness checks:
 Interpretation:
 
 - This is a naming/include-structure cleanup, not a performance-sensitive code change. A new benchmark run was not collected for this pass because the generated adapter forwarding logic is unchanged.
+
+## 2026-06-01 IO File Header Fragment Rename
+
+This run validates removal of active `*_fragment.hpp` naming from the public file IO helper entry point.
+
+Changes under validation:
+
+- `include/af/io_file.hpp` now includes `io_file_read.hpp`, `io_file_positioned.hpp`, `io_file_fixed_buffer.hpp`, `io_file_lifecycle.hpp`, and `io_file_write.hpp`.
+- `io_file_read.hpp` now includes `io_file_read_current.hpp` and `io_file_read_positioned.hpp`.
+- `io_file_fixed_buffer.hpp` now includes `io_file_fixed_file.hpp`, `io_file_registered_buffer.hpp`, and `io_file_vectored_write.hpp`.
+- `io_file_lifecycle.hpp` now includes `io_file_close_fsync.hpp`, `io_file_metadata.hpp`, `io_file_namespace.hpp`, and `io_file_open.hpp`.
+- The old `AF_IO_FILE_FRAGMENT_INCLUDE` guard was replaced with `AF_IO_FILE_DETAIL_INCLUDE`.
+- No file read/write, positioned IO, fixed-file, registered-buffer, vectored write, open/close/fsync, metadata, namespace operation, wait/cancel ordering, or public API behavior changed.
+
+Correctness checks:
+
+- Local `git diff --check`: passed before this documentation update.
+- Local scan for active `io_file_*fragment.hpp` includes under `include/af`: no matches.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.0` Debug build and full runtime suite under `--security-opt seccomp=unconfined`: passed; 143 tests, 140 passed, 3 skipped, 0 failed.
+- Remote clang Release build and full runtime suite under `--security-opt seccomp=unconfined`: passed; 143 tests, 140 passed, 3 skipped, 0 failed.
+
+Interpretation:
+
+- This is a naming/include-structure cleanup, not a performance-sensitive code change. A new benchmark run was not collected for this pass because the generated file IO helper logic is unchanged.
