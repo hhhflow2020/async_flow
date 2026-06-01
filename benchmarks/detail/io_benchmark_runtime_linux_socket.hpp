@@ -2,6 +2,7 @@
 #error "io_benchmark_runtime_linux_socket.hpp is a FakeRuntime implementation detail"
 #endif
 
+struct FakeRuntimeLinuxSocketOps {
 #if defined(__linux__)
     static bool io_submit_send_zc(
         BenchIoThread,
@@ -62,3 +63,4 @@
         return false;
     }
 #endif
+};

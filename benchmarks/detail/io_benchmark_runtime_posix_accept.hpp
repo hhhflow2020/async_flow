@@ -2,6 +2,7 @@
 #error "io_benchmark_runtime_posix_accept.hpp is a FakeRuntime implementation detail"
 #endif
 
+struct FakeRuntimePosixAcceptOps {
 #if !defined(_WIN32)
     static bool io_submit_accept(
         BenchIoThread,
@@ -47,3 +48,4 @@
         return false;
     }
 #endif
+};

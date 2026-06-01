@@ -2,6 +2,7 @@
 #error "io_benchmark_runtime_posix_message.hpp is a FakeRuntime implementation detail"
 #endif
 
+struct FakeRuntimePosixMessageOps {
 #if !defined(_WIN32)
     static bool io_submit_recvmsg(
         BenchIoThread,
@@ -77,3 +78,4 @@
         return false;
     }
 #endif
+};

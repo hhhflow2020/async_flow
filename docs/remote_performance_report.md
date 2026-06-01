@@ -1748,3 +1748,24 @@ Correctness checks:
 Interpretation:
 
 - This is a source-organization and naming cleanup. It does not change queue algorithms, task state transitions, IO submit/completion behavior, locks, allocations, memory ordering, cache-line layout, or public API semantics.
+
+## 2026-06-01 Benchmark Runtime Stub De-Splicing
+
+This follow-up removes the last active class-body include splice found outside the framework tree. `benchmarks/io_benchmark_support.hpp` no longer includes operation stub headers inside the `FakeRuntime` class body; the benchmark runtime stubs are normal operation-family base structs.
+
+Changes under validation:
+
+- `FakeRuntimeLinuxSocketOps`, `FakeRuntimePosixMessageOps`, `FakeRuntimePosixFileOps`, `FakeRuntimePosixAcceptOps`, and `FakeRuntimeFilesystemOps` now own the benchmark-only static IO submit stubs.
+- `FakeRuntime` inherits those base structs instead of using `#include` directives in its class body.
+- No benchmark stub return value, argument type, platform guard, public framework header, queue logic, task state transition, lock, allocation, memory ordering, or cache layout changed.
+
+Correctness checks:
+
+- Local scan for `#include` directives inside class/struct bodies under `include`, `tests`, `examples`, and `benchmarks`: no matches.
+- Local `git diff --check`: passed.
+- Remote clang Debug build of `asyncflow_runtime_benchmarks`: passed.
+- Remote clang Release build of `asyncflow_runtime_benchmarks`: passed.
+
+Interpretation:
+
+- This completes the removal of active class-body include splicing in source code while keeping benchmark stub responsibilities split by operation family.

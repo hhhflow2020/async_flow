@@ -2,6 +2,7 @@
 #error "io_benchmark_runtime_filesystem.hpp is a FakeRuntime implementation detail"
 #endif
 
+struct FakeRuntimeFilesystemOps {
     static bool io_submit_openat(
         BenchIoThread,
         int,
@@ -150,3 +151,4 @@
         af::IoResult*) noexcept {
         return false;
     }
+};

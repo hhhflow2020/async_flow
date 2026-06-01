@@ -2,6 +2,7 @@
 #error "io_benchmark_runtime_posix_file.hpp is a FakeRuntime implementation detail"
 #endif
 
+struct FakeRuntimePosixFileOps {
 #if !defined(_WIN32)
     static bool io_submit_read_fixed_at(
         BenchIoThread,
@@ -126,3 +127,4 @@
         return false;
     }
 #endif
+};
