@@ -49,6 +49,58 @@ struct RuntimeTraitsConfig {
         }
     }();
 
+    static constexpr std::size_t task_pool_remote_release_batch_size = [] {
+        if constexpr (requires { TraitsT::task_pool_remote_release_batch_size; }) {
+            return static_cast<std::size_t>(
+                TraitsT::task_pool_remote_release_batch_size);
+        } else {
+            return static_cast<std::size_t>(64);
+        }
+    }();
+
+    static constexpr std::size_t task_pool_chunk_size = [] {
+        if constexpr (requires { TraitsT::task_pool_chunk_size; }) {
+            return static_cast<std::size_t>(TraitsT::task_pool_chunk_size);
+        } else {
+            return static_cast<std::size_t>(256);
+        }
+    }();
+
+    static constexpr bool task_pool_cache_slot_index = [] {
+        if constexpr (requires { TraitsT::task_pool_cache_slot_index; }) {
+            return static_cast<bool>(TraitsT::task_pool_cache_slot_index);
+        } else {
+            return false;
+        }
+    }();
+
+    static constexpr std::size_t task_pool_local_cache_set_size = [] {
+        if constexpr (requires { TraitsT::task_pool_local_cache_set_size; }) {
+            return static_cast<std::size_t>(
+                TraitsT::task_pool_local_cache_set_size);
+        } else {
+            return static_cast<std::size_t>(1);
+        }
+    }();
+
+    static constexpr std::size_t task_pool_direct_release_set_size = [] {
+        if constexpr (requires { TraitsT::task_pool_direct_release_set_size; }) {
+            return static_cast<std::size_t>(
+                TraitsT::task_pool_direct_release_set_size);
+        } else {
+            return static_cast<std::size_t>(4);
+        }
+    }();
+
+    static constexpr std::size_t task_pool_local_cache_capacity = [] {
+        if constexpr (requires { TraitsT::task_pool_local_cache_capacity; }) {
+            return static_cast<std::size_t>(
+                TraitsT::task_pool_local_cache_capacity);
+        } else {
+            return static_cast<std::size_t>(64);
+        }
+    }();
+
     static constexpr unsigned io_uring_entries = [] {
         if constexpr (requires { TraitsT::io_uring_entries; }) {
             return static_cast<unsigned>(TraitsT::io_uring_entries);

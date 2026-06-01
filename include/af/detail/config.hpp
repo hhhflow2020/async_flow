@@ -17,6 +17,12 @@
 #define AF_ASSERT(expr) static_cast<void>(sizeof(expr))
 #endif
 
+#if defined(__GNUC__) || defined(__clang__)
+#define AF_DETAIL_NOINLINE __attribute__((noinline))
+#else
+#define AF_DETAIL_NOINLINE
+#endif
+
 #if defined(__linux__)
 #define AF_DETAIL_HAS_EPOLL 1
 #else

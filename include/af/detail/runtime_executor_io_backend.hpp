@@ -294,10 +294,16 @@ void Executor<RuntimeT, TraitsT>::reserve_io_backend_storage() noexcept {
   try {
     if constexpr (io_wait_reserve != 0U) {
       io_waits_.reserve(io_wait_reserve);
+      io_wait_pool_.reserve_slots(io_wait_reserve);
     }
     if constexpr (io_uring_provided_buffer_group_reserve != 0U) {
       io_uring_provided_buffer_groups_.reserve(
           io_uring_provided_buffer_group_reserve);
+    }
+    if (io_uring_thread()) {
+      io_uring_msg_pool_.reserve_slots(io_uring_entries);
+      io_uring_address_pool_.reserve_slots(io_uring_entries);
+      io_uring_op_pool_.reserve_slots(io_uring_entries);
     }
   } catch (...) {
   }

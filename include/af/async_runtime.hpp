@@ -248,8 +248,21 @@ private:
   using ParallelGroup = detail::RuntimeParallelGroup<AsyncRuntime>;
   using SpscQueue = detail::BoundedSpscQueue<Task>;
   using ExternalQueue = detail::BoundedMpscQueue<Task>;
-  template <typename TaskT> using TaskPool = detail::ObjectPool<TaskT>;
-  using ParallelGroupPool = detail::ObjectPool<ParallelGroup>;
+  template <typename TaskT>
+  using TaskPool =
+      detail::ObjectPool<TaskT, Config::task_pool_chunk_size,
+                         Config::task_pool_remote_release_batch_size,
+                         Config::task_pool_cache_slot_index,
+                         Config::task_pool_local_cache_set_size,
+                         Config::task_pool_direct_release_set_size,
+                         Config::task_pool_local_cache_capacity>;
+  using ParallelGroupPool =
+      detail::ObjectPool<ParallelGroup, Config::task_pool_chunk_size,
+                         Config::task_pool_remote_release_batch_size,
+                         Config::task_pool_cache_slot_index,
+                         Config::task_pool_local_cache_set_size,
+                         Config::task_pool_direct_release_set_size,
+                         Config::task_pool_local_cache_capacity>;
 
   enum class ReadyQueueRoute : std::uint8_t {
     Local,

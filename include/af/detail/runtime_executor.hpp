@@ -12,6 +12,8 @@ class alignas(hardware_cache_line_size) Executor {
   using Task = BasicTask<RuntimeT>;
   using RuntimeStatus = detail::RuntimeStatus;
   template <typename T> using CacheLineAtomic = detail::CacheLineAtomic<T>;
+  template <typename T>
+  using IoObjectPool = detail::ObjectPool<T, 256, 1, false, 1>;
 
   static constexpr std::uint16_t thread_count = RuntimeT::thread_count;
   static constexpr std::uint16_t invalid_thread_index =
@@ -2224,6 +2226,8 @@ private:
     try {
       if constexpr (io_wait_reserve != 0U) {
         io_waits_.reserve(io_wait_reserve);
+        io_wait_pool_.reserve_slots(io_wait_reserve);
+        io_kqueue_timeout_pool_.reserve_slots(io_wait_reserve);
       }
     } catch (...) {
     }
@@ -2565,7 +2569,7 @@ private:
   Task *running_task_{nullptr};
 #if AF_DETAIL_HAS_NATIVE_IO_WAIT
   absl::flat_hash_map<int, IoWaitRegistration *> io_waits_;
-  detail::ObjectPool<IoWaitRegistration> io_wait_pool_;
+  IoObjectPool<IoWaitRegistration> io_wait_pool_;
 #endif
 #if AF_DETAIL_HAS_EPOLL
   int io_epoll_fd_{-1};
@@ -2576,7 +2580,7 @@ private:
   KqueueTimeoutRegistration *io_kqueue_timeouts_{nullptr};
   std::uint32_t io_kqueue_timeout_count_{0};
   uintptr_t io_kqueue_next_timeout_ident_{2};
-  detail::ObjectPool<KqueueTimeoutRegistration> io_kqueue_timeout_pool_;
+  IoObjectPool<KqueueTimeoutRegistration> io_kqueue_timeout_pool_;
 #endif
 #if defined(__linux__)
   int io_uring_fd_{-1};
@@ -2607,9 +2611,9 @@ private:
   bool io_uring_files_registered_{false};
   unsigned io_uring_registered_file_count_{0};
   IoUringOperation *io_uring_operations_{nullptr};
-  detail::ObjectPool<detail::IoUringMessage> io_uring_msg_pool_;
-  detail::ObjectPool<detail::IoUringSocketAddress> io_uring_address_pool_;
-  detail::ObjectPool<IoUringOperation> io_uring_op_pool_;
+  IoObjectPool<detail::IoUringMessage> io_uring_msg_pool_;
+  IoObjectPool<detail::IoUringSocketAddress> io_uring_address_pool_;
+  IoObjectPool<IoUringOperation> io_uring_op_pool_;
 #endif
 #if AF_DETAIL_HAS_EPOLL || AF_DETAIL_HAS_KQUEUE
   CacheLineAtomic<bool> io_wake_pending_{false};

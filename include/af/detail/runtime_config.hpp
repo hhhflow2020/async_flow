@@ -33,6 +33,18 @@ template <typename TraitsT> struct RuntimeConfig {
       TraitConfig::shutdown_policy;
   static constexpr bool task_registry_enabled =
       TraitConfig::task_registry_enabled;
+  static constexpr std::size_t task_pool_remote_release_batch_size =
+      TraitConfig::task_pool_remote_release_batch_size;
+  static constexpr std::size_t task_pool_chunk_size =
+      TraitConfig::task_pool_chunk_size;
+  static constexpr bool task_pool_cache_slot_index =
+      TraitConfig::task_pool_cache_slot_index;
+  static constexpr std::size_t task_pool_local_cache_set_size =
+      TraitConfig::task_pool_local_cache_set_size;
+  static constexpr std::size_t task_pool_direct_release_set_size =
+      TraitConfig::task_pool_direct_release_set_size;
+  static constexpr std::size_t task_pool_local_cache_capacity =
+      TraitConfig::task_pool_local_cache_capacity;
   static constexpr unsigned io_uring_entries = TraitConfig::io_uring_entries;
   static constexpr unsigned io_uring_submit_batch_threshold =
       TraitConfig::io_uring_submit_batch_threshold;
@@ -61,6 +73,25 @@ template <typename TraitsT> struct RuntimeConfig {
                 "spsc_queue_capacity must be greater than zero");
   static_assert(external_queue_capacity > 0,
                 "external_queue_capacity must be greater than zero");
+  static_assert(task_pool_remote_release_batch_size > 0,
+                "task_pool_remote_release_batch_size must be greater than zero");
+  static_assert(task_pool_chunk_size > 0,
+                "task_pool_chunk_size must be greater than zero");
+  static_assert(task_pool_chunk_size <
+                    static_cast<std::size_t>(
+                        std::numeric_limits<std::uint16_t>::max()),
+                "task_pool_chunk_size must leave 48 bits for the object-pool "
+                "free-list ABA tag");
+  static_assert(task_pool_local_cache_set_size >= 1,
+                "task_pool_local_cache_set_size must be at least one");
+  static_assert(task_pool_direct_release_set_size > 0,
+                "task_pool_direct_release_set_size must be greater than zero");
+  static_assert(task_pool_local_cache_capacity > 0,
+                "task_pool_local_cache_capacity must be greater than zero");
+  static_assert(task_pool_remote_release_batch_size <=
+                    task_pool_local_cache_capacity,
+                "task_pool_remote_release_batch_size must not exceed "
+                "task_pool_local_cache_capacity");
   static_assert(io_uring_entries > 0,
                 "io_uring_entries must be greater than zero");
   static_assert(std::has_single_bit(io_uring_entries),

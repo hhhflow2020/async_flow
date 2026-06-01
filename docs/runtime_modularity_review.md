@@ -191,7 +191,7 @@ Resolved items:
 - The old task fragment filenames were later retired from the active public task path. `include/af/task.hpp` now includes normal internal task headers, and the `AF_TASK_FRAGMENT_INCLUDE` gate was replaced with `AF_TASK_DETAIL_INCLUDE`.
 - The modularity rule for task internals is now stricter: split only when there is an independent data structure, algorithm, function family, or class boundary. Do not split a single class by access section, field block, or a few private member functions just to reduce line count.
 - `runtime_executor_io_uring_generic_submit_sqe_fragment.hpp` is now an 8-line umbrella over SQE dispatch/common initialization, filesystem/path SQE fields, socket/message SQE fields, and buffer/data SQE fields.
-- The previous `ObjectPool` class-body fragment split has been reverted. `object_pool.hpp` now keeps storage layout, TLS cache, slot acquire/release, lifecycle, MPMC free-list, and cache-line-aligned atomics in one cohesive class definition.
+- The previous `ObjectPool` class-body fragment split has been reverted. `object_pool.hpp` keeps storage layout, TLS cache, slot acquire/release, lifecycle, free-list mechanics, and cache-line-aligned atomics in one cohesive class definition; the later object-pool performance pass replaced the old general MPMC free queue with a tagged per-block free stack.
 - The previous public adapter class-body fragment split has been reverted. `IoStream`, `IoDatagramSocket`, `IoFile`, and `IoFixedFile` now keep their operation-family methods in declaration order inside one cohesive class definition per adapter, preserving the two-field trivially-copyable adapter layout and inline/template visibility without `#include` splicing inside class bodies.
 
 Historical file-size snapshot after that scheduler pass. For current core-runtime files, use the Runtime Core De-Fragmenting Correction section above:
@@ -350,7 +350,7 @@ Additional validation after the `ObjectPool` de-fragmenting pass:
 
 - Removed the class-body include splice in `object_pool.hpp`.
 - Deleted the now-obsolete storage/slot-ops/lifecycle ObjectPool fragment headers.
-- Kept TLS cache, cache-line slot sizing, MPMC free-list, slot acquire/release, lifecycle, and hot-block atomics together in one readable class definition; no memory ordering, lock, allocation policy, queue type, or cache alignment changed.
+- Kept TLS cache, cache-line slot sizing, then-current free-list mechanics, slot acquire/release, lifecycle, and hot-block atomics together in one readable class definition; that historical de-fragmenting pass did not change memory ordering, locks, allocation policy, queue type, or cache alignment.
 - Local `git diff --check`: passed.
 - Remote clang Debug `asyncflow_runtime_tests` build: passed.
 - Remote clang Debug Pool/Runtime/Stress targeted tests: 27/27 passed.
