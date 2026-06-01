@@ -1,5 +1,5 @@
-#if !defined(AF_TASK_FRAGMENT_INCLUDE)
-#error "task_types_fragment.hpp is a task implementation fragment"
+#if !defined(AF_TASK_DETAIL_INCLUDE)
+#error "task_types.hpp is internal to af/task.hpp"
 #endif
 
 template <typename TraitsT> class AsyncRuntime;

@@ -11,11 +11,13 @@
 
 namespace af {
 
-#define AF_TASK_FRAGMENT_INCLUDE
-#include "af/detail/task_types_fragment.hpp"
-#include "af/detail/task_io_state_fragment.hpp"
-#include "af/detail/task_registry_fragment.hpp"
-#include "af/detail/basic_task_fragment.hpp"
-#undef AF_TASK_FRAGMENT_INCLUDE
+#define AF_TASK_DETAIL_INCLUDE
+// clang-format off
+#include "af/detail/task_types.hpp"
+#include "af/detail/task_io_state.hpp"
+#include "af/detail/task_registry.hpp"
+#include "af/detail/basic_task.hpp"
+// clang-format on
+#undef AF_TASK_DETAIL_INCLUDE
 
 } // namespace af

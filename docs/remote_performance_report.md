@@ -1460,3 +1460,26 @@ Interpretation:
 - This pass changes only declaration/definition placement. SQE contents, io_uring operation ownership, submit batching, fixed-resource validation, provided-buffer checks, message/address storage, locks, atomics, allocations, and task wake behavior are unchanged.
 - The runtime hop benchmarks do not directly exercise the moved io_uring submit helpers; the external/cross-thread values remain within the historical canary range but are noisy enough that they should not be treated as a stable microarchitectural baseline.
 - `runtime_executor.hpp` dropped from 3356 lines to 2627 lines. Further executor work should target remaining real operation families, especially public submit wrappers or platform-specific kqueue code when a kqueue-capable runner is available.
+
+## 2026-06-01 Task Header Fragment Rename
+
+This run validates removal of active `*_fragment.hpp` naming from the public task entry point.
+
+Changes under validation:
+
+- `include/af/task.hpp` now includes `task_types.hpp`, `task_io_state.hpp`, `task_registry.hpp`, and `basic_task.hpp`.
+- The old `AF_TASK_FRAGMENT_INCLUDE` guard was replaced with `AF_TASK_DETAIL_INCLUDE`.
+- No task state transition, memory ordering, queue routing, allocation policy, or virtual task API changed.
+
+Correctness checks:
+
+- Local `git diff --check`: passed before this documentation update.
+- Local scan for `#include "af/detail/*fragment.hpp"` inside framework class/struct bodies: no matches.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.0` Debug `asyncflow_runtime_tests` build: passed.
+- Remote clang Debug full runtime suite under `--security-opt seccomp=unconfined`: 143 tests, 140 passed, 3 skipped, 0 failed.
+- Remote clang Release `asyncflow_runtime_tests` build: passed.
+- Remote clang Release full runtime suite under `--security-opt seccomp=unconfined`: 143 tests, 140 passed, 3 skipped, 0 failed.
+
+Interpretation:
+
+- This is a naming/include-structure cleanup, not a performance-sensitive code change. A new benchmark run was not collected for this pass because the generated task/runtime logic is unchanged.

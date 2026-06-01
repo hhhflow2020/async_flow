@@ -1,5 +1,5 @@
-#if !defined(AF_TASK_FRAGMENT_INCLUDE)
-#error "basic_task_fragment.hpp is a task implementation fragment"
+#if !defined(AF_TASK_DETAIL_INCLUDE)
+#error "basic_task.hpp is internal to af/task.hpp"
 #endif
 
 template <typename RuntimeT> class BasicTask {
