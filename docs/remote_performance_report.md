@@ -523,3 +523,30 @@ Interpretation:
 
 - This is the strongest current remote correctness signal: scheduler, epoll fallback, actual io_uring socket/file/multishot paths, runtime stress tests, above-64-thread ready-source coverage, and shutdown/restart cases all passed under Debug, TSAN, and Release.
 - The default container profile still blocks io_uring; `--security-opt seccomp=unconfined` remains required unless a custom seccomp profile allows the three io_uring syscalls.
+
+## 2026-06-01 Explicit Ready Queue Route And Self-Post Stress
+
+This run validates the scheduler hot-path change that makes runtime-thread ready enqueue routing explicit: same-owner posts use `ReadyQueueRoute::Local`, while cross-owner posts use `ReadyQueueRoute::Spsc`.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Remote clang Debug targeted scheduler stress tests: 5/5 passed.
+- Remote clang TSAN targeted scheduler stress tests: 5/5 passed, no ThreadSanitizer report.
+- Remote clang Release targeted scheduler stress tests: 5/5 passed.
+- Remote clang Release full runtime test suite: 135 total, 132 passed, 3 skipped, 0 failed.
+
+Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | CPU Mean | Throughput Mean |
+| --- | ---: | ---: | ---: |
+| `BM_RuntimeExternalStart/8192` | 7.08 ms | 7.07 ms | 1.181 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 11.6 ms | 4.42 ms | 705.325 k/s |
+| `BM_RuntimeIoThreadHop/8192` | 4.23 ms | 4.23 ms | 1.936 M/s |
+| `BM_RuntimeParallelShards/128` | 0.500 ms | 0.480 ms | 256.161 k/s |
+
+Interpretation:
+
+- The new single-thread fanout stress test would strand work if same-thread runtime posts were accidentally routed through the self SPSC queue instead of the executor local FIFO.
+- The `again()` stress test covers the `finish_again()` self-reschedule path and verifies it also drains through local queue behavior without relying on cross-thread ready hints.
+- The route naming change adds no locks, no heap allocation, no additional queue type, and no executor state-layout changes.

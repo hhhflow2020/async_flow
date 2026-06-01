@@ -2,6 +2,11 @@
 #error "runtime_ready_enqueue_fragment.hpp is an AsyncRuntime implementation fragment"
 #endif
 
+    enum class ReadyQueueRoute : std::uint8_t {
+        Local,
+        Spsc,
+    };
+
     static void post_blocking(Thread thread, Task* task) noexcept {
         const std::uint16_t index = thread_index(thread);
         AF_ASSERT(index < thread_count);
@@ -43,11 +48,19 @@
         std::uint16_t source,
         std::uint16_t target,
         Task* task) noexcept {
-        if (source == target) {
+        const ReadyQueueRoute route = ready_route_from_runtime_thread(source, target);
+        if (route == ReadyQueueRoute::Local) {
             return try_enqueue_local_from_runtime_thread(target, task);
         }
 
+        AF_ASSERT(route == ReadyQueueRoute::Spsc);
         return try_enqueue_cross_thread_spsc(source, target, task);
+    }
+
+    [[nodiscard]] static constexpr ReadyQueueRoute ready_route_from_runtime_thread(
+        std::uint16_t source,
+        std::uint16_t target) noexcept {
+        return source == target ? ReadyQueueRoute::Local : ReadyQueueRoute::Spsc;
     }
 
     static bool try_enqueue_local_from_runtime_thread(
@@ -89,11 +102,13 @@
         std::uint16_t source,
         std::uint16_t target,
         Task* task) noexcept {
-        if (source == target) {
+        const ReadyQueueRoute route = ready_route_from_runtime_thread(source, target);
+        if (route == ReadyQueueRoute::Local) {
             enqueue_local_from_runtime_thread_blocking(target, task);
             return;
         }
 
+        AF_ASSERT(route == ReadyQueueRoute::Spsc);
         enqueue_cross_thread_spsc_blocking(source, target, task);
     }
 
