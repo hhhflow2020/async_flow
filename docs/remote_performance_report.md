@@ -1139,3 +1139,36 @@ Interpretation:
 
 - The cleanup removes an over-fragmented class-body structure without changing the object-pool allocation strategy, cache-line padding, TLS cache policy, queue type, or atomic ordering.
 - Keeping the pool implementation in one file makes future false-sharing and lifetime audits easier than following public/private include fragments.
+
+## 2026-06-01 Adapter Class De-Fragmenting Validation
+
+This run validates the cleanup that removes class-body `#include` splicing from the public IO adapter classes.
+
+Changes under validation:
+
+- `IoStream`, `IoDatagramSocket`, `IoFile`, and `IoFixedFile` now keep their forwarding methods in one cohesive class definition per adapter.
+- Removed the 16 recv/send/read/write/fixed/sync method fragment headers that existed only to splice code into class bodies.
+- Preserved the adapter object model: two-field trivially-copyable views, no fd ownership, no heap allocation, no virtual dispatch, and inline/template-visible forwarding to the same IO helper functions.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed before the documentation update.
+- Remote clang Debug `asyncflow_runtime_tests` build: passed.
+- Remote clang Debug adapter/stream/datagram/file-boundary targeted tests: 27/27 passed.
+- Remote clang TSAN adapter/stream/datagram/file-boundary targeted tests: 27/27 passed, no ThreadSanitizer report.
+- Remote clang Release adapter/stream/datagram/file-boundary targeted tests: 27/27 passed.
+
+Release IO adapter benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | CPU Mean |
+| --- | ---: | ---: |
+| `BM_IoDatagramAdapterZeroByteRecv` | 0.640 ns | 0.640 ns |
+| `BM_IoFileAdapterZeroByteRead` | 0.628 ns | 0.627 ns |
+| `BM_IoStreamAdapterZeroByteSend` | 0.627 ns | 0.627 ns |
+| `BM_IoStreamAdapterZeroByteSendZc` | 0.627 ns | 0.627 ns |
+| `BM_IoFileAdapterZeroByteReadFixedAt` | 0.630 ns | 0.629 ns |
+
+Interpretation:
+
+- The cleanup removes an over-fragmented adapter class-body structure without changing IO routing, queue selection, syscall paths, io_uring submit paths, memory ordering, or ownership behavior.
+- The benchmark canary stayed in the same sub-nanosecond helper-level range as previous adapter checks, which is the expected result for an inline-only source layout cleanup.

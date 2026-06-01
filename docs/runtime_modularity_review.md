@@ -102,9 +102,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - The macOS/BSD kqueue backend is split by setup, timeout, poll, storage, wait, and event translation helpers. kqueue now supports native one-shot timeout completion and cancel for `io_wait_timeout()` / `arm_io_timeout()` without routing through Linux `timerfd`.
 - The bounded queue implementations are now split by SPSC, MPSC, and MPMC queue family, with `bounded_queues.hpp` kept as a compatibility umbrella. The split is mechanical and preserves queue layout, cache-line alignment, memory ordering, and template visibility.
 - Socket transfer helpers are now split by sendfile, shutdown, and splice operation family, with `io_socket_transfer_fragment.hpp` kept as a compatibility umbrella.
-- `IoFixedFile` is now a small adapter shell with read, recv, write, send, and sync member-function fragments included inside the class body. The thin adapter remains trivially copyable and inline/template-visible.
-- `IoFile` is now a small descriptor-adapter shell with read, write, registered-buffer fixed IO, and sync member-function fragments included inside the class body. The public adapter remains a thin inline view over the descriptor.
-- `IoStream` and `IoDatagramSocket` are now small adapter shells with operation-family method fragments included inside the class body. Stream methods are grouped by recv, send, transfer/connect, and read/write aliases; datagram methods are grouped by lifecycle, recv, and send families.
+- `IoFixedFile`, `IoFile`, `IoStream`, and `IoDatagramSocket` are now cohesive thin adapter class definitions again. The previous class-body method-fragment split has been reverted because it made each adapter harder to audit without creating an independent abstraction boundary.
 - Public file read helpers are now split into current-offset read/readv and positioned read/readv fragments, with `io_file_read_fragment.hpp` kept as a compatibility umbrella.
 - Public timeout helpers are now split into timeout completion status normalization, single timeout wait submission, and deadline arbitration fragments. `io_timeout.hpp` remains a small public umbrella while preserving inline/template visibility for timeout and cancel race handling.
 - `runtime_common_fragment.hpp` is now a 9-line umbrella over runtime status, cache-line atomic wrapper, ordered-batch state, parallel-group state, and external-post counter fragments. This keeps common state families separate while preserving class-scope inline visibility.
@@ -141,6 +139,7 @@ Resolved items:
 - The modularity rule for task internals is now stricter: split only when there is an independent data structure, algorithm, function family, or class boundary. Do not split a single class by access section, field block, or a few private member functions just to reduce line count.
 - `runtime_executor_io_uring_generic_submit_sqe_fragment.hpp` is now an 8-line umbrella over SQE dispatch/common initialization, filesystem/path SQE fields, socket/message SQE fields, and buffer/data SQE fields.
 - The previous `ObjectPool` class-body fragment split has been reverted. `object_pool.hpp` now keeps storage layout, TLS cache, slot acquire/release, lifecycle, MPMC free-list, and cache-line-aligned atomics in one cohesive class definition.
+- The previous public adapter class-body fragment split has been reverted. `IoStream`, `IoDatagramSocket`, `IoFile`, and `IoFixedFile` now keep their operation-family methods in declaration order inside one cohesive class definition per adapter, preserving the two-field trivially-copyable adapter layout and inline/template visibility without `#include` splicing inside class bodies.
 
 Current file-size snapshot after the pass:
 
@@ -201,6 +200,10 @@ Current file-size snapshot after the pass:
 - `include/af/detail/io_uring_support_sqe_fragment.hpp`: 41 lines.
 - `include/af/detail/basic_task_fragment.hpp`: 317 lines, intentionally kept as one cohesive class definition with no class-body `#include` splicing.
 - `include/af/detail/object_pool.hpp`: 196 lines, intentionally kept as one cohesive class definition with no class-body `#include` splicing.
+- `include/af/detail/io_adapters_stream_fragment.hpp`: 197 lines, intentionally kept as one cohesive `IoStream` class definition with no class-body `#include` splicing.
+- `include/af/detail/io_adapters_datagram_fragment.hpp`: 202 lines, intentionally kept as one cohesive `IoDatagramSocket` class definition with no class-body `#include` splicing.
+- `include/af/detail/io_adapters_file_descriptor_fragment.hpp`: 198 lines, intentionally kept as one cohesive `IoFile` class definition with no class-body `#include` splicing.
+- `include/af/detail/io_adapters_fixed_file_fragment.hpp`: 222 lines, intentionally kept as one cohesive `IoFixedFile` class definition with no class-body `#include` splicing.
 - `tests/runtime_lifecycle_stress_tests.cpp`: 63 lines.
 - `tests/runtime_config_tests.cpp`: 30 lines.
 - `tests/runtime_self_post_stress_tests.cpp`: 117 lines.
@@ -304,6 +307,23 @@ Additional validation after the `ObjectPool` de-fragmenting pass:
   - `BM_ObjectPoolCreateDestroy/16384` mean: 48,464 ns real, 341.805 M/s.
   - `BM_RuntimeExternalStart/8192` mean: 6.69 ms real, 1.230 M/s.
   - `BM_RuntimeCrossThreadHop/8192` mean: 13.4 ms real, 613.925 k/s.
+
+Additional validation after the adapter class de-fragmenting pass:
+
+- Removed class-body include splices from `IoStream`, `IoDatagramSocket`, `IoFile`, and `IoFixedFile`.
+- Deleted the 16 now-obsolete adapter method fragment headers that only existed to splice recv/send/read/write/fixed/sync methods into class bodies.
+- Kept adapter objects as two-field trivially-copyable views and kept all forwarding helpers inline/template-visible; no IO routing, queueing, syscall, io_uring submit, memory ordering, allocation, virtual dispatch, or ownership behavior changed.
+- Local `git diff --check`: passed before the documentation update.
+- Remote clang Debug `asyncflow_runtime_tests` build: passed.
+- Remote clang Debug adapter/stream/datagram/file-boundary targeted tests: 27/27 passed.
+- Remote clang TSAN adapter/stream/datagram/file-boundary targeted tests: 27/27 passed with no ThreadSanitizer report.
+- Remote clang Release adapter/stream/datagram/file-boundary targeted tests: 27/27 passed.
+- Remote clang Release IO adapter benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+  - `BM_IoDatagramAdapterZeroByteRecv` mean: 0.640 ns real.
+  - `BM_IoFileAdapterZeroByteRead` mean: 0.628 ns real.
+  - `BM_IoStreamAdapterZeroByteSend` mean: 0.627 ns real.
+  - `BM_IoStreamAdapterZeroByteSendZc` mean: 0.627 ns real.
+  - `BM_IoFileAdapterZeroByteReadFixedAt` mean: 0.630 ns real.
 
 Additional validation after the `io_common` split and epoll delete race fix:
 
@@ -1044,8 +1064,8 @@ After splitting `IoFile`, the largest remaining files are mostly tests/examples.
 - `include/af/detail/basic_task_fragment.hpp`: no longer a class shell over class-body fragments; task lifecycle and scheduling now remain inline in one cohesive class definition.
 - Resolved after this scan: `include/af/detail/io_common_detail_state_fragment.hpp` is now a small umbrella over focused IO common helper fragments.
 - Resolved after this scan: `include/af/detail/runtime_executor_io_uring_file_resource_fragment.hpp` is now a small umbrella over fixed-file table register, unregister, and update fragments.
-- `include/af/detail/io_adapters_datagram_fragment.hpp`: now a small class shell. Its methods are split by bind/lifecycle, recv/multishot, and send/zero-copy groups.
-- `include/af/detail/io_adapters_stream_fragment.hpp`: now a small class shell. Its methods are split by recv, send, transfer/connect, and read/write alias groups.
+- Resolved after this scan: `include/af/detail/io_adapters_datagram_fragment.hpp` and `include/af/detail/io_adapters_stream_fragment.hpp` no longer use class-body method fragments. Each adapter is kept as one cohesive thin class definition.
+- Resolved after this scan: `include/af/detail/io_adapters_file_descriptor_fragment.hpp` and `include/af/detail/io_adapters_fixed_file_fragment.hpp` no longer use class-body method fragments. `IoFile` and `IoFixedFile` keep read/write/fixed/sync forwarding methods in declaration order.
 
 Recommended next order:
 
