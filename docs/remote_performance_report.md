@@ -344,3 +344,20 @@ Interpretation:
 
 - This pass changed only example support layout. Runtime scheduling, IO backend behavior, queue selection, memory ordering, and public APIs were unchanged.
 - The remote host/container combination did not expose the io_uring fixed-file backend path for this example, so this validates build/link/run and TSAN startup/teardown cleanliness rather than the registered-file data path itself.
+
+## 2026-06-01 io_uring File-Lifecycle Task Split Validation
+
+This run validates the example support split that turned `examples/support/io_uring_file_lifecycle_task.hpp` into a small task shell over flow, file-operation, and namespace-operation fragments.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_io_uring_file_lifecycle_example` build: passed; local run reported `io_uring lifecycle example is Linux-only`.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2` Debug `asyncflow_io_uring_file_lifecycle_example` build/run: passed with `io_uring backend unavailable`.
+- Remote clang TSAN `asyncflow_io_uring_file_lifecycle_example` build/run: passed with `io_uring backend unavailable` and no ThreadSanitizer report.
+- Remote clang Release `asyncflow_io_uring_file_lifecycle_example` build/run: passed with `io_uring backend unavailable`.
+
+Interpretation:
+
+- This pass changed only example support layout. Runtime scheduling, IO backend behavior, queue selection, memory ordering, and public APIs were unchanged.
+- The remote host/container combination did not expose the io_uring backend path for this example, so this validates build/link/run and TSAN startup/teardown cleanliness rather than the open/fallocate/read/write/stat/rename/unlink data path itself.

@@ -78,7 +78,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - The io_uring fixed-file example is now split into runtime traits, temporary file lifecycle helpers, a small registered-file/buffer task shell, flow/IO/registration fragments, and a thin executable entry point.
 - The io_uring filesystem-ops example is now split into runtime/result types, temporary path lifecycle helpers, a small filesystem operation task shell, flow/data/namespace operation fragments, and a thin executable entry point.
 - The io_uring UDP recv multishot example is now split into runtime/wait helpers, UDP socket setup helpers, the provided-buffer recv multishot task, and a thin executable entry point.
-- The io_uring file-lifecycle example is now split into runtime traits, temporary path lifecycle helpers, the open/fallocate/read/write/stat/rename/unlink/close task, and a thin executable entry point.
+- The io_uring file-lifecycle example is now split into runtime traits, temporary path lifecycle helpers, a small task shell, flow/file-operation/namespace-operation fragments, and a thin executable entry point.
 - The pollable-client adapter example is now split into runtime traits, a third-party-style pollable echo client, the AsyncFlow readiness adapter task, peer echo helpers, and a thin executable entry point.
 - The io_uring stream recv multishot example is now split into runtime/wait helpers, socketpair setup helpers, the provided-buffer recv multishot task, and a thin executable entry point.
 - The TCP connect/accept example is now split into runtime traits, portable loopback socket setup, server/client state-machine tasks, and a thin executable entry point. It uses the unified `ThreadKind::Io`/`ThreadKind::IoUring` API so Linux can prefer io_uring while macOS/BSD uses the native kqueue readiness backend.
@@ -338,6 +338,19 @@ Additional validation after the io_uring fixed-file task split:
 - Remote clang TSAN `asyncflow_io_uring_fixed_file_example` build/run: passed with `io_uring backend unavailable` and no ThreadSanitizer report.
 - Remote clang Release `asyncflow_io_uring_fixed_file_example` build/run: passed with `io_uring backend unavailable`.
 
+Additional validation after the io_uring file-lifecycle task split:
+
+- `examples/support/io_uring_file_lifecycle_task.hpp` is now a 74-line task shell.
+- `examples/support/io_uring_file_lifecycle_task_flow.hpp` owns path copying and the state dispatcher.
+- `examples/support/io_uring_file_lifecycle_task_file_ops.hpp` owns open, fallocate, write, fsync, read, and close handlers.
+- `examples/support/io_uring_file_lifecycle_task_namespace_ops.hpp` owns statx, rename, and unlink handlers.
+- No runtime scheduling, IO backend, queue, memory-ordering, or public API behavior changed in this pass; only example support ownership changed.
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_io_uring_file_lifecycle_example` build: passed; local run reported `io_uring lifecycle example is Linux-only`.
+- Remote clang Debug `asyncflow_io_uring_file_lifecycle_example` build/run: passed with `io_uring backend unavailable`.
+- Remote clang TSAN `asyncflow_io_uring_file_lifecycle_example` build/run: passed with `io_uring backend unavailable` and no ThreadSanitizer report.
+- Remote clang Release `asyncflow_io_uring_file_lifecycle_example` build/run: passed with `io_uring backend unavailable`.
+
 Remaining follow-up:
 
 - Ready-source hints are now correct and bounded, but future benchmarking may justify a rotating ready-word cursor for very large `thread_count` values.
@@ -355,7 +368,7 @@ Current file-size snapshot:
 - Resolved after this scan: `include/af/detail/basic_task_fragment.hpp` is now a small class shell over public, protected-helper, lifetime, scheduling, and storage fragments.
 - Resolved after this scan: `include/af/detail/io_common_detail_state_fragment.hpp` is now a small umbrella over IO target, wait-arm, wait-state, io_uring-status, and iovec helper fragments.
 - Resolved after this scan: the old combined `tests/runtime_stress_tests.cpp` was removed. Runtime stress test cases are split by concern, and reusable stress state machines live in support headers.
-- The largest remaining examples/tests are now fixture/state-machine files, not the runtime shell. `runtime_io_uring_socket_datagram_tests.cpp`, `runtime_io_stream_transfer_tests.cpp`, `io_rpc_length_prefixed_server.hpp`, and `io_uring_fixed_file_task.hpp` have been reduced by moving repeated setup or role-specific tasks into support fragments; the remaining notable example candidate is `io_uring_file_lifecycle_task.hpp`.
+- The largest remaining examples/tests are now fixture/state-machine files, not the runtime shell. `runtime_io_uring_socket_datagram_tests.cpp`, `runtime_io_stream_transfer_tests.cpp`, `io_rpc_length_prefixed_server.hpp`, `io_uring_fixed_file_task.hpp`, and `io_uring_file_lifecycle_task.hpp` have been reduced by moving repeated setup or role-specific tasks into support fragments.
 
 Active correctness/performance issues to track:
 
@@ -396,7 +409,7 @@ Issue ledger:
 - Resolved: `basic_task_fragment.hpp` now uses class-body fragments for public/protected task helpers, schedule-state transitions, lifetime/destroy helpers, and one final storage-layout block.
 - Resolved: `io_common_detail_state_fragment.hpp` is split by helper family, and the epoll readiness path no longer depends on a deferred-delete/rearm-hint cleanup path.
 - Resolved: the old combined runtime stress source was removed. Lifecycle, cross-thread hop, and parallel shard stress cases now live in separate test sources; reusable state machines live in support headers.
-- P2: several IO tests and examples remain moderately dense after the first pass. `runtime_io_uring_socket_datagram_tests.cpp` and `runtime_io_stream_transfer_tests.cpp` were reduced by extracting repeated fixture setup into shared test support; `io_rpc_length_prefixed_server.hpp` and `io_uring_fixed_file_task.hpp` were reduced to small task/umbrella shells over role or operation-family fragments. The notable remaining example file is `io_uring_file_lifecycle_task.hpp`. Future edits should split by protocol role, transfer mode, or operation family instead of appending new states to the existing file.
+- P2: several IO tests and examples remain moderately dense after the first pass. `runtime_io_uring_socket_datagram_tests.cpp` and `runtime_io_stream_transfer_tests.cpp` were reduced by extracting repeated fixture setup into shared test support; `io_rpc_length_prefixed_server.hpp`, `io_uring_fixed_file_task.hpp`, and `io_uring_file_lifecycle_task.hpp` were reduced to small task/umbrella shells over role or operation-family fragments. Future edits should split by protocol role, transfer mode, or operation family instead of appending new states to the existing file.
 - P2: older examples such as `io_epoll.cpp`, `io_event.cpp`, `io_timer.cpp`, `io_native_readiness.cpp`, and several multishot examples still use explicit atomics to observe readiness/completion from `main`. Prefer task-owned state machines plus `ShutdownPolicy::WaitForTasks` for examples unless the example is specifically demonstrating cross-thread observation.
 
 Performance guardrails:
@@ -460,7 +473,7 @@ Current issue ledger:
 - P1: future changes must not append new operation families directly into `async_runtime.hpp`. New public methods should enter through the existing public IO/resource/lifecycle/parallel umbrellas, and new executor operations should enter through the matching backend submit/completion fragments.
 - P2: `include/af/detail/bounded_queues.hpp` still contains SPSC, MPSC, and MPMC bounded queues in one file. The implementation is performance-sensitive and cache-line aligned, so a split is acceptable only as a mechanical separation into queue-family headers with no layout or memory-order changes, followed by queue benchmarks.
 - P2: several test support files remain dense state-machine collections: stream sendfile/splice support, file lifecycle support, fixed-file read/write support, and io_uring multishot recv/recvmsg support. These should continue moving toward operation-family task fragments when touched.
-- P2: several examples remain long because they combine protocol framing, socket IO, task state machines, and result reporting. The fixed-file round trip and length-prefixed RPC server paths have been reduced to focused fragments; the biggest current examples are now the length-prefixed RPC client, file lifecycle, and UDP recv/recvmsg multishot examples. Prefer protocol/helper headers plus small task headers for future edits.
+- P2: several examples remain long because they combine protocol framing, socket IO, task state machines, and result reporting. The fixed-file round trip, file lifecycle, and length-prefixed RPC server paths have been reduced to focused fragments; the biggest current examples are now the length-prefixed RPC client and UDP recv/recvmsg multishot examples. Prefer protocol/helper headers plus small task headers for future edits.
 - P2: `tests/utility_tests.cpp` is now one of the largest standalone tests. It should be split by utility domain if new utility coverage is added.
 
 Assessment:
