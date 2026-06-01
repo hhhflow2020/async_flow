@@ -140,7 +140,7 @@ Resolved items:
 - The previous aggressive `BasicTask` class-body fragment split has been reverted. `basic_task_fragment.hpp` is now one cohesive class definition again, so public API, protected task helpers, lifetime reference handling, scheduling/wake state machine, and storage fields can be read in declaration order without `#include` splicing inside the class body.
 - The modularity rule for task internals is now stricter: split only when there is an independent data structure, algorithm, function family, or class boundary. Do not split a single class by access section, field block, or a few private member functions just to reduce line count.
 - `runtime_executor_io_uring_generic_submit_sqe_fragment.hpp` is now an 8-line umbrella over SQE dispatch/common initialization, filesystem/path SQE fields, socket/message SQE fields, and buffer/data SQE fields.
-- `object_pool.hpp` is now a small shell over storage layout, slot acquire/release, and lifecycle fragments. The split preserves the TLS cache, cache-line slot sizing, MPMC free-list, and atomic block/hot-block fields.
+- The previous `ObjectPool` class-body fragment split has been reverted. `object_pool.hpp` now keeps storage layout, TLS cache, slot acquire/release, lifecycle, MPMC free-list, and cache-line-aligned atomics in one cohesive class definition.
 
 Current file-size snapshot after the pass:
 
@@ -200,10 +200,7 @@ Current file-size snapshot after the pass:
 - `include/af/detail/io_uring_support_syscall_fragment.hpp`: 51 lines.
 - `include/af/detail/io_uring_support_sqe_fragment.hpp`: 41 lines.
 - `include/af/detail/basic_task_fragment.hpp`: 317 lines, intentionally kept as one cohesive class definition with no class-body `#include` splicing.
-- `include/af/detail/object_pool.hpp`: 38 lines.
-- `include/af/detail/object_pool_storage_fragment.hpp`: 68 lines.
-- `include/af/detail/object_pool_slot_ops_fragment.hpp`: 80 lines.
-- `include/af/detail/object_pool_lifecycle_fragment.hpp`: 29 lines.
+- `include/af/detail/object_pool.hpp`: 196 lines, intentionally kept as one cohesive class definition with no class-body `#include` splicing.
 - `tests/runtime_lifecycle_stress_tests.cpp`: 63 lines.
 - `tests/runtime_config_tests.cpp`: 30 lines.
 - `tests/runtime_self_post_stress_tests.cpp`: 117 lines.
@@ -292,6 +289,21 @@ Additional validation after the `BasicTask` de-fragmenting pass:
   - `BM_RuntimeIoThreadHop/8192` mean: 5.65 ms real, 1.458 M/s.
   - `BM_RuntimeParallelShards/128` mean: 0.570 ms real, 226.356 k/s.
   - `BM_RuntimeParallelShards/512` mean: 1.85 ms real, 276.807 k/s.
+
+Additional validation after the `ObjectPool` de-fragmenting pass:
+
+- Removed the class-body include splice in `object_pool.hpp`.
+- Deleted the now-obsolete storage/slot-ops/lifecycle ObjectPool fragment headers.
+- Kept TLS cache, cache-line slot sizing, MPMC free-list, slot acquire/release, lifecycle, and hot-block atomics together in one readable class definition; no memory ordering, lock, allocation policy, queue type, or cache alignment changed.
+- Local `git diff --check`: passed.
+- Remote clang Debug `asyncflow_runtime_tests` build: passed.
+- Remote clang Debug Pool/Runtime/Stress targeted tests: 27/27 passed.
+- Remote clang TSAN Pool/Runtime/Stress targeted tests: 27/27 passed with no ThreadSanitizer report.
+- Remote clang Release Pool/Runtime/Stress targeted tests: 27/27 passed.
+- Remote clang Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+  - `BM_ObjectPoolCreateDestroy/16384` mean: 48,464 ns real, 341.805 M/s.
+  - `BM_RuntimeExternalStart/8192` mean: 6.69 ms real, 1.230 M/s.
+  - `BM_RuntimeCrossThreadHop/8192` mean: 13.4 ms real, 613.925 k/s.
 
 Additional validation after the `io_common` split and epoll delete race fix:
 
@@ -575,7 +587,7 @@ Additional validation after the Running -> Pending wake-boundary audit and Objec
 
 - `finish_pending()` was rechecked against the suspected lost-wake boundary. The current ordering publishes `Pending`, consumes any same-epoch running wake request, then calls `enqueue_pending_blocking()`, which first performs `Pending -> Queued`; if a concurrent Pending wake already won, no duplicate queue entry is produced.
 - `tests/runtime_running_pending_stress_tests.cpp` adds direct coverage for the owner hang scenario: a waker task on another runtime thread posts the owner while the owner is still Running and about to return Pending. The owner must be requeued and complete.
-- `object_pool.hpp` is now split into storage, slot operations, and lifecycle fragments. `PoolTests.ObjectPoolSupportsConcurrentCreateDestroy` adds multi-threaded create/destroy coverage for the task/IO object-pool primitive.
+- Superseded: `object_pool.hpp` was temporarily split into storage, slot operations, and lifecycle fragments, but that class-body split has been reverted. `PoolTests.ObjectPoolSupportsConcurrentCreateDestroy` remains the multi-threaded create/destroy coverage for the task/IO object-pool primitive.
 - Local `git diff --check`: passed.
 - Remote clang Debug targeted Running/Pending, owner-resume, self-post, and pool tests: 6/6 passed.
 - Remote clang TSAN targeted Running/Pending, owner-resume, self-post, and pool tests: 6/6 passed, no ThreadSanitizer report.

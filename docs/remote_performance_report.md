@@ -618,7 +618,7 @@ Changes under validation:
 
 - `runtime_executor_finish_fragment.hpp` documents that `enqueue_pending_blocking()` converts a same-epoch running wake into a queue entry only if the task is still Pending.
 - `tests/runtime_running_pending_stress_tests.cpp` adds `RuntimeStressTests.RunningToPendingWakeDoesNotStrandOwner`, which forces the wake request to arrive while the owner is still Running and about to return Pending.
-- `object_pool.hpp` is now a small shell over storage, slot acquire/release, and lifecycle fragments.
+- `object_pool.hpp` was temporarily a shell over storage, slot acquire/release, and lifecycle fragments. That class-body split has since been reverted; `ObjectPool` now stays in one cohesive class definition.
 - `tests/pool_tests.cpp` adds concurrent ObjectPool create/destroy coverage.
 
 Correctness and race checks:
@@ -1108,3 +1108,34 @@ Interpretation:
 - The cleanup removes an over-fragmented structure without changing scheduling state transitions, queue routing, memory ordering, locks, allocations, or task storage fields.
 - Keeping `BasicTask` readable in declaration order improves maintainability for future scheduler audits, especially around Running -> Pending wake resolution.
 - The benchmark canary stays within the recent noisy remote range for scheduler paths.
+
+## 2026-06-01 ObjectPool De-Fragmenting Validation
+
+This run validates the cleanup that removes the class-body `#include` splice pattern from `ObjectPool`.
+
+Changes under validation:
+
+- `object_pool.hpp` is now one cohesive `ObjectPool` class definition again.
+- Removed the storage, slot acquire/release, and lifecycle fragment headers that existed only to splice code into the class body.
+- Kept TLS cache, cache-line slot sizing, MPMC free-list, slot acquire/release, lifecycle, and hot-block atomics together in declaration order. This is a readability/maintainability cleanup, not a runtime behavior change.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Remote clang Debug `asyncflow_runtime_tests` build: passed.
+- Remote clang Debug Pool/Runtime/Stress targeted tests: 27/27 passed.
+- Remote clang TSAN Pool/Runtime/Stress targeted tests: 27/27 passed, no ThreadSanitizer report.
+- Remote clang Release Pool/Runtime/Stress targeted tests: 27/27 passed.
+
+Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | CPU Mean | Throughput Mean |
+| --- | ---: | ---: | ---: |
+| `BM_ObjectPoolCreateDestroy/16384` | 48,464 ns | 48,396 ns | 341.805 M/s |
+| `BM_RuntimeExternalStart/8192` | 6.69 ms | 6.68 ms | 1.230 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 13.4 ms | 4.68 ms | 613.925 k/s |
+
+Interpretation:
+
+- The cleanup removes an over-fragmented class-body structure without changing the object-pool allocation strategy, cache-line padding, TLS cache policy, queue type, or atomic ordering.
+- Keeping the pool implementation in one file makes future false-sharing and lifetime audits easier than following public/private include fragments.
