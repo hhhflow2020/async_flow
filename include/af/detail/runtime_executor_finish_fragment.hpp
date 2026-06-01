@@ -14,6 +14,8 @@
             task->state_.store(TaskState::Pending, std::memory_order_release);
             const std::uint16_t requested = task->take_requested_thread();
             if (requested != invalid_thread_index) {
+                // A running-task wake request is converted into a real queue entry only if
+                // the task is still Pending; a concurrent Pending->Queued wake wins otherwise.
                 enqueue_pending_blocking(requested, task);
             }
         }

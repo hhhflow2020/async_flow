@@ -126,10 +126,12 @@ Resolved items:
 - Runtime config now validates the raw `Traits::thread_count` before narrowing it to the runtime's 16-bit thread index type. This preserves above-64 support while rejecting impossible index counts instead of silently truncating them.
 - Ready-source bits are hints, not correctness state. `pop_one()` now checks ready-source words, clears an empty source only after an SPSC pop miss, immediately rechecks that SPSC queue, and still has a bounded all-source SPSC fallback scan. This prevents lost/coalesced ready hints from stranding work while avoiding permanent scans of stale sticky bits.
 - A late owner-resume race was fixed in `BasicTask`. Running wake requests are now tagged with a run epoch, `Executor::execute()` uses a `Queued -> Starting -> Running` transition, and a post that races with `finish_pending()` can either defer to the owner or directly transition `Pending -> Queued` and enqueue the task. This prevents a stale `Running` observation from writing `requested_thread_` after the owner has already checked the slot.
+- The Running -> Pending boundary has direct stress coverage. `RuntimeStressTests.RunningToPendingWakeDoesNotStrandOwner` forces a waker on another runtime thread to post the owner while the owner is still Running and about to return Pending; the owner must resume and complete instead of hanging.
 - Scheduler and runtime stress fixtures are no longer concentrated in one source. Reusable scheduler state machines are split by repeat-hop, above-64 wide-hop, parallel owner-resume, and wait-helper fragments; lifecycle stress helpers live in `tests/support/runtime_lifecycle_stress_support.hpp`, and test cases are split by lifecycle, cross-thread, and parallel concerns.
 - `runtime_executor_core_state_fragment.hpp` is now the executor field-layout owner only. Queue-drain behavior lives in `runtime_executor_pop_fragment.hpp`, and finish/reschedule behavior lives in `runtime_executor_finish_fragment.hpp`. This keeps declaration order and cache placement in one file while separating behavior that changes scheduling state.
 - `runtime_executor_task_fragment.hpp` is now a 7-line umbrella. Ready-source/wake signaling, local queue push/pop, and execute/result dispatch live in `runtime_executor_ready_signal_fragment.hpp`, `runtime_executor_local_queue_fragment.hpp`, and `runtime_executor_execute_fragment.hpp`.
 - `basic_task_fragment.hpp` is now a 20-line class shell. Public task API, protected task helpers, lifetime reference handling, scheduling/wake state machine, and storage layout live in dedicated class-body fragments. Storage fields remain together in `basic_task_storage_fragment.hpp`.
+- `object_pool.hpp` is now a small shell over storage layout, slot acquire/release, and lifecycle fragments. The split preserves the TLS cache, cache-line slot sizing, MPMC free-list, and atomic block/hot-block fields.
 
 Current file-size snapshot after the pass:
 
@@ -153,17 +155,24 @@ Current file-size snapshot after the pass:
 - `include/af/detail/basic_task_lifetime_fragment.hpp`: 26 lines.
 - `include/af/detail/basic_task_schedule_fragment.hpp`: 167 lines.
 - `include/af/detail/basic_task_storage_fragment.hpp`: 18 lines.
+- `include/af/detail/object_pool.hpp`: 38 lines.
+- `include/af/detail/object_pool_storage_fragment.hpp`: 68 lines.
+- `include/af/detail/object_pool_slot_ops_fragment.hpp`: 80 lines.
+- `include/af/detail/object_pool_lifecycle_fragment.hpp`: 29 lines.
 - `tests/runtime_lifecycle_stress_tests.cpp`: 63 lines.
 - `tests/runtime_config_tests.cpp`: 30 lines.
 - `tests/runtime_self_post_stress_tests.cpp`: 117 lines.
 - `tests/runtime_cross_thread_stress_tests.cpp`: 123 lines.
 - `tests/runtime_parallel_stress_tests.cpp`: 96 lines.
+- `tests/runtime_running_pending_stress_tests.cpp`: 80 lines.
+- `tests/pool_tests.cpp`: 79 lines.
 - `tests/support/runtime_lifecycle_stress_support.hpp`: 109 lines.
 - `tests/support/runtime_scheduler_stress_support.hpp`: 22 lines.
 - `tests/support/runtime_scheduler_stress_self_post_fragment.hpp`: 157 lines.
 - `tests/support/runtime_scheduler_stress_repeat_hop_fragment.hpp`: 83 lines.
 - `tests/support/runtime_scheduler_stress_wide_hop_fragment.hpp`: 70 lines.
 - `tests/support/runtime_scheduler_stress_parallel_resume_fragment.hpp`: 112 lines.
+- `tests/support/runtime_scheduler_stress_running_pending_fragment.hpp`: 160 lines.
 - `tests/support/runtime_scheduler_stress_wait_fragment.hpp`: 15 lines.
 
 Validation evidence for the final pass:
@@ -494,6 +503,20 @@ Additional validation after the thread-count config boundary fix:
 - Remote clang Debug targeted config/scheduler tests: 5/5 passed.
 - Remote clang TSAN targeted config/scheduler tests: 5/5 passed, no ThreadSanitizer report.
 - Remote clang Release full runtime test suite: 136 total, 133 passed, 3 platform/kernel capability tests skipped, 0 failed.
+
+Additional validation after the Running -> Pending wake-boundary audit and ObjectPool split:
+
+- `finish_pending()` was rechecked against the suspected lost-wake boundary. The current ordering publishes `Pending`, consumes any same-epoch running wake request, then calls `enqueue_pending_blocking()`, which first performs `Pending -> Queued`; if a concurrent Pending wake already won, no duplicate queue entry is produced.
+- `tests/runtime_running_pending_stress_tests.cpp` adds direct coverage for the owner hang scenario: a waker task on another runtime thread posts the owner while the owner is still Running and about to return Pending. The owner must be requeued and complete.
+- `object_pool.hpp` is now split into storage, slot operations, and lifecycle fragments. `PoolTests.ObjectPoolSupportsConcurrentCreateDestroy` adds multi-threaded create/destroy coverage for the task/IO object-pool primitive.
+- Local `git diff --check`: passed.
+- Remote clang Debug targeted Running/Pending, owner-resume, self-post, and pool tests: 6/6 passed.
+- Remote clang TSAN targeted Running/Pending, owner-resume, self-post, and pool tests: 6/6 passed, no ThreadSanitizer report.
+- Remote clang Release full runtime test suite: 138 total, 135 passed, 3 platform/kernel capability tests skipped, 0 failed.
+- Remote clang Release queue/pool benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+  - `BM_SpscQueuePushPop/16384` mean: 19,566 ns real, 838.619 M/s.
+  - `BM_MpscQueuePushPop/16384` mean: 135,152 ns real, 121.346 M/s.
+  - `BM_ObjectPoolCreateDestroy/16384` mean: 39,830 ns real, 411.638 M/s.
 
 Remaining follow-up:
 

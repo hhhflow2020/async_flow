@@ -607,3 +607,34 @@ Interpretation:
 
 - The runtime remains explicitly capable of above-64 thread counts; the new 257-thread config test protects that API boundary.
 - The only new limit is the existing representation limit implied by `std::uint16_t` thread indexes. It is now an explicit compile-time error instead of silent truncation.
+
+## 2026-06-01 Running-to-Pending Wake Boundary And ObjectPool Split
+
+This run validates the suspected owner-task hang boundary: a task is still Running when another runtime thread posts it, then the task returns Pending. The expected behavior is that the wake request either remains deferred until `finish_pending()` consumes it or wins a direct `Pending -> Queued` transition after the owner publishes Pending.
+
+Changes under validation:
+
+- `runtime_executor_finish_fragment.hpp` documents that `enqueue_pending_blocking()` converts a same-epoch running wake into a queue entry only if the task is still Pending.
+- `tests/runtime_running_pending_stress_tests.cpp` adds `RuntimeStressTests.RunningToPendingWakeDoesNotStrandOwner`, which forces the wake request to arrive while the owner is still Running and about to return Pending.
+- `object_pool.hpp` is now a small shell over storage, slot acquire/release, and lifecycle fragments.
+- `tests/pool_tests.cpp` adds concurrent ObjectPool create/destroy coverage.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2` Debug targeted Running/Pending, owner-resume, self-post, and pool tests: 6/6 passed.
+- Remote clang TSAN targeted Running/Pending, owner-resume, self-post, and pool tests: 6/6 passed, no ThreadSanitizer report.
+- Remote clang Release full runtime test suite: 138 total, 135 passed, 3 skipped, 0 failed.
+
+Release queue/pool benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | CPU Mean | Throughput Mean |
+| --- | ---: | ---: | ---: |
+| `BM_SpscQueuePushPop/16384` | 19,566 ns | 19,546 ns | 838.619 M/s |
+| `BM_MpscQueuePushPop/16384` | 135,152 ns | 135,021 ns | 121.346 M/s |
+| `BM_ObjectPoolCreateDestroy/16384` | 39,830 ns | 39,803 ns | 411.638 M/s |
+
+Interpretation:
+
+- The targeted stress test did not reproduce a lost wake or owner hang across Debug, TSAN, or Release. The state-machine audit matches the observed behavior: either the running wake slot is consumed by `finish_pending()`, or a concurrent post observes Pending and performs the `Pending -> Queued` transition itself.
+- The ObjectPool split is structural. It preserves the free-list, TLS cache, cache-line slot sizing, and block/hot-block atomics while making storage and lifecycle responsibilities auditable separately.
