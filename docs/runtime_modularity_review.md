@@ -6,14 +6,14 @@ Date: 2026-06-01
 
 This note tracks modularity and responsibility-boundary issues found while reviewing the fixed-thread runtime, IO executor, tests, benchmarks, and examples.
 
-The runtime is intentionally header-only/template-visible for hot path inlining. Refactors should therefore prefer internal include fragments or small inline headers over moving performance-sensitive code to `.cpp` files.
+The runtime is intentionally header-only/template-visible for hot path inlining. Refactors should keep hot paths inline/template-visible, but class-body `#include` splicing is not a target pattern. Prefer named components: standalone classes/data structures, namespace-scope inline implementation headers, operation-family headers, or CRTP bases when they create a real boundary.
 
 ## Already Improved
 
-- `include/af/async_runtime.hpp` has been split into focused runtime fragments for public task handles/config, common helpers, dispatch, lifecycle, parallel support, state, executor control, executor task helpers, executor IO state types, executor thread-kind helpers, readiness wait/cancel, backend polling, poll helper conversion, executor state, and io_uring resource registration.
-- The public `AsyncRuntime` API is now split into lifecycle, parallel, IO resource/wait, file-data submit, fd lifecycle submit, socket data submit, and socket message/connect submit fragments. The top-level `include/af/async_runtime.hpp` is now an overview-sized class shell instead of a multi-thousand-line mixed implementation file.
-- Public runtime lifecycle is now a small umbrella over lifecycle control, task creation/start helpers, post admission, and thread-index helpers.
-- Internal runtime task lifecycle is now a small umbrella over task object pools, task handle lifetime release, optional StopImmediately task registry/cancel, and unfinished-task accounting.
+- `include/af/async_runtime.hpp` is now a normal runtime class shell with public aliases/API declarations, static runtime state, and no class-body fragment includes. Namespace-scope inline implementation headers are included after the class definition.
+- `detail::RuntimeConfig`, `detail::RuntimeTaskHandle`, and `detail::RuntimeCommonState` own config validation, task-handle lifetime, and common cache-line/state helpers instead of splicing those types into the `AsyncRuntime` class body.
+- Public runtime implementation is split by responsibility into `runtime_public_api.hpp`, `runtime_public_io.hpp`, `runtime_dispatch.hpp`, `runtime_task_lifecycle.hpp`, and `runtime_parallel.hpp`.
+- `detail::Executor<RuntimeT, TraitsT>` is now a standalone executor component instead of a nested class assembled through class-scope fragments. It remains header-only/template-visible for the scheduler and IO hot paths.
 - `tests/runtime_io_test_support.hpp` is now an umbrella header with domain fragments for core traits, basic tasks, stream, accept, file, timer/event, wait/cancel, socket lifecycle, and io_uring socket support.
 - Portable accept/multishot receive test support is now split into basic TCP accept, accept-multishot boundary, and recv/recvmsg-multishot boundary task fragments, with the previous accept header kept as a small umbrella.
 - Basic socket IO test support is now split into stream read/write, UDP datagram, and UDP vectored task fragments with the original basic-socket header kept as an umbrella.
@@ -55,7 +55,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Runtime lifecycle support is now a small umbrella over base, backpressure, and shutdown-policy task fragments.
 - Runtime parallel tests have been split into shard scheduling, ordered-start, and ordered-batch sources with shared task support.
 - Runtime parallel support is now a small umbrella over core runtime fixtures, shard tasks, ordered-batch tasks, and ordered-start tasks.
-- Core runtime parallel implementation is now a small inline umbrella over ordered-start state, ordered-batch guard, shard runner/task, and shard dispatch fragments. This keeps the hot template path visible while separating sequencing, guard, and dispatch responsibilities.
+- Core runtime parallel implementation now lives in `runtime_parallel.hpp`, with ordered-start state, ordered-batch guard, shard runner/task, and shard dispatch kept as namespace-scope inline template definitions.
 - Utility tests are now split by queue, object-pool, IO state, and batch/sequencer utility domains instead of collecting unrelated helpers in one source file.
 - Stream IO test support is now a small umbrella over connect, basic stream, vectored, zero-copy boundary, zero-copy send, pending zero-copy send, sendfile, and splice task fragments.
 - Stream IO runtime tests are split by basic stream, vectored send/recv, zero-copy send, fd-to-fd transfer, and connect/accept coverage.
@@ -105,11 +105,55 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - `IoFixedFile`, `IoFile`, `IoStream`, and `IoDatagramSocket` are now cohesive thin adapter class definitions again. The previous class-body method-fragment split has been reverted because it made each adapter harder to audit without creating an independent abstraction boundary.
 - Public file read helpers are now split into current-offset read/readv and positioned read/readv fragments, with `io_file_read_fragment.hpp` kept as a compatibility umbrella.
 - Public timeout helpers are now split into timeout completion status normalization, single timeout wait submission, and deadline arbitration fragments. `io_timeout.hpp` remains a small public umbrella while preserving inline/template visibility for timeout and cancel race handling.
-- `runtime_common_fragment.hpp` is now a 9-line umbrella over runtime status, cache-line atomic wrapper, ordered-batch state, parallel-group state, and external-post counter fragments. This keeps common state families separate while preserving class-scope inline visibility.
-- `runtime_ready_enqueue_fragment.hpp` is now an 8-line umbrella over explicit ready-route selection, non-blocking enqueue, blocking enqueue, and post/pending admission fragments. The same-thread local queue path and cross-thread SPSC path are now separate named helpers while preserving the original queue topology and inline visibility.
+- Runtime common state now lives in `runtime_common_state.hpp` as real named types: runtime status, cache-line atomic wrapper, ordered-batch state, parallel-group state, and external-post counter.
+- Runtime dispatch now lives in `runtime_dispatch.hpp`; explicit ready-route selection, non-blocking enqueue, blocking enqueue, and post/pending admission stay in one scheduler-owned implementation file. The same-thread local queue path and cross-thread SPSC path remain separate named helpers.
 - Each split so far preserved header-only/template visibility, passed `git diff --check`, Docker GCC Debug runtime tests, and, for core runtime header changes, Release runtime benchmark baseline regression.
 
 ## Current Findings
+
+### 2026-06-01 Runtime Core De-Fragmenting Correction
+
+Status: current core-runtime structure. This section supersedes the earlier fragment-oriented runtime snapshots below where they recommend class-scope include fragments as the modularity target.
+
+Issue recorded:
+
+- P1: class-body `#include` splicing made code shorter per physical file but harder to audit. It hid declaration order, access boundaries, friendship requirements, cache-line placement, and state-machine invariants behind preprocessor wiring.
+- P1: modularity should split independent data structures, algorithms, operation families, and task/adapter roles. It should not split one cohesive class by access section, field block, or a few private methods just to lower a line count.
+- P1: runtime hot paths must stay header-only/template-visible, but that does not require injecting fragments into the middle of class definitions.
+
+Current core-runtime layout:
+
+- `include/af/async_runtime.hpp`: 391 lines. It declares the `AsyncRuntime` API aliases, public methods, private runtime state, and static members. It no longer includes fragment headers inside the class body.
+- `include/af/detail/runtime_config.hpp`: config validation and public tuning values. The thread-count boundary is still `> 0` and `<= UINT16_MAX`; there is no 64-thread cap.
+- `include/af/detail/runtime_task_handle.hpp`: public task-handle lifetime wrapper.
+- `include/af/detail/runtime_common_state.hpp`: runtime status, cache-line atomic wrapper, ordered-batch state, parallel-group state, and external-post counter.
+- `include/af/detail/runtime_public_api.hpp`: lifecycle, task creation/start/post, thread helpers, public parallel entry points, and ordered-start public APIs.
+- `include/af/detail/runtime_public_io.hpp`: CRTP public IO API component inherited by `AsyncRuntime`.
+- `include/af/detail/runtime_dispatch.hpp`: queue topology, local/SPSC/external enqueue paths, ready-route selection, and external-post admission accounting.
+- `include/af/detail/runtime_task_lifecycle.hpp`: task object pools, handle release, optional StopImmediately registry/cancel, and unfinished-task accounting.
+- `include/af/detail/runtime_parallel.hpp`: ordered-start, ordered-batch guard, shard task/runner, and shard dispatch.
+- `include/af/detail/runtime_executor.hpp`: standalone `detail::Executor<RuntimeT, TraitsT>` component. It remains large because executor scheduler/IO submit/completion paths are tightly coupled for inlining, state layout, and syscall hot paths, but it is no longer a nested class assembled by class-scope fragments.
+
+Correctness and performance audit points:
+
+- No queue algorithm, task state transition, wake publication, memory ordering, or IO submit/completion semantic change was intended in this cleanup.
+- Runtime-thread ready enqueue remains explicit: `ReadyQueueRoute::Local` for same-owner posts, `ReadyQueueRoute::Spsc` for cross-owner runtime posts, and external MPSC for external threads.
+- `BasicTask` now explicitly friends `detail::Executor<RuntimeT, TraitsT>` because the executor is no longer nested inside `AsyncRuntime`.
+- Public IO was moved behind a CRTP base to create a real API component boundary without adding virtual dispatch, allocation, `std::function`, or extra queues.
+- The remaining old runtime executor fragment headers are historical implementation fragments and are no longer included by the active `async_runtime.hpp` / `runtime_executor.hpp` path. Do not use them as the model for new core-runtime structure.
+
+Validation after this correction:
+
+- Remote clang Debug build of `asyncflow_runtime_tests`: passed.
+- Remote clang Debug full runtime suite with `--security-opt seccomp=unconfined`: 143 total, 140 passed, 3 skipped.
+- Remote clang Release build of `asyncflow_runtime_tests` and `asyncflow_runtime_benchmarks`: passed.
+- Remote clang Release full runtime suite with `--security-opt seccomp=unconfined`: 143 total, 140 passed, 3 skipped.
+- Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`: `BM_RuntimeExternalStart/8192` mean 6.99 ms, `BM_RuntimeCrossThreadHop/8192` mean 10.9 ms, `BM_RuntimeIoThreadHop/8192` mean 4.28 ms, `BM_RuntimeParallelShards/128` mean 0.494 ms.
+
+Remaining follow-up:
+
+- P1: `runtime_executor.hpp` is still very large. Do not re-split it by access sections. The next acceptable split should extract real components such as backend-specific executor helper classes, scheduler-only helper algorithms, or operation-family implementation headers with explicit owner boundaries.
+- P2: non-core IO headers such as `io_common` and several `io_*` public umbrellas still use fragment includes. They should be cleaned opportunistically when the split can follow real operation-family or class boundaries.
 
 ### 2026-06-01 Scheduler Correctness And Modularity Pass
 
@@ -141,7 +185,7 @@ Resolved items:
 - The previous `ObjectPool` class-body fragment split has been reverted. `object_pool.hpp` now keeps storage layout, TLS cache, slot acquire/release, lifecycle, MPMC free-list, and cache-line-aligned atomics in one cohesive class definition.
 - The previous public adapter class-body fragment split has been reverted. `IoStream`, `IoDatagramSocket`, `IoFile`, and `IoFixedFile` now keep their operation-family methods in declaration order inside one cohesive class definition per adapter, preserving the two-field trivially-copyable adapter layout and inline/template visibility without `#include` splicing inside class bodies.
 
-Current file-size snapshot after the pass:
+Historical file-size snapshot after that scheduler pass. For current core-runtime files, use the Runtime Core De-Fragmenting Correction section above:
 
 - `include/af/async_runtime.hpp`: 239 lines.
 - `include/af/detail/runtime_public_config_fragment.hpp`: 67 lines.
@@ -687,7 +731,7 @@ Recommended immediate order:
 
 Status: superseded by the scheduler correctness and modularity pass above. Items marked P0/P1 here were the pre-fix review notes.
 
-This follow-up records the active issues from the latest fixed-thread runtime review. The top-level `include/af/async_runtime.hpp` remains 226 lines and is not the immediate problem; it is a class shell that keeps template and hot-path fragments inline-visible. The current risks are correctness-sensitive scheduler behavior and second-level fragments that still mix responsibilities.
+This follow-up recorded the active issues from that fixed-thread runtime review. At the time, the top-level `include/af/async_runtime.hpp` was 226 lines and was not the immediate problem; it was a class shell that kept template and hot-path fragments inline-visible. The risks were correctness-sensitive scheduler behavior and second-level fragments that still mixed responsibilities.
 
 Issue ledger:
 
@@ -720,9 +764,9 @@ Recommended next split order:
 
 ### 2026-06-01 Core Fixed-Thread Runtime Modularity Audit
 
-Status: partially superseded by the scheduler correctness and modularity pass above. The remaining guidance about preserving inline hot paths and executor cache layout still applies.
+Status: superseded for current file layout by the runtime core de-fragmenting correction above. The remaining guidance about preserving inline hot paths and executor cache layout still applies.
 
-The current core runtime is no longer bottlenecked by `include/af/async_runtime.hpp` itself. That file is 226 lines and works as a class shell: it declares `AsyncRuntime`, the nested `Executor`, and wires inline fragments into the correct class scopes. The main modularity pressure has moved into second-level hot-path fragments.
+At that point, the core runtime was no longer bottlenecked by `include/af/async_runtime.hpp` itself. That file was 226 lines and worked as a class shell: it declared `AsyncRuntime`, the nested `Executor`, and wired inline fragments into the correct class scopes. The current core-runtime structure is recorded in the Runtime Core De-Fragmenting Correction section above.
 
 Findings to track:
 
@@ -753,9 +797,9 @@ Recommended order:
 
 ### 2026-05-31 Core Runtime Modularity Recheck
 
-Latest scan result: `include/af/async_runtime.hpp` is 226 lines and is no longer a monolithic implementation file. It now mainly declares the public `AsyncRuntime` shell, the nested `Executor` shell, and includes operation-family fragments inside the right class scope so template/hot-path code remains inline-visible.
+Historical scan result before the runtime core de-fragmenting correction: `include/af/async_runtime.hpp` was 226 lines and was no longer a monolithic implementation file. It mainly declared the public `AsyncRuntime` shell, the nested `Executor` shell, and included operation-family fragments inside the right class scope so template/hot-path code remained inline-visible.
 
-Current issue ledger:
+Issue ledger from that scan:
 
 - P1: do not move hot runtime submit/wait/completion/task-resume code into `.cpp` files just to reduce header length. That would make the code look cleaner while risking lost inlining, extra call overhead, and weaker optimizer visibility. Continue using inline fragments included inside `AsyncRuntime` or `AsyncRuntime::Executor`.
 - P1: keep `runtime_executor_core_state_fragment.hpp` as the single executor state-layout owner unless a split explicitly preserves declaration order, alignment, and cache-line placement. Splitting state for aesthetics can silently introduce false sharing or make queue/cache layout audits harder.
@@ -774,7 +818,7 @@ Assessment:
 
 ### 2026-05-31 Active Issue Ledger
 
-The current review found that `include/af/async_runtime.hpp` itself is no longer the primary modularity problem. It is 226 lines and mostly acts as an inline class shell plus fragment wiring. The remaining issues are second-level ownership boundaries:
+That review found that `include/af/async_runtime.hpp` itself was no longer the primary modularity problem. It was 226 lines and mostly acted as an inline class shell plus fragment wiring. The remaining issues were second-level ownership boundaries:
 
 - P2: the largest files are now tests and examples, not runtime entry points. The biggest current files are file IO support fragments, accept/socket support fragments, and protocol examples. New tests should be added as small operation-family files instead of growing the existing fixture files.
 - P2: timeout/cancel race handling now lives in focused inline fragments. Keep the deadline arbitration fragment semantically intact unless new tests cover IO-first, timeout-first, user-cancel, cancel-completion-pending, and backend-unavailable paths.
@@ -789,7 +833,7 @@ Performance guardrails for these issues:
 
 ### Second-Pass Structure Snapshot
 
-The current top-level runtime shell is no longer the main modularity problem:
+Historical second-pass snapshot before the runtime core de-fragmenting correction:
 
 - `include/af/async_runtime.hpp`: 226 lines. It is mostly a declaration shell that includes focused public/runtime/executor fragments.
 - `include/af/task.hpp`: small umbrella over task declarations, IO wait state, optional registry links, and `BasicTask`.
@@ -799,11 +843,11 @@ The remaining code-size pressure is now in second-level fragments and fixtures. 
 
 - `include/af/io_filesystem.hpp`: now an overview-sized public umbrella. Public filesystem helpers and the underlying runtime submit layer are both split by operation family.
 
-This means the right next step is not another large rewrite of `async_runtime.hpp`; it is a second-pass split of the largest fragments into narrower operation-family files while keeping them included inline inside the same class/function scopes.
+At that point, the right next step was not another large rewrite of `async_runtime.hpp`; it was a second-pass split of the largest fragments into narrower operation-family files while keeping them included inline inside the same class/function scopes.
 
-### Latest Structure Scan: async_runtime.hpp Is Now A Shell, Detail Fragments Carry The Weight
+### Historical Structure Scan: async_runtime.hpp Was A Shell, Detail Fragments Carried The Weight
 
-The current `include/af/async_runtime.hpp` is 226 lines and mostly wires public API fragments, executor fragments, and runtime state fragments together. `include/af/task.hpp` and `include/af/io_types.hpp` are now also overview-sized umbrellas. The remaining modularity risk is concentrated in several focused-but-still-dense fragments:
+At that point, `include/af/async_runtime.hpp` was 226 lines and mostly wired public API fragments, executor fragments, and runtime state fragments together. `include/af/task.hpp` and `include/af/io_types.hpp` were also overview-sized umbrellas. The remaining modularity risk was concentrated in several focused-but-still-dense fragments:
 
 - Public IO adapter and socket/file lifecycle fragments are still around 250-300 lines in a few places. They are acceptable for inline APIs, but future additions should go into narrower recv/send/fixed/lifecycle fragments.
 

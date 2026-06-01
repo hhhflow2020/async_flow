@@ -207,7 +207,9 @@ Interpretation:
 
 ## 2026-06-01 Runtime Common-State Split Validation
 
-This run validates the split of `runtime_common_fragment.hpp` into focused class-scope fragments and the removal of the now-obsolete `io_deferred_delete_reserve` public tuning knob.
+Status: superseded by the runtime core de-fragmenting correction later on 2026-06-01. The validation below remains useful as historical correctness/performance evidence, but class-scope fragment splicing is no longer the target modularity pattern.
+
+This run validated the split of `runtime_common_fragment.hpp` into focused class-scope fragments and the removal of the now-obsolete `io_deferred_delete_reserve` public tuning knob.
 
 Changes under validation:
 
@@ -1256,3 +1258,38 @@ Interpretation:
 
 - This pass changed only test support layout. Runtime scheduling, IO backend behavior, queue selection, memory ordering, public APIs, task field layout, and test assertions were unchanged.
 - No Release benchmark was run for this pass because no production runtime path or benchmarked helper path changed.
+
+## 2026-06-01 Runtime Core De-Fragmenting Validation
+
+This run validates the cleanup that removes class-body fragment splicing from the active core runtime path while preserving header-only/template-visible implementation.
+
+Changes under validation:
+
+- `include/af/async_runtime.hpp` now declares the `AsyncRuntime` shell and static runtime state directly, with no class-body `#include` fragments.
+- Config, task handle, and common runtime state moved to named detail components: `runtime_config.hpp`, `runtime_task_handle.hpp`, and `runtime_common_state.hpp`.
+- Public lifecycle/task/parallel APIs, public IO APIs, dispatch, task lifecycle, and parallel implementation now live in namespace-scope inline implementation headers: `runtime_public_api.hpp`, `runtime_public_io.hpp`, `runtime_dispatch.hpp`, `runtime_task_lifecycle.hpp`, and `runtime_parallel.hpp`.
+- `detail::Executor<RuntimeT, TraitsT>` is now a standalone executor component in `runtime_executor.hpp` instead of a nested `AsyncRuntime::Executor` class assembled through class-scope fragments.
+- Same-thread runtime posts still route explicitly through `ReadyQueueRoute::Local`; cross-thread runtime posts still use `ReadyQueueRoute::Spsc`; external posts still use the external MPSC path.
+- The thread-count config boundary remains above-64 capable: `Traits::thread_count > 0` and `Traits::thread_count <= UINT16_MAX`.
+
+Correctness and race checks:
+
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.0` Debug `asyncflow_runtime_tests` build: passed.
+- Remote clang Debug full runtime suite under `--security-opt seccomp=unconfined`: 143 tests, 140 passed, 3 skipped, 0 failed.
+- Remote clang Release `asyncflow_runtime_tests` and `asyncflow_runtime_benchmarks` build: passed.
+- Remote clang Release full runtime suite under `--security-opt seccomp=unconfined`: 143 tests, 140 passed, 3 skipped, 0 failed.
+
+Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | Throughput Mean |
+| --- | ---: | ---: |
+| `BM_RuntimeExternalStart/8192` | 6.99 ms | 1.173 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 10.9 ms | 754 k/s |
+| `BM_RuntimeIoThreadHop/8192` | 4.28 ms | 1.917 M/s |
+| `BM_RuntimeParallelShards/128` | 0.494 ms | 259 k/s |
+
+Interpretation:
+
+- The cleanup changes structure, not scheduling semantics. No queue type, lock, atomic ordering, IO submit/completion rule, task state transition, or public behavior was intentionally changed.
+- The active runtime path now follows the stricter modularity rule: split real components and operation families, not single class bodies by access section.
+- `runtime_executor.hpp` remains the largest core file and should be the next focus, but only through real ownership boundaries such as backend-specific helper components or scheduler-only helper algorithms. Reintroducing class-scope fragment splicing would repeat the maintainability problem this pass fixed.
