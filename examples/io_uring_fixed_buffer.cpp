@@ -11,30 +11,25 @@
 
 namespace {
 
-enum class FixedBufferThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    IO_0,
-    enum_thread_index_end,
-};
+struct FixedBufferIoThreadTag;
 
 struct FixedBufferRuntimeTraits {
-    using Thread = FixedBufferThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(FixedBufferThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<FixedBufferIoThreadTag, 1, af::ThreadKind::IoUring, "fixed-buf">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
-
-    static constexpr af::ThreadKind thread_kind(FixedBufferThread thread) noexcept {
-        return thread == FixedBufferThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
-    }
 };
 
 using fixed_async = af::AsyncRuntime<FixedBufferRuntimeTraits>;
 using FixedBufferTask = fixed_async::Task;
+using FixedBufferThread = fixed_async::Thread;
+
+struct FixedBufferThreads {
+    static constexpr FixedBufferThread IO_0 =
+        fixed_async::thread_group<FixedBufferIoThreadTag>().template at<0>();
+};
 
 #if defined(__linux__)
 class FixedBufferRoundTripTask final : public FixedBufferTask {
@@ -43,9 +38,9 @@ public:
         : FixedBufferTask(token) {}
 
     bool do_it(int fd, char *byte_read) {
-        file_.reset(FixedBufferThread::IO_0, fd);
+        file_.reset(FixedBufferThreads::IO_0, fd);
         byte_read_ = byte_read;
-        return schedule(FixedBufferThread::IO_0);
+        return schedule(FixedBufferThreads::IO_0);
     }
 
 private:
@@ -80,7 +75,7 @@ private:
     af::TaskResult register_buffer() {
         iovec iov{buffer_, sizeof(buffer_)};
         int error = 0;
-        if (!fixed_async::io_register_buffers(FixedBufferThread::IO_0, &iov, 1, &error)) {
+        if (!fixed_async::io_register_buffers(FixedBufferThreads::IO_0, &iov, 1, &error)) {
             std::cout << "io_uring register buffers failed error=" << error << '\n';
             return failed();
         }
@@ -130,7 +125,7 @@ private:
 
     af::TaskResult unregister_buffer() {
         int error = 0;
-        if (!fixed_async::io_unregister_buffers(FixedBufferThread::IO_0, &error)) {
+        if (!fixed_async::io_unregister_buffers(FixedBufferThreads::IO_0, &error)) {
             std::cout << "io_uring unregister buffers failed error=" << error << '\n';
             return failed();
         }
@@ -154,7 +149,7 @@ private:
 int main() {
 #if defined(__linux__)
     fixed_async::init();
-    if (!fixed_async::io_uring_backend_available(FixedBufferThread::IO_0)) {
+    if (!fixed_async::io_uring_backend_available(FixedBufferThreads::IO_0)) {
         std::cout << "io_uring backend unavailable\n";
         fixed_async::shutdown();
         return 0;

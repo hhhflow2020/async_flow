@@ -14,7 +14,7 @@ public:
         ops_ = af::ShardedOps<int>(4);
         ops_.shards[0] = {1};
         ops_.shards[2] = {2, 3};
-        return schedule(TestThread::Logic_0);
+        return schedule(TestThreads::Logic_0);
     }
 
 private:
@@ -27,7 +27,7 @@ private:
         switch (state_) {
         case State::Split:
             state_ = State::Finish;
-            Runtime::parallel_shards(TestThread::Logic_0, ops_, mode_, this,
+            Runtime::parallel_shards(TestThreads::Logic_0, ops_, mode_, this,
                                      [this](std::uint16_t shard, std::vector<int> &shard_ops) {
                                          (*shard_hits_)[shard].fetch_add(1,
                                                                          std::memory_order_relaxed);
@@ -66,7 +66,7 @@ public:
         ops_ = af::ShardedOps<int>(4);
         ops_.shards[0] = {1};
         ops_.shards[1] = {2};
-        return schedule(TestThread::Logic_0);
+        return schedule(TestThreads::Logic_0);
     }
 
 private:
@@ -80,7 +80,7 @@ private:
         case State::Split:
             state_ = State::Finish;
             Runtime::parallel_shards(
-                TestThread::Logic_0, ops_, af::ParallelMode::NonEmptyOnly, this,
+                TestThreads::Logic_0, ops_, af::ParallelMode::NonEmptyOnly, this,
                 [](std::uint16_t shard, std::vector<int> &) { return shard != 1; });
             return pending();
 
@@ -106,7 +106,7 @@ public:
     bool do_it(std::atomic<int> *completed) {
         completed_ = completed;
         ops_ = af::ShardedOps<int>(4);
-        return schedule(TestThread::Logic_0);
+        return schedule(TestThreads::Logic_0);
     }
 
 private:
@@ -120,7 +120,7 @@ private:
         case State::Split:
             state_ = State::Finish;
             Runtime::parallel_shards(
-                TestThread::Logic_0, ops_, af::ParallelMode::NonEmptyOnly, this,
+                TestThreads::Logic_0, ops_, af::ParallelMode::NonEmptyOnly, this,
                 [](std::uint16_t, std::vector<int> &) { FAIL() << "empty shards should skip"; });
             return pending();
 
@@ -146,7 +146,7 @@ public:
         ran_on_ = ran_on;
         ops_ = af::ShardedOps<int>(2);
         ops_.shards[1] = {42};
-        return schedule(TestThread::Logic_0);
+        return schedule(TestThreads::Logic_0);
     }
 
 private:

@@ -13,11 +13,11 @@ public:
     explicit DatagramReceiverTask(VectoredTask::FactoryToken token) : VectoredTask(token) {}
 
     bool do_it(int fd, std::atomic<int> *armed, bool *ok, int *payload_seen) {
-        socket_.reset(VectoredThread::IO_0, fd);
+        socket_.reset(VectoredThreads::IO_0, fd);
         armed_ = armed;
         ok_ = ok;
         payload_seen_ = payload_seen;
-        return schedule(VectoredThread::IO_0);
+        return schedule(VectoredThreads::IO_0);
     }
 
 private:
@@ -58,12 +58,12 @@ public:
     explicit DatagramSenderTask(VectoredTask::FactoryToken token) : VectoredTask(token) {}
 
     bool do_it(int fd, sockaddr_in address, socklen_t address_size, bool *ok, int *bytes_sent) {
-        socket_.reset(VectoredThread::IO_0, fd);
+        socket_.reset(VectoredThreads::IO_0, fd);
         address_ = address;
         address_size_ = address_size;
         ok_ = ok;
         bytes_sent_ = bytes_sent;
-        return schedule(VectoredThread::IO_0);
+        return schedule(VectoredThreads::IO_0);
     }
 
 private:

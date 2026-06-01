@@ -24,14 +24,6 @@ enum class ShutdownPolicy : std::uint8_t {
     StopImmediately,
 };
 
-enum class ThreadKind : std::uint8_t {
-    Worker,
-    Io,
-    IoUring,
-    Epoll,
-    Kqueue,
-};
-
 enum class TaskState : std::uint8_t {
     Created,
     Queued,

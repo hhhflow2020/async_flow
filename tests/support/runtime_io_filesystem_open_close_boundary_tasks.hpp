@@ -7,7 +7,7 @@ public:
     bool do_it(std::atomic<int> *completed, std::atomic<int> *error) {
         completed_ = completed;
         error_ = error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -18,20 +18,20 @@ private:
         af::IoOpState close_no_uring{};
         int opened = -1;
         const af::IoStatus null_path_status =
-            af::io_openat(*this, IoTestThread::IO_0, AT_FDCWD, nullptr, O_RDONLY | O_CLOEXEC, 0,
+            af::io_openat(*this, IoTestThreads::IO_0, AT_FDCWD, nullptr, O_RDONLY | O_CLOEXEC, 0,
                           &opened, null_path);
         const af::IoStatus null_output_status =
-            af::io_openat(*this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-boundary",
+            af::io_openat(*this, IoTestThreads::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-boundary",
                           O_RDONLY | O_CLOEXEC, 0, nullptr, null_output);
         const af::IoStatus no_uring_status =
-            af::io_openat(*this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-boundary",
+            af::io_openat(*this, IoTestThreads::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-boundary",
                           O_RDONLY | O_CLOEXEC, 0, &opened, no_uring);
         af::UniqueFd event = af::make_eventfd();
         if (!event) {
             return failed();
         }
         const af::IoStatus close_no_uring_status =
-            af::io_close(*this, IoTestThread::IO_0, event, close_no_uring);
+            af::io_close(*this, IoTestThreads::IO_0, event, close_no_uring);
         if (!null_path_status.failed() || null_path_status.error != EINVAL ||
             !null_output_status.failed() || null_output_status.error != EINVAL ||
             !no_uring_status.failed() || no_uring_status.error != ENOSYS ||

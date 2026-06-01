@@ -63,7 +63,7 @@ private:
         }
 
         state_ = State::Compute;
-        return pending_on(EchoThread::Compute_0);
+        return pending_on(EchoThreads::Compute_0);
     }
 
     af::TaskResult compute_response() {
@@ -99,7 +99,7 @@ private:
     }
 
     State state_{State::Receive};
-    EchoThread io_thread_{EchoThread::IO_0};
+    EchoThread io_thread_{EchoThreads::IO_0};
     af::UniqueFd fd_{};
     af::TcpStream<EchoThread> stream_{};
     EchoPayload payload_{};

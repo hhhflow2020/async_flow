@@ -7,36 +7,31 @@
 
 namespace io_socket_lifecycle_example {
 
-enum class SocketThread : std::int16_t {
-    enum_thread_index_start = -1,
-    IO_0,
-    enum_thread_index_end,
-};
+struct SocketIoThreadTag;
+
+#if defined(__linux__)
+inline constexpr af::ThreadKind socket_io_thread_kind = af::ThreadKind::IoUring;
+#else
+inline constexpr af::ThreadKind socket_io_thread_kind = af::ThreadKind::Io;
+#endif
 
 struct SocketRuntimeTraits {
-    using Thread = SocketThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(SocketThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<SocketIoThreadTag, 1, socket_io_thread_kind, "socket-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
-
-    static constexpr af::ThreadKind thread_kind(SocketThread thread) noexcept {
-        if (thread != SocketThread::IO_0) {
-            return af::ThreadKind::Worker;
-        }
-#if defined(__linux__)
-        return af::ThreadKind::IoUring;
-#else
-        return af::ThreadKind::Io;
-#endif
-    }
 };
 
 using socket_async = af::AsyncRuntime<SocketRuntimeTraits>;
 using SocketTask = socket_async::Task;
+using SocketThread = socket_async::Thread;
+
+struct SocketThreads {
+    static constexpr SocketThread IO_0 =
+        socket_async::thread_group<SocketIoThreadTag>().template at<0>();
+};
 
 struct SocketLifecycleClientResult {
     bool ok{false};
@@ -51,8 +46,8 @@ struct SocketLifecycleServerResult {
 
 [[nodiscard]] inline const char *socket_lifecycle_backend_name() noexcept {
 #if defined(__linux__)
-    return socket_async::io_uring_backend_available(SocketThread::IO_0) ? "io_uring"
-                                                                        : "epoll-fallback";
+    return socket_async::io_uring_backend_available(SocketThreads::IO_0) ? "io_uring"
+                                                                         : "epoll-fallback";
 #elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
     return "kqueue";
 #else

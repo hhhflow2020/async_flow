@@ -11,7 +11,7 @@ public:
         completed_ = completed;
         error_ = error;
         byte_read_ = byte_read;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -50,7 +50,7 @@ private:
     af::TaskResult register_sparse_slot() {
         const int sparse = -1;
         int error = 0;
-        if (!UringIoRuntime::io_register_files(IoTestThread::IO_0, &sparse, 1, &error)) {
+        if (!UringIoRuntime::io_register_files(IoTestThreads::IO_0, &sparse, 1, &error)) {
             return complete(error == 0 ? EIO : error);
         }
         registered_ = true;
@@ -60,7 +60,7 @@ private:
 
     af::TaskResult open_direct() {
         const af::IoStatus status =
-            af::io_openat_direct(*this, IoTestThread::IO_0, AT_FDCWD, path_,
+            af::io_openat_direct(*this, IoTestThreads::IO_0, AT_FDCWD, path_,
                                  O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC, 0600U, 0, &file_, open_);
         if (status.pending()) {
             return pending();
@@ -111,7 +111,7 @@ private:
     af::TaskResult complete(int error) {
         if (registered_) {
             int unregister_error = 0;
-            if (!UringIoRuntime::io_unregister_files(IoTestThread::IO_0, &unregister_error) &&
+            if (!UringIoRuntime::io_unregister_files(IoTestThreads::IO_0, &unregister_error) &&
                 error == 0) {
                 error = unregister_error == 0 ? EIO : unregister_error;
             }

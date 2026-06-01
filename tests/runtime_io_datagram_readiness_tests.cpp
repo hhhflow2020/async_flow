@@ -4,7 +4,7 @@ class IoRuntimeDatagramFixture : public IoRuntimeFixture {};
 
 TEST_F(IoRuntimeDatagramFixture, EpollIoThreadRejectsDuplicateFdWait) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
@@ -36,7 +36,7 @@ TEST_F(IoRuntimeDatagramFixture, EpollIoThreadRejectsDuplicateFdWait) {
 
 TEST_F(IoRuntimeDatagramFixture, EpollIoThreadResumesTaskWhenFdBecomesWritable) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
@@ -60,7 +60,7 @@ TEST_F(IoRuntimeDatagramFixture, EpollIoThreadResumesTaskWhenFdBecomesWritable) 
 
 TEST_F(IoRuntimeDatagramFixture, EpollIoThreadReportsPeerHangupAsClosedRead) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 

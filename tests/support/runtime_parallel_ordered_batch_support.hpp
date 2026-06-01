@@ -13,7 +13,7 @@ public:
         batch_seen_ = batch_seen;
         ops_ = af::ShardedOps<int>(4);
         ops_.shards[0] = {7};
-        return schedule(TestThread::Logic_0);
+        return schedule(TestThreads::Logic_0);
     }
 
 private:
@@ -27,7 +27,7 @@ private:
         case State::Apply:
             state_ = State::Finish;
             Runtime::parallel_shards_ordered(
-                TestThread::Logic_0, ops_, batch_id_, this,
+                TestThreads::Logic_0, ops_, batch_id_, this,
                 [this](std::uint16_t shard, std::vector<int> &, std::uint64_t batch_id) {
                     (*shard_hits_)[shard].fetch_add(1, std::memory_order_relaxed);
                     (*batch_seen_)[shard].store(batch_id, std::memory_order_release);
@@ -61,7 +61,7 @@ public:
         shard_hits_ = shard_hits;
         ops_ = af::ShardedOps<int>(4);
         ops_.shards[0] = {1};
-        return schedule(TestThread::Logic_0);
+        return schedule(TestThreads::Logic_0);
     }
 
 private:
@@ -107,7 +107,7 @@ public:
         completed_ = completed;
         failures_ = failures;
         ops_ = af::ShardedOps<int>(4);
-        return schedule(TestThread::Logic_0);
+        return schedule(TestThreads::Logic_0);
     }
 
 private:
@@ -121,7 +121,7 @@ private:
         case State::Apply:
             state_ = State::Finish;
             Runtime::parallel_shards_ordered(
-                TestThread::Logic_0, ops_, batch_id_, this,
+                TestThreads::Logic_0, ops_, batch_id_, this,
                 [this](std::uint16_t shard, std::vector<int> &, std::uint64_t) {
                     return shard != fail_shard_;
                 });
@@ -155,7 +155,7 @@ public:
         shard_hits_ = shard_hits;
         failures_ = failures;
         ops_ = af::ShardedOps<int>(4);
-        return schedule(TestThread::Logic_0);
+        return schedule(TestThreads::Logic_0);
     }
 
 private:
@@ -169,7 +169,7 @@ private:
         case State::Apply:
             state_ = State::Finish;
             Runtime::parallel_shards_ordered(
-                TestThread::Logic_0, ops_, batch_id_, af::retryable_ordered_batch_options, this,
+                TestThreads::Logic_0, ops_, batch_id_, af::retryable_ordered_batch_options, this,
                 [this](std::uint16_t shard, std::vector<int> &, std::uint64_t) {
                     (*shard_hits_)[shard].fetch_add(1, std::memory_order_release);
                 });

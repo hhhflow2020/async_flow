@@ -12,7 +12,7 @@ int main() {
     using namespace io_uring_filesystem_ops_example;
 
     fs_async::init();
-    if (!fs_async::io_uring_backend_available(FsThread::IO_0)) {
+    if (!fs_async::io_uring_backend_available(FsThreads::IO_0)) {
         std::cout << "io_uring backend unavailable\n";
         fs_async::shutdown();
         return 0;

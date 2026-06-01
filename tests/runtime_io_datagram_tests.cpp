@@ -4,7 +4,7 @@ class IoRuntimeDatagramFixture : public IoRuntimeFixture {};
 
 TEST_F(IoRuntimeDatagramFixture, EpollIoThreadResumesUdpRecvFromHelper) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
@@ -29,7 +29,7 @@ TEST_F(IoRuntimeDatagramFixture, EpollIoThreadResumesUdpRecvFromHelper) {
 
 TEST_F(IoRuntimeDatagramFixture, EpollIoThreadReceivesVectoredUdpDatagramFromHelper) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
@@ -54,7 +54,7 @@ TEST_F(IoRuntimeDatagramFixture, EpollIoThreadReceivesVectoredUdpDatagramFromHel
 
 TEST_F(IoRuntimeDatagramFixture, EpollIoThreadAcceptsUdpZeroLengthDatagram) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 

@@ -114,7 +114,7 @@ private:
     }
 
     State state_{State::Connect};
-    EchoThread io_thread_{EchoThread::IO_0};
+    EchoThread io_thread_{EchoThreads::IO_0};
     af::UniqueFd fd_{};
     af::TcpStream<EchoThread> stream_{};
     sockaddr_in server_{};

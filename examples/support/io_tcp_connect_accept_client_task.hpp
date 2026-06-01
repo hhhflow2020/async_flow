@@ -15,12 +15,12 @@ public:
     explicit TcpClientTask(TcpTask::FactoryToken token) : TcpTask(token) {}
 
     bool do_it(int fd, sockaddr_in server, socklen_t server_size, bool *ok, char *response_seen) {
-        stream_.reset(TcpThread::IO_0, fd);
+        stream_.reset(TcpThreads::IO_0, fd);
         server_ = server;
         server_size_ = server_size;
         ok_ = ok;
         response_seen_ = response_seen;
-        return schedule(TcpThread::IO_0);
+        return schedule(TcpThreads::IO_0);
     }
 
 private:

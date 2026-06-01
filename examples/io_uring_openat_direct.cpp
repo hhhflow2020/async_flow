@@ -8,7 +8,7 @@ int main() {
     using namespace io_uring_openat_direct_example;
 
     direct_open_async::init();
-    if (!direct_open_async::io_uring_backend_available(DirectOpenThread::IO_0)) {
+    if (!direct_open_async::io_uring_backend_available(DirectOpenThreads::IO_0)) {
         std::cout << "io_uring backend unavailable\n";
         direct_open_async::shutdown();
         return 0;

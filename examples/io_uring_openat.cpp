@@ -12,30 +12,25 @@
 
 namespace {
 
-enum class OpenAtThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    IO_0,
-    enum_thread_index_end,
-};
+struct OpenAtIoThreadTag;
 
 struct OpenAtRuntimeTraits {
-    using Thread = OpenAtThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(OpenAtThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<OpenAtIoThreadTag, 1, af::ThreadKind::IoUring, "openat-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
-
-    static constexpr af::ThreadKind thread_kind(OpenAtThread thread) noexcept {
-        return thread == OpenAtThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
-    }
 };
 
 using openat_async = af::AsyncRuntime<OpenAtRuntimeTraits>;
 using OpenAtTaskBase = openat_async::Task;
+using OpenAtThread = openat_async::Thread;
+
+struct OpenAtThreads {
+    static constexpr OpenAtThread IO_0 =
+        openat_async::thread_group<OpenAtIoThreadTag>().template at<0>();
+};
 
 #if defined(__linux__)
 class OpenAtRoundTripTask final : public OpenAtTaskBase {
@@ -48,7 +43,7 @@ public:
             return false;
         }
         byte_read_ = byte_read;
-        return schedule(OpenAtThread::IO_0);
+        return schedule(OpenAtThreads::IO_0);
     }
 
 private:
@@ -79,7 +74,7 @@ private:
     af::TaskResult open_file() {
         int fd = -1;
         const af::IoStatus status =
-            af::io_openat(*this, OpenAtThread::IO_0, AT_FDCWD, path_.data(),
+            af::io_openat(*this, OpenAtThreads::IO_0, AT_FDCWD, path_.data(),
                           O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC, 0600U, &fd, open_);
         if (status.pending()) {
             return pending();
@@ -88,7 +83,7 @@ private:
             return failed();
         }
         owned_.reset(fd);
-        file_.reset(OpenAtThread::IO_0, owned_.get());
+        file_.reset(OpenAtThreads::IO_0, owned_.get());
         state_ = State::Write;
         return again();
     }
@@ -148,7 +143,7 @@ private:
 int main() {
 #if defined(__linux__)
     openat_async::init();
-    if (!openat_async::io_uring_backend_available(OpenAtThread::IO_0)) {
+    if (!openat_async::io_uring_backend_available(OpenAtThreads::IO_0)) {
         std::cout << "io_uring backend unavailable\n";
         openat_async::shutdown();
         return 0;

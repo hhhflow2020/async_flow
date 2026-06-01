@@ -1,17 +1,9 @@
 #pragma once
 
-enum class WideHopThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    Logic_64 = 64,
-    enum_thread_index_end,
-};
+struct WideHopThreadTag;
 
 struct WideHopRuntimeTraits {
-    using Thread = WideHopThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(WideHopThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(af::thread_group<WideHopThreadTag, 65>());
     static constexpr std::size_t spsc_queue_capacity = 256;
     static constexpr std::size_t external_queue_capacity = 256;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
@@ -21,6 +13,14 @@ struct WideHopRuntimeTraits {
 
 using WideHopRuntime = af::AsyncRuntime<WideHopRuntimeTraits>;
 using WideHopTaskBase = WideHopRuntime::Task;
+using WideHopThread = WideHopRuntime::Thread;
+
+struct WideHopThreads {
+    static constexpr WideHopThread Logic_0 =
+        WideHopRuntime::thread_group<WideHopThreadTag>().template at<0>();
+    static constexpr WideHopThread Logic_64 =
+        WideHopRuntime::thread_group<WideHopThreadTag>().template at<64>();
+};
 
 class WideHopTask final : public WideHopTaskBase {
 public:
@@ -32,15 +32,15 @@ public:
         remaining_ = remaining;
         runs_ = runs;
         post_failures_ = post_failures;
-        return schedule(WideHopThread::Logic_0);
+        return schedule(WideHopThreads::Logic_0);
     }
 
 private:
     af::TaskResult run() override {
         runs_->fetch_add(1, std::memory_order_relaxed);
         if (hops_-- > 0) {
-            const auto next = WideHopRuntime::current_thread_index() == 0 ? WideHopThread::Logic_64
-                                                                          : WideHopThread::Logic_0;
+            const auto next = WideHopRuntime::current_thread_index() == 0 ? WideHopThreads::Logic_64
+                                                                          : WideHopThreads::Logic_0;
             if (!schedule(next)) {
                 post_failures_->fetch_add(1, std::memory_order_relaxed);
                 if (remaining_->fetch_sub(1, std::memory_order_acq_rel) == 1) {

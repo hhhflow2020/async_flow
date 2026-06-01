@@ -14,7 +14,7 @@ public:
         bad_address_error_ = bad_address_error;
         bad_index_error_ = bad_index_error;
         unavailable_error_ = unavailable_error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -29,19 +29,19 @@ private:
         af::IoOpState unavailable{};
 
         const af::IoStatus bad_fd_status =
-            af::io_accept_direct(*this, IoTestThread::IO_0, -1, nullptr, nullptr,
+            af::io_accept_direct(*this, IoTestThreads::IO_0, -1, nullptr, nullptr,
                                  SOCK_NONBLOCK | SOCK_CLOEXEC, 0, &accepted_direct, bad_fd);
         const af::IoStatus null_output_status =
-            af::io_accept_direct(*this, IoTestThread::IO_0, placeholder_fd, nullptr, nullptr,
+            af::io_accept_direct(*this, IoTestThreads::IO_0, placeholder_fd, nullptr, nullptr,
                                  SOCK_NONBLOCK | SOCK_CLOEXEC, 0, nullptr, null_output);
         const af::IoStatus bad_address_status = af::io_accept_direct(
-            *this, IoTestThread::IO_0, placeholder_fd, reinterpret_cast<sockaddr *>(&peer), nullptr,
-            SOCK_NONBLOCK | SOCK_CLOEXEC, 0, &accepted_direct, bad_address);
+            *this, IoTestThreads::IO_0, placeholder_fd, reinterpret_cast<sockaddr *>(&peer),
+            nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC, 0, &accepted_direct, bad_address);
         const af::IoStatus bad_index_status =
-            af::io_accept_direct(*this, IoTestThread::IO_0, placeholder_fd, nullptr, nullptr,
+            af::io_accept_direct(*this, IoTestThreads::IO_0, placeholder_fd, nullptr, nullptr,
                                  SOCK_NONBLOCK | SOCK_CLOEXEC, -1, &accepted_direct, bad_index);
         const af::IoStatus unavailable_status =
-            af::io_accept_direct(*this, IoTestThread::IO_0, placeholder_fd, nullptr, nullptr,
+            af::io_accept_direct(*this, IoTestThreads::IO_0, placeholder_fd, nullptr, nullptr,
                                  SOCK_NONBLOCK | SOCK_CLOEXEC, 0, &accepted_direct, unavailable);
 
         if (!bad_fd_status.failed() || bad_fd_status.error != EBADF ||

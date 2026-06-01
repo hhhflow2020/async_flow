@@ -27,7 +27,7 @@ public:
         fd_ = fd;
         timeout_ = timeout;
         error_ = error;
-        return schedule(AppThread::IO_0);
+        return schedule(AppThreads::IO_0);
     }
 
 private:
@@ -51,12 +51,12 @@ private:
         state_ = State::Resume;
         deadline_.set_after(timeout_);
         const af::IoStatus status =
-            af::io_read_some(*this, AppThread::IO_0, fd_, &value_, sizeof(value_), read_);
+            af::io_read_some(*this, AppThreads::IO_0, fd_, &value_, sizeof(value_), read_);
         if (!status.pending()) {
             return failed();
         }
 
-        const af::IoStatus timeout = af::arm_io_timeout(*this, AppThread::IO_0, deadline_, read_);
+        const af::IoStatus timeout = af::arm_io_timeout(*this, AppThreads::IO_0, deadline_, read_);
         if (!timeout.pending()) {
             return failed();
         }
@@ -64,7 +64,7 @@ private:
     }
 
     af::TaskResult resume_read() {
-        const af::IoStatus timeout = af::arm_io_timeout(*this, AppThread::IO_0, deadline_, read_);
+        const af::IoStatus timeout = af::arm_io_timeout(*this, AppThreads::IO_0, deadline_, read_);
         if (timeout.pending()) {
             return pending();
         }
@@ -77,7 +77,7 @@ private:
         }
 
         const af::IoStatus status =
-            af::io_read_some(*this, AppThread::IO_0, fd_, &value_, sizeof(value_), read_);
+            af::io_read_some(*this, AppThreads::IO_0, fd_, &value_, sizeof(value_), read_);
         *error_ = status.failed() ? status.error : 0;
         return done();
     }
@@ -97,7 +97,7 @@ private:
 int main() {
 #if defined(__linux__)
     async::init();
-    if (!async::io_backend_available(AppThread::IO_0)) {
+    if (!async::io_backend_available(AppThreads::IO_0)) {
         std::cout << "IO backend unavailable\n";
         async::shutdown();
         return 0;

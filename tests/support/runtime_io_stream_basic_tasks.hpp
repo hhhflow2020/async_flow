@@ -6,11 +6,11 @@ public:
 
     bool do_it(int fd, std::atomic<int> *armed, std::atomic<int> *completed,
                std::atomic<char> *byte_read) {
-        stream_.reset(IoTestThread::IO_0, fd);
+        stream_.reset(IoTestThreads::IO_0, fd);
         armed_ = armed;
         completed_ = completed;
         byte_read_ = byte_read;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -72,10 +72,10 @@ public:
     explicit BasicStreamShutdownTask(typename BaseTask::FactoryToken token) : BaseTask(token) {}
 
     bool do_it(int fd, std::atomic<int> *completed, std::atomic<int> *error) {
-        stream_.reset(IoTestThread::IO_0, fd);
+        stream_.reset(IoTestThreads::IO_0, fd);
         completed_ = completed;
         error_ = error;
-        return this->schedule(IoTestThread::IO_0);
+        return this->schedule(IoTestThreads::IO_0);
     }
 
 private:

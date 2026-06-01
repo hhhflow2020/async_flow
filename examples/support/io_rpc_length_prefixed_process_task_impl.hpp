@@ -2,7 +2,7 @@
 
 inline bool RpcProcessTask::do_it(RpcServerTask *server) {
     server_ = server;
-    return schedule(RpcThread::Logic_0);
+    return schedule(RpcThreads::Logic_0);
 }
 
 inline af::TaskResult RpcProcessTask::run() {
@@ -18,7 +18,7 @@ inline af::TaskResult RpcProcessTask::run() {
         server_->set_response(request, request_size);
     }
 
-    if (!rpc_async::post(RpcThread::IO_0, server_)) {
+    if (!rpc_async::post(RpcThreads::IO_0, server_)) {
         return done();
     }
     return done();

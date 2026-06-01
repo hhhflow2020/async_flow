@@ -31,7 +31,7 @@ public:
     bool do_it(int fd, std::atomic<int> *armed) {
         fd_ = fd;
         armed_ = armed;
-        return schedule(AppThread::IO_0);
+        return schedule(AppThreads::IO_0);
     }
 
 private:
@@ -54,7 +54,7 @@ private:
     af::TaskResult arm_read() {
         state_ = State::Consume;
         const af::IoStatus status =
-            af::io_read_some(*this, AppThread::IO_0, fd_, &value_, sizeof(value_), read_);
+            af::io_read_some(*this, AppThreads::IO_0, fd_, &value_, sizeof(value_), read_);
         if (!status.pending()) {
             return failed();
         }
@@ -64,7 +64,7 @@ private:
 
     af::TaskResult consume() {
         const af::IoStatus status =
-            af::io_read_some(*this, AppThread::IO_0, fd_, &value_, sizeof(value_), read_);
+            af::io_read_some(*this, AppThreads::IO_0, fd_, &value_, sizeof(value_), read_);
         if (!status.ready() || status.bytes != sizeof(value_)) {
             return failed();
         }
@@ -85,7 +85,7 @@ private:
 int main() {
 #if defined(__linux__)
     async::init();
-    if (!async::io_backend_available(AppThread::IO_0)) {
+    if (!async::io_backend_available(AppThreads::IO_0)) {
         std::cout << "epoll backend unavailable\n";
         async::shutdown();
         return 0;

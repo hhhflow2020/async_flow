@@ -7,7 +7,7 @@ public:
     bool do_it(std::atomic<int> *completed, std::atomic<int> *error) {
         completed_ = completed;
         error_ = error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -34,52 +34,52 @@ private:
         int opened = -1;
 
         const af::IoStatus rename_no_uring_status = af::io_renameat(
-            *this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-boundary-old", AT_FDCWD,
+            *this, IoTestThreads::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-boundary-old", AT_FDCWD,
             "/tmp/asyncflow-openat-boundary-new", 0, rename_no_uring);
         const af::IoStatus unlink_no_uring_status =
-            af::io_unlinkat(*this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-boundary",
+            af::io_unlinkat(*this, IoTestThreads::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-boundary",
                             0, unlink_no_uring);
         const af::IoStatus openat2_no_uring_status =
-            af::io_openat2(*this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-openat2-boundary",
+            af::io_openat2(*this, IoTestThreads::IO_0, AT_FDCWD, "/tmp/asyncflow-openat2-boundary",
                            &how, &opened, openat2_no_uring);
         const af::IoStatus mkdir_no_uring_status =
-            af::io_mkdirat(*this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-mkdirat-boundary",
+            af::io_mkdirat(*this, IoTestThreads::IO_0, AT_FDCWD, "/tmp/asyncflow-mkdirat-boundary",
                            0700U, mkdir_no_uring);
         const af::IoStatus symlink_no_uring_status =
-            af::io_symlinkat(*this, IoTestThread::IO_0, "/tmp/asyncflow-symlinkat-target", AT_FDCWD,
-                             "/tmp/asyncflow-symlinkat-boundary", symlink_no_uring);
+            af::io_symlinkat(*this, IoTestThreads::IO_0, "/tmp/asyncflow-symlinkat-target",
+                             AT_FDCWD, "/tmp/asyncflow-symlinkat-boundary", symlink_no_uring);
         const af::IoStatus link_no_uring_status =
-            af::io_linkat(*this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-linkat-old",
+            af::io_linkat(*this, IoTestThreads::IO_0, AT_FDCWD, "/tmp/asyncflow-linkat-old",
                           AT_FDCWD, "/tmp/asyncflow-linkat-new", 0, link_no_uring);
         const af::IoStatus rename_null_old_status =
-            af::io_renameat(*this, IoTestThread::IO_0, AT_FDCWD, nullptr, AT_FDCWD,
+            af::io_renameat(*this, IoTestThreads::IO_0, AT_FDCWD, nullptr, AT_FDCWD,
                             "/tmp/asyncflow-openat-boundary-new", 0, rename_null_old);
         const af::IoStatus rename_null_new_status = af::io_renameat(
-            *this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-boundary-old", AT_FDCWD,
+            *this, IoTestThreads::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-boundary-old", AT_FDCWD,
             nullptr, 0, rename_null_new);
         const af::IoStatus unlink_null_path_status =
-            af::io_unlinkat(*this, IoTestThread::IO_0, AT_FDCWD, nullptr, 0, unlink_null_path);
+            af::io_unlinkat(*this, IoTestThreads::IO_0, AT_FDCWD, nullptr, 0, unlink_null_path);
         const af::IoStatus openat2_null_path_status = af::io_openat2(
-            *this, IoTestThread::IO_0, AT_FDCWD, nullptr, &how, &opened, openat2_null_path);
+            *this, IoTestThreads::IO_0, AT_FDCWD, nullptr, &how, &opened, openat2_null_path);
         const af::IoStatus openat2_null_how_status =
-            af::io_openat2(*this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-openat2-boundary",
+            af::io_openat2(*this, IoTestThreads::IO_0, AT_FDCWD, "/tmp/asyncflow-openat2-boundary",
                            nullptr, &opened, openat2_null_how);
         const af::IoStatus openat2_null_output_status =
-            af::io_openat2(*this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-openat2-boundary",
+            af::io_openat2(*this, IoTestThreads::IO_0, AT_FDCWD, "/tmp/asyncflow-openat2-boundary",
                            &how, nullptr, openat2_null_output);
         const af::IoStatus mkdir_null_path_status =
-            af::io_mkdirat(*this, IoTestThread::IO_0, AT_FDCWD, nullptr, 0700U, mkdir_null_path);
+            af::io_mkdirat(*this, IoTestThreads::IO_0, AT_FDCWD, nullptr, 0700U, mkdir_null_path);
         const af::IoStatus symlink_null_target_status =
-            af::io_symlinkat(*this, IoTestThread::IO_0, nullptr, AT_FDCWD,
+            af::io_symlinkat(*this, IoTestThreads::IO_0, nullptr, AT_FDCWD,
                              "/tmp/asyncflow-symlinkat-boundary", symlink_null_target);
         const af::IoStatus symlink_null_path_status =
-            af::io_symlinkat(*this, IoTestThread::IO_0, "/tmp/asyncflow-symlinkat-target", AT_FDCWD,
-                             nullptr, symlink_null_path);
+            af::io_symlinkat(*this, IoTestThreads::IO_0, "/tmp/asyncflow-symlinkat-target",
+                             AT_FDCWD, nullptr, symlink_null_path);
         const af::IoStatus link_null_old_status =
-            af::io_linkat(*this, IoTestThread::IO_0, AT_FDCWD, nullptr, AT_FDCWD,
+            af::io_linkat(*this, IoTestThreads::IO_0, AT_FDCWD, nullptr, AT_FDCWD,
                           "/tmp/asyncflow-linkat-new", 0, link_null_old);
         const af::IoStatus link_null_new_status =
-            af::io_linkat(*this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-linkat-old",
+            af::io_linkat(*this, IoTestThreads::IO_0, AT_FDCWD, "/tmp/asyncflow-linkat-old",
                           AT_FDCWD, nullptr, 0, link_null_new);
         if (!rename_no_uring_status.failed() || rename_no_uring_status.error != ENOSYS ||
             !unlink_no_uring_status.failed() || unlink_no_uring_status.error != ENOSYS ||

@@ -8,29 +8,25 @@
 
 namespace io_uring_send_zc_example {
 
-enum class SendZcThread : std::int16_t {
-    enum_thread_index_start = -1,
-    IO_0,
-    enum_thread_index_end,
-};
+struct SendZcIoThreadTag;
 
 struct SendZcRuntimeTraits {
-    using Thread = SendZcThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(SendZcThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<SendZcIoThreadTag, 1, af::ThreadKind::IoUring, "send-zc">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
-
-    static constexpr af::ThreadKind thread_kind(SendZcThread thread) noexcept {
-        return thread == SendZcThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
-    }
 };
 
 using send_zc_async = af::AsyncRuntime<SendZcRuntimeTraits>;
 using SendZcTaskBase = send_zc_async::Task;
+using SendZcThread = send_zc_async::Thread;
+
+struct SendZcThreads {
+    static constexpr SendZcThread IO_0 =
+        send_zc_async::thread_group<SendZcIoThreadTag>().template at<0>();
+};
 
 inline constexpr char send_zc_payload[] =
     "asyncflow io_uring send_zc keeps socket writes on the IO thread\n";

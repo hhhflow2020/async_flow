@@ -20,9 +20,9 @@ public:
         if (fd < 0 || result == nullptr) {
             return false;
         }
-        socket_.reset(AppThread::IO_0, fd);
+        socket_.reset(AppThreads::IO_0, fd);
         result_ = result;
-        return schedule(AppThread::IO_0);
+        return schedule(AppThreads::IO_0);
     }
 
 private:
@@ -66,11 +66,11 @@ public:
         if (fd < 0 || address_size == 0U || result == nullptr) {
             return false;
         }
-        socket_.reset(AppThread::IO_0, fd);
+        socket_.reset(AppThreads::IO_0, fd);
         address_ = address;
         address_size_ = address_size;
         result_ = result;
-        return schedule(AppThread::IO_0);
+        return schedule(AppThreads::IO_0);
     }
 
 private:

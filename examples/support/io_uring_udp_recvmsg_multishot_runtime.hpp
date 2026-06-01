@@ -17,30 +17,25 @@
 
 namespace io_uring_udp_recvmsg_multishot_example {
 
-enum class UdpRecvmsgThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    IO_0,
-    enum_thread_index_end,
-};
+struct UdpRecvmsgIoThreadTag;
 
 struct UdpRecvmsgRuntimeTraits {
-    using Thread = UdpRecvmsgThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(UdpRecvmsgThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<UdpRecvmsgIoThreadTag, 1, af::ThreadKind::IoUring, "udp-rmsg">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
-
-    static constexpr af::ThreadKind thread_kind(UdpRecvmsgThread thread) noexcept {
-        return thread == UdpRecvmsgThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
-    }
 };
 
 using udp_recvmsg_async = af::AsyncRuntime<UdpRecvmsgRuntimeTraits>;
 using UdpRecvmsgTaskBase = udp_recvmsg_async::Task;
+using UdpRecvmsgThread = udp_recvmsg_async::Thread;
+
+struct UdpRecvmsgThreads {
+    static constexpr UdpRecvmsgThread IO_0 =
+        udp_recvmsg_async::thread_group<UdpRecvmsgIoThreadTag>().template at<0>();
+};
 
 inline bool wait_until_armed_or_error(std::atomic<int> &armed, std::atomic<int> &error) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);

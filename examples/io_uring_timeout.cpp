@@ -6,30 +6,25 @@
 
 namespace {
 
-enum class TimeoutThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    IO_0,
-    enum_thread_index_end,
-};
+struct TimeoutIoThreadTag;
 
 struct TimeoutRuntimeTraits {
-    using Thread = TimeoutThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(TimeoutThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<TimeoutIoThreadTag, 1, af::ThreadKind::IoUring, "timeout-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
-
-    static constexpr af::ThreadKind thread_kind(TimeoutThread thread) noexcept {
-        return thread == TimeoutThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
-    }
 };
 
 using timeout_async = af::AsyncRuntime<TimeoutRuntimeTraits>;
 using TimeoutTaskBase = timeout_async::Task;
+using TimeoutThread = timeout_async::Thread;
+
+struct TimeoutThreads {
+    static constexpr TimeoutThread IO_0 =
+        timeout_async::thread_group<TimeoutIoThreadTag>().template at<0>();
+};
 
 class RingTimeoutTask final : public TimeoutTaskBase {
 public:
@@ -37,13 +32,13 @@ public:
 
     bool do_it(int *error) {
         error_ = error;
-        return schedule(TimeoutThread::IO_0);
+        return schedule(TimeoutThreads::IO_0);
     }
 
 private:
     af::TaskResult run() override {
         const af::IoStatus status =
-            af::io_wait_timeout(*this, TimeoutThread::IO_0, std::chrono::milliseconds(2), wait_);
+            af::io_wait_timeout(*this, TimeoutThreads::IO_0, std::chrono::milliseconds(2), wait_);
         if (status.pending()) {
             return pending();
         }
@@ -60,7 +55,7 @@ private:
 int main() {
 #if defined(__linux__)
     timeout_async::init();
-    if (!timeout_async::io_uring_backend_available(TimeoutThread::IO_0)) {
+    if (!timeout_async::io_uring_backend_available(TimeoutThreads::IO_0)) {
         std::cout << "io_uring timeout backend unavailable\n";
         timeout_async::shutdown();
         return 0;

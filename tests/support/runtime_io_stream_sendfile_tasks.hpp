@@ -7,7 +7,7 @@ public:
     bool do_it(int socket_fd, int file_fd, std::size_t total_size, std::size_t chunk_size,
                bool use_null_offset, std::atomic<int> *completed, std::atomic<int> *calls,
                std::atomic<std::size_t> *bytes_sent) {
-        stream_.reset(IoTestThread::IO_0, socket_fd);
+        stream_.reset(IoTestThreads::IO_0, socket_fd);
         file_fd_ = file_fd;
         total_size_ = total_size;
         chunk_size_ = chunk_size == 0U ? total_size : chunk_size;
@@ -15,7 +15,7 @@ public:
         completed_ = completed;
         calls_ = calls;
         bytes_sent_ = bytes_sent;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -64,12 +64,12 @@ public:
 
     bool do_it(int socket_fd, int file_fd, std::atomic<int> *pending_seen,
                std::atomic<int> *completed, std::atomic<std::size_t> *bytes_sent) {
-        stream_.reset(IoTestThread::IO_0, socket_fd);
+        stream_.reset(IoTestThreads::IO_0, socket_fd);
         file_fd_ = file_fd;
         pending_seen_ = pending_seen;
         completed_ = completed;
         bytes_sent_ = bytes_sent;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -109,7 +109,7 @@ public:
                std::atomic<int> *wait_kind, std::atomic<int> *pending_seen,
                std::atomic<int> *completed, std::atomic<int> *error,
                std::atomic<std::size_t> *bytes_sent) {
-        stream_.reset(IoTestThread::IO_0, socket_fd);
+        stream_.reset(IoTestThreads::IO_0, socket_fd);
         file_fd_ = file_fd;
         state_ = state;
         wait_kind_ = wait_kind;
@@ -117,7 +117,7 @@ public:
         completed_ = completed;
         error_ = error;
         bytes_sent_ = bytes_sent;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:

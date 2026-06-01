@@ -15,7 +15,7 @@ int main() {
     }
 
     send_zc_async::init();
-    const bool has_uring = send_zc_async::io_uring_backend_available(SendZcThread::IO_0);
+    const bool has_uring = send_zc_async::io_uring_backend_available(SendZcThreads::IO_0);
     SendZcServerResult server{};
     SendZcClientResult client{};
     const bool server_started =

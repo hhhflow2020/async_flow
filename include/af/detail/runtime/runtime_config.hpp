@@ -4,22 +4,26 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <string_view>
+#include <type_traits>
 
 #include "af/detail/runtime/runtime_traits.hpp"
 
 namespace af::detail {
 
 template <typename TraitsT> struct RuntimeConfig {
-    using Thread = typename TraitsT::Thread;
+    static_assert(
+        requires { TraitsT::threads; },
+        "AsyncRuntime traits must define static constexpr auto threads = "
+        "af::thread_layout(...)");
+
+    using ThreadLayout = std::remove_cv_t<decltype(TraitsT::threads)>;
+    using Thread = typename ThreadLayout::Thread;
     using TraitConfig = RuntimeTraitsConfig<TraitsT>;
 
-    static_assert(TraitsT::thread_count > 0, "AsyncRuntime requires at least one fixed thread");
-    static_assert(static_cast<std::uint64_t>(TraitsT::thread_count) <=
-                      std::numeric_limits<std::uint16_t>::max(),
-                  "AsyncRuntime thread_count must fit in 16-bit thread indexes");
-
-    static constexpr std::uint16_t thread_count = static_cast<std::uint16_t>(TraitsT::thread_count);
-    static constexpr std::uint16_t invalid_thread_index = thread_count;
+    static constexpr ThreadLayout threads = TraitsT::threads;
+    static constexpr std::uint16_t thread_count = ThreadLayout::thread_count;
+    static constexpr std::uint16_t invalid_thread_index = ThreadLayout::invalid_thread_index;
 
     static constexpr std::size_t spsc_queue_capacity = TraitConfig::spsc_queue_capacity;
     static constexpr std::size_t external_queue_capacity = TraitConfig::external_queue_capacity;
@@ -86,12 +90,19 @@ template <typename TraitsT> struct RuntimeConfig {
                   "is enabled");
 
     [[nodiscard]] static constexpr ThreadKind thread_kind(Thread thread) noexcept {
-        if constexpr (requires { TraitsT::thread_kind(thread); }) {
-            return TraitsT::thread_kind(thread);
-        } else {
-            static_cast<void>(thread);
-            return ThreadKind::Worker;
-        }
+        return ThreadLayout::thread_kind(thread);
+    }
+
+    [[nodiscard]] static constexpr std::string_view thread_name(Thread thread) noexcept {
+        return ThreadLayout::thread_name(thread);
+    }
+
+    [[nodiscard]] static constexpr std::uint16_t thread_group_offset(Thread thread) noexcept {
+        return ThreadLayout::thread_group_offset(thread);
+    }
+
+    template <typename Tag> [[nodiscard]] static constexpr auto thread_group() noexcept {
+        return ThreadLayout::template group<Tag>();
     }
 };
 

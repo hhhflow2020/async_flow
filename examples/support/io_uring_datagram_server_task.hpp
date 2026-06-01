@@ -15,10 +15,10 @@ public:
     explicit DatagramServerTask(DatagramTask::FactoryToken token) : DatagramTask(token) {}
 
     bool do_it(int fd, bool *ok, char *request_seen) {
-        socket_.reset(DatagramThread::IO_0, fd);
+        socket_.reset(DatagramThreads::IO_0, fd);
         ok_ = ok;
         request_seen_ = request_seen;
-        return schedule(DatagramThread::IO_0);
+        return schedule(DatagramThreads::IO_0);
     }
 
 private:

@@ -7,12 +7,12 @@ public:
 
     bool do_it(int fd, std::atomic<int> *armed, std::atomic<int> *completed,
                std::atomic<int> *error, std::atomic<int> *packed_read) {
-        listener_.reset(IoTestThread::IO_0, fd);
+        listener_.reset(IoTestThreads::IO_0, fd);
         armed_ = armed;
         completed_ = completed;
         error_ = error;
         packed_read_ = packed_read;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -47,7 +47,7 @@ private:
     af::TaskResult register_sparse_slot() {
         const int sparse = -1;
         int error = 0;
-        if (!UringIoRuntime::io_register_files(IoTestThread::IO_0, &sparse, 1, &error)) {
+        if (!UringIoRuntime::io_register_files(IoTestThreads::IO_0, &sparse, 1, &error)) {
             return complete(error == 0 ? EIO : error);
         }
         registered_ = true;
@@ -107,7 +107,7 @@ private:
     af::TaskResult complete(int error) {
         if (registered_) {
             int unregister_error = 0;
-            if (!UringIoRuntime::io_unregister_files(IoTestThread::IO_0, &unregister_error) &&
+            if (!UringIoRuntime::io_unregister_files(IoTestThreads::IO_0, &unregister_error) &&
                 error == 0) {
                 error = unregister_error == 0 ? EIO : unregister_error;
             }

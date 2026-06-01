@@ -8,7 +8,7 @@ void BM_IoSendfileZeroCount(benchmark::State &state) {
     af::IoOffset offset = 0;
     for (auto _ : state) {
         benchmark::DoNotOptimize(
-            af::io_sendfile_some(task, BenchIoThread::IO_0, -1, -1, &offset, 0, op));
+            af::io_sendfile_some(task, BenchIoThreads::IO_0, -1, -1, &offset, 0, op));
     }
 }
 
@@ -17,7 +17,7 @@ void BM_IoSpliceZeroCount(benchmark::State &state) {
     af::IoOpState op;
     af::IoOffset input_offset = 0;
     for (auto _ : state) {
-        benchmark::DoNotOptimize(af::io_splice_some(task, BenchIoThread::IO_0, -1, &input_offset,
+        benchmark::DoNotOptimize(af::io_splice_some(task, BenchIoThreads::IO_0, -1, &input_offset,
                                                     -1, nullptr, 0, 0, op));
     }
 }

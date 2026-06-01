@@ -24,12 +24,12 @@ public:
             return false;
         }
 
-        listener_.reset(EchoThread::IO_0, listener_fd);
+        listener_.reset(EchoThreads::IO_0, listener_fd);
         sessions_ = sessions;
         session_count_ = session_count;
         ok_ = ok;
         error_ = error;
-        return schedule(EchoThread::IO_0);
+        return schedule(EchoThreads::IO_0);
     }
 
 private:

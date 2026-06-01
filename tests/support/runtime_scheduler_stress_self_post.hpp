@@ -1,16 +1,9 @@
 #pragma once
 
-enum class SelfPostThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic,
-    enum_thread_index_end,
-};
+struct SelfPostThreadTag;
 
 struct SelfPostRuntimeTraits {
-    using Thread = SelfPostThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(SelfPostThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(af::thread_group<SelfPostThreadTag, 1>());
     static constexpr std::size_t spsc_queue_capacity = 4096;
     static constexpr std::size_t external_queue_capacity = 4096;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
@@ -20,6 +13,12 @@ struct SelfPostRuntimeTraits {
 
 using SelfPostRuntime = af::AsyncRuntime<SelfPostRuntimeTraits>;
 using SelfPostTaskBase = SelfPostRuntime::Task;
+using SelfPostThread = SelfPostRuntime::Thread;
+
+struct SelfPostThreads {
+    static constexpr SelfPostThread Logic =
+        SelfPostRuntime::thread_group<SelfPostThreadTag>().template at<0>();
+};
 
 class SelfPostChildTask final : public SelfPostTaskBase {
 public:
@@ -35,7 +34,7 @@ public:
         order_ = order;
         order_capacity_ = order_capacity;
         root_completed_ = root_completed;
-        return schedule(SelfPostThread::Logic);
+        return schedule(SelfPostThreads::Logic);
     }
 
 private:
@@ -77,7 +76,7 @@ public:
         sequence_ = sequence;
         order_ = order;
         root_completed_ = root_completed;
-        return schedule(SelfPostThread::Logic);
+        return schedule(SelfPostThreads::Logic);
     }
 
 private:
@@ -116,7 +115,7 @@ public:
         iteration_count_ = iteration_count;
         remaining_ = remaining;
         run_count_ = run_count;
-        return schedule(SelfPostThread::Logic);
+        return schedule(SelfPostThreads::Logic);
     }
 
 private:

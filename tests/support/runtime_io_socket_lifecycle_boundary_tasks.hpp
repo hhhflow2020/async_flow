@@ -7,7 +7,7 @@ public:
     bool do_it(std::atomic<int> *completed, std::atomic<int> *error) {
         completed_ = completed;
         error_ = error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -25,39 +25,39 @@ private:
         address.sin_port = 0;
 
         const af::IoStatus null_socket_status =
-            af::io_socket(*this, IoTestThread::IO_0, AF_INET,
+            af::io_socket(*this, IoTestThreads::IO_0, AF_INET,
                           SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, nullptr, null_socket);
         const af::IoStatus bad_setsockopt_status = af::io_setsockopt(
-            *this, IoTestThread::IO_0, -1, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+            *this, IoTestThreads::IO_0, -1, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
         const af::IoStatus null_setsockopt_status = af::io_setsockopt(
-            *this, IoTestThread::IO_0, 0, SOL_SOCKET, SO_REUSEADDR, nullptr, sizeof(one));
+            *this, IoTestThreads::IO_0, 0, SOL_SOCKET, SO_REUSEADDR, nullptr, sizeof(one));
         const af::IoStatus bad_getsockopt_status = af::io_getsockopt(
-            *this, IoTestThread::IO_0, -1, SOL_SOCKET, SO_REUSEADDR, &value, &value_size);
+            *this, IoTestThreads::IO_0, -1, SOL_SOCKET, SO_REUSEADDR, &value, &value_size);
         const af::IoStatus null_getsockopt_status = af::io_getsockopt(
-            *this, IoTestThread::IO_0, 0, SOL_SOCKET, SO_REUSEADDR, nullptr, &value_size);
+            *this, IoTestThreads::IO_0, 0, SOL_SOCKET, SO_REUSEADDR, nullptr, &value_size);
         const af::IoStatus bad_getsockname_status = af::io_getsockname(
-            *this, IoTestThread::IO_0, -1, reinterpret_cast<sockaddr *>(&name), &name_size);
+            *this, IoTestThreads::IO_0, -1, reinterpret_cast<sockaddr *>(&name), &name_size);
         const af::IoStatus null_getsockname_status =
-            af::io_getsockname(*this, IoTestThread::IO_0, 0, nullptr, &name_size);
+            af::io_getsockname(*this, IoTestThreads::IO_0, 0, nullptr, &name_size);
         const af::IoStatus bad_getpeername_status = af::io_getpeername(
-            *this, IoTestThread::IO_0, -1, reinterpret_cast<sockaddr *>(&name), &name_size);
+            *this, IoTestThreads::IO_0, -1, reinterpret_cast<sockaddr *>(&name), &name_size);
         const af::IoStatus null_getpeername_status = af::io_getpeername(
-            *this, IoTestThread::IO_0, 0, reinterpret_cast<sockaddr *>(&name), nullptr);
+            *this, IoTestThreads::IO_0, 0, reinterpret_cast<sockaddr *>(&name), nullptr);
         const af::IoStatus bad_bind_status =
-            af::io_bind(*this, IoTestThread::IO_0, -1, reinterpret_cast<const sockaddr *>(&address),
-                        sizeof(address));
+            af::io_bind(*this, IoTestThreads::IO_0, -1,
+                        reinterpret_cast<const sockaddr *>(&address), sizeof(address));
         const af::IoStatus null_bind_status =
-            af::io_bind(*this, IoTestThread::IO_0, 0, nullptr, sizeof(address));
-        const af::IoStatus bad_listen_status = af::io_listen(*this, IoTestThread::IO_0, -1, 16);
+            af::io_bind(*this, IoTestThreads::IO_0, 0, nullptr, sizeof(address));
+        const af::IoStatus bad_listen_status = af::io_listen(*this, IoTestThreads::IO_0, -1, 16);
 
         af::UniqueFd temp(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
         if (!temp) {
             return complete(EIO);
         }
         const af::IoStatus wrong_thread_status =
-            af::io_listen(*this, IoTestThread::Logic_0, temp.get(), 16);
+            af::io_listen(*this, IoTestThreads::Logic_0, temp.get(), 16);
         const af::IoStatus wrong_name_thread_status =
-            af::io_getsockname(*this, IoTestThread::Logic_0, temp.get(),
+            af::io_getsockname(*this, IoTestThreads::Logic_0, temp.get(),
                                reinterpret_cast<sockaddr *>(&name), &name_size);
 
         const bool ok = null_socket_status.failed() && null_socket_status.error == EINVAL &&

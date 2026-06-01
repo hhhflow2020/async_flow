@@ -1,42 +1,41 @@
 #pragma once
 
-#include <cstdint>
-
 #include "af/async_flow.hpp"
 
-enum class AppThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    Logic_1,
-    Logic_2,
-    Logic_3,
-    DB_0,
-    IO_0,
-    enum_thread_index_end,
-};
+struct AppLogicThreadTag;
+struct AppDbThreadTag;
+struct AppIoThreadTag;
 
 struct AppRuntimeTraits {
-    using Thread = AppThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(AppThread::enum_thread_index_end);
+    static constexpr auto threads =
+        af::thread_layout(af::thread_group<AppLogicThreadTag, 4, af::ThreadKind::Worker, "logic">(),
+                          af::thread_group<AppDbThreadTag, 1, af::ThreadKind::Worker, "db">(),
+                          af::thread_group<AppIoThreadTag, 1, af::ThreadKind::Epoll, "io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
-
-    static constexpr af::ThreadKind thread_kind(AppThread thread) noexcept {
-        return thread == AppThread::IO_0 ? af::ThreadKind::Epoll : af::ThreadKind::Worker;
-    }
 };
 
 using async = af::AsyncRuntime<AppRuntimeTraits>;
 using Task = async::Task;
+using AppThread = async::Thread;
 
-inline constexpr AppThread player_logic_begin = AppThread::Logic_0;
-inline constexpr std::uint16_t player_logic_shard_count = static_cast<std::uint16_t>(
-    async::thread_index(AppThread::Logic_3) - async::thread_index(player_logic_begin) + 1U);
+inline constexpr auto player_logic_threads = async::thread_group<AppLogicThreadTag>();
+inline constexpr auto app_db_threads = async::thread_group<AppDbThreadTag>();
+inline constexpr auto app_io_threads = async::thread_group<AppIoThreadTag>();
+inline constexpr AppThread player_logic_begin = player_logic_threads.begin();
+inline constexpr std::uint16_t player_logic_shard_count = player_logic_threads.count;
+
+struct AppThreads {
+    static constexpr AppThread Logic_0 = player_logic_threads.template at<0>();
+    static constexpr AppThread Logic_1 = player_logic_threads.template at<1>();
+    static constexpr AppThread Logic_2 = player_logic_threads.template at<2>();
+    static constexpr AppThread Logic_3 = player_logic_threads.template at<3>();
+    static constexpr AppThread DB_0 = app_db_threads.template at<0>();
+    static constexpr AppThread IO_0 = app_io_threads.template at<0>();
+};
 
 inline AppThread player_thread(std::uint64_t player_id) noexcept {
-    return async::shard_by<player_logic_begin, player_logic_shard_count>(player_id);
+    return player_logic_threads.shard(player_id);
 }

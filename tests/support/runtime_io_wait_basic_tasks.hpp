@@ -8,13 +8,13 @@ public:
         fd_ = fd;
         armed_ = armed;
         closed_ = closed;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
     af::TaskResult run() override {
         const af::IoStatus status =
-            af::io_read_some(*this, IoTestThread::IO_0, fd_, &value_, sizeof(value_), read_);
+            af::io_read_some(*this, IoTestThreads::IO_0, fd_, &value_, sizeof(value_), read_);
         if (status.pending()) {
             armed_->fetch_add(1, std::memory_order_release);
             return pending();
@@ -41,13 +41,13 @@ public:
         fd_ = fd;
         rejected_ = rejected;
         error_ = error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
     af::TaskResult run() override {
         af::IoResult result{};
-        if (wait_io(IoTestThread::IO_0, fd_, af::io_readable, &result)) {
+        if (wait_io(IoTestThreads::IO_0, fd_, af::io_readable, &result)) {
             return failed();
         }
         error_->store(result.error, std::memory_order_release);
@@ -67,7 +67,7 @@ public:
     bool do_it(std::atomic<int> *completed, std::atomic<int> *error) {
         completed_ = completed;
         error_ = error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -75,7 +75,7 @@ private:
         char value = 0;
         af::IoOpState read{};
         const af::IoStatus status =
-            af::io_read_some(*this, IoTestThread::IO_0, -1, &value, sizeof(value), read);
+            af::io_read_some(*this, IoTestThreads::IO_0, -1, &value, sizeof(value), read);
         if (!status.failed()) {
             return failed();
         }

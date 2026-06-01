@@ -6,10 +6,10 @@ public:
         : UringIoTaskBase(token) {}
 
     bool do_it(int fd, std::atomic<int> *completed, std::atomic<char> *byte_read) {
-        file_.reset(IoTestThread::IO_0, fd);
+        file_.reset(IoTestThreads::IO_0, fd);
         completed_ = completed;
         byte_read_ = byte_read;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -49,7 +49,7 @@ private:
 
         iovec iov{buffer_, sizeof(buffer_)};
         int error = 0;
-        if (!UringIoRuntime::io_register_buffers(IoTestThread::IO_0, &iov, 1, &error)) {
+        if (!UringIoRuntime::io_register_buffers(IoTestThreads::IO_0, &iov, 1, &error)) {
             return failed();
         }
 
@@ -104,7 +104,7 @@ private:
 
     af::TaskResult unregister_buffer() {
         int error = 0;
-        if (!UringIoRuntime::io_unregister_buffers(IoTestThread::IO_0, &error)) {
+        if (!UringIoRuntime::io_unregister_buffers(IoTestThreads::IO_0, &error)) {
             return failed();
         }
         byte_read_->store(buffer_[0], std::memory_order_release);

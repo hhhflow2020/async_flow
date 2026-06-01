@@ -6,7 +6,7 @@ public:
 
     bool do_it(std::atomic<int> *completed) {
         completed_ = completed;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -14,9 +14,9 @@ private:
         af::IoOpState read{};
         af::IoOpState write{};
         const af::IoStatus read_status =
-            af::io_read_some(*this, IoTestThread::IO_0, -1, nullptr, 0, read);
+            af::io_read_some(*this, IoTestThreads::IO_0, -1, nullptr, 0, read);
         const af::IoStatus write_status =
-            af::io_write_some(*this, IoTestThread::IO_0, -1, nullptr, 0, write);
+            af::io_write_some(*this, IoTestThreads::IO_0, -1, nullptr, 0, write);
         if (!read_status.ready() || read_status.bytes != 0U || !write_status.ready() ||
             write_status.bytes != 0U) {
             return failed();
@@ -34,13 +34,13 @@ public:
 
     bool do_it(std::atomic<int> *completed) {
         completed_ = completed;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
     af::TaskResult run() override {
-        af::IoFile<IoTestThread> file(IoTestThread::IO_0, -1);
-        af::TcpStream<IoTestThread> stream(IoTestThread::IO_0, -1);
+        af::IoFile<IoTestThread> file(IoTestThreads::IO_0, -1);
+        af::TcpStream<IoTestThread> stream(IoTestThreads::IO_0, -1);
         af::IoOpState readv{};
         af::IoOpState writev{};
         af::IoOpState readv_at{};
@@ -61,7 +61,7 @@ private:
         char value = 'v';
         iovec valid_iov{&value, 1};
         iovec invalid_iov{nullptr, 1};
-        af::UdpSocket<IoTestThread> datagram(IoTestThread::IO_0, -1);
+        af::UdpSocket<IoTestThread> datagram(IoTestThreads::IO_0, -1);
 
         const af::IoStatus zero_readv = file.readv_some(*this, nullptr, 0, readv);
         const af::IoStatus zero_writev = file.writev_some(*this, nullptr, 0, writev);

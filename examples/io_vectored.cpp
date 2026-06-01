@@ -34,7 +34,7 @@ int main() {
         return 1;
     }
 
-    const char *backend = vectored_async::io_uring_backend_available(VectoredThread::IO_0)
+    const char *backend = vectored_async::io_uring_backend_available(VectoredThreads::IO_0)
                               ? "io_uring"
                               : "epoll-fallback";
     std::cout << "vectored stream backend=" << backend << '\n';

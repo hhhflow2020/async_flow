@@ -27,7 +27,7 @@ public:
         for (std::size_t i = 0; i < batch_.deltas.size(); ++i) {
             sharded_deltas_.shards[i % player_logic_shard_count].push_back(batch_.deltas[i]);
         }
-        return schedule(AppThread::Logic_0);
+        return schedule(AppThreads::Logic_0);
     }
 
 private:
@@ -82,14 +82,14 @@ public:
 
     bool do_it(PlayerDeltaBatch batch) {
         batch_ = std::move(batch);
-        return schedule(AppThread::IO_0);
+        return schedule(AppThreads::IO_0);
     }
 
 private:
     af::TaskResult run() override {
         const bool started =
             async::start_ordered_task<PlayerDeltaStream, ApplyPlayerDeltaBatchTask>(
-                AppThread::Logic_0, std::move(batch_));
+                AppThreads::Logic_0, std::move(batch_));
         AF_ASSERT(started);
         return started ? done() : failed();
     }

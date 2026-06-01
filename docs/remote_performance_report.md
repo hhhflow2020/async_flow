@@ -63,6 +63,24 @@ The pressure run covered concurrent init/shutdown/start_task, StopImmediately pe
 - Keep CI baseline checks focused on runtime key paths, but keep IO benchmarks out of strict CI regression gates unless the runner provides stable IO characteristics.
 - For future performance commits, collect both fixed-iteration perf counters and normal benchmark regression output. The former catches microarchitectural surprises; the latter catches user-visible throughput regressions.
 
+## 2026-06-02 Thread Layout API Migration Validation
+
+This run validates the enum-thread to `thread_layout` migration on the requested remote Linux host with `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.0`.
+
+Changes under validation:
+
+- Runtime traits now provide `static constexpr auto threads = af::thread_layout(...)`; the old `using Thread`, manual `thread_count`, and traits `thread_kind()` path has been removed from the active runtime config.
+- Thread ids are compact layout-derived `uint16_t` indexes. `thread_group<Tag>().at()` / `.shard()` compute targets with inline arithmetic and do not add an allocation, virtual dispatch, or pointer-chasing step to task handoff.
+- Thread group kind/name metadata is kept in a compile-time table for executor setup/introspection, and POSIX executor threads are named `af-<group>-<offset>` with the offset preserved under Linux's 15-character visible-name limit.
+- Examples, tests, benchmarks, and README snippets were migrated to layout groups and named thread aliases.
+
+Correctness checks:
+
+- Local macOS Debug full build: passed.
+- Local macOS Debug full runtime suite: 166/166 no failures; Linux-only IO tests skipped by platform logic and kqueue tests passed.
+- Remote Linux GCC Debug full build: passed.
+- Remote Linux GCC Debug full runtime suite: 162/162 no failures; three platform/capability tests skipped by test logic.
+
 ## 2026-06-02 Async IO Support Audit And Epoll Wake Fix
 
 This run validates the async IO audit fixes on the requested remote Linux host
@@ -397,7 +415,7 @@ Correctness and race checks:
 Interpretation:
 
 - This pass changed only example support layout. Runtime scheduling, IO backend behavior, queue selection, memory ordering, and public APIs were unchanged.
-- The split separates the IO-thread accept/read/write server state machine from the logic-thread request processing task while preserving the explicit `rpc_async::post(RpcThread::IO_0, server_)` handoff.
+- The split separates the IO-thread accept/read/write server state machine from the logic-thread request processing task while preserving the explicit `rpc_async::post(RpcThreads::IO_0, server_)` handoff.
 
 ## 2026-06-01 io_uring Fixed-File Task Split Validation
 

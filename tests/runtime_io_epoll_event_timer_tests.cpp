@@ -4,7 +4,7 @@ class IoRuntimeEpollFixture : public IoRuntimeFixture {};
 
 TEST_F(IoRuntimeEpollFixture, EpollIoThreadResumesTimerFdFromAdapter) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
@@ -28,7 +28,7 @@ TEST_F(IoRuntimeEpollFixture, EpollIoThreadResumesTimerFdFromAdapter) {
 
 TEST_F(IoRuntimeEpollFixture, EpollIoThreadResumesEventFdFromAdapter) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 

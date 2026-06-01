@@ -11,8 +11,8 @@ public:
         second_fd_ = second_fd;
         completed_ = completed;
         packed_read_ = packed_read;
-        file_.reset(IoTestThread::IO_0, 0);
-        return schedule(IoTestThread::IO_0);
+        file_.reset(IoTestThreads::IO_0, 0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -46,15 +46,15 @@ private:
 
     af::TaskResult register_file() {
         int error = 0;
-        if (UringIoRuntime::io_update_registered_files(IoTestThread::IO_0, 0, &second_fd_, 1,
+        if (UringIoRuntime::io_update_registered_files(IoTestThreads::IO_0, 0, &second_fd_, 1,
                                                        &error) ||
             error != ENOENT) {
             return failed();
         }
-        if (!UringIoRuntime::io_register_files(IoTestThread::IO_0, &first_fd_, 1, &error)) {
+        if (!UringIoRuntime::io_register_files(IoTestThreads::IO_0, &first_fd_, 1, &error)) {
             return failed();
         }
-        if (UringIoRuntime::io_update_registered_files(IoTestThread::IO_0, 1, &second_fd_, 1,
+        if (UringIoRuntime::io_update_registered_files(IoTestThreads::IO_0, 1, &second_fd_, 1,
                                                        &error) ||
             error != EINVAL) {
             return failed();
@@ -78,7 +78,7 @@ private:
 
     af::TaskResult update_file() {
         int error = 0;
-        if (!UringIoRuntime::io_update_registered_files(IoTestThread::IO_0, 0, &second_fd_, 1,
+        if (!UringIoRuntime::io_update_registered_files(IoTestThreads::IO_0, 0, &second_fd_, 1,
                                                         &error)) {
             return failed();
         }
@@ -102,7 +102,7 @@ private:
 
     af::TaskResult unregister_file() {
         int error = 0;
-        if (!UringIoRuntime::io_unregister_files(IoTestThread::IO_0, &error)) {
+        if (!UringIoRuntime::io_unregister_files(IoTestThreads::IO_0, &error)) {
             return failed();
         }
         const int packed = (static_cast<int>(static_cast<unsigned char>(first_read_)) << 8) |

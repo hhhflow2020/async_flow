@@ -8,7 +8,7 @@ public:
         path_ = path;
         completed_ = completed;
         byte_read_ = byte_read;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -39,7 +39,7 @@ private:
     af::TaskResult open_file() {
         int fd = -1;
         const af::IoStatus status =
-            af::io_openat(*this, IoTestThread::IO_0, AT_FDCWD, path_,
+            af::io_openat(*this, IoTestThreads::IO_0, AT_FDCWD, path_,
                           O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC, 0600U, &fd, open_);
         if (status.pending()) {
             return pending();
@@ -48,7 +48,7 @@ private:
             return failed();
         }
         owned_.reset(fd);
-        file_.reset(IoTestThread::IO_0, owned_.get());
+        file_.reset(IoTestThreads::IO_0, owned_.get());
         state_ = State::Write;
         return again();
     }

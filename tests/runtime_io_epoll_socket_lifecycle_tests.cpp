@@ -4,7 +4,7 @@ class IoRuntimeEpollFixture : public IoRuntimeFixture {};
 
 TEST_F(IoRuntimeEpollFixture, SocketLifecycleHelpersRunOnIoThread) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
@@ -19,7 +19,7 @@ TEST_F(IoRuntimeEpollFixture, SocketLifecycleHelpersRunOnIoThread) {
     EXPECT_EQ(error.load(std::memory_order_acquire), 0);
     EXPECT_NE(reuse_value.load(std::memory_order_acquire), 0);
     EXPECT_GT(local_port.load(std::memory_order_acquire), 0);
-    EXPECT_EQ(ran_on.load(std::memory_order_acquire), IoRuntime::thread_index(IoTestThread::IO_0));
+    EXPECT_EQ(ran_on.load(std::memory_order_acquire), IoRuntime::thread_index(IoTestThreads::IO_0));
 #else
     GTEST_SKIP() << "socket lifecycle helpers are Linux-only";
 #endif
@@ -27,7 +27,7 @@ TEST_F(IoRuntimeEpollFixture, SocketLifecycleHelpersRunOnIoThread) {
 
 TEST_F(IoRuntimeEpollFixture, SocketLifecycleHelpersHandleInvalidOperations) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 

@@ -5,10 +5,10 @@ public:
     explicit UringTcpAcceptTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
 
     bool do_it(int fd, std::atomic<int> *armed, std::atomic<int> *completed) {
-        listener_.reset(IoTestThread::IO_0, fd);
+        listener_.reset(IoTestThreads::IO_0, fd);
         armed_ = armed;
         completed_ = completed;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:

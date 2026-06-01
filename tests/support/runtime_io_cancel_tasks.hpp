@@ -11,7 +11,7 @@ public:
         armed_ = armed;
         completed_ = completed;
         error_ = error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -34,7 +34,7 @@ private:
     af::TaskResult arm_read() {
         state_machine_ = State::Finish;
         const af::IoStatus status =
-            af::io_read_some(*this, IoTestThread::IO_0, fd_, &value_, sizeof(value_), read_);
+            af::io_read_some(*this, IoTestThreads::IO_0, fd_, &value_, sizeof(value_), read_);
         if (!status.pending()) {
             return failed();
         }
@@ -45,7 +45,7 @@ private:
 
     af::TaskResult finish_read() {
         const af::IoStatus status =
-            af::io_read_some(*this, IoTestThread::IO_0, fd_, &value_, sizeof(value_), read_);
+            af::io_read_some(*this, IoTestThreads::IO_0, fd_, &value_, sizeof(value_), read_);
         if (!status.failed() || status.error != ECANCELED) {
             return failed();
         }
@@ -77,7 +77,7 @@ public:
         first_result_ = first_result;
         second_result_ = second_result;
         error_ = error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -87,12 +87,12 @@ private:
             return failed();
         }
 
-        const bool first = IoRuntime::cancel_io(IoTestThread::IO_0, *state);
+        const bool first = IoRuntime::cancel_io(IoTestThreads::IO_0, *state);
         first_result_->store(first ? 1 : 0, std::memory_order_release);
         error_->store(state->wait.error, std::memory_order_release);
 
         if (cancel_twice_) {
-            const bool second = IoRuntime::cancel_io(IoTestThread::IO_0, *state);
+            const bool second = IoRuntime::cancel_io(IoTestThreads::IO_0, *state);
             second_result_->store(second ? 1 : 0, std::memory_order_release);
         }
 
@@ -116,13 +116,13 @@ public:
         completed_ = completed;
         result_ = result;
         error_ = error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
     af::TaskResult run() override {
         af::IoOpState state{};
-        const bool ok = IoRuntime::cancel_io(IoTestThread::IO_0, state);
+        const bool ok = IoRuntime::cancel_io(IoTestThreads::IO_0, state);
         result_->store(ok ? 1 : 0, std::memory_order_release);
         error_->store(state.wait.error, std::memory_order_release);
         completed_->fetch_add(1, std::memory_order_release);

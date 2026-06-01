@@ -6,18 +6,11 @@
 
 namespace {
 
-enum class TunedSetupThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    IO_0,
-    enum_thread_index_end,
-};
+struct TunedSetupIoThreadTag;
 
 struct TunedSetupRuntimeTraits {
-    using Thread = TunedSetupThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(TunedSetupThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<TunedSetupIoThreadTag, 1, af::ThreadKind::IoUring, "tuned-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
@@ -31,17 +24,11 @@ struct TunedSetupRuntimeTraits {
     static constexpr bool io_uring_setup_coop_taskrun = true;
     static constexpr bool io_uring_setup_single_issuer = true;
     static constexpr bool io_uring_setup_defer_taskrun = true;
-
-    static constexpr af::ThreadKind thread_kind(TunedSetupThread thread) noexcept {
-        return thread == TunedSetupThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
-    }
 };
 
 struct FallbackSetupRuntimeTraits {
-    using Thread = TunedSetupThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(TunedSetupThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<TunedSetupIoThreadTag, 1, af::ThreadKind::IoUring, "fallback-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
@@ -49,10 +36,6 @@ struct FallbackSetupRuntimeTraits {
     static constexpr unsigned io_uring_entries = 1024;
     static constexpr unsigned io_uring_cq_entries = 2048;
     static constexpr unsigned io_uring_submit_batch_threshold = 256;
-
-    static constexpr af::ThreadKind thread_kind(TunedSetupThread thread) noexcept {
-        return thread == TunedSetupThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
-    }
 };
 
 } // namespace
@@ -60,9 +43,10 @@ struct FallbackSetupRuntimeTraits {
 int main() {
 #if defined(__linux__)
     using tuned_async = af::AsyncRuntime<TunedSetupRuntimeTraits>;
+    constexpr auto tuned_io = tuned_async::thread_group<TunedSetupIoThreadTag>().template at<0>();
 
     tuned_async::init();
-    if (tuned_async::io_uring_backend_available(TunedSetupThread::IO_0)) {
+    if (tuned_async::io_uring_backend_available(tuned_io)) {
         std::cout << "io_uring tuned setup backend available\n";
         tuned_async::shutdown();
         return 0;
@@ -71,8 +55,10 @@ int main() {
 
     std::cout << "io_uring tuned setup backend unavailable; retrying with fallback traits\n";
     using fallback_async = af::AsyncRuntime<FallbackSetupRuntimeTraits>;
+    constexpr auto fallback_io =
+        fallback_async::thread_group<TunedSetupIoThreadTag>().template at<0>();
     fallback_async::init();
-    if (!fallback_async::io_uring_backend_available(TunedSetupThread::IO_0)) {
+    if (!fallback_async::io_uring_backend_available(fallback_io)) {
         std::cout << "io_uring backend unavailable\n";
         fallback_async::shutdown();
         return 0;

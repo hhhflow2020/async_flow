@@ -4,7 +4,7 @@ namespace {
 
 void BM_IoFileAdapterZeroByteRead(benchmark::State &state) {
     FakeTask task;
-    af::IoFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
+    af::IoFile<BenchIoThread> file(BenchIoThreads::IO_0, -1);
     af::IoOpState op;
     for (auto _ : state) {
         benchmark::DoNotOptimize(file.read_some(task, nullptr, 0, op));
@@ -13,7 +13,7 @@ void BM_IoFileAdapterZeroByteRead(benchmark::State &state) {
 
 void BM_IoTimerAdapterNullExpiration(benchmark::State &state) {
     FakeTask task;
-    af::IoTimer<BenchIoThread> timer(BenchIoThread::IO_0, -1);
+    af::IoTimer<BenchIoThread> timer(BenchIoThreads::IO_0, -1);
     af::IoOpState op;
     for (auto _ : state) {
         benchmark::DoNotOptimize(timer.wait(task, nullptr, op));
@@ -22,7 +22,7 @@ void BM_IoTimerAdapterNullExpiration(benchmark::State &state) {
 
 void BM_IoEventAdapterNullValue(benchmark::State &state) {
     FakeTask task;
-    af::IoEvent<BenchIoThread> event(BenchIoThread::IO_0, -1);
+    af::IoEvent<BenchIoThread> event(BenchIoThreads::IO_0, -1);
     af::IoOpState op;
     for (auto _ : state) {
         benchmark::DoNotOptimize(event.wait(task, nullptr, op));
@@ -34,7 +34,7 @@ void BM_IoTimeoutInvalidDelay(benchmark::State &state) {
     af::IoOpState op;
     for (auto _ : state) {
         benchmark::DoNotOptimize(
-            af::io_wait_timeout(task, BenchIoThread::IO_0, std::chrono::nanoseconds{0}, op));
+            af::io_wait_timeout(task, BenchIoThreads::IO_0, std::chrono::nanoseconds{0}, op));
     }
 }
 
@@ -44,7 +44,7 @@ void BM_IoOpenAtNullPath(benchmark::State &state) {
     int opened = -1;
     for (auto _ : state) {
         benchmark::DoNotOptimize(
-            af::io_openat(task, BenchIoThread::IO_0, -1, nullptr, 0, 0, &opened, op));
+            af::io_openat(task, BenchIoThreads::IO_0, -1, nullptr, 0, 0, &opened, op));
     }
 }
 
@@ -52,7 +52,7 @@ void BM_IoSocketNullOutput(benchmark::State &state) {
     FakeTask task;
     af::IoOpState op;
     for (auto _ : state) {
-        benchmark::DoNotOptimize(af::io_socket(task, BenchIoThread::IO_0, 0, 0, 0, nullptr, op));
+        benchmark::DoNotOptimize(af::io_socket(task, BenchIoThreads::IO_0, 0, 0, 0, nullptr, op));
     }
 }
 
@@ -61,7 +61,7 @@ void BM_IoSocketNameNullOutput(benchmark::State &state) {
     FakeTask task;
     socklen_t size = 0;
     for (auto _ : state) {
-        benchmark::DoNotOptimize(af::io_getsockname(task, BenchIoThread::IO_0, 0, nullptr, &size));
+        benchmark::DoNotOptimize(af::io_getsockname(task, BenchIoThreads::IO_0, 0, nullptr, &size));
     }
 }
 #endif
@@ -71,7 +71,7 @@ void BM_IoOpenAtDirectInvalidIndex(benchmark::State &state) {
     af::IoOpState op;
     af::IoFixedFile<BenchIoThread> file;
     for (auto _ : state) {
-        benchmark::DoNotOptimize(af::io_openat_direct(task, BenchIoThread::IO_0, -1,
+        benchmark::DoNotOptimize(af::io_openat_direct(task, BenchIoThreads::IO_0, -1,
                                                       "/tmp/asyncflow-openat-direct-bench", 0, 0,
                                                       -1, &file, op));
     }

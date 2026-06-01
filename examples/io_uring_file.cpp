@@ -10,30 +10,24 @@
 
 namespace {
 
-enum class FileThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    IO_0,
-    enum_thread_index_end,
-};
+struct FileIoThreadTag;
 
 struct FileRuntimeTraits {
-    using Thread = FileThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(FileThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<FileIoThreadTag, 1, af::ThreadKind::IoUring, "file-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
-
-    static constexpr af::ThreadKind thread_kind(FileThread thread) noexcept {
-        return thread == FileThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
-    }
 };
 
 using file_async = af::AsyncRuntime<FileRuntimeTraits>;
 using FileTask = file_async::Task;
+using FileThread = file_async::Thread;
+
+struct FileThreads {
+    static constexpr FileThread IO_0 = file_async::thread_group<FileIoThreadTag>().template at<0>();
+};
 
 #if defined(__linux__)
 class FileRoundTripTask final : public FileTask {
@@ -41,9 +35,9 @@ public:
     explicit FileRoundTripTask(FileTask::FactoryToken token) : FileTask(token) {}
 
     bool do_it(int fd, char *byte_read) {
-        file_.reset(FileThread::IO_0, fd);
+        file_.reset(FileThreads::IO_0, fd);
         byte_read_ = byte_read;
-        return schedule(FileThread::IO_0);
+        return schedule(FileThreads::IO_0);
     }
 
 private:
@@ -131,7 +125,7 @@ private:
 int main() {
 #if defined(__linux__)
     file_async::init();
-    if (!file_async::io_uring_backend_available(FileThread::IO_0)) {
+    if (!file_async::io_uring_backend_available(FileThreads::IO_0)) {
         std::cout << "io_uring backend unavailable\n";
         file_async::shutdown();
         return 0;

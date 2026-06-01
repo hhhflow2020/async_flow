@@ -11,21 +11,12 @@ template <typename T> bool wait_until_at_least(std::atomic<T> &value, T expected
     return true;
 }
 
-enum class TestThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    Logic_1,
-    Logic_2,
-    Logic_3,
-    DB_0,
-    enum_thread_index_end,
-};
+struct TestLogicThreadTag;
+struct TestDbThreadTag;
 
 struct TestRuntimeTraits {
-    using Thread = TestThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(TestThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(af::thread_group<TestLogicThreadTag, 4>(),
+                                                      af::thread_group<TestDbThreadTag, 1>());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
@@ -33,6 +24,19 @@ struct TestRuntimeTraits {
 
 using Runtime = af::AsyncRuntime<TestRuntimeTraits>;
 using Task = Runtime::Task;
+using TestThread = Runtime::Thread;
+
+struct TestThreads {
+    static constexpr TestThread Logic_0 =
+        Runtime::thread_group<TestLogicThreadTag>().template at<0>();
+    static constexpr TestThread Logic_1 =
+        Runtime::thread_group<TestLogicThreadTag>().template at<1>();
+    static constexpr TestThread Logic_2 =
+        Runtime::thread_group<TestLogicThreadTag>().template at<2>();
+    static constexpr TestThread Logic_3 =
+        Runtime::thread_group<TestLogicThreadTag>().template at<3>();
+    static constexpr TestThread DB_0 = Runtime::thread_group<TestDbThreadTag>().template at<0>();
+};
 
 class ParallelRuntimeFixture : public testing::Test {
 protected:

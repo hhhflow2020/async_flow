@@ -8,7 +8,7 @@ int main() {
     using namespace io_uring_fixed_file_example;
 
     fixed_file_async::init();
-    if (!fixed_file_async::io_uring_backend_available(FixedFileThread::IO_0)) {
+    if (!fixed_file_async::io_uring_backend_available(FixedFileThreads::IO_0)) {
         std::cout << "io_uring backend unavailable\n";
         fixed_file_async::shutdown();
         return 0;

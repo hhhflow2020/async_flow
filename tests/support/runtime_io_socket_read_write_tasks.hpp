@@ -10,7 +10,7 @@ public:
         armed_ = armed;
         completed_ = completed;
         byte_read_ = byte_read;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -33,7 +33,7 @@ private:
     af::TaskResult arm_read() {
         state_ = State::Read;
         const af::IoStatus status =
-            af::io_read_some(*this, IoTestThread::IO_0, fd_, &value_, sizeof(value_), read_);
+            af::io_read_some(*this, IoTestThreads::IO_0, fd_, &value_, sizeof(value_), read_);
         if (!status.pending()) {
             return failed();
         }
@@ -43,7 +43,7 @@ private:
 
     af::TaskResult finish_read() {
         const af::IoStatus status =
-            af::io_read_some(*this, IoTestThread::IO_0, fd_, &value_, sizeof(value_), read_);
+            af::io_read_some(*this, IoTestThreads::IO_0, fd_, &value_, sizeof(value_), read_);
         if (!status.ready() || status.bytes != sizeof(value_)) {
             return failed();
         }
@@ -72,7 +72,7 @@ public:
         completed_ = completed;
         reads_ = reads;
         output_ = output;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -95,13 +95,13 @@ private:
     af::TaskResult arm_read() {
         state_ = State::Read;
         const af::IoStatus status =
-            af::io_read_some(*this, IoTestThread::IO_0, fd_, &value_, sizeof(value_), read_);
+            af::io_read_some(*this, IoTestThreads::IO_0, fd_, &value_, sizeof(value_), read_);
         return handle_status(status);
     }
 
     af::TaskResult finish_read() {
         const af::IoStatus status =
-            af::io_read_some(*this, IoTestThread::IO_0, fd_, &value_, sizeof(value_), read_);
+            af::io_read_some(*this, IoTestThreads::IO_0, fd_, &value_, sizeof(value_), read_);
         return handle_status(status);
     }
 
@@ -146,13 +146,13 @@ public:
         fd_ = fd;
         armed_ = armed;
         completed_ = completed;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
     af::TaskResult run() override {
         const af::IoStatus status =
-            af::io_write_some(*this, IoTestThread::IO_0, fd_, &value_, sizeof(value_), write_);
+            af::io_write_some(*this, IoTestThreads::IO_0, fd_, &value_, sizeof(value_), write_);
         if (status.pending()) {
             armed_->fetch_add(1, std::memory_order_release);
             return pending();

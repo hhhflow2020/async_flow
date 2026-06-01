@@ -10,13 +10,13 @@ public:
         unavailable_error_ = unavailable_error;
         invalid_error_ = invalid_error;
         null_error_ = null_error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
     af::TaskResult run() override {
-        af::IoFixedFile<IoTestThread> missing(IoTestThread::IO_0, 0);
-        af::IoFixedFile<IoTestThread> invalid(IoTestThread::IO_0, -1);
+        af::IoFixedFile<IoTestThread> missing(IoTestThreads::IO_0, 0);
+        af::IoFixedFile<IoTestThread> invalid(IoTestThreads::IO_0, -1);
         af::IoOpState recv_unavailable{};
         af::IoOpState recv_zero{};
         af::IoOpState recv_bad{};

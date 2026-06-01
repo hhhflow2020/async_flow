@@ -6,11 +6,11 @@ public:
         : UringIoTaskBase(token) {}
 
     bool do_it(int fd, std::uint64_t offset, char value, std::atomic<int> *completed) {
-        file_.reset(IoTestThread::IO_0, fd);
+        file_.reset(IoTestThreads::IO_0, fd);
         offset_ = offset;
         value_ = value;
         completed_ = completed;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:

@@ -4,7 +4,7 @@ class UringIoRuntimeFileFixture : public UringIoRuntimeFixture {};
 
 TEST_F(UringIoRuntimeFileFixture, IoUringFileAdapterWritesFsyncsAndReadsAtOffset) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io_uring backend unavailable";
     }
 
@@ -29,7 +29,7 @@ TEST_F(UringIoRuntimeFileFixture, IoUringFileAdapterWritesFsyncsAndReadsAtOffset
 
 TEST_F(UringIoRuntimeFileFixture, IoUringFileAdapterWritesAndReadsVectoredAtOffset) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io_uring backend unavailable";
     }
 
@@ -54,7 +54,7 @@ TEST_F(UringIoRuntimeFileFixture, IoUringFileAdapterWritesAndReadsVectoredAtOffs
 
 TEST_F(UringIoRuntimeFileFixture, IoUringFileAdapterUsesAsyncCurrentOffsetReadWrite) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io_uring backend unavailable";
     }
 

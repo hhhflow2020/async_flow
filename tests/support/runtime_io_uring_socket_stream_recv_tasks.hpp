@@ -7,11 +7,11 @@ public:
 
     bool do_it(int fd, std::atomic<int> *armed, std::atomic<int> *completed,
                std::atomic<char> *byte_read) {
-        stream_.reset(IoTestThread::IO_0, fd);
+        stream_.reset(IoTestThreads::IO_0, fd);
         armed_ = armed;
         completed_ = completed;
         byte_read_ = byte_read;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -45,14 +45,14 @@ public:
     bool do_it(int fd, std::atomic<af::IoOpState *> *state, std::atomic<int> *wait_kind,
                std::atomic<int> *armed, std::atomic<int> *completed, std::atomic<int> *error,
                std::atomic<int> *bytes) {
-        stream_.reset(IoTestThread::IO_0, fd);
+        stream_.reset(IoTestThreads::IO_0, fd);
         state_ = state;
         wait_kind_ = wait_kind;
         armed_ = armed;
         completed_ = completed;
         error_ = error;
         bytes_ = bytes;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -102,7 +102,7 @@ public:
         completed_ = completed;
         result_ = result;
         error_ = error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -112,7 +112,7 @@ private:
             return failed();
         }
 
-        const bool ok = UringIoRuntime::cancel_io(IoTestThread::IO_0, *state);
+        const bool ok = UringIoRuntime::cancel_io(IoTestThreads::IO_0, *state);
         result_->store(ok ? 1 : 0, std::memory_order_release);
         error_->store(state->wait.error, std::memory_order_release);
         completed_->fetch_add(1, std::memory_order_release);

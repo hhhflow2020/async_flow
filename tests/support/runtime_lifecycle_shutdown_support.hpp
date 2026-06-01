@@ -1,20 +1,19 @@
 #pragma once
 
-enum class NoInitThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    enum_thread_index_end,
-};
+struct NoInitThreadTag;
 
 struct NoInitRuntimeTraits {
-    using Thread = NoInitThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(NoInitThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(af::thread_group<NoInitThreadTag, 1>());
 };
 
 using NoInitRuntime = af::AsyncRuntime<NoInitRuntimeTraits>;
 using NoInitTaskBase = NoInitRuntime::Task;
+using NoInitThread = NoInitRuntime::Thread;
+
+struct NoInitThreads {
+    static constexpr NoInitThread Logic_0 =
+        NoInitRuntime::thread_group<NoInitThreadTag>().template at<0>();
+};
 
 class NoInitTask final : public NoInitTaskBase {
 public:
@@ -22,7 +21,7 @@ public:
 
     bool do_it(std::atomic<int> *destroyed) {
         destroyed_ = destroyed;
-        return schedule(NoInitThread::Logic_0);
+        return schedule(NoInitThreads::Logic_0);
     }
 
     ~NoInitTask() override {
@@ -37,23 +36,26 @@ private:
     std::atomic<int> *destroyed_{nullptr};
 };
 
-enum class WaitShutdownThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    DB_0,
-    enum_thread_index_end,
-};
+struct WaitShutdownLogicThreadTag;
+struct WaitShutdownDbThreadTag;
 
 struct WaitShutdownRuntimeTraits {
-    using Thread = WaitShutdownThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(WaitShutdownThread::enum_thread_index_end);
+    static constexpr auto threads =
+        af::thread_layout(af::thread_group<WaitShutdownLogicThreadTag, 1>(),
+                          af::thread_group<WaitShutdownDbThreadTag, 1>());
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 };
 
 using WaitShutdownRuntime = af::AsyncRuntime<WaitShutdownRuntimeTraits>;
 using WaitShutdownTaskBase = WaitShutdownRuntime::Task;
+using WaitShutdownThread = WaitShutdownRuntime::Thread;
+
+struct WaitShutdownThreads {
+    static constexpr WaitShutdownThread Logic_0 =
+        WaitShutdownRuntime::thread_group<WaitShutdownLogicThreadTag>().template at<0>();
+    static constexpr WaitShutdownThread DB_0 =
+        WaitShutdownRuntime::thread_group<WaitShutdownDbThreadTag>().template at<0>();
+};
 
 class WaitShutdownBlockingTask final : public WaitShutdownTaskBase {
 public:
@@ -64,7 +66,7 @@ public:
         started_ = started;
         release_ = release;
         completed_ = completed;
-        return schedule(WaitShutdownThread::Logic_0);
+        return schedule(WaitShutdownThreads::Logic_0);
     }
 
 private:
@@ -95,7 +97,7 @@ public:
         release_ = release;
         completed_ = completed;
         seen_ = seen;
-        return schedule(WaitShutdownThread::Logic_0);
+        return schedule(WaitShutdownThreads::Logic_0);
     }
 
 private:
@@ -115,7 +117,7 @@ private:
                 release_->wait(false, std::memory_order_acquire);
             }
             state_ = State::Db;
-            return pending_on(WaitShutdownThread::DB_0);
+            return pending_on(WaitShutdownThreads::DB_0);
 
         case State::Db:
             (*seen_)[1].store(WaitShutdownRuntime::current_thread_index(),
@@ -148,7 +150,7 @@ public:
 
     bool do_it(std::atomic<int> *destroyed) {
         destroyed_ = destroyed;
-        return schedule(WaitShutdownThread::Logic_0);
+        return schedule(WaitShutdownThreads::Logic_0);
     }
 
 private:
@@ -159,23 +161,22 @@ private:
     std::atomic<int> *destroyed_{nullptr};
 };
 
-enum class FastShutdownThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    enum_thread_index_end,
-};
+struct FastShutdownThreadTag;
 
 struct FastShutdownRuntimeTraits {
-    using Thread = FastShutdownThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(FastShutdownThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(af::thread_group<FastShutdownThreadTag, 1>());
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::StopImmediately;
     static constexpr bool enable_task_registry = true;
 };
 
 using FastShutdownRuntime = af::AsyncRuntime<FastShutdownRuntimeTraits>;
 using FastShutdownTaskBase = FastShutdownRuntime::Task;
+using FastShutdownThread = FastShutdownRuntime::Thread;
+
+struct FastShutdownThreads {
+    static constexpr FastShutdownThread Logic_0 =
+        FastShutdownRuntime::thread_group<FastShutdownThreadTag>().template at<0>();
+};
 
 class FastShutdownPendingTask final : public FastShutdownTaskBase {
 public:
@@ -185,7 +186,7 @@ public:
     bool do_it(std::atomic<int> *entered, std::atomic<int> *destroyed = nullptr) {
         entered_ = entered;
         destroyed_ = destroyed;
-        return schedule(FastShutdownThread::Logic_0);
+        return schedule(FastShutdownThreads::Logic_0);
     }
 
     ~FastShutdownPendingTask() override {

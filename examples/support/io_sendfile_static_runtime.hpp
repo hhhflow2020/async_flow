@@ -8,30 +8,29 @@
 
 namespace io_sendfile_static_example {
 
-enum class SendfileThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    IO_0,
-    enum_thread_index_end,
-};
+struct SendfileLogicThreadTag;
+struct SendfileIoThreadTag;
 
 struct SendfileRuntimeTraits {
-    using Thread = SendfileThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(SendfileThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<SendfileLogicThreadTag, 1, af::ThreadKind::Worker, "sendfile-cpu">(),
+        af::thread_group<SendfileIoThreadTag, 1, af::ThreadKind::Epoll, "sendfile-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
-
-    static constexpr af::ThreadKind thread_kind(SendfileThread thread) noexcept {
-        return thread == SendfileThread::IO_0 ? af::ThreadKind::Epoll : af::ThreadKind::Worker;
-    }
 };
 
 using sendfile_async = af::AsyncRuntime<SendfileRuntimeTraits>;
 using SendfileTaskBase = sendfile_async::Task;
+using SendfileThread = sendfile_async::Thread;
+
+struct SendfileThreads {
+    static constexpr SendfileThread Logic_0 =
+        sendfile_async::thread_group<SendfileLogicThreadTag>().template at<0>();
+    static constexpr SendfileThread IO_0 =
+        sendfile_async::thread_group<SendfileIoThreadTag>().template at<0>();
+};
 
 inline constexpr char sendfile_payload[] = "HTTP/1.1 200 OK\r\n"
                                            "Content-Type: text/plain\r\n"

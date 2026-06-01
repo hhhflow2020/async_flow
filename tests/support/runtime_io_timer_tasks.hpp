@@ -6,11 +6,11 @@ public:
 
     bool do_it(int fd, std::atomic<int> *armed, std::atomic<int> *completed,
                std::atomic<std::uint64_t> *expirations) {
-        timer_.reset(IoTestThread::IO_0, fd);
+        timer_.reset(IoTestThreads::IO_0, fd);
         armed_ = armed;
         completed_ = completed;
         expirations_ = expirations;
-        return this->schedule(IoTestThread::IO_0);
+        return this->schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -47,13 +47,13 @@ public:
         armed_ = armed;
         completed_ = completed;
         error_ = error;
-        return this->schedule(IoTestThread::IO_0);
+        return this->schedule(IoTestThreads::IO_0);
     }
 
 private:
     af::TaskResult run() override {
         const af::IoStatus status =
-            af::io_wait_timeout(*this, IoTestThread::IO_0, std::chrono::milliseconds(1), wait_);
+            af::io_wait_timeout(*this, IoTestThreads::IO_0, std::chrono::milliseconds(1), wait_);
         if (status.pending()) {
             armed_->fetch_add(1, std::memory_order_release);
             return this->pending();

@@ -5,12 +5,14 @@
 #include <bit>
 #include <cerrno>
 #include <chrono>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <new>
+#include <string_view>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -30,6 +32,7 @@
 
 #if !defined(_WIN32)
 #include <fcntl.h>
+#include <pthread.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
@@ -93,9 +96,10 @@ template <typename TraitsT>
 class AsyncRuntime : public detail::RuntimePublicIo<AsyncRuntime<TraitsT>, TraitsT> {
 public:
     using Traits = TraitsT;
-    using Thread = typename Traits::Thread;
     using Task = BasicTask<AsyncRuntime<Traits>>;
     using Config = detail::RuntimeConfig<Traits>;
+    using ThreadLayout = typename Config::ThreadLayout;
+    using Thread = typename Config::Thread;
 
     template <typename TaskT> using TaskHandle = detail::RuntimeTaskHandle<AsyncRuntime, TaskT>;
 
@@ -134,6 +138,18 @@ public:
         return Config::thread_kind(thread);
     }
 
+    [[nodiscard]] static constexpr std::string_view thread_name(Thread thread) noexcept {
+        return Config::thread_name(thread);
+    }
+
+    [[nodiscard]] static constexpr std::uint16_t thread_group_offset(Thread thread) noexcept {
+        return Config::thread_group_offset(thread);
+    }
+
+    template <typename Tag> [[nodiscard]] static constexpr auto thread_group() noexcept {
+        return Config::template thread_group<Tag>();
+    }
+
     AsyncRuntime() = delete;
 
     static void init();
@@ -157,21 +173,11 @@ public:
     [[nodiscard]] static bool is_stopping() noexcept;
     [[nodiscard]] static std::uint16_t current_thread_index() noexcept;
     [[nodiscard]] static constexpr std::uint16_t thread_index(Thread thread) noexcept {
-        using Underlying = std::underlying_type_t<Thread>;
-        return static_cast<std::uint16_t>(static_cast<Underlying>(thread));
+        return thread.index();
     }
 
     [[nodiscard]] static constexpr Thread thread_from_index(std::uint16_t index) noexcept {
-        return static_cast<Thread>(index);
-    }
-
-    template <Thread Begin, std::uint16_t Count, typename Key>
-    [[nodiscard]] static constexpr Thread shard_by(Key key) noexcept {
-        static_assert(Count > 0);
-        const auto begin = thread_index(Begin);
-        const auto value = static_cast<std::uint64_t>(key);
-        const auto shard = static_cast<std::uint16_t>(value % Count);
-        return thread_from_index(static_cast<std::uint16_t>(begin + shard));
+        return Thread::from_index(index);
     }
 
     template <typename Op, typename KeyFn>

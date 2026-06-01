@@ -7,11 +7,11 @@ public:
 
     bool do_it(int fd, std::atomic<int> *completed, std::atomic<int> *packed_read,
                std::atomic<int> *pending_submits) {
-        file_.reset(IoTestThread::IO_0, fd);
+        file_.reset(IoTestThreads::IO_0, fd);
         completed_ = completed;
         packed_read_ = packed_read;
         pending_submits_ = pending_submits;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:

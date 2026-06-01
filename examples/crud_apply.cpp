@@ -114,13 +114,13 @@ public:
 
     bool do_it(PlayerChangeBatch batch) {
         batch_ = std::move(batch);
-        return schedule(AppThread::IO_0);
+        return schedule(AppThreads::IO_0);
     }
 
 private:
     af::TaskResult run() override {
         const bool ok = async::start_ordered_task<PlayerCrudStream, ApplyPlayerCrudBatchTask>(
-            AppThread::IO_0, std::move(batch_));
+            AppThreads::IO_0, std::move(batch_));
         return ok ? done() : failed();
     }
 

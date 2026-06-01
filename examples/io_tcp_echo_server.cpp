@@ -11,15 +11,15 @@ int main() {
     using namespace io_tcp_echo_example;
 
     echo_async::init();
-    if (!echo_async::io_backend_available(EchoThread::IO_0) ||
-        !echo_async::io_backend_available(EchoThread::IO_1)) {
+    if (!echo_async::io_backend_available(EchoThreads::IO_0) ||
+        !echo_async::io_backend_available(EchoThreads::IO_1)) {
         std::cout << "IO backend unavailable\n";
         echo_async::shutdown();
         return 0;
     }
 
-    std::cout << "tcp echo backends=" << echo_backend_name(EchoThread::IO_0) << ','
-              << echo_backend_name(EchoThread::IO_1) << '\n';
+    std::cout << "tcp echo backends=" << echo_backend_name(EchoThreads::IO_0) << ','
+              << echo_backend_name(EchoThreads::IO_1) << '\n';
 
     EchoLoopbackListener listener{};
     if (!listener.create()) {
@@ -46,11 +46,11 @@ int main() {
     const bool clients_ready = static_cast<bool>(client0) && static_cast<bool>(client1);
     const bool client0_started =
         clients_ready && echo_async::start_task<EchoClientTask>(
-                             std::move(client0), EchoThread::IO_0, listener.address,
+                             std::move(client0), EchoThreads::IO_0, listener.address,
                              listener.address_size, request0, &clients[0]);
     const bool client1_started =
         clients_ready && echo_async::start_task<EchoClientTask>(
-                             std::move(client1), EchoThread::IO_1, listener.address,
+                             std::move(client1), EchoThreads::IO_1, listener.address,
                              listener.address_size, request1, &clients[1]);
 
     AF_ASSERT(server_started && client0_started && client1_started);

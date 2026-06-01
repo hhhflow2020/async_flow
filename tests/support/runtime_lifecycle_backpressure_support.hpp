@@ -1,16 +1,9 @@
 #pragma once
 
-enum class TinyThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    enum_thread_index_end,
-};
+struct TinyThreadTag;
 
 struct TinyRuntimeTraits {
-    using Thread = TinyThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(TinyThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(af::thread_group<TinyThreadTag, 1>());
     static constexpr std::size_t spsc_queue_capacity = 2;
     static constexpr std::size_t external_queue_capacity = 2;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
@@ -18,6 +11,12 @@ struct TinyRuntimeTraits {
 
 using TinyRuntime = af::AsyncRuntime<TinyRuntimeTraits>;
 using TinyTask = TinyRuntime::Task;
+using TinyThread = TinyRuntime::Thread;
+
+struct TinyThreads {
+    static constexpr TinyThread Logic_0 =
+        TinyRuntime::thread_group<TinyThreadTag>().template at<0>();
+};
 
 class BlockingTinyTask final : public TinyTask {
 public:
@@ -27,7 +26,7 @@ public:
         started_ = started;
         release_ = release;
         completed_ = completed;
-        return schedule(TinyThread::Logic_0);
+        return schedule(TinyThreads::Logic_0);
     }
 
 private:
@@ -53,7 +52,7 @@ public:
     bool do_it(std::atomic<int> *completed, std::atomic<int> *destroyed) {
         completed_ = completed;
         destroyed_ = destroyed;
-        return schedule(TinyThread::Logic_0);
+        return schedule(TinyThreads::Logic_0);
     }
 
     ~TinyNoopTask() override {
@@ -70,18 +69,10 @@ private:
     std::atomic<int> *destroyed_{nullptr};
 };
 
-enum class YieldThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    Logic_1,
-    enum_thread_index_end,
-};
+struct YieldThreadTag;
 
 struct YieldRuntimeTraits {
-    using Thread = YieldThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(YieldThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(af::thread_group<YieldThreadTag, 2>());
     static constexpr std::size_t spsc_queue_capacity = 64;
     static constexpr std::size_t external_queue_capacity = 64;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
@@ -89,6 +80,14 @@ struct YieldRuntimeTraits {
 
 using YieldRuntime = af::AsyncRuntime<YieldRuntimeTraits>;
 using YieldTask = YieldRuntime::Task;
+using YieldThread = YieldRuntime::Thread;
+
+struct YieldThreads {
+    static constexpr YieldThread Logic_0 =
+        YieldRuntime::thread_group<YieldThreadTag>().template at<0>();
+    static constexpr YieldThread Logic_1 =
+        YieldRuntime::thread_group<YieldThreadTag>().template at<1>();
+};
 
 class YieldCountTask final : public YieldTask {
 public:
@@ -116,13 +115,13 @@ public:
         child_count_ = child_count;
         completed_ = completed;
         all_started_ = all_started;
-        return schedule(YieldThread::Logic_0);
+        return schedule(YieldThreads::Logic_0);
     }
 
 private:
     af::TaskResult run() override {
         for (int i = 0; i < child_count_; ++i) {
-            if (!YieldRuntime::start_task<YieldCountTask>(YieldThread::Logic_0, completed_)) {
+            if (!YieldRuntime::start_task<YieldCountTask>(YieldThreads::Logic_0, completed_)) {
                 all_started_->store(false, std::memory_order_release);
                 return failed();
             }

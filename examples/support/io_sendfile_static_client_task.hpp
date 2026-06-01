@@ -24,7 +24,7 @@ public:
         server_ = server;
         server_size_ = server_size;
         result_ = result;
-        return schedule(SendfileThread::IO_0);
+        return schedule(SendfileThreads::IO_0);
     }
 
 private:
@@ -51,13 +51,13 @@ private:
 
     af::TaskResult create_socket() {
         state_ = State::FinishSocket;
-        return consume_socket_status(af::io_socket(*this, SendfileThread::IO_0, AF_INET,
+        return consume_socket_status(af::io_socket(*this, SendfileThreads::IO_0, AF_INET,
                                                    SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0,
                                                    &fd_, socket_));
     }
 
     af::TaskResult finish_socket() {
-        return consume_socket_status(af::io_socket(*this, SendfileThread::IO_0, AF_INET,
+        return consume_socket_status(af::io_socket(*this, SendfileThreads::IO_0, AF_INET,
                                                    SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0,
                                                    &fd_, socket_));
     }
@@ -72,7 +72,7 @@ private:
 
         owned_.reset(fd_);
         fd_ = -1;
-        stream_.reset(SendfileThread::IO_0, owned_.get());
+        stream_.reset(SendfileThreads::IO_0, owned_.get());
         state_ = State::Connect;
         return again();
     }

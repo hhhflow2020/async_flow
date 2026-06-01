@@ -17,7 +17,7 @@ public:
         client_.reset(fd);
         state_ = State::Drive;
         wait_.reset();
-        return schedule(ClientThread::IO_0);
+        return schedule(ClientThreads::IO_0);
     }
 
 private:
@@ -54,7 +54,7 @@ private:
             }
 
             state_ = State::Wait;
-            if (!wait_io(ClientThread::IO_0, client_.fd(), step.want, &wait_.wait)) {
+            if (!wait_io(ClientThreads::IO_0, client_.fd(), step.want, &wait_.wait)) {
                 std::cout << "io_wait failed: " << wait_.wait.error << '\n';
                 return failed();
             }

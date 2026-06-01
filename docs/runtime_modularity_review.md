@@ -115,6 +115,25 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 
 ## Current Findings
 
+### 2026-06-02 Thread Layout API Migration
+
+Status: current public thread configuration API.
+
+Resolved items:
+
+- P1: the public runtime configuration no longer accepts a user-defined fixed-thread enum plus `thread_count` / `thread_kind()` traits. Runtime traits now declare `static constexpr auto threads = af::thread_layout(...)`, and `detail::RuntimeConfig` derives the runtime thread id type, count, group metadata, and IO kind from that layout.
+- P1: examples, tests, and benchmarks now use `Runtime::Thread` plus explicit thread groups (`Runtime::thread_group<Tag>()`) instead of enum constants. Named helper structs such as `AppThreads` / `RpcThreads` remain only as user-facing aliases over layout group offsets.
+- P1: `thread_group<Tag>().at()` and `thread_group<Tag>().shard()` are empty compile-time views over contiguous `uint16_t` thread indexes. Scheduler hot paths still receive a compact `ThreadId` and call `thread.index()` directly, so using a group to compute a target thread does not introduce heap allocation, virtual dispatch, pointer chasing, or an extra runtime lookup.
+- P2: thread group `ThreadKind` and name metadata are stored in a small compile-time table by numeric thread index for executor setup and introspection. This keeps the common task-post/pending path index-only while still allowing layout-level IO kind selection and debug names.
+- P2: executor startup now names POSIX threads as `af-<group>-<offset>` through `pthread_setname_np()` on Linux/macOS. The Linux-visible 15-character limit is handled by truncating the group portion first so the numeric offset remains visible in debuggers and process viewers.
+
+Validation:
+
+- Local macOS Debug full build: passed.
+- Local macOS Debug full runtime suite: 166/166 no failures; Linux-only IO tests skipped by platform logic and kqueue tests passed.
+- Remote Linux GCC Debug full build in `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.0`: passed.
+- Remote Linux GCC Debug full runtime suite: 162/162 no failures; three platform/capability tests skipped by test logic.
+
 ### 2026-06-02 Detail Directory Layout Pass
 
 Status: current framework layout.

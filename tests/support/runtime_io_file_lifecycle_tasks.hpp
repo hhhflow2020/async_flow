@@ -11,7 +11,7 @@ public:
         completed_ = completed;
         close_released_ = close_released;
         observed_size_ = observed_size;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -62,7 +62,7 @@ private:
     af::TaskResult open_file() {
         int fd = -1;
         const af::IoStatus status =
-            af::io_openat(*this, IoTestThread::IO_0, AT_FDCWD, path_,
+            af::io_openat(*this, IoTestThreads::IO_0, AT_FDCWD, path_,
                           O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC, 0600U, &fd, open_);
         if (status.pending()) {
             return pending();
@@ -71,13 +71,13 @@ private:
             return failed();
         }
         owned_.reset(fd);
-        file_.reset(IoTestThread::IO_0, owned_.get());
+        file_.reset(IoTestThreads::IO_0, owned_.get());
         state_ = State::Fallocate;
         return again();
     }
 
     af::TaskResult fallocate_file() {
-        const af::IoStatus status = af::io_fallocate(*this, IoTestThread::IO_0, owned_.get(),
+        const af::IoStatus status = af::io_fallocate(*this, IoTestThreads::IO_0, owned_.get(),
                                                      FALLOC_FL_KEEP_SIZE, 0, 4096, fallocate_);
         if (status.pending()) {
             return pending();
@@ -126,7 +126,7 @@ private:
     }
 
     af::TaskResult stat_file() {
-        const af::IoStatus status = af::io_statx(*this, IoTestThread::IO_0, AT_FDCWD, path_, 0,
+        const af::IoStatus status = af::io_statx(*this, IoTestThreads::IO_0, AT_FDCWD, path_, 0,
                                                  STATX_SIZE, &stat_, stat_state_);
         if (status.pending()) {
             return pending();
@@ -140,7 +140,7 @@ private:
     }
 
     af::TaskResult rename_file() {
-        const af::IoStatus status = af::io_renameat(*this, IoTestThread::IO_0, AT_FDCWD, path_,
+        const af::IoStatus status = af::io_renameat(*this, IoTestThreads::IO_0, AT_FDCWD, path_,
                                                     AT_FDCWD, renamed_path_, 0, rename_);
         if (status.pending()) {
             return pending();
@@ -154,7 +154,7 @@ private:
 
     af::TaskResult unlink_file() {
         const af::IoStatus status =
-            af::io_unlinkat(*this, IoTestThread::IO_0, AT_FDCWD, renamed_path_, 0, unlink_);
+            af::io_unlinkat(*this, IoTestThreads::IO_0, AT_FDCWD, renamed_path_, 0, unlink_);
         if (status.pending()) {
             return pending();
         }
@@ -166,7 +166,7 @@ private:
     }
 
     af::TaskResult close_file() {
-        const af::IoStatus status = af::io_close(*this, IoTestThread::IO_0, owned_, close_);
+        const af::IoStatus status = af::io_close(*this, IoTestThreads::IO_0, owned_, close_);
         if (status.pending()) {
             if (owned_.get() != -1) {
                 return failed();

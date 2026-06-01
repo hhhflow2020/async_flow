@@ -7,7 +7,7 @@
 namespace af::detail {
 
 template <typename RuntimeT, typename TraitsT> class alignas(hardware_cache_line_size) Executor {
-    using Thread = typename TraitsT::Thread;
+    using Thread = typename RuntimeT::Thread;
     using Task = BasicTask<RuntimeT>;
     using RuntimeStatus = detail::RuntimeStatus;
     template <typename T> using CacheLineAtomic = detail::CacheLineAtomic<T>;
@@ -38,6 +38,14 @@ template <typename RuntimeT, typename TraitsT> class alignas(hardware_cache_line
 
     [[nodiscard]] static constexpr ThreadKind thread_kind(Thread thread) noexcept {
         return RuntimeT::thread_kind(thread);
+    }
+
+    [[nodiscard]] static constexpr std::string_view thread_name(Thread thread) noexcept {
+        return RuntimeT::thread_name(thread);
+    }
+
+    [[nodiscard]] static constexpr std::uint16_t thread_group_offset(Thread thread) noexcept {
+        return RuntimeT::thread_group_offset(thread);
     }
 
     [[nodiscard]] static auto &spsc_queue(std::uint16_t source, std::uint16_t target) noexcept {
@@ -2286,6 +2294,7 @@ private:
 #endif
 
     void notify_force() noexcept;
+    void set_current_thread_name() noexcept;
     void run_loop() noexcept;
     void init_io_backend() noexcept;
     void close_io_backend() noexcept;

@@ -7,11 +7,11 @@ public:
 
     bool do_it(int fd, std::atomic<int> *armed, std::atomic<int> *completed,
                std::atomic<int> *request_seen) {
-        stream_.reset(IoTestThread::IO_0, fd);
+        stream_.reset(IoTestThreads::IO_0, fd);
         armed_ = armed;
         completed_ = completed;
         request_seen_ = request_seen;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:

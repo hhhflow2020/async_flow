@@ -41,7 +41,7 @@ TEST(RuntimeBackpressureTests, YieldPolicyAllowsManyExternalProducers) {
         producers[producer] = std::thread([producer, &completed, &all_started] {
             for (int i = 0; i < tasks_per_producer; ++i) {
                 const YieldThread target =
-                    ((producer + i) & 1) == 0 ? YieldThread::Logic_0 : YieldThread::Logic_1;
+                    ((producer + i) & 1) == 0 ? YieldThreads::Logic_0 : YieldThreads::Logic_1;
                 if (!YieldRuntime::start_task<YieldCountTask>(target, &completed)) {
                     all_started.store(false, std::memory_order_release);
                     return;

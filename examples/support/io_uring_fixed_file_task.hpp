@@ -21,8 +21,8 @@ public:
         byte_read_ = byte_read;
         vectored_read_ = vectored_read;
         updated_byte_read_ = updated_byte_read;
-        file_.reset(FixedFileThread::IO_0, 0);
-        return schedule(FixedFileThread::IO_0);
+        file_.reset(FixedFileThreads::IO_0, 0);
+        return schedule(FixedFileThreads::IO_0);
     }
 
 private:
@@ -77,11 +77,11 @@ private:
 
     af::TaskResult register_file() {
         int error = 0;
-        if (!fixed_file_async::io_register_files(FixedFileThread::IO_0, &fd_, 1, &error)) {
+        if (!fixed_file_async::io_register_files(FixedFileThreads::IO_0, &fd_, 1, &error)) {
             return complete(error == 0 ? EIO : error);
         }
         iovec iov{buffer_, sizeof(buffer_)};
-        if (!fixed_file_async::io_register_buffers(FixedFileThread::IO_0, &iov, 1, &error)) {
+        if (!fixed_file_async::io_register_buffers(FixedFileThreads::IO_0, &iov, 1, &error)) {
             return complete(error == 0 ? EIO : error);
         }
         buffer_[0] = value_;
@@ -91,8 +91,8 @@ private:
 
     af::TaskResult update_file() {
         int error = 0;
-        if (!fixed_file_async::io_update_registered_files(FixedFileThread::IO_0, 0, &updated_fd_, 1,
-                                                          &error)) {
+        if (!fixed_file_async::io_update_registered_files(FixedFileThreads::IO_0, 0, &updated_fd_,
+                                                          1, &error)) {
             return complete(error == 0 ? EIO : error);
         }
         state_ = State::ReadUpdated;
@@ -101,10 +101,10 @@ private:
 
     af::TaskResult unregister_file() {
         int error = 0;
-        if (!fixed_file_async::io_unregister_buffers(FixedFileThread::IO_0, &error)) {
+        if (!fixed_file_async::io_unregister_buffers(FixedFileThreads::IO_0, &error)) {
             return complete(error == 0 ? EIO : error);
         }
-        if (!fixed_file_async::io_unregister_files(FixedFileThread::IO_0, &error)) {
+        if (!fixed_file_async::io_unregister_files(FixedFileThreads::IO_0, &error)) {
             return complete(error == 0 ? EIO : error);
         }
         *byte_read_ = buffer_[0];

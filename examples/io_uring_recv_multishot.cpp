@@ -9,7 +9,7 @@ int main() {
     using namespace io_uring_recv_multishot_example;
 
     recv_async::init();
-    if (!recv_async::io_uring_backend_available(RecvThread::IO_0)) {
+    if (!recv_async::io_uring_backend_available(RecvThreads::IO_0)) {
         std::cout << "io_uring backend unavailable\n";
         recv_async::shutdown();
         return 0;

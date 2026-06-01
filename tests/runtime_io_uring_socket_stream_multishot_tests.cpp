@@ -4,7 +4,7 @@ class UringIoRuntimeSocketMultishotFixture : public UringIoRuntimeFixture {};
 
 TEST_F(UringIoRuntimeSocketMultishotFixture, IoUringRecvMultishotUsesProvidedBuffers) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io_uring backend unavailable";
     }
 

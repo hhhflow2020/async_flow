@@ -9,7 +9,7 @@ int main() {
     using namespace io_adapters_example;
 
     async::init();
-    if (!async::io_backend_available(AppThread::IO_0)) {
+    if (!async::io_backend_available(AppThreads::IO_0)) {
         std::cout << "epoll backend unavailable\n";
         async::shutdown();
         return 0;

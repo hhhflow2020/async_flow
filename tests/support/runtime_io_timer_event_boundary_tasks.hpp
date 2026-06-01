@@ -7,12 +7,12 @@ public:
     bool do_it(std::atomic<int> *completed, std::atomic<int> *error) {
         completed_ = completed;
         error_ = error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
     af::TaskResult run() override {
-        af::IoTimer<IoTestThread> timer(IoTestThread::IO_0, -1);
+        af::IoTimer<IoTestThread> timer(IoTestThreads::IO_0, -1);
         af::IoOpState null_state{};
         af::IoOpState bad_fd_state{};
         std::uint64_t expirations = 0;
@@ -38,7 +38,7 @@ public:
     bool do_it(std::atomic<int> *completed, std::atomic<int> *error) {
         completed_ = completed;
         error_ = error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -46,9 +46,9 @@ private:
         af::IoOpState invalid_delay{};
         af::IoOpState no_uring{};
         const af::IoStatus invalid_status = af::io_wait_timeout(
-            *this, IoTestThread::IO_0, std::chrono::nanoseconds{0}, invalid_delay);
+            *this, IoTestThreads::IO_0, std::chrono::nanoseconds{0}, invalid_delay);
         const af::IoStatus no_uring_status =
-            af::io_wait_timeout(*this, IoTestThread::IO_0, std::chrono::milliseconds(1), no_uring);
+            af::io_wait_timeout(*this, IoTestThreads::IO_0, std::chrono::milliseconds(1), no_uring);
         if (!invalid_status.failed() || invalid_status.error != EINVAL ||
             !no_uring_status.failed() || no_uring_status.error != ENOSYS) {
             return failed();
@@ -69,12 +69,12 @@ public:
     bool do_it(std::atomic<int> *completed, std::atomic<int> *error) {
         completed_ = completed;
         error_ = error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
     af::TaskResult run() override {
-        af::IoEvent<IoTestThread> event(IoTestThread::IO_0, -1);
+        af::IoEvent<IoTestThread> event(IoTestThreads::IO_0, -1);
         af::IoOpState null_state{};
         af::IoOpState bad_fd_state{};
         std::uint64_t value = 0;

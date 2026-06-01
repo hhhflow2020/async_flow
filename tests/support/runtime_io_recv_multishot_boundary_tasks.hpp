@@ -8,14 +8,14 @@ public:
     bool do_it(int fd, std::atomic<int> *completed, std::atomic<int> *invalid_error,
                std::atomic<int> *null_error, std::atomic<int> *unavailable_error,
                std::atomic<int> *register_error) {
-        stream_.reset(IoTestThread::IO_0, fd);
-        datagram_.reset(IoTestThread::IO_0, fd);
+        stream_.reset(IoTestThreads::IO_0, fd);
+        datagram_.reset(IoTestThreads::IO_0, fd);
         completed_ = completed;
         invalid_error_ = invalid_error;
         null_error_ = null_error;
         unavailable_error_ = unavailable_error;
         register_error_ = register_error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -41,17 +41,17 @@ private:
 
         int null_register_error = 0;
         const bool null_registered = IoRuntime::io_register_provided_buffer_ring(
-            IoTestThread::IO_0, nullptr, 2, 0, &null_register_error);
+            IoTestThreads::IO_0, nullptr, 2, 0, &null_register_error);
         int register_error = 0;
         const bool registered = IoRuntime::io_register_provided_buffer_ring(
-            IoTestThread::IO_0, ring.ring(), ring.entries(), 0, &register_error);
+            IoTestThreads::IO_0, ring.ring(), ring.entries(), 0, &register_error);
         if (null_registered || null_register_error != EINVAL || registered ||
             register_error != ENOSYS) {
             return failed();
         }
 
-        af::TcpStream<IoTestThread> invalid_stream(IoTestThread::IO_0, -1);
-        af::UdpSocket<IoTestThread> invalid_datagram(IoTestThread::IO_0, -1);
+        af::TcpStream<IoTestThread> invalid_stream(IoTestThreads::IO_0, -1);
+        af::UdpSocket<IoTestThread> invalid_datagram(IoTestThreads::IO_0, -1);
         af::IoOpState invalid_state{};
         af::IoOpState invalid_datagram_state{};
         af::IoOpState invalid_recvmsg_datagram_state{};

@@ -11,21 +11,12 @@ template <typename T> bool wait_until_at_least(std::atomic<T> &value, T expected
     return true;
 }
 
-enum class TestThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    Logic_1,
-    Logic_2,
-    Logic_3,
-    DB_0,
-    enum_thread_index_end,
-};
+struct TestLogicThreadTag;
+struct TestDbThreadTag;
 
 struct TestRuntimeTraits {
-    using Thread = TestThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(TestThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(af::thread_group<TestLogicThreadTag, 4>(),
+                                                      af::thread_group<TestDbThreadTag, 1>());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
@@ -33,6 +24,19 @@ struct TestRuntimeTraits {
 
 using Runtime = af::AsyncRuntime<TestRuntimeTraits>;
 using Task = Runtime::Task;
+using TestThread = Runtime::Thread;
+
+struct TestThreads {
+    static constexpr TestThread Logic_0 =
+        Runtime::thread_group<TestLogicThreadTag>().template at<0>();
+    static constexpr TestThread Logic_1 =
+        Runtime::thread_group<TestLogicThreadTag>().template at<1>();
+    static constexpr TestThread Logic_2 =
+        Runtime::thread_group<TestLogicThreadTag>().template at<2>();
+    static constexpr TestThread Logic_3 =
+        Runtime::thread_group<TestLogicThreadTag>().template at<3>();
+    static constexpr TestThread DB_0 = Runtime::thread_group<TestDbThreadTag>().template at<0>();
+};
 
 class RuntimeFixture : public testing::Test {
 protected:
@@ -114,7 +118,7 @@ public:
 
     bool do_it(std::atomic<int> *completed) {
         completed_ = completed;
-        return schedule(TestThread::Logic_0);
+        return schedule(TestThreads::Logic_0);
     }
 
 private:
@@ -133,7 +137,7 @@ public:
 
     bool do_it(std::atomic<int> *completed) {
         completed_ = completed;
-        return schedule(TestThread::Logic_0);
+        return schedule(TestThreads::Logic_0);
     }
 
 private:
@@ -152,7 +156,7 @@ public:
     bool do_it(std::atomic<int> *completed, std::atomic<int> *destroyed) {
         completed_ = completed;
         destroyed_ = destroyed;
-        return schedule(TestThread::Logic_0);
+        return schedule(TestThreads::Logic_0);
     }
 
     ~CancelResultTask() override {
@@ -177,7 +181,7 @@ public:
         completed_ = completed;
         seen_ = seen;
         state_ = State::Start;
-        return schedule(TestThread::Logic_0);
+        return schedule(TestThreads::Logic_0);
     }
 
 private:
@@ -193,12 +197,12 @@ private:
         case State::Start:
             (*seen_)[0].store(Runtime::current_thread_index(), std::memory_order_release);
             state_ = State::Db;
-            return pending_on(TestThread::DB_0);
+            return pending_on(TestThreads::DB_0);
 
         case State::Db:
             (*seen_)[1].store(Runtime::current_thread_index(), std::memory_order_release);
             state_ = State::Logic;
-            return pending_on(TestThread::Logic_1);
+            return pending_on(TestThreads::Logic_1);
 
         case State::Logic:
             (*seen_)[2].store(Runtime::current_thread_index(), std::memory_order_release);

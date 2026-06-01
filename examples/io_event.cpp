@@ -25,10 +25,10 @@ public:
     explicit EventTask(Task::FactoryToken token) : Task(token) {}
 
     bool do_it(int fd, std::atomic<int> *armed, std::uint64_t *value) {
-        event_.reset(AppThread::IO_0, fd);
+        event_.reset(AppThreads::IO_0, fd);
         armed_ = armed;
         value_ = value;
-        return schedule(AppThread::IO_0);
+        return schedule(AppThreads::IO_0);
     }
 
 private:
@@ -63,7 +63,7 @@ int main() {
 #if defined(__linux__)
     async::init();
 
-    if (!async::io_backend_available(AppThread::IO_0)) {
+    if (!async::io_backend_available(AppThreads::IO_0)) {
         std::cout << "IO backend unavailable\n";
         async::shutdown();
         return 0;

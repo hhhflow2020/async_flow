@@ -8,11 +8,11 @@ TEST_F(IoRuntimeEpollFixture, IoThreadUsesConfiguredThreadKindAndAcceptsTasks) {
 
     ASSERT_TRUE(IoRuntime::start_task<IoHopTask>(&completed, &ran_on));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
-    EXPECT_EQ(ran_on.load(std::memory_order_acquire), IoRuntime::thread_index(IoTestThread::IO_0));
+    EXPECT_EQ(ran_on.load(std::memory_order_acquire), IoRuntime::thread_index(IoTestThreads::IO_0));
 }
 
 TEST_F(IoRuntimeEpollFixture, WorkerThreadDoesNotExposeIoBackend) {
-    EXPECT_FALSE(IoRuntime::io_backend_available(IoTestThread::Logic_0));
+    EXPECT_FALSE(IoRuntime::io_backend_available(IoTestThreads::Logic_0));
 
     std::atomic<int> completed{0};
     std::atomic<int> error{0};

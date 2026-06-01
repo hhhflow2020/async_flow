@@ -15,11 +15,11 @@ public:
     explicit UdpRecvMultishotTask(UdpRecvTaskBase::FactoryToken token) : UdpRecvTaskBase(token) {}
 
     bool do_it(int fd, std::atomic<int> *armed, int *packed_read, std::atomic<int> *error) {
-        socket_.reset(UdpRecvThread::IO_0, fd);
+        socket_.reset(UdpRecvThreads::IO_0, fd);
         armed_ = armed;
         packed_read_ = packed_read;
         error_ = error;
-        return schedule(UdpRecvThread::IO_0);
+        return schedule(UdpRecvThreads::IO_0);
     }
 
 private:
@@ -48,7 +48,7 @@ private:
         if (registered_) {
             int unregister_error = 0;
             if (udp_recv_async::io_unregister_provided_buffer_ring(
-                    UdpRecvThread::IO_0, buffer_group, &unregister_error)) {
+                    UdpRecvThreads::IO_0, buffer_group, &unregister_error)) {
                 registered_ = false;
             }
         }
@@ -72,7 +72,7 @@ private:
         }
 
         int register_error = 0;
-        if (!udp_recv_async::io_register_provided_buffer_ring(UdpRecvThread::IO_0, ring_.ring(),
+        if (!udp_recv_async::io_register_provided_buffer_ring(UdpRecvThreads::IO_0, ring_.ring(),
                                                               ring_.entries(), buffer_group,
                                                               &register_error)) {
             return complete(register_error == 0 ? EIO : register_error);
@@ -86,7 +86,7 @@ private:
         if (registered_) {
             int unregister_error = 0;
             if (!udp_recv_async::io_unregister_provided_buffer_ring(
-                    UdpRecvThread::IO_0, buffer_group, &unregister_error)) {
+                    UdpRecvThreads::IO_0, buffer_group, &unregister_error)) {
                 return complete(unregister_error == 0 ? EIO : unregister_error);
             }
             registered_ = false;
@@ -131,7 +131,7 @@ private:
             return again();
         }
         finish_error_ = 0;
-        if (!udp_recv_async::cancel_io(UdpRecvThread::IO_0, recv_)) {
+        if (!udp_recv_async::cancel_io(UdpRecvThreads::IO_0, recv_)) {
             return complete(recv_.wait.error == 0 ? EIO : recv_.wait.error);
         }
         state_ = State::Cancel;
@@ -157,7 +157,7 @@ private:
             state_ = State::Unregister;
             return again();
         }
-        if (!udp_recv_async::cancel_io(UdpRecvThread::IO_0, recv_)) {
+        if (!udp_recv_async::cancel_io(UdpRecvThreads::IO_0, recv_)) {
             return complete(recv_.wait.error == 0 ? finish_error_ : recv_.wait.error);
         }
         state_ = State::Cancel;

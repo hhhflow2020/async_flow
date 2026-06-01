@@ -4,7 +4,7 @@ class IoRuntimeEpollFixture : public IoRuntimeFixture {};
 
 TEST_F(IoRuntimeEpollFixture, IoHelpersHandleInvalidAndZeroByteOperations) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
@@ -24,7 +24,7 @@ TEST_F(IoRuntimeEpollFixture, IoHelpersHandleInvalidAndZeroByteOperations) {
 
 TEST_F(IoRuntimeEpollFixture, ZeroCopyHelpersHandleInvalidAndZeroCountOperations) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
@@ -40,7 +40,7 @@ TEST_F(IoRuntimeEpollFixture, ZeroCopyHelpersHandleInvalidAndZeroCountOperations
 
 TEST_F(IoRuntimeEpollFixture, FileAdapterHandlesInvalidAndZeroByteOperations) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
@@ -56,7 +56,7 @@ TEST_F(IoRuntimeEpollFixture, FileAdapterHandlesInvalidAndZeroByteOperations) {
 
 TEST_F(IoRuntimeEpollFixture, FixedBufferHelpersHandleInvalidAndUnavailableBackend) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
@@ -72,7 +72,7 @@ TEST_F(IoRuntimeEpollFixture, FixedBufferHelpersHandleInvalidAndUnavailableBacke
 
 TEST_F(IoRuntimeEpollFixture, FixedFileHelpersHandleInvalidAndUnavailableBackend) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
@@ -120,7 +120,7 @@ TEST_F(IoRuntimeEpollFixture, FixedFileHelpersHandleInvalidAndUnavailableBackend
 
 TEST_F(IoRuntimeEpollFixture, VectoredHelpersHandleInvalidAndZeroLengthOperations) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
@@ -134,7 +134,7 @@ TEST_F(IoRuntimeEpollFixture, VectoredHelpersHandleInvalidAndZeroLengthOperation
 
 TEST_F(IoRuntimeEpollFixture, TimerFdAdapterHandlesInvalidOperations) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
@@ -156,7 +156,7 @@ TEST_F(IoRuntimeEpollFixture, TimerFdAdapterHandlesInvalidOperations) {
 
 TEST_F(IoRuntimeEpollFixture, TimeoutHelperHandlesInvalidAndUnavailableBackend) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
@@ -172,7 +172,7 @@ TEST_F(IoRuntimeEpollFixture, TimeoutHelperHandlesInvalidAndUnavailableBackend) 
 
 TEST_F(IoRuntimeEpollFixture, EventFdAdapterHandlesInvalidOperations) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
@@ -197,7 +197,7 @@ TEST_F(IoRuntimeEpollFixture, EventFdAdapterHandlesInvalidOperations) {
 
 TEST_F(IoRuntimeEpollFixture, OpenAtHelperHandlesInvalidOperations) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 

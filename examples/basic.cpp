@@ -70,7 +70,7 @@ private:
 
     af::TaskResult start_query() {
         state_ = State::QueryDb;
-        return pending_on(AppThread::DB_0);
+        return pending_on(AppThreads::DB_0);
     }
 
     af::TaskResult query_db() {

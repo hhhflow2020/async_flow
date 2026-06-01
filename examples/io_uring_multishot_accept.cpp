@@ -9,7 +9,7 @@ int main() {
     using namespace io_uring_multishot_accept_example;
 
     accept_async::init();
-    if (!accept_async::io_uring_backend_available(AcceptThread::IO_0)) {
+    if (!accept_async::io_uring_backend_available(AcceptThreads::IO_0)) {
         std::cout << "io_uring backend unavailable\n";
         accept_async::shutdown();
         return 0;

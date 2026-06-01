@@ -4,7 +4,7 @@ class UringIoRuntimeSocketAcceptFixture : public UringIoRuntimeFixture {};
 
 TEST_F(UringIoRuntimeSocketAcceptFixture, IoUringThreadAcceptsTcpConnectionOrFallsBackToEpoll) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io backend unavailable";
     }
 
@@ -33,7 +33,7 @@ TEST_F(UringIoRuntimeSocketAcceptFixture, IoUringThreadAcceptsTcpConnectionOrFal
 
 TEST_F(UringIoRuntimeSocketAcceptFixture, IoUringAcceptDirectReceivesThroughFixedFile) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io_uring backend unavailable";
     }
 
@@ -100,7 +100,7 @@ TEST_F(UringIoRuntimeSocketAcceptFixture, IoUringAcceptDirectReceivesThroughFixe
 
 TEST_F(UringIoRuntimeSocketAcceptFixture, IoUringAcceptMultishotAcceptsMultipleConnections) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io_uring backend unavailable";
     }
 
@@ -150,7 +150,7 @@ TEST_F(UringIoRuntimeSocketAcceptFixture, IoUringAcceptMultishotAcceptsMultipleC
 
 TEST_F(UringIoRuntimeSocketAcceptFixture, IoUringAcceptMultishotCancelDrainsQueuedAccepts) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io_uring backend unavailable";
     }
 

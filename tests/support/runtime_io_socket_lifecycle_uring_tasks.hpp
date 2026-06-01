@@ -7,7 +7,7 @@ public:
     bool do_it(std::atomic<int> *completed, std::atomic<int> *error) {
         completed_ = completed;
         error_ = error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -28,13 +28,13 @@ private:
 
     af::TaskResult create_socket() {
         state_ = State::FinishSocket;
-        return consume_socket_status(af::io_socket(*this, IoTestThread::IO_0, AF_INET,
+        return consume_socket_status(af::io_socket(*this, IoTestThreads::IO_0, AF_INET,
                                                    SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0,
                                                    &opened_fd_, socket_));
     }
 
     af::TaskResult finish_socket() {
-        return consume_socket_status(af::io_socket(*this, IoTestThread::IO_0, AF_INET,
+        return consume_socket_status(af::io_socket(*this, IoTestThreads::IO_0, AF_INET,
                                                    SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0,
                                                    &opened_fd_, socket_));
     }

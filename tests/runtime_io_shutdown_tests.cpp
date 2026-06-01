@@ -3,7 +3,7 @@
 TEST(RuntimeIo, StopImmediatelyDropsPendingIoWaitsAndCanRestart) {
 #if defined(__linux__)
     FastIoRuntime::init();
-    if (!FastIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!FastIoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         FastIoRuntime::shutdown();
         GTEST_SKIP() << "epoll backend unavailable";
     }

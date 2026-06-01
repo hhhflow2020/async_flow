@@ -4,7 +4,7 @@ class UringIoRuntimeSocketStreamFixture : public UringIoRuntimeFixture {};
 
 TEST_F(UringIoRuntimeSocketStreamFixture, IoUringThreadSendsStreamBytesOrFallsBackToEpoll) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io backend unavailable";
     }
 
@@ -27,7 +27,7 @@ TEST_F(UringIoRuntimeSocketStreamFixture, IoUringThreadSendsStreamBytesOrFallsBa
 
 TEST_F(UringIoRuntimeSocketStreamFixture, IoUringThreadCreatesSocketOrFallsBack) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io backend unavailable";
     }
 
@@ -43,7 +43,7 @@ TEST_F(UringIoRuntimeSocketStreamFixture, IoUringThreadCreatesSocketOrFallsBack)
 
 TEST_F(UringIoRuntimeSocketStreamFixture, IoUringThreadSendZcSendsStreamBytesOrFallsBack) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io backend unavailable";
     }
 
@@ -66,7 +66,7 @@ TEST_F(UringIoRuntimeSocketStreamFixture, IoUringThreadSendZcSendsStreamBytesOrF
 
 TEST_F(UringIoRuntimeSocketStreamFixture, IoUringThreadShutdownsStreamOrFallsBack) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io backend unavailable";
     }
 
@@ -89,7 +89,7 @@ TEST_F(UringIoRuntimeSocketStreamFixture, IoUringThreadShutdownsStreamOrFallsBac
 
 TEST_F(UringIoRuntimeSocketStreamFixture, IoUringThreadHandlesVectoredStreamOrFallsBackToEpoll) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io backend unavailable";
     }
 
@@ -121,7 +121,7 @@ TEST_F(UringIoRuntimeSocketStreamFixture, IoUringThreadHandlesVectoredStreamOrFa
 
 TEST_F(UringIoRuntimeSocketStreamFixture, IoUringCompletionCancelIsNotConsumableBeforeCqe) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io backend unavailable";
     }
 
@@ -159,7 +159,7 @@ TEST_F(UringIoRuntimeSocketStreamFixture, IoUringCompletionCancelIsNotConsumable
 
 TEST_F(UringIoRuntimeSocketStreamFixture, IoUringThreadConnectsTcpStreamOrFallsBackToEpoll) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io backend unavailable";
     }
 

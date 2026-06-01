@@ -10,7 +10,7 @@ public:
                std::atomic<int> *completed, std::atomic<int> *read_count,
                std::atomic<int> *packed_read, std::atomic<int> *peer_count,
                std::atomic<int> *error) {
-        socket_.reset(IoTestThread::IO_0, fd);
+        socket_.reset(IoTestThreads::IO_0, fd);
         expected_port_ = expected_port;
         armed_ = armed;
         completed_ = completed;
@@ -18,7 +18,7 @@ public:
         packed_read_ = packed_read;
         peer_count_ = peer_count;
         error_ = error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -58,8 +58,9 @@ private:
         }
 
         int register_error = 0;
-        if (!UringIoRuntime::io_register_provided_buffer_ring(
-                IoTestThread::IO_0, ring_.ring(), ring_.entries(), buffer_group, &register_error)) {
+        if (!UringIoRuntime::io_register_provided_buffer_ring(IoTestThreads::IO_0, ring_.ring(),
+                                                              ring_.entries(), buffer_group,
+                                                              &register_error)) {
             return complete(register_error == 0 ? EIO : register_error);
         }
         registered_ = true;
@@ -123,7 +124,7 @@ private:
             return again();
         }
         finish_error_ = 0;
-        if (!UringIoRuntime::cancel_io(IoTestThread::IO_0, recv_)) {
+        if (!UringIoRuntime::cancel_io(IoTestThreads::IO_0, recv_)) {
             return complete(recv_.wait.error == 0 ? EIO : recv_.wait.error);
         }
         state_ = State::Cancel;
@@ -148,7 +149,7 @@ private:
         if (registered_) {
             int unregister_error = 0;
             if (!UringIoRuntime::io_unregister_provided_buffer_ring(
-                    IoTestThread::IO_0, buffer_group, &unregister_error)) {
+                    IoTestThreads::IO_0, buffer_group, &unregister_error)) {
                 return complete(unregister_error == 0 ? EIO : unregister_error);
             }
             registered_ = false;
@@ -159,8 +160,8 @@ private:
     af::TaskResult complete(int error) {
         if (registered_) {
             int unregister_error = 0;
-            if (UringIoRuntime::io_unregister_provided_buffer_ring(IoTestThread::IO_0, buffer_group,
-                                                                   &unregister_error)) {
+            if (UringIoRuntime::io_unregister_provided_buffer_ring(
+                    IoTestThreads::IO_0, buffer_group, &unregister_error)) {
                 registered_ = false;
             }
         }
@@ -175,7 +176,7 @@ private:
             state_ = State::Unregister;
             return again();
         }
-        if (!UringIoRuntime::cancel_io(IoTestThread::IO_0, recv_)) {
+        if (!UringIoRuntime::cancel_io(IoTestThreads::IO_0, recv_)) {
             return complete(recv_.wait.error == 0 ? finish_error_ : recv_.wait.error);
         }
         state_ = State::Cancel;

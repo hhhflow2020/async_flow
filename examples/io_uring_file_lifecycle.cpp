@@ -9,7 +9,7 @@ int main() {
     using namespace io_uring_file_lifecycle_example;
 
     lifecycle_async::init();
-    if (!lifecycle_async::io_uring_backend_available(LifecycleThread::IO_0)) {
+    if (!lifecycle_async::io_uring_backend_available(LifecycleThreads::IO_0)) {
         std::cout << "io_uring backend unavailable\n";
         lifecycle_async::shutdown();
         return 0;

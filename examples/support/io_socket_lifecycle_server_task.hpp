@@ -23,7 +23,7 @@ public:
         }
         server_result_ = server_result;
         client_result_ = client_result;
-        return schedule(SocketThread::IO_0);
+        return schedule(SocketThreads::IO_0);
     }
 
 private:
@@ -47,13 +47,13 @@ private:
 
     af::TaskResult create_listener() {
         state_ = State::FinishListener;
-        return consume_listener_status(af::io_socket(*this, SocketThread::IO_0, AF_INET,
+        return consume_listener_status(af::io_socket(*this, SocketThreads::IO_0, AF_INET,
                                                      lifecycle_stream_socket_type(), 0,
                                                      &listener_fd_, socket_));
     }
 
     af::TaskResult finish_listener() {
-        return consume_listener_status(af::io_socket(*this, SocketThread::IO_0, AF_INET,
+        return consume_listener_status(af::io_socket(*this, SocketThreads::IO_0, AF_INET,
                                                      lifecycle_stream_socket_type(), 0,
                                                      &listener_fd_, socket_));
     }
@@ -72,7 +72,7 @@ private:
         if (!apply_lifecycle_socket_flags(listener_owned_.get(), flag_error)) {
             return finish(flag_error);
         }
-        listener_.reset(SocketThread::IO_0, listener_owned_.get());
+        listener_.reset(SocketThreads::IO_0, listener_owned_.get());
         return configure_listener();
     }
 
@@ -130,7 +130,7 @@ private:
 
         accepted_owned_.reset(accepted_fd_);
         accepted_fd_ = -1;
-        af::TcpStream<SocketThread> accepted_stream(SocketThread::IO_0, accepted_owned_.get());
+        af::TcpStream<SocketThread> accepted_stream(SocketThreads::IO_0, accepted_owned_.get());
         sockaddr_storage peer{};
         socklen_t peer_size = sizeof(peer);
         const af::IoStatus peer_status =

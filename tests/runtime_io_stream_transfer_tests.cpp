@@ -5,7 +5,7 @@ class UringIoRuntimePollFixture : public UringIoRuntimeFixture {};
 
 TEST_F(IoRuntimeStreamFixture, StreamAdapterSendfileSendsFileToSocket) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
@@ -36,7 +36,7 @@ TEST_F(IoRuntimeStreamFixture, StreamAdapterSendfileSendsFileToSocket) {
 
 TEST_F(IoRuntimeStreamFixture, SendfileWaitsForSocketWritableWhenBufferIsFull) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
@@ -65,7 +65,7 @@ TEST_F(IoRuntimeStreamFixture, SendfileWaitsForSocketWritableWhenBufferIsFull) {
 
 TEST_F(UringIoRuntimePollFixture, IoUringPollReadinessResumesSendfileWhenSocketWritable) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_uring_poll_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_uring_poll_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io_uring poll backend unavailable";
     }
 
@@ -101,7 +101,7 @@ TEST_F(UringIoRuntimePollFixture, IoUringPollReadinessResumesSendfileWhenSocketW
 
 TEST_F(UringIoRuntimePollFixture, IoUringPollReadinessCancelPendingSendfileWait) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_uring_poll_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_uring_poll_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io_uring poll backend unavailable";
     }
 
@@ -145,7 +145,7 @@ TEST_F(UringIoRuntimePollFixture, IoUringPollReadinessCancelPendingSendfileWait)
 
 TEST_F(IoRuntimeStreamFixture, SpliceTransfersPipeContentWithNullOffsets) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 

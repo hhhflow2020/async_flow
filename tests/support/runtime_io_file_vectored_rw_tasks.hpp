@@ -6,10 +6,10 @@ public:
         : UringIoTaskBase(token) {}
 
     bool do_it(int fd, std::atomic<int> *completed, std::atomic<int> *bytes_read) {
-        file_.reset(IoTestThread::IO_0, fd);
+        file_.reset(IoTestThreads::IO_0, fd);
         completed_ = completed;
         bytes_read_ = bytes_read;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:

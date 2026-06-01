@@ -7,7 +7,7 @@ int main() {
     using namespace io_socket_lifecycle_example;
 
     socket_async::init();
-    if (!socket_async::io_backend_available(SocketThread::IO_0)) {
+    if (!socket_async::io_backend_available(SocketThreads::IO_0)) {
         std::cout << "socket lifecycle backend unavailable\n";
         socket_async::shutdown();
         return 0;

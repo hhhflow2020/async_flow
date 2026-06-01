@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <chrono>
+#include <type_traits>
 
 #include <benchmark/benchmark.h>
 
@@ -10,8 +11,16 @@
 
 namespace {
 
-enum class BenchIoThread : std::int16_t {
-    IO_0,
+struct BenchIoThreadTag;
+
+inline constexpr auto bench_io_thread_layout =
+    af::thread_layout(af::thread_group<BenchIoThreadTag, 1, af::ThreadKind::Worker, "bench-io">());
+using BenchIoThread = typename std::remove_cv_t<decltype(bench_io_thread_layout)>::Thread;
+
+struct BenchIoThreads {
+    static constexpr BenchIoThread IO_0 =
+        std::remove_cv_t<decltype(bench_io_thread_layout)>::template group<BenchIoThreadTag>()
+            .template at<0>();
 };
 
 #include "detail/io_benchmark_runtime_linux_socket.hpp"
@@ -36,7 +45,7 @@ struct FakeRuntime : FakeRuntimeLinuxSocketOps,
     }
 
     static constexpr std::uint16_t thread_index(BenchIoThread thread) noexcept {
-        return static_cast<std::uint16_t>(thread);
+        return thread.index();
     }
 
     static bool io_uring_backend_available(BenchIoThread) noexcept {

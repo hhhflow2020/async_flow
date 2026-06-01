@@ -1,17 +1,12 @@
 #pragma once
 
-enum class RunningPendingThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Owner,
-    Waker,
-    enum_thread_index_end,
-};
+struct RunningPendingOwnerThreadTag;
+struct RunningPendingWakerThreadTag;
 
 struct RunningPendingRuntimeTraits {
-    using Thread = RunningPendingThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(RunningPendingThread::enum_thread_index_end);
+    static constexpr auto threads =
+        af::thread_layout(af::thread_group<RunningPendingOwnerThreadTag, 1>(),
+                          af::thread_group<RunningPendingWakerThreadTag, 1>());
     static constexpr std::size_t spsc_queue_capacity = 65536;
     static constexpr std::size_t external_queue_capacity = 65536;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
@@ -21,6 +16,14 @@ struct RunningPendingRuntimeTraits {
 
 using RunningPendingRuntime = af::AsyncRuntime<RunningPendingRuntimeTraits>;
 using RunningPendingTaskBase = RunningPendingRuntime::Task;
+using RunningPendingThread = RunningPendingRuntime::Thread;
+
+struct RunningPendingThreads {
+    static constexpr RunningPendingThread Owner =
+        RunningPendingRuntime::thread_group<RunningPendingOwnerThreadTag>().template at<0>();
+    static constexpr RunningPendingThread Waker =
+        RunningPendingRuntime::thread_group<RunningPendingWakerThreadTag>().template at<0>();
+};
 
 class RunningPendingOwnerTask;
 
@@ -57,11 +60,11 @@ public:
         stages_ = stages;
         wake_flag_ = &wake_flags[id_];
         stages_[id_].store(1, std::memory_order_relaxed);
-        return schedule(RunningPendingThread::Owner);
+        return schedule(RunningPendingThreads::Owner);
     }
 
     bool request_resume_from_waker() noexcept {
-        return schedule(RunningPendingThread::Owner);
+        return schedule(RunningPendingThreads::Owner);
     }
 
 private:
@@ -132,7 +135,7 @@ inline bool RunningPendingWakerTask::do_it(RunningPendingOwnerTask *owner,
     wake_flag_ = wake_flag;
     wake_attempts_ = wake_attempts;
     failures_ = failures;
-    return schedule(RunningPendingThread::Waker);
+    return schedule(RunningPendingThreads::Waker);
 }
 
 inline af::TaskResult RunningPendingWakerTask::run() {

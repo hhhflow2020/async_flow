@@ -7,13 +7,13 @@ public:
 
     bool do_it(int fd, int target_accepts, std::atomic<int> *armed, std::atomic<int> *completed,
                std::atomic<int> *accepted_count, std::atomic<int> *error) {
-        listener_.reset(IoTestThread::IO_0, fd);
+        listener_.reset(IoTestThreads::IO_0, fd);
         target_accepts_ = target_accepts;
         armed_ = armed;
         completed_ = completed;
         accepted_count_ = accepted_count;
         error_ = error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -62,7 +62,7 @@ private:
             completed_->fetch_add(1, std::memory_order_release);
             return done();
         }
-        if (!UringIoRuntime::cancel_io(IoTestThread::IO_0, accept_)) {
+        if (!UringIoRuntime::cancel_io(IoTestThreads::IO_0, accept_)) {
             error_->store(accept_.wait.error == 0 ? EIO : accept_.wait.error,
                           std::memory_order_release);
             completed_->fetch_add(1, std::memory_order_release);

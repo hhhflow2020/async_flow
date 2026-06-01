@@ -4,7 +4,7 @@ class UringIoRuntimeSocketDatagramFixture : public UringIoRuntimeFixture {};
 
 TEST_F(UringIoRuntimeSocketDatagramFixture, IoUringThreadReceivesUdpDatagramOrFallsBackToEpoll) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io backend unavailable";
     }
 
@@ -30,7 +30,7 @@ TEST_F(UringIoRuntimeSocketDatagramFixture, IoUringThreadReceivesUdpDatagramOrFa
 TEST_F(UringIoRuntimeSocketDatagramFixture,
        IoUringThreadReceivesVectoredUdpDatagramOrFallsBackToEpoll) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io backend unavailable";
     }
 
@@ -55,7 +55,7 @@ TEST_F(UringIoRuntimeSocketDatagramFixture,
 
 TEST_F(UringIoRuntimeSocketDatagramFixture, IoUringThreadSendsUdpDatagramOrFallsBackToEpoll) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io backend unavailable";
     }
 
@@ -82,7 +82,7 @@ TEST_F(UringIoRuntimeSocketDatagramFixture, IoUringThreadSendsUdpDatagramOrFalls
 TEST_F(UringIoRuntimeSocketDatagramFixture,
        IoUringThreadSendsVectoredUdpDatagramOrFallsBackToEpoll) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io backend unavailable";
     }
 
@@ -109,7 +109,7 @@ TEST_F(UringIoRuntimeSocketDatagramFixture,
 TEST_F(UringIoRuntimeSocketDatagramFixture,
        IoUringThreadSendsVectoredUdpDatagramWithSendmsgZcOrFallback) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io backend unavailable";
     }
 

@@ -9,7 +9,7 @@ int main() {
     using namespace io_uring_datagram_example;
 
     datagram_async::init();
-    if (!datagram_async::io_backend_available(DatagramThread::IO_0)) {
+    if (!datagram_async::io_backend_available(DatagramThreads::IO_0)) {
         std::cout << "IO backend unavailable\n";
         datagram_async::shutdown();
         return 0;

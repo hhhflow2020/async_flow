@@ -42,10 +42,10 @@ TEST_F(ParallelRuntimeFixture, OrderedBatchFailureDoesNotAdvanceFailedShard) {
     ASSERT_TRUE(wait_until_at_least(completed, 1));
 
     EXPECT_EQ(failures.load(std::memory_order_acquire), 1U);
-    EXPECT_EQ(Runtime::ordered_last_applied_batch_id(TestThread::Logic_0), 1U);
-    EXPECT_EQ(Runtime::ordered_last_applied_batch_id(TestThread::Logic_1), 0U);
-    EXPECT_EQ(Runtime::ordered_last_applied_batch_id(TestThread::Logic_2), 1U);
-    EXPECT_EQ(Runtime::ordered_last_applied_batch_id(TestThread::Logic_3), 1U);
+    EXPECT_EQ(Runtime::ordered_last_applied_batch_id(TestThreads::Logic_0), 1U);
+    EXPECT_EQ(Runtime::ordered_last_applied_batch_id(TestThreads::Logic_1), 0U);
+    EXPECT_EQ(Runtime::ordered_last_applied_batch_id(TestThreads::Logic_2), 1U);
+    EXPECT_EQ(Runtime::ordered_last_applied_batch_id(TestThreads::Logic_3), 1U);
 }
 
 TEST_F(ParallelRuntimeFixture, RetryableOrderedBatchSkipsAlreadyAppliedShards) {

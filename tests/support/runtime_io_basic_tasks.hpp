@@ -7,7 +7,7 @@ public:
     bool do_it(std::atomic<int> *completed, std::atomic<std::uint16_t> *ran_on) {
         completed_ = completed;
         ran_on_ = ran_on;
-        return schedule(IoTestThread::Logic_0);
+        return schedule(IoTestThreads::Logic_0);
     }
 
 private:
@@ -20,7 +20,7 @@ private:
         switch (state_) {
         case State::Logic:
             state_ = State::Io;
-            return pending_on(IoTestThread::IO_0);
+            return pending_on(IoTestThreads::IO_0);
 
         case State::Io:
             ran_on_->store(IoRuntime::current_thread_index(), std::memory_order_release);
@@ -42,13 +42,13 @@ public:
     bool do_it(std::atomic<int> *completed, std::atomic<int> *error) {
         completed_ = completed;
         error_ = error;
-        return schedule(IoTestThread::Logic_0);
+        return schedule(IoTestThreads::Logic_0);
     }
 
 private:
     af::TaskResult run() override {
         af::IoResult result{};
-        const bool ok = wait_io(IoTestThread::Logic_0, 0, af::io_readable, &result);
+        const bool ok = wait_io(IoTestThreads::Logic_0, 0, af::io_readable, &result);
         if (ok) {
             return failed();
         }

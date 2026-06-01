@@ -7,12 +7,12 @@ public:
     bool do_it(int fd, std::atomic<int> *armed) {
         fd_ = fd;
         armed_ = armed;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
     af::TaskResult run() override {
-        if (!wait_io(IoTestThread::IO_0, fd_, af::io_readable, &result_)) {
+        if (!wait_io(IoTestThreads::IO_0, fd_, af::io_readable, &result_)) {
             return failed();
         }
         armed_->fetch_add(1, std::memory_order_release);
@@ -30,7 +30,7 @@ public:
 
     bool do_it(std::atomic<int> *completed) {
         completed_ = completed;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:

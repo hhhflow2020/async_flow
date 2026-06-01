@@ -1,19 +1,10 @@
 #pragma once
 
-enum class ParallelResumeThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    Logic_1,
-    Logic_2,
-    Logic_3,
-    enum_thread_index_end,
-};
+struct ParallelResumeThreadTag;
 
 struct ParallelResumeRuntimeTraits {
-    using Thread = ParallelResumeThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(ParallelResumeThread::enum_thread_index_end);
+    static constexpr auto threads =
+        af::thread_layout(af::thread_group<ParallelResumeThreadTag, 4>());
     static constexpr std::size_t spsc_queue_capacity = 65536;
     static constexpr std::size_t external_queue_capacity = 65536;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
@@ -23,6 +14,12 @@ struct ParallelResumeRuntimeTraits {
 
 using ParallelResumeRuntime = af::AsyncRuntime<ParallelResumeRuntimeTraits>;
 using ParallelResumeTaskBase = ParallelResumeRuntime::Task;
+using ParallelResumeThread = ParallelResumeRuntime::Thread;
+
+struct ParallelResumeThreads {
+    static constexpr ParallelResumeThread Logic_0 =
+        ParallelResumeRuntime::thread_group<ParallelResumeThreadTag>().template at<0>();
+};
 
 class ParallelResumeTask final : public ParallelResumeTaskBase {
 public:
@@ -46,7 +43,7 @@ public:
         for (std::uint64_t value = 0; value < 1024; ++value) {
             ops_.shards[value & 3U].push_back(value);
         }
-        return schedule(ParallelResumeThread::Logic_0);
+        return schedule(ParallelResumeThreads::Logic_0);
     }
 
 private:
@@ -61,7 +58,7 @@ private:
             state_ = State::Finish;
             task_stage_[id_].store(2, std::memory_order_relaxed);
             ParallelResumeRuntime::parallel_shards(
-                ParallelResumeThread::Logic_0, ops_, af::ParallelMode::AllShards, this,
+                ParallelResumeThreads::Logic_0, ops_, af::ParallelMode::AllShards, this,
                 [this](std::uint16_t shard, std::vector<std::uint64_t> &shard_ops) {
                     task_shards_[id_ * 4 + shard].fetch_add(1, std::memory_order_relaxed);
                     shard_runs_->fetch_add(1, std::memory_order_relaxed);

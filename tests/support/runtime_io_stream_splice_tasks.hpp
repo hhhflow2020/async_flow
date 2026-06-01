@@ -11,7 +11,7 @@ public:
         total_size_ = total_size;
         completed_ = completed;
         bytes_spliced_ = bytes_spliced;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -25,7 +25,7 @@ private:
             return done();
         }
         const af::IoStatus status =
-            af::io_splice_some(*this, IoTestThread::IO_0, input_fd_, nullptr, output_fd_, nullptr,
+            af::io_splice_some(*this, IoTestThreads::IO_0, input_fd_, nullptr, output_fd_, nullptr,
                                total_size_ - spliced_, SPLICE_F_NONBLOCK, splice_);
         if (status.pending()) {
             return pending();

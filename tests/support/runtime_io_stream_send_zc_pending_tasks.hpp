@@ -6,11 +6,11 @@ public:
 
     bool do_it(int socket_fd, std::atomic<int> *pending_seen, std::atomic<int> *completed,
                std::atomic<std::size_t> *bytes_sent) {
-        stream_.reset(IoTestThread::IO_0, socket_fd);
+        stream_.reset(IoTestThreads::IO_0, socket_fd);
         pending_seen_ = pending_seen;
         completed_ = completed;
         bytes_sent_ = bytes_sent;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:

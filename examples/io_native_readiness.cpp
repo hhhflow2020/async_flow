@@ -14,28 +14,23 @@
 
 namespace {
 
-enum class NativeIoThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    IO_0,
-    enum_thread_index_end,
-};
+struct NativeIoThreadTag;
 
 struct NativeIoRuntimeTraits {
-    using Thread = NativeIoThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(NativeIoThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<NativeIoThreadTag, 1, af::ThreadKind::Io, "native-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
-
-    static constexpr af::ThreadKind thread_kind(NativeIoThread thread) noexcept {
-        return thread == NativeIoThread::IO_0 ? af::ThreadKind::Io : af::ThreadKind::Worker;
-    }
 };
 
 using NativeIoRuntime = af::AsyncRuntime<NativeIoRuntimeTraits>;
 using NativeIoTask = NativeIoRuntime::Task;
+using NativeIoThread = NativeIoRuntime::Thread;
+
+struct NativeIoThreads {
+    static constexpr NativeIoThread IO_0 =
+        NativeIoRuntime::thread_group<NativeIoThreadTag>().template at<0>();
+};
 
 bool wait_until(std::atomic<int> &value, int expected) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -83,7 +78,7 @@ public:
     bool do_it(int fd, std::atomic<int> *armed) {
         fd_ = fd;
         armed_ = armed;
-        return schedule(NativeIoThread::IO_0);
+        return schedule(NativeIoThreads::IO_0);
     }
 
 private:
@@ -106,7 +101,7 @@ private:
     af::TaskResult arm_read() {
         state_ = State::Consume;
         const af::IoStatus status =
-            af::io_read_some(*this, NativeIoThread::IO_0, fd_, &value_, sizeof(value_), read_);
+            af::io_read_some(*this, NativeIoThreads::IO_0, fd_, &value_, sizeof(value_), read_);
         if (!status.pending()) {
             return failed();
         }
@@ -116,7 +111,7 @@ private:
 
     af::TaskResult consume() {
         const af::IoStatus status =
-            af::io_read_some(*this, NativeIoThread::IO_0, fd_, &value_, sizeof(value_), read_);
+            af::io_read_some(*this, NativeIoThreads::IO_0, fd_, &value_, sizeof(value_), read_);
         if (!status.ready() || status.bytes != sizeof(value_)) {
             return failed();
         }
@@ -137,7 +132,7 @@ private:
 int main() {
 #if !defined(_WIN32)
     NativeIoRuntime::init();
-    if (!NativeIoRuntime::io_backend_available(NativeIoThread::IO_0)) {
+    if (!NativeIoRuntime::io_backend_available(NativeIoThreads::IO_0)) {
         std::cout << "native IO backend unavailable\n";
         NativeIoRuntime::shutdown();
         return 0;

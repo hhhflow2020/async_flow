@@ -39,11 +39,11 @@ public:
         wake_attempts_ = wake_attempts;
         failures_ = failures;
         wake_flag_ = &wake_flags[id_];
-        return schedule(RunningPendingThread::Owner);
+        return schedule(RunningPendingThreads::Owner);
     }
 
     bool request_resume_from_waker() noexcept {
-        return schedule(RunningPendingThread::Owner);
+        return schedule(RunningPendingThreads::Owner);
     }
 
 private:
@@ -121,7 +121,7 @@ inline bool RunningWakeTerminalWakerTask::do_it(RunningWakeTerminalOwnerTask *ow
     wake_flag_ = wake_flag;
     wake_attempts_ = wake_attempts;
     failures_ = failures;
-    return schedule(RunningPendingThread::Waker);
+    return schedule(RunningPendingThreads::Waker);
 }
 
 inline af::TaskResult RunningWakeTerminalWakerTask::run() {

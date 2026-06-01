@@ -15,10 +15,10 @@ public:
     explicit TcpServerTask(TcpTask::FactoryToken token) : TcpTask(token) {}
 
     bool do_it(int fd, bool *ok, char *request_seen) {
-        listener_.reset(TcpThread::IO_0, fd);
+        listener_.reset(TcpThreads::IO_0, fd);
         ok_ = ok;
         request_seen_ = request_seen;
-        return schedule(TcpThread::IO_0);
+        return schedule(TcpThreads::IO_0);
     }
 
 private:
@@ -53,7 +53,7 @@ private:
         }
 
         accepted_.reset(fd);
-        stream_.reset(TcpThread::IO_0, accepted_.get());
+        stream_.reset(TcpThreads::IO_0, accepted_.get());
         state_ = State::ReceiveRequest;
         return again();
     }

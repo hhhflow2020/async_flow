@@ -22,7 +22,7 @@ public:
         }
         server_ = server;
         result_ = result;
-        return schedule(SocketThread::IO_0);
+        return schedule(SocketThreads::IO_0);
     }
 
 private:
@@ -47,12 +47,12 @@ private:
     af::TaskResult create_socket() {
         state_ = State::FinishSocket;
         return consume_socket_status(af::io_socket(
-            *this, SocketThread::IO_0, AF_INET, lifecycle_stream_socket_type(), 0, &fd_, socket_));
+            *this, SocketThreads::IO_0, AF_INET, lifecycle_stream_socket_type(), 0, &fd_, socket_));
     }
 
     af::TaskResult finish_socket() {
         return consume_socket_status(af::io_socket(
-            *this, SocketThread::IO_0, AF_INET, lifecycle_stream_socket_type(), 0, &fd_, socket_));
+            *this, SocketThreads::IO_0, AF_INET, lifecycle_stream_socket_type(), 0, &fd_, socket_));
     }
 
     af::TaskResult consume_socket_status(af::IoStatus status) {
@@ -69,7 +69,7 @@ private:
         if (!apply_lifecycle_socket_flags(owned_.get(), flag_error)) {
             return finish(flag_error);
         }
-        stream_.reset(SocketThread::IO_0, owned_.get());
+        stream_.reset(SocketThreads::IO_0, owned_.get());
         state_ = State::Connect;
         return again();
     }

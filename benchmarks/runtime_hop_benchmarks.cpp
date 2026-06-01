@@ -11,10 +11,7 @@ template <std::size_t TaskPoolRemoteReleaseBatchSize, bool TaskPoolCacheSlotInde
           std::size_t TaskPoolChunkSize = 256, std::size_t TaskPoolLocalCacheSetSize = 1,
           std::size_t TaskPoolDirectReleaseSetSize = 4, std::size_t TaskPoolLocalCacheCapacity = 64>
 struct BatchRuntimeTraits {
-    using Thread = af_bench::runtime::BenchThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(Thread::enum_thread_index_end);
+    static constexpr auto threads = af_bench::runtime::BenchRuntimeTraits::threads;
     static constexpr std::size_t spsc_queue_capacity = 65536;
     static constexpr std::size_t external_queue_capacity = 65536;
     static constexpr std::size_t task_pool_remote_release_batch_size =
@@ -25,10 +22,6 @@ struct BatchRuntimeTraits {
     static constexpr std::size_t task_pool_direct_release_set_size = TaskPoolDirectReleaseSetSize;
     static constexpr std::size_t task_pool_local_cache_capacity = TaskPoolLocalCacheCapacity;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
-
-    static constexpr af::ThreadKind thread_kind(Thread thread) noexcept {
-        return thread == Thread::IO_0 ? af::ThreadKind::Epoll : af::ThreadKind::Worker;
-    }
 };
 
 template <typename RuntimeT> class BatchHopTask final : public RuntimeT::Task {
@@ -41,14 +34,15 @@ public:
     bool do_it(int hops, std::atomic<int> *remaining) {
         hops_ = hops;
         remaining_ = remaining;
-        return this->schedule(Thread::Logic_0);
+        return this->schedule(af_bench::runtime::BenchThreads::Logic_0);
     }
 
 private:
     af::TaskResult run() override {
         if (hops_-- > 0) {
-            const auto next =
-                RuntimeT::current_thread() == Thread::Logic_0 ? Thread::Logic_1 : Thread::Logic_0;
+            const auto next = RuntimeT::current_thread() == af_bench::runtime::BenchThreads::Logic_0
+                                  ? af_bench::runtime::BenchThreads::Logic_1
+                                  : af_bench::runtime::BenchThreads::Logic_0;
             return this->pending_on(next);
         }
 

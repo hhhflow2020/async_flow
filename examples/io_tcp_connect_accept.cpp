@@ -9,7 +9,7 @@ int main() {
     using namespace io_tcp_connect_accept_example;
 
     tcp_async::init();
-    if (!tcp_async::io_backend_available(TcpThread::IO_0)) {
+    if (!tcp_async::io_backend_available(TcpThreads::IO_0)) {
         std::cout << "IO backend unavailable\n";
         tcp_async::shutdown();
         return 0;

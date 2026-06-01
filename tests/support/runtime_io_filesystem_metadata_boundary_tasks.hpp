@@ -7,7 +7,7 @@ public:
     bool do_it(std::atomic<int> *completed, std::atomic<int> *error) {
         completed_ = completed;
         error_ = error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -27,22 +27,22 @@ private:
         struct statx stat{};
 
         const af::IoStatus stat_no_uring_status =
-            af::io_statx(*this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-boundary", 0,
+            af::io_statx(*this, IoTestThreads::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-boundary", 0,
                          STATX_SIZE, &stat, stat_no_uring);
         const af::IoStatus fallocate_no_uring_status =
-            af::io_fallocate(*this, IoTestThread::IO_0, event.get(), FALLOC_FL_KEEP_SIZE, 0, 4096,
+            af::io_fallocate(*this, IoTestThreads::IO_0, event.get(), FALLOC_FL_KEEP_SIZE, 0, 4096,
                              fallocate_no_uring);
         const af::IoStatus ftruncate_no_uring_status =
-            af::io_ftruncate(*this, IoTestThread::IO_0, event.get(), 0, ftruncate_no_uring);
+            af::io_ftruncate(*this, IoTestThreads::IO_0, event.get(), 0, ftruncate_no_uring);
         const af::IoStatus stat_null_path_status = af::io_statx(
-            *this, IoTestThread::IO_0, AT_FDCWD, nullptr, 0, STATX_SIZE, &stat, stat_null_path);
+            *this, IoTestThreads::IO_0, AT_FDCWD, nullptr, 0, STATX_SIZE, &stat, stat_null_path);
         const af::IoStatus stat_null_output_status =
-            af::io_statx(*this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-boundary", 0,
+            af::io_statx(*this, IoTestThreads::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-boundary", 0,
                          STATX_SIZE, nullptr, stat_null_output);
         const af::IoStatus fallocate_bad_fd_status = af::io_fallocate(
-            *this, IoTestThread::IO_0, -1, FALLOC_FL_KEEP_SIZE, 0, 4096, fallocate_bad_fd);
+            *this, IoTestThreads::IO_0, -1, FALLOC_FL_KEEP_SIZE, 0, 4096, fallocate_bad_fd);
         const af::IoStatus ftruncate_bad_fd_status =
-            af::io_ftruncate(*this, IoTestThread::IO_0, -1, 0, ftruncate_bad_fd);
+            af::io_ftruncate(*this, IoTestThreads::IO_0, -1, 0, ftruncate_bad_fd);
 
         if (!stat_no_uring_status.failed() || stat_no_uring_status.error != ENOSYS ||
             !fallocate_no_uring_status.failed() || fallocate_no_uring_status.error != ENOSYS ||

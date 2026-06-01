@@ -16,7 +16,7 @@ public:
 
     bool do_it(OrderedStartBatch batch) {
         batch_ = batch;
-        return schedule(TestThread::Logic_0);
+        return schedule(TestThreads::Logic_0);
     }
 
 private:
@@ -50,7 +50,7 @@ public:
         }
 
         batch_ = batch;
-        return schedule(TestThread::Logic_0);
+        return schedule(TestThreads::Logic_0);
     }
 
 private:

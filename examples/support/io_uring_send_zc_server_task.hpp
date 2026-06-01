@@ -18,9 +18,9 @@ public:
         if (listener_fd < 0 || result == nullptr) {
             return false;
         }
-        listener_.reset(SendZcThread::IO_0, listener_fd);
+        listener_.reset(SendZcThreads::IO_0, listener_fd);
         result_ = result;
-        return schedule(SendZcThread::IO_0);
+        return schedule(SendZcThreads::IO_0);
     }
 
 private:
@@ -51,7 +51,7 @@ private:
 
         accepted_.reset(accepted_fd_);
         accepted_fd_ = -1;
-        stream_.reset(SendZcThread::IO_0, accepted_.get());
+        stream_.reset(SendZcThreads::IO_0, accepted_.get());
         state_ = State::SendPayload;
         return again();
     }

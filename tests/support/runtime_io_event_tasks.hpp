@@ -6,11 +6,11 @@ public:
 
     bool do_it(int fd, std::atomic<int> *armed, std::atomic<int> *completed,
                std::atomic<std::uint64_t> *value) {
-        event_.reset(IoTestThread::IO_0, fd);
+        event_.reset(IoTestThreads::IO_0, fd);
         armed_ = armed;
         completed_ = completed;
         value_ = value;
-        return this->schedule(IoTestThread::IO_0);
+        return this->schedule(IoTestThreads::IO_0);
     }
 
 private:

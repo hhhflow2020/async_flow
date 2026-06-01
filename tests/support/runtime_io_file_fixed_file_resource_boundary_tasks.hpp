@@ -12,7 +12,7 @@ public:
         unavailable_error_ = unavailable_error;
         invalid_error_ = invalid_error;
         null_error_ = null_error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -20,25 +20,25 @@ private:
         const int fd = -1;
         int register_error = 0;
         const bool registered =
-            IoRuntime::io_register_files(IoTestThread::IO_0, &fd, 1, &register_error);
+            IoRuntime::io_register_files(IoTestThreads::IO_0, &fd, 1, &register_error);
         if (registered || register_error != ENOSYS) {
             return failed();
         }
         int update_error = 0;
         const bool updated =
-            IoRuntime::io_update_registered_files(IoTestThread::IO_0, 0, &fd, 1, &update_error);
+            IoRuntime::io_update_registered_files(IoTestThreads::IO_0, 0, &fd, 1, &update_error);
         if (updated || update_error != ENOSYS) {
             return failed();
         }
         int null_update_error = 0;
         const bool null_update = IoRuntime::io_update_registered_files(
-            IoTestThread::IO_0, 0, nullptr, 1, &null_update_error);
+            IoTestThreads::IO_0, 0, nullptr, 1, &null_update_error);
         if (null_update || null_update_error != EINVAL) {
             return failed();
         }
 
-        af::IoFixedFile<IoTestThread> missing(IoTestThread::IO_0, 0);
-        af::IoFixedFile<IoTestThread> invalid(IoTestThread::IO_0, -1);
+        af::IoFixedFile<IoTestThread> missing(IoTestThreads::IO_0, 0);
+        af::IoFixedFile<IoTestThread> invalid(IoTestThreads::IO_0, -1);
         af::IoOpState unavailable{};
         af::IoOpState zero{};
         af::IoOpState bad{};
@@ -66,16 +66,16 @@ private:
 
         af::IoFixedFile<IoTestThread> direct_file{};
         const af::IoStatus direct_null_path_status =
-            af::io_openat_direct(*this, IoTestThread::IO_0, AT_FDCWD, nullptr, O_RDONLY | O_CLOEXEC,
-                                 0, 0, &direct_file, direct_null_path);
+            af::io_openat_direct(*this, IoTestThreads::IO_0, AT_FDCWD, nullptr,
+                                 O_RDONLY | O_CLOEXEC, 0, 0, &direct_file, direct_null_path);
         const af::IoStatus direct_null_output_status = af::io_openat_direct(
-            *this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-direct-boundary",
+            *this, IoTestThreads::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-direct-boundary",
             O_RDONLY | O_CLOEXEC, 0, 0, nullptr, direct_null_output);
         const af::IoStatus direct_bad_index_status = af::io_openat_direct(
-            *this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-direct-boundary",
+            *this, IoTestThreads::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-direct-boundary",
             O_RDONLY | O_CLOEXEC, 0, -1, &direct_file, direct_bad_index);
         const af::IoStatus direct_unavailable_status = af::io_openat_direct(
-            *this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-direct-boundary",
+            *this, IoTestThreads::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-direct-boundary",
             O_RDONLY | O_CLOEXEC, 0, 0, &direct_file, direct_unavailable);
 
         if (!unavailable_read.failed() || unavailable_read.error != ENOSYS || !zero_read.ready() ||

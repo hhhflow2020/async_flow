@@ -19,10 +19,10 @@ public:
         if (listener_fd < 0 || file_fd < 0 || result == nullptr) {
             return false;
         }
-        listener_.reset(SendfileThread::IO_0, listener_fd);
+        listener_.reset(SendfileThreads::IO_0, listener_fd);
         file_fd_ = file_fd;
         result_ = result;
-        return schedule(SendfileThread::IO_0);
+        return schedule(SendfileThreads::IO_0);
     }
 
 private:
@@ -53,7 +53,7 @@ private:
 
         accepted_.reset(accepted_fd_);
         accepted_fd_ = -1;
-        stream_.reset(SendfileThread::IO_0, accepted_.get());
+        stream_.reset(SendfileThreads::IO_0, accepted_.get());
         state_ = State::SendFile;
         return again();
     }

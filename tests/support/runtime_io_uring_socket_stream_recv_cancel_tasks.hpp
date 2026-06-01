@@ -8,13 +8,13 @@ public:
     bool do_it(int fd, std::atomic<int> *wait_kind, std::atomic<int> *cancel_result,
                std::atomic<int> *immediate_pending, std::atomic<int> *completed,
                std::atomic<int> *error) {
-        stream_.reset(IoTestThread::IO_0, fd);
+        stream_.reset(IoTestThreads::IO_0, fd);
         wait_kind_ = wait_kind;
         cancel_result_ = cancel_result;
         immediate_pending_ = immediate_pending;
         completed_ = completed;
         error_ = error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -44,7 +44,7 @@ private:
 
         wait_kind_->store(static_cast<int>(recv_.wait_kind), std::memory_order_release);
         state_ = State::Cancel;
-        if (!schedule(IoTestThread::IO_0)) {
+        if (!schedule(IoTestThreads::IO_0)) {
             return complete(EIO);
         }
         return pending();
@@ -55,7 +55,7 @@ private:
             return complete(ENOSYS);
         }
 
-        const bool cancelled = UringIoRuntime::cancel_io(IoTestThread::IO_0, recv_);
+        const bool cancelled = UringIoRuntime::cancel_io(IoTestThreads::IO_0, recv_);
         cancel_result_->store(cancelled ? 1 : 0, std::memory_order_release);
         if (!cancelled) {
             return complete(recv_.wait.error == 0 ? EIO : recv_.wait.error);

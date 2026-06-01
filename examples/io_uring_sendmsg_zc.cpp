@@ -14,29 +14,25 @@
 
 namespace {
 
-enum class SendmsgZcThread : std::int16_t {
-    enum_thread_index_start = -1,
-    IO_0,
-    enum_thread_index_end,
-};
+struct SendmsgZcIoThreadTag;
 
 struct SendmsgZcRuntimeTraits {
-    using Thread = SendmsgZcThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(SendmsgZcThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<SendmsgZcIoThreadTag, 1, af::ThreadKind::IoUring, "sendmsg-zc">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
-
-    static constexpr af::ThreadKind thread_kind(SendmsgZcThread thread) noexcept {
-        return thread == SendmsgZcThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
-    }
 };
 
 using sendmsg_zc_async = af::AsyncRuntime<SendmsgZcRuntimeTraits>;
 using SendmsgZcTaskBase = sendmsg_zc_async::Task;
+using SendmsgZcThread = sendmsg_zc_async::Thread;
+
+struct SendmsgZcThreads {
+    static constexpr SendmsgZcThread IO_0 =
+        sendmsg_zc_async::thread_group<SendmsgZcIoThreadTag>().template at<0>();
+};
 
 #if defined(__linux__)
 class SendmsgZcTask final : public SendmsgZcTaskBase {
@@ -45,13 +41,13 @@ public:
 
     bool do_it(int socket_fd, const char *first, std::size_t first_size, const char *second,
                std::size_t second_size, std::size_t *bytes_sent) {
-        stream_.reset(SendmsgZcThread::IO_0, socket_fd);
+        stream_.reset(SendmsgZcThreads::IO_0, socket_fd);
         first_ = first;
         first_size_ = first_size;
         second_ = second;
         second_size_ = second_size;
         bytes_sent_ = bytes_sent;
-        return schedule(SendmsgZcThread::IO_0);
+        return schedule(SendmsgZcThreads::IO_0);
     }
 
 private:
@@ -141,7 +137,7 @@ int main() {
     constexpr std::size_t payload_size = first_size + second_size;
 
     sendmsg_zc_async::init();
-    const bool has_uring = sendmsg_zc_async::io_uring_backend_available(SendmsgZcThread::IO_0);
+    const bool has_uring = sendmsg_zc_async::io_uring_backend_available(SendmsgZcThreads::IO_0);
     std::size_t bytes_sent{0};
     const bool started = sendmsg_zc_async::start_task<SendmsgZcTask>(
         sender.get(), first, first_size, second, second_size, &bytes_sent);

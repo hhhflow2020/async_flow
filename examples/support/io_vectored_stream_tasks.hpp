@@ -13,10 +13,10 @@ public:
     explicit ServerTask(VectoredTask::FactoryToken token) : VectoredTask(token) {}
 
     bool do_it(int fd, bool *ok, int *request_seen) {
-        stream_.reset(VectoredThread::IO_0, fd);
+        stream_.reset(VectoredThreads::IO_0, fd);
         ok_ = ok;
         request_seen_ = request_seen;
-        return schedule(VectoredThread::IO_0);
+        return schedule(VectoredThreads::IO_0);
     }
 
 private:
@@ -86,10 +86,10 @@ public:
     explicit ClientTask(VectoredTask::FactoryToken token) : VectoredTask(token) {}
 
     bool do_it(int fd, bool *ok, int *response_seen) {
-        stream_.reset(VectoredThread::IO_0, fd);
+        stream_.reset(VectoredThreads::IO_0, fd);
         ok_ = ok;
         response_seen_ = response_seen;
-        return schedule(VectoredThread::IO_0);
+        return schedule(VectoredThreads::IO_0);
     }
 
 private:

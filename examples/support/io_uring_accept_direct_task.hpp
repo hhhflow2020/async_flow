@@ -17,11 +17,11 @@ public:
 
     bool do_it(int listener_fd, std::atomic<int> *armed, std::atomic<int> *error,
                int *packed_read) {
-        listener_.reset(DirectAcceptThread::IO_0, listener_fd);
+        listener_.reset(DirectAcceptThreads::IO_0, listener_fd);
         armed_ = armed;
         error_ = error;
         packed_read_ = packed_read;
-        return schedule(DirectAcceptThread::IO_0);
+        return schedule(DirectAcceptThreads::IO_0);
     }
 
 private:
@@ -56,7 +56,8 @@ private:
     af::TaskResult register_sparse_slot() {
         const int sparse = -1;
         int error = 0;
-        if (!direct_accept_async::io_register_files(DirectAcceptThread::IO_0, &sparse, 1, &error)) {
+        if (!direct_accept_async::io_register_files(DirectAcceptThreads::IO_0, &sparse, 1,
+                                                    &error)) {
             return complete(error == 0 ? EIO : error);
         }
         registered_ = true;
@@ -116,7 +117,7 @@ private:
     af::TaskResult complete(int error) {
         if (registered_) {
             int unregister_error = 0;
-            if (!direct_accept_async::io_unregister_files(DirectAcceptThread::IO_0,
+            if (!direct_accept_async::io_unregister_files(DirectAcceptThreads::IO_0,
                                                           &unregister_error) &&
                 error == 0) {
                 error = unregister_error == 0 ? EIO : unregister_error;

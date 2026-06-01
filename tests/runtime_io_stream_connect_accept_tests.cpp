@@ -4,7 +4,7 @@ class IoRuntimeStreamFixture : public IoRuntimeFixture {};
 
 TEST_F(IoRuntimeStreamFixture, EpollIoThreadAcceptsTcpConnectionFromHelper) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
@@ -33,7 +33,7 @@ TEST_F(IoRuntimeStreamFixture, EpollIoThreadAcceptsTcpConnectionFromHelper) {
 
 TEST_F(IoRuntimeStreamFixture, AcceptMultishotReportsInvalidAndUnavailableBackend) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
@@ -63,7 +63,7 @@ TEST_F(IoRuntimeStreamFixture, AcceptMultishotReportsInvalidAndUnavailableBacken
 
 TEST_F(IoRuntimeStreamFixture, RecvMultishotReportsInvalidAndUnavailableBackend) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
@@ -91,7 +91,7 @@ TEST_F(IoRuntimeStreamFixture, RecvMultishotReportsInvalidAndUnavailableBackend)
 
 TEST_F(IoRuntimeStreamFixture, EpollIoThreadConnectsTcpStreamFromHelper) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 

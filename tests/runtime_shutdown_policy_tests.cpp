@@ -83,9 +83,9 @@ TEST(RuntimeShutdownTests, WaitForTasksPolicyAllowsRuntimeThreadRescheduleWhileS
     EXPECT_TRUE(shutdown_done.load(std::memory_order_acquire));
     EXPECT_EQ(completed.load(std::memory_order_acquire), 1);
     EXPECT_EQ(seen[0].load(std::memory_order_acquire),
-              WaitShutdownRuntime::thread_index(WaitShutdownThread::Logic_0));
+              WaitShutdownRuntime::thread_index(WaitShutdownThreads::Logic_0));
     EXPECT_EQ(seen[1].load(std::memory_order_acquire),
-              WaitShutdownRuntime::thread_index(WaitShutdownThread::DB_0));
+              WaitShutdownRuntime::thread_index(WaitShutdownThreads::DB_0));
     EXPECT_EQ(WaitShutdownRuntime::unfinished_task_count(), 0U);
 }
 

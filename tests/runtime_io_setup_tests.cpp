@@ -25,8 +25,8 @@ TEST(IoUringSetupConfig, PopulatesRequestedSetupParams) {
 }
 
 TEST_F(UringIoRuntimeFixture, IoUringBackendAvailabilityReportsSetupError) {
-    const bool available = UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0);
-    const int error = UringIoRuntime::io_uring_backend_error(IoTestThread::IO_0);
+    const bool available = UringIoRuntime::io_uring_backend_available(IoTestThreads::IO_0);
+    const int error = UringIoRuntime::io_uring_backend_error(IoTestThreads::IO_0);
 #if defined(__linux__)
     if (available) {
         EXPECT_EQ(error, 0);

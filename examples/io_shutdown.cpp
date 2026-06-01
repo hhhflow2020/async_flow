@@ -9,38 +9,34 @@
 #endif
 
 #if defined(__linux__)
-enum class ShutdownThread : std::int16_t {
-    enum_thread_index_start = -1,
-    IO_0,
-    enum_thread_index_end,
-};
+struct ShutdownIoThreadTag;
 
 struct ShutdownRuntimeTraits {
-    using Thread = ShutdownThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(ShutdownThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<ShutdownIoThreadTag, 1, af::ThreadKind::IoUring, "shutdown-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
-
-    static constexpr af::ThreadKind thread_kind(ShutdownThread thread) noexcept {
-        return thread == ShutdownThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
-    }
 };
 
 using shutdown_async = af::AsyncRuntime<ShutdownRuntimeTraits>;
 using ShutdownTaskBase = shutdown_async::Task;
+using ShutdownThread = shutdown_async::Thread;
+
+struct ShutdownThreads {
+    static constexpr ShutdownThread IO_0 =
+        shutdown_async::thread_group<ShutdownIoThreadTag>().template at<0>();
+};
 
 class ShutdownWriteTask final : public ShutdownTaskBase {
 public:
     explicit ShutdownWriteTask(ShutdownTaskBase::FactoryToken token) : ShutdownTaskBase(token) {}
 
     bool do_it(int fd, int *error) {
-        stream_.reset(ShutdownThread::IO_0, fd);
+        stream_.reset(ShutdownThreads::IO_0, fd);
         error_ = error;
-        return schedule(ShutdownThread::IO_0);
+        return schedule(ShutdownThreads::IO_0);
     }
 
 private:
@@ -77,7 +73,7 @@ void close_pair(int (&fds)[2]) {
 int main() {
 #if defined(__linux__)
     shutdown_async::init();
-    if (!shutdown_async::io_backend_available(ShutdownThread::IO_0)) {
+    if (!shutdown_async::io_backend_available(ShutdownThreads::IO_0)) {
         std::cout << "io shutdown backend unavailable\n";
         shutdown_async::shutdown();
         return 0;
@@ -115,8 +111,8 @@ int main() {
     }
 
     std::cout << "io shutdown backend="
-              << (shutdown_async::io_uring_backend_available(ShutdownThread::IO_0) ? "io_uring"
-                                                                                   : "fallback")
+              << (shutdown_async::io_uring_backend_available(ShutdownThreads::IO_0) ? "io_uring"
+                                                                                    : "fallback")
               << " eof=1\n";
     close_pair(fds);
     return 0;

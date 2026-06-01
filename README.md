@@ -1,27 +1,21 @@
 # AsyncFlow
 
-一个基于固定线程枚举的轻量 C++20 异步任务框架。
+一个基于显式线程布局的轻量 C++20 异步任务框架。
 
 ## 线程定义
 
-业务使用连续递增 enum 定义线程，建议用 signed underlying type，并把第一个哨兵定义为 `enum_thread_index_start = -1`，最后一个哨兵定义为 `enum_thread_index_end`：
+业务使用 tag + `thread_layout` 声明线程组，不再手写连续递增 enum。每个线程组声明自己的线程数量、线程能力和调试名称：
 
 ```cpp
-enum class AppThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    Logic_1,
-    Logic_2,
-    Logic_3,
-    DB_0,
-    IO_0,
-    enum_thread_index_end,
-};
+struct AppLogicThreadTag;
+struct AppDbThreadTag;
+struct AppIoThreadTag;
 
 struct AppRuntimeTraits {
-    using Thread = AppThread;
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(AppThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<AppLogicThreadTag, 4, af::ThreadKind::Worker, "logic">(),
+        af::thread_group<AppDbThreadTag, 1, af::ThreadKind::Worker, "db">(),
+        af::thread_group<AppIoThreadTag, 1, af::ThreadKind::IoUring, "io">());
 
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
@@ -34,28 +28,39 @@ struct AppRuntimeTraits {
     static constexpr bool io_uring_setup_coop_taskrun = true;
     static constexpr bool io_uring_setup_defer_taskrun = true;
     static constexpr std::size_t io_wait_reserve = 1024;
-
-    static constexpr af::ThreadKind thread_kind(AppThread thread) noexcept {
-        return thread == AppThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
-    }
 };
 
 using async = af::AsyncRuntime<AppRuntimeTraits>;
 using Task = async::Task;
+using AppThread = async::Thread;
+
+inline constexpr auto player_logic_threads = async::thread_group<AppLogicThreadTag>();
+inline constexpr auto app_db_threads = async::thread_group<AppDbThreadTag>();
+inline constexpr auto app_io_threads = async::thread_group<AppIoThreadTag>();
+
+struct AppThreads {
+    static constexpr AppThread Logic_0 = player_logic_threads.template at<0>();
+    static constexpr AppThread Logic_1 = player_logic_threads.template at<1>();
+    static constexpr AppThread Logic_2 = player_logic_threads.template at<2>();
+    static constexpr AppThread Logic_3 = player_logic_threads.template at<3>();
+    static constexpr AppThread DB_0 = app_db_threads.template at<0>();
+    static constexpr AppThread IO_0 = app_io_threads.template at<0>();
+};
 ```
 
-`AppRuntimeTraits` 只建议放框架直接消费的参数：线程 enum、线程总数、队列容量、满队列策略、IO 后端容量等。`io_uring_entries` 必须是 2 的幂，`io_uring_submit_batch_threshold` 不能超过 entries；`io_uring_cq_entries` 为 0 时使用内核默认 CQ 大小，非 0 时会设置 `IORING_SETUP_CQSIZE`，且必须不小于 entries；`io_uring_setup_single_issuer`、`io_uring_setup_coop_taskrun`、`io_uring_setup_defer_taskrun`、`io_uring_setup_submit_all`、`io_uring_setup_sqpoll`、`io_uring_sqpoll_idle_ms` 和 `io_uring_sqpoll_cpu` 会映射到对应 `io_uring_setup(2)` flags/params，极致性能场景可按内核能力开启。`io_wait_reserve` 和 `io_uring_provided_buffer_group_reserve` 会在 IO executor 初始化时 best-effort 预留热点表空间，减少高并发 fd wait 和 provided-buffer group 注册时的 rehash/扩容抖动。业务分片范围放到具体逻辑里计算：
+`AppRuntimeTraits` 只建议放框架直接消费的参数：线程布局、队列容量、满队列策略、IO 后端容量等。`io_uring_entries` 必须是 2 的幂，`io_uring_submit_batch_threshold` 不能超过 entries；`io_uring_cq_entries` 为 0 时使用内核默认 CQ 大小，非 0 时会设置 `IORING_SETUP_CQSIZE`，且必须不小于 entries；`io_uring_setup_single_issuer`、`io_uring_setup_coop_taskrun`、`io_uring_setup_defer_taskrun`、`io_uring_setup_submit_all`、`io_uring_setup_sqpoll`、`io_uring_sqpoll_idle_ms` 和 `io_uring_sqpoll_cpu` 会映射到对应 `io_uring_setup(2)` flags/params，极致性能场景可按内核能力开启。`io_wait_reserve` 和 `io_uring_provided_buffer_group_reserve` 会在 IO executor 初始化时 best-effort 预留热点表空间，减少高并发 fd wait 和 provided-buffer group 注册时的 rehash/扩容抖动。
+
+线程组对象是空的编译期视图，`begin/count/at()/shard()` 都是内联整数运算。任务切换时 `Thread` 本身只保存一个 `uint16_t` index，`pending_on()` / `post()` 直接使用这个 index 定位 executor 和 SPSC queue，不会因为通过 `thread_group` 计算目标线程而多一次对象跳转或堆内存访问。`thread_kind()` / `thread_name()` 这类 introspection 才会按 index 查询一张小的编译期表，主要用于 executor 初始化和调试，不在普通调度热路径里。
+
+业务分片范围放到具体逻辑里计算：
 
 ```cpp
-inline constexpr AppThread player_logic_begin = AppThread::Logic_0;
-inline constexpr std::uint16_t player_logic_shard_count =
-    static_cast<std::uint16_t>(
-        async::thread_index(AppThread::Logic_3) - async::thread_index(player_logic_begin) + 1U);
-
 inline AppThread player_thread(std::uint64_t player_id) noexcept {
-    return async::shard_by<player_logic_begin, player_logic_shard_count>(player_id);
+    return player_logic_threads.shard(player_id);
 }
 ```
+
+`thread_group` 的第四个模板参数是线程组名称。Linux/macOS 上 runtime 启动 executor 时会调用系统线程命名接口，把线程命名为 `af-<group>-<offset>`，例如 `af-logic-0`、`af-io-0`，方便在 `top`、`ps -L`、`htop`、`lldb/gdb` 中定位线程；实际可见长度受平台线程名上限约束。
 
 ## 任务 API
 
@@ -88,7 +93,7 @@ private:
 
     af::TaskResult start() {
         state_ = State::QueryDb;
-        return pending_on(AppThread::DB_0);
+        return pending_on(AppThreads::DB_0);
     }
 
     af::TaskResult query_db() {
@@ -127,21 +132,17 @@ if (!started) {
 
 ## IO 线程
 
-traits 可通过 `thread_kind()` 把固定线程声明为 IO 线程。跨平台业务优先使用 `ThreadKind::Io`：Linux 下映射到 epoll readiness backend，macOS/BSD 下映射到 kqueue readiness backend，公共 `io_*` API 不变。Linux 上 `ThreadKind::Epoll` 可显式指定 epoll + eventfd；`ThreadKind::IoUring` 会优先创建 io_uring，并保留 epoll + eventfd 作为 completion wake 和 socket readiness fallback；如果内核或容器环境不支持 io_uring，该线程仍可退化为 epoll readiness 线程。
+线程组可在 `thread_group<Tag, Count, Kind, Name>()` 的第三个模板参数里声明 IO 能力。跨平台业务优先使用 `ThreadKind::Io`：Linux 下映射到 epoll readiness backend，macOS/BSD 下映射到 kqueue readiness backend，公共 `io_*` API 不变。Linux 上 `ThreadKind::Epoll` 可显式指定 epoll + eventfd；`ThreadKind::IoUring` 会优先创建 io_uring，并保留 epoll + eventfd 作为 completion wake 和 socket readiness fallback；如果内核或容器环境不支持 io_uring，该线程仍可退化为 epoll readiness 线程。
 
 提示：某些容器运行时默认 seccomp/apparmor profile 可能拦截 `io_uring_setup/enter/register`，导致 `ThreadKind::IoUring` 退化为 epoll 并跳过 io_uring tests；在 OrbStack/Docker 下可尝试容器启动参数 `--security-opt seccomp=unconfined --security-opt apparmor=unconfined` 或使用自定义 seccomp profile 放通相关 syscall。
 
-```cpp
-static constexpr af::ThreadKind thread_kind(AppThread thread) noexcept {
-    return thread == AppThread::IO_0 ? af::ThreadKind::Io : af::ThreadKind::Worker;
-}
-```
+例如 `af::thread_group<AppIoThreadTag, 1, af::ThreadKind::Io, "io">()` 声明一个跨平台 native-readiness IO 线程；Linux 专用高性能路径可改成 `ThreadKind::IoUring`。
 
 任务必须先调度到对应 IO 线程，再调用 `wait_io()` 注册 fd 事件；事件到达后 runtime 会把 pending task 放回同一个 IO executor：
 
 ```cpp
 state_ = State::Consume;
-if (!wait_io(AppThread::IO_0, fd_, af::io_readable, &result_)) {
+if (!wait_io(AppThreads::IO_0, fd_, af::io_readable, &result_)) {
     return failed();
 }
 return pending();
@@ -152,7 +153,7 @@ return pending();
 ```cpp
 const af::IoStatus status = af::io_read_some(
     *this,
-    AppThread::IO_0,
+    AppThreads::IO_0,
     fd_,
     &value_,
     sizeof(value_),
@@ -168,7 +169,7 @@ if (!status.ready()) {
 业务模板代码可以进一步用轻量 adapter 包住 `thread + fd`，避免每个状态都重复传线程和 fd：
 
 ```cpp
-af::TcpStream<AppThread> stream(AppThread::IO_0, fd_);
+af::TcpStream<AppThread> stream(AppThreads::IO_0, fd_);
 const af::IoStatus status = stream.recv_some(*this, buffer_, sizeof(buffer_), read_);
 ```
 

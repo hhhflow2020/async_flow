@@ -53,6 +53,6 @@ TEST_F(ParallelRuntimeFixture, ParallelShardsDefaultBeginOverloadUsesThreadZero)
 
     ASSERT_TRUE(Runtime::start_task<DefaultParallelOverloadTask>(&completed, &ran_on));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
-    EXPECT_EQ(ran_on.load(std::memory_order_acquire), Runtime::thread_index(TestThread::Logic_1));
+    EXPECT_EQ(ran_on.load(std::memory_order_acquire), Runtime::thread_index(TestThreads::Logic_1));
 }
 } // namespace af::test::runtime_parallel

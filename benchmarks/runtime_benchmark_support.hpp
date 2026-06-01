@@ -9,32 +9,33 @@
 
 namespace af_bench::runtime {
 
-enum class BenchThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    Logic_1,
-    Logic_2,
-    Logic_3,
-    IO_0,
-    enum_thread_index_end,
-};
+struct BenchLogicThreadTag;
+struct BenchIoThreadTag;
 
 struct BenchRuntimeTraits {
-    using Thread = BenchThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(BenchThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<BenchLogicThreadTag, 4, af::ThreadKind::Worker, "bench-log">(),
+        af::thread_group<BenchIoThreadTag, 1, af::ThreadKind::Epoll, "bench-io">());
     static constexpr std::size_t spsc_queue_capacity = 65536;
     static constexpr std::size_t external_queue_capacity = 65536;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
-
-    static constexpr af::ThreadKind thread_kind(BenchThread thread) noexcept {
-        return thread == BenchThread::IO_0 ? af::ThreadKind::Epoll : af::ThreadKind::Worker;
-    }
 };
 
 using Runtime = af::AsyncRuntime<BenchRuntimeTraits>;
 using Task = Runtime::Task;
+using BenchThread = Runtime::Thread;
+
+struct BenchThreads {
+    static constexpr BenchThread Logic_0 =
+        Runtime::thread_group<BenchLogicThreadTag>().template at<0>();
+    static constexpr BenchThread Logic_1 =
+        Runtime::thread_group<BenchLogicThreadTag>().template at<1>();
+    static constexpr BenchThread Logic_2 =
+        Runtime::thread_group<BenchLogicThreadTag>().template at<2>();
+    static constexpr BenchThread Logic_3 =
+        Runtime::thread_group<BenchLogicThreadTag>().template at<3>();
+    static constexpr BenchThread IO_0 = Runtime::thread_group<BenchIoThreadTag>().template at<0>();
+};
 
 inline void wait_zero(std::atomic<int> &remaining) {
     while (remaining.load(std::memory_order_acquire) != 0) {
@@ -78,15 +79,15 @@ public:
     bool do_it(int hops, std::atomic<int> *remaining) {
         hops_ = hops;
         remaining_ = remaining;
-        return schedule(BenchThread::Logic_0);
+        return schedule(BenchThreads::Logic_0);
     }
 
 private:
     af::TaskResult run() override {
         if (hops_-- > 0) {
-            const auto next = Runtime::current_thread() == BenchThread::Logic_0
-                                  ? BenchThread::Logic_1
-                                  : BenchThread::Logic_0;
+            const auto next = Runtime::current_thread() == BenchThreads::Logic_0
+                                  ? BenchThreads::Logic_1
+                                  : BenchThreads::Logic_0;
             return pending_on(next);
         }
 
@@ -107,7 +108,7 @@ public:
     bool do_it(std::atomic<int> *remaining) {
         remaining_ = remaining;
         state_ = State::Logic;
-        return schedule(BenchThread::Logic_0);
+        return schedule(BenchThreads::Logic_0);
     }
 
 private:
@@ -120,7 +121,7 @@ private:
         switch (state_) {
         case State::Logic:
             state_ = State::Io;
-            return pending_on(BenchThread::IO_0);
+            return pending_on(BenchThreads::IO_0);
 
         case State::Io:
             if (remaining_->fetch_sub(1, std::memory_order_acq_rel) == 1) {
@@ -146,7 +147,7 @@ public:
         for (std::uint64_t i = 0; i < 1024; ++i) {
             ops_.shards[i & 3U].push_back(i);
         }
-        return schedule(BenchThread::Logic_0);
+        return schedule(BenchThreads::Logic_0);
     }
 
 private:
@@ -159,7 +160,7 @@ private:
         switch (state_) {
         case State::Split:
             state_ = State::Finish;
-            Runtime::parallel_shards(BenchThread::Logic_0, ops_, af::ParallelMode::AllShards, this,
+            Runtime::parallel_shards(BenchThreads::Logic_0, ops_, af::ParallelMode::AllShards, this,
                                      [this](std::uint16_t, std::vector<std::uint64_t> &shard_ops) {
                                          std::uint64_t local = 0;
                                          for (auto value : shard_ops) {

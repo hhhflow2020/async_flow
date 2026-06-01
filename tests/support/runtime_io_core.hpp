@@ -11,71 +11,59 @@ template <typename T> bool wait_until_at_least(std::atomic<T> &value, T expected
     return true;
 }
 
-enum class IoTestThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    IO_0,
-    enum_thread_index_end,
-};
+struct IoTestLogicThreadTag;
+struct IoTestIoThreadTag;
+
+inline constexpr auto io_test_threads =
+    af::thread_layout(af::thread_group<IoTestLogicThreadTag, 1>(),
+                      af::thread_group<IoTestIoThreadTag, 1, af::ThreadKind::Io>());
+
+inline constexpr auto uring_io_test_threads =
+    af::thread_layout(af::thread_group<IoTestLogicThreadTag, 1>(),
+                      af::thread_group<IoTestIoThreadTag, 1, af::ThreadKind::IoUring>());
 
 struct IoTestRuntimeTraits {
-    using Thread = IoTestThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(IoTestThread::enum_thread_index_end);
+    static constexpr auto threads = io_test_threads;
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
-
-    static constexpr af::ThreadKind thread_kind(IoTestThread thread) noexcept {
-        return thread == IoTestThread::IO_0 ? af::ThreadKind::Io : af::ThreadKind::Worker;
-    }
 };
 
 using IoRuntime = af::AsyncRuntime<IoTestRuntimeTraits>;
 using IoTaskBase = IoRuntime::Task;
+using IoTestThread = IoRuntime::Thread;
+
+struct IoTestThreads {
+    static constexpr IoTestThread Logic_0 =
+        IoRuntime::thread_group<IoTestLogicThreadTag>().template at<0>();
+    static constexpr IoTestThread IO_0 =
+        IoRuntime::thread_group<IoTestIoThreadTag>().template at<0>();
+};
 
 struct FastIoRuntimeTraits {
-    using Thread = IoTestThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(IoTestThread::enum_thread_index_end);
+    static constexpr auto threads = io_test_threads;
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::StopImmediately;
     static constexpr bool enable_task_registry = true;
-
-    static constexpr af::ThreadKind thread_kind(IoTestThread thread) noexcept {
-        return thread == IoTestThread::IO_0 ? af::ThreadKind::Io : af::ThreadKind::Worker;
-    }
 };
 
 using FastIoRuntime = af::AsyncRuntime<FastIoRuntimeTraits>;
 using FastIoTaskBase = FastIoRuntime::Task;
 
 struct UringIoRuntimeTraits {
-    using Thread = IoTestThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(IoTestThread::enum_thread_index_end);
+    static constexpr auto threads = uring_io_test_threads;
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
-
-    static constexpr af::ThreadKind thread_kind(IoTestThread thread) noexcept {
-        return thread == IoTestThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
-    }
 };
 
 using UringIoRuntime = af::AsyncRuntime<UringIoRuntimeTraits>;
 using UringIoTaskBase = UringIoRuntime::Task;
 
 struct TunedIoRuntimeTraits {
-    using Thread = IoTestThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(IoTestThread::enum_thread_index_end);
+    static constexpr auto threads = uring_io_test_threads;
     static constexpr std::size_t spsc_queue_capacity = 2048;
     static constexpr std::size_t external_queue_capacity = 4096;
     static constexpr unsigned io_uring_entries = 512;

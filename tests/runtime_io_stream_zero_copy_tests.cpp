@@ -4,7 +4,7 @@ class IoRuntimeStreamFixture : public IoRuntimeFixture {};
 
 TEST_F(IoRuntimeStreamFixture, StreamAdapterSendZcSendsSocketBytes) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
@@ -34,7 +34,7 @@ TEST_F(IoRuntimeStreamFixture, StreamAdapterSendZcSendsSocketBytes) {
 
 TEST_F(IoRuntimeStreamFixture, SendZcWaitsForSocketWritableWhenBufferIsFull) {
 #if defined(__linux__)
-    if (!IoRuntime::io_backend_available(IoTestThread::IO_0)) {
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 

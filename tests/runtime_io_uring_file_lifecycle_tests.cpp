@@ -4,7 +4,7 @@ class UringIoRuntimeFileFixture : public UringIoRuntimeFixture {};
 
 TEST_F(UringIoRuntimeFileFixture, IoUringThreadOpensFileWithOpenAt) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io_uring backend unavailable";
     }
 
@@ -28,7 +28,7 @@ TEST_F(UringIoRuntimeFileFixture, IoUringThreadOpensFileWithOpenAt) {
 
 TEST_F(UringIoRuntimeFileFixture, IoUringFileLifecycleRunsOnIoThread) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io_uring backend unavailable";
     }
 
@@ -66,7 +66,7 @@ TEST_F(UringIoRuntimeFileFixture, IoUringFileLifecycleRunsOnIoThread) {
 
 TEST_F(UringIoRuntimeFileFixture, IoUringFilesystemOpsRunOnIoThread) {
 #if defined(__linux__)
-    if (!UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0)) {
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "io_uring backend unavailable";
     }
 

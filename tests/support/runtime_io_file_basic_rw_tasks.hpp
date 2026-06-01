@@ -5,10 +5,10 @@ public:
     explicit UringFileReadWriteTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
 
     bool do_it(int fd, std::atomic<int> *completed, std::atomic<char> *byte_read) {
-        file_.reset(IoTestThread::IO_0, fd);
+        file_.reset(IoTestThreads::IO_0, fd);
         completed_ = completed;
         byte_read_ = byte_read;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:

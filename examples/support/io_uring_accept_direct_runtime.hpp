@@ -17,31 +17,29 @@
 
 namespace io_uring_accept_direct_example {
 
-enum class DirectAcceptThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    IO_0,
-    enum_thread_index_end,
-};
+struct DirectAcceptLogicThreadTag;
+struct DirectAcceptIoThreadTag;
 
 struct DirectAcceptRuntimeTraits {
-    using Thread = DirectAcceptThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(DirectAcceptThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<DirectAcceptLogicThreadTag, 1, af::ThreadKind::Worker, "accept-cpu">(),
+        af::thread_group<DirectAcceptIoThreadTag, 1, af::ThreadKind::IoUring, "accept-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
-
-    static constexpr af::ThreadKind thread_kind(DirectAcceptThread thread) noexcept {
-        return thread == DirectAcceptThread::IO_0 ? af::ThreadKind::IoUring
-                                                  : af::ThreadKind::Worker;
-    }
 };
 
 using direct_accept_async = af::AsyncRuntime<DirectAcceptRuntimeTraits>;
 using DirectAcceptTask = direct_accept_async::Task;
+using DirectAcceptThread = direct_accept_async::Thread;
+
+struct DirectAcceptThreads {
+    static constexpr DirectAcceptThread Logic_0 =
+        direct_accept_async::thread_group<DirectAcceptLogicThreadTag>().template at<0>();
+    static constexpr DirectAcceptThread IO_0 =
+        direct_accept_async::thread_group<DirectAcceptIoThreadTag>().template at<0>();
+};
 
 inline bool wait_until_armed_or_error(std::atomic<int> &armed, std::atomic<int> &error) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);

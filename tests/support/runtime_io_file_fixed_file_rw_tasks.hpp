@@ -6,10 +6,10 @@ public:
 
     bool do_it(int fd, std::atomic<int> *completed, std::atomic<char> *byte_read) {
         fd_ = fd;
-        file_.reset(IoTestThread::IO_0, 0);
+        file_.reset(IoTestThreads::IO_0, 0);
         completed_ = completed;
         byte_read_ = byte_read;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -56,17 +56,17 @@ private:
         }
 
         int error = 0;
-        if (!UringIoRuntime::io_register_files(IoTestThread::IO_0, &fd_, 1, &error)) {
+        if (!UringIoRuntime::io_register_files(IoTestThreads::IO_0, &fd_, 1, &error)) {
             return failed();
         }
 
         int duplicate_error = 0;
-        if (UringIoRuntime::io_register_files(IoTestThread::IO_0, &fd_, 1, &duplicate_error) ||
+        if (UringIoRuntime::io_register_files(IoTestThreads::IO_0, &fd_, 1, &duplicate_error) ||
             duplicate_error != EALREADY) {
             return failed();
         }
 
-        af::IoFixedFile<IoTestThread> bad_file(IoTestThread::IO_0, 1);
+        af::IoFixedFile<IoTestThread> bad_file(IoTestThreads::IO_0, 1);
         const af::IoStatus bad_index =
             bad_file.write_at(*this, &value_, sizeof(value_), 0, bad_index_);
         if (!bad_index.failed() || bad_index.error != EINVAL) {
@@ -80,7 +80,7 @@ private:
 
         iovec iov{buffer_, sizeof(buffer_)};
         int buffer_error = 0;
-        if (!UringIoRuntime::io_register_buffers(IoTestThread::IO_0, &iov, 1, &buffer_error)) {
+        if (!UringIoRuntime::io_register_buffers(IoTestThreads::IO_0, &iov, 1, &buffer_error)) {
             return failed();
         }
 
@@ -159,10 +159,10 @@ private:
 
     af::TaskResult unregister_file() {
         int error = 0;
-        if (!UringIoRuntime::io_unregister_buffers(IoTestThread::IO_0, &error)) {
+        if (!UringIoRuntime::io_unregister_buffers(IoTestThreads::IO_0, &error)) {
             return failed();
         }
-        if (!UringIoRuntime::io_unregister_files(IoTestThread::IO_0, &error)) {
+        if (!UringIoRuntime::io_unregister_files(IoTestThreads::IO_0, &error)) {
             return failed();
         }
         byte_read_->store(buffer_[0], std::memory_order_release);

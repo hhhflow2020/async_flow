@@ -7,18 +7,18 @@ public:
     bool do_it(int fd, std::atomic<int> *completed, std::atomic<int> *invalid_error,
                std::atomic<int> *null_error, std::atomic<int> *address_error,
                std::atomic<int> *unavailable_error) {
-        listener_.reset(IoTestThread::IO_0, fd);
+        listener_.reset(IoTestThreads::IO_0, fd);
         completed_ = completed;
         invalid_error_ = invalid_error;
         null_error_ = null_error;
         address_error_ = address_error;
         unavailable_error_ = unavailable_error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
     af::TaskResult run() override {
-        af::TcpListener<IoTestThread> invalid_listener(IoTestThread::IO_0, -1);
+        af::TcpListener<IoTestThread> invalid_listener(IoTestThreads::IO_0, -1);
         af::IoOpState invalid_state{};
         af::IoOpState null_state{};
         af::IoOpState address_state{};

@@ -13,7 +13,7 @@ int main() {
     using namespace io_pollable_client_example;
 
     client_async::init();
-    if (!client_async::io_backend_available(ClientThread::IO_0)) {
+    if (!client_async::io_backend_available(ClientThreads::IO_0)) {
         std::cout << "epoll backend unavailable\n";
         client_async::shutdown();
         return 0;

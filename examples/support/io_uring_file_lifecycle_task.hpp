@@ -23,7 +23,7 @@ public:
             return false;
         }
         observed_size_ = observed_size;
-        return schedule(LifecycleThread::IO_0);
+        return schedule(LifecycleThreads::IO_0);
     }
 
 private:
@@ -79,7 +79,7 @@ private:
     af::TaskResult open_file() {
         int fd = -1;
         const af::IoStatus status =
-            af::io_openat(*this, LifecycleThread::IO_0, AT_FDCWD, path_.data(),
+            af::io_openat(*this, LifecycleThreads::IO_0, AT_FDCWD, path_.data(),
                           O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC, 0600U, &fd, open_);
         if (status.pending()) {
             return pending();
@@ -88,13 +88,13 @@ private:
             return failed();
         }
         owned_.reset(fd);
-        file_.reset(LifecycleThread::IO_0, owned_.get());
+        file_.reset(LifecycleThreads::IO_0, owned_.get());
         state_ = State::Fallocate;
         return again();
     }
 
     af::TaskResult fallocate_file() {
-        const af::IoStatus status = af::io_fallocate(*this, LifecycleThread::IO_0, owned_.get(),
+        const af::IoStatus status = af::io_fallocate(*this, LifecycleThreads::IO_0, owned_.get(),
                                                      FALLOC_FL_KEEP_SIZE, 0, 4096, fallocate_);
         if (status.pending()) {
             return pending();
@@ -143,7 +143,7 @@ private:
     }
 
     af::TaskResult close_file() {
-        const af::IoStatus status = af::io_close(*this, LifecycleThread::IO_0, owned_, close_);
+        const af::IoStatus status = af::io_close(*this, LifecycleThreads::IO_0, owned_, close_);
         if (status.pending()) {
             return owned_.get() == -1 ? pending() : failed();
         }
@@ -154,7 +154,7 @@ private:
     }
 
     af::TaskResult stat_file() {
-        const af::IoStatus status = af::io_statx(*this, LifecycleThread::IO_0, AT_FDCWD,
+        const af::IoStatus status = af::io_statx(*this, LifecycleThreads::IO_0, AT_FDCWD,
                                                  path_.data(), 0, STATX_SIZE, &stat_, stat_state_);
         if (status.pending()) {
             return pending();
@@ -169,7 +169,7 @@ private:
 
     af::TaskResult rename_file() {
         const af::IoStatus status =
-            af::io_renameat(*this, LifecycleThread::IO_0, AT_FDCWD, path_.data(), AT_FDCWD,
+            af::io_renameat(*this, LifecycleThreads::IO_0, AT_FDCWD, path_.data(), AT_FDCWD,
                             renamed_path_.data(), 0, rename_);
         if (status.pending()) {
             return pending();
@@ -182,7 +182,7 @@ private:
     }
 
     af::TaskResult unlink_file() {
-        const af::IoStatus status = af::io_unlinkat(*this, LifecycleThread::IO_0, AT_FDCWD,
+        const af::IoStatus status = af::io_unlinkat(*this, LifecycleThreads::IO_0, AT_FDCWD,
                                                     renamed_path_.data(), 0, unlink_);
         if (status.pending()) {
             return pending();

@@ -17,10 +17,10 @@ public:
         if (fd < 0 || target_accepts <= 0 || result == nullptr) {
             return false;
         }
-        listener_.reset(AcceptThread::IO_0, fd);
+        listener_.reset(AcceptThreads::IO_0, fd);
         target_accepts_ = target_accepts;
         result_ = result;
-        return schedule(AcceptThread::IO_0);
+        return schedule(AcceptThreads::IO_0);
     }
 
 private:
@@ -58,7 +58,7 @@ private:
         if (!accept_.waiting) {
             return complete(0);
         }
-        if (!accept_async::cancel_io(AcceptThread::IO_0, accept_)) {
+        if (!accept_async::cancel_io(AcceptThreads::IO_0, accept_)) {
             return complete(accept_.wait.error == 0 ? EIO : accept_.wait.error);
         }
         state_ = State::Cancel;

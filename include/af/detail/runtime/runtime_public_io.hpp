@@ -21,7 +21,7 @@ struct statx;
 namespace af::detail {
 
 template <typename RuntimeT, typename TraitsT> struct RuntimePublicIo {
-    using Thread = typename TraitsT::Thread;
+    using Thread = typename RuntimeConfig<TraitsT>::Thread;
     using Task = BasicTask<RuntimeT>;
 
     [[nodiscard]] static bool io_backend_available(Thread thread) noexcept {

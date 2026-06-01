@@ -6,11 +6,11 @@ public:
 
     bool do_it(int fd, std::atomic<int> *armed, std::atomic<int> *completed,
                std::atomic<char> *byte_read) {
-        socket_.reset(IoTestThread::IO_0, fd);
+        socket_.reset(IoTestThreads::IO_0, fd);
         armed_ = armed;
         completed_ = completed;
         byte_read_ = byte_read;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -47,13 +47,13 @@ public:
 
     bool do_it(int fd, sockaddr_in address, socklen_t address_size, char value,
                std::atomic<int> *completed, std::atomic<int> *bytes_sent) {
-        socket_.reset(IoTestThread::IO_0, fd);
+        socket_.reset(IoTestThreads::IO_0, fd);
         address_ = address;
         address_size_ = address_size;
         value_ = value;
         completed_ = completed;
         bytes_sent_ = bytes_sent;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:

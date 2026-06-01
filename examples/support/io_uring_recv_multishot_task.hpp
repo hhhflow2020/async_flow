@@ -15,11 +15,11 @@ public:
     explicit RecvMultishotTask(RecvTaskBase::FactoryToken token) : RecvTaskBase(token) {}
 
     bool do_it(int fd, std::atomic<int> *armed, int *packed_read, std::atomic<int> *error) {
-        stream_.reset(RecvThread::IO_0, fd);
+        stream_.reset(RecvThreads::IO_0, fd);
         armed_ = armed;
         packed_read_ = packed_read;
         error_ = error;
-        return schedule(RecvThread::IO_0);
+        return schedule(RecvThreads::IO_0);
     }
 
 private:
@@ -47,7 +47,7 @@ private:
     af::TaskResult complete(int error) {
         if (registered_) {
             int unregister_error = 0;
-            if (recv_async::io_unregister_provided_buffer_ring(RecvThread::IO_0, buffer_group,
+            if (recv_async::io_unregister_provided_buffer_ring(RecvThreads::IO_0, buffer_group,
                                                                &unregister_error)) {
                 registered_ = false;
             }
@@ -73,7 +73,7 @@ private:
 
         int register_error = 0;
         if (!recv_async::io_register_provided_buffer_ring(
-                RecvThread::IO_0, ring_.ring(), ring_.entries(), buffer_group, &register_error)) {
+                RecvThreads::IO_0, ring_.ring(), ring_.entries(), buffer_group, &register_error)) {
             return complete(register_error == 0 ? EIO : register_error);
         }
         registered_ = true;
@@ -84,7 +84,7 @@ private:
     af::TaskResult unregister_ring() {
         if (registered_) {
             int unregister_error = 0;
-            if (!recv_async::io_unregister_provided_buffer_ring(RecvThread::IO_0, buffer_group,
+            if (!recv_async::io_unregister_provided_buffer_ring(RecvThreads::IO_0, buffer_group,
                                                                 &unregister_error)) {
                 return complete(unregister_error == 0 ? EIO : unregister_error);
             }
@@ -130,7 +130,7 @@ private:
             return again();
         }
         finish_error_ = 0;
-        if (!recv_async::cancel_io(RecvThread::IO_0, recv_)) {
+        if (!recv_async::cancel_io(RecvThreads::IO_0, recv_)) {
             return complete(recv_.wait.error == 0 ? EIO : recv_.wait.error);
         }
         state_ = State::Cancel;
@@ -156,7 +156,7 @@ private:
             state_ = State::Unregister;
             return again();
         }
-        if (!recv_async::cancel_io(RecvThread::IO_0, recv_)) {
+        if (!recv_async::cancel_io(RecvThreads::IO_0, recv_)) {
             return complete(recv_.wait.error == 0 ? finish_error_ : recv_.wait.error);
         }
         state_ = State::Cancel;

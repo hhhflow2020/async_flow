@@ -5,10 +5,10 @@ public:
     explicit TcpAcceptTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
     bool do_it(int fd, std::atomic<int> *armed, std::atomic<int> *completed) {
-        listener_.reset(IoTestThread::IO_0, fd);
+        listener_.reset(IoTestThreads::IO_0, fd);
         armed_ = armed;
         completed_ = completed;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -23,7 +23,7 @@ private:
         if (!status.ready() || accepted_fd_ < 0 || peer_size_ == 0U) {
             return failed();
         }
-        af::TcpStream<IoTestThread> accepted(IoTestThread::IO_0, accepted_fd_);
+        af::TcpStream<IoTestThread> accepted(IoTestThreads::IO_0, accepted_fd_);
         sockaddr_storage observed_peer{};
         socklen_t observed_peer_size = sizeof(observed_peer);
         const af::IoStatus peer_status = accepted.getpeername(

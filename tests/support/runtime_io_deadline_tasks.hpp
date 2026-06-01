@@ -14,7 +14,7 @@ public:
         completed_ = completed;
         error_ = error;
         byte_read_ = byte_read;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -38,12 +38,12 @@ private:
         state_machine_ = State::Resume;
         deadline_.set_after(timeout_);
         const af::IoStatus status =
-            af::io_read_some(*this, IoTestThread::IO_0, fd_, &value_, sizeof(value_), read_);
+            af::io_read_some(*this, IoTestThreads::IO_0, fd_, &value_, sizeof(value_), read_);
         if (!status.pending()) {
             return failed();
         }
         const af::IoStatus timeout =
-            af::arm_io_timeout(*this, IoTestThread::IO_0, deadline_, read_);
+            af::arm_io_timeout(*this, IoTestThreads::IO_0, deadline_, read_);
         if (!timeout.pending()) {
             return failed();
         }
@@ -54,7 +54,7 @@ private:
 
     af::TaskResult resume_read() {
         const af::IoStatus timeout =
-            af::arm_io_timeout(*this, IoTestThread::IO_0, deadline_, read_);
+            af::arm_io_timeout(*this, IoTestThreads::IO_0, deadline_, read_);
         if (timeout.pending()) {
             return pending();
         }
@@ -68,7 +68,7 @@ private:
         }
 
         const af::IoStatus status =
-            af::io_read_some(*this, IoTestThread::IO_0, fd_, &value_, sizeof(value_), read_);
+            af::io_read_some(*this, IoTestThreads::IO_0, fd_, &value_, sizeof(value_), read_);
         if (status.ready() && status.bytes == sizeof(value_)) {
             byte_read_->store(value_, std::memory_order_release);
             error_->store(0, std::memory_order_release);

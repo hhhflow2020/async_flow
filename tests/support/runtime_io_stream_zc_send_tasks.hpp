@@ -7,14 +7,14 @@ public:
     bool do_it(int socket_fd, const char *payload, std::size_t total_size, std::size_t chunk_size,
                std::atomic<int> *completed, std::atomic<int> *calls,
                std::atomic<std::size_t> *bytes_sent) {
-        stream_.reset(IoTestThread::IO_0, socket_fd);
+        stream_.reset(IoTestThreads::IO_0, socket_fd);
         payload_ = payload;
         total_size_ = total_size;
         chunk_size_ = chunk_size == 0U ? total_size : chunk_size;
         completed_ = completed;
         calls_ = calls;
         bytes_sent_ = bytes_sent;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -62,14 +62,14 @@ public:
     bool do_it(int socket_fd, const char *first, std::size_t first_size, const char *second,
                std::size_t second_size, std::atomic<int> *completed,
                std::atomic<std::size_t> *bytes_sent) {
-        stream_.reset(IoTestThread::IO_0, socket_fd);
+        stream_.reset(IoTestThreads::IO_0, socket_fd);
         first_ = first;
         first_size_ = first_size;
         second_ = second;
         second_size_ = second_size;
         completed_ = completed;
         bytes_sent_ = bytes_sent;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:

@@ -9,7 +9,7 @@ int main() {
     using namespace io_uring_udp_recvmsg_multishot_example;
 
     udp_recvmsg_async::init();
-    if (!udp_recvmsg_async::io_uring_backend_available(UdpRecvmsgThread::IO_0)) {
+    if (!udp_recvmsg_async::io_uring_backend_available(UdpRecvmsgThreads::IO_0)) {
         std::cout << "io_uring backend unavailable\n";
         udp_recvmsg_async::shutdown();
         return 0;

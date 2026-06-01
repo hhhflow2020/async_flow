@@ -13,7 +13,9 @@ void BM_RuntimeExternalStart(benchmark::State &state) {
         std::atomic<int> remaining{0};
         bool launch_failed = false;
         for (int i = 0; i < task_count; ++i) {
-            const auto thread = static_cast<af_bench::runtime::BenchThread>(i & 3);
+            const auto thread =
+                af_bench::runtime::Runtime::thread_group<af_bench::runtime::BenchLogicThreadTag>()
+                    .at(static_cast<std::uint16_t>(i & 3));
             remaining.fetch_add(1, std::memory_order_relaxed);
             const bool ok = af_bench::runtime::Runtime::start_task<af_bench::runtime::CountTask>(
                 thread, &remaining);

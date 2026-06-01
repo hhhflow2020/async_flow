@@ -19,20 +19,10 @@ inline std::chrono::milliseconds stress_duration() {
     return std::chrono::milliseconds(300);
 }
 
-enum class StressThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    Logic_1,
-    Logic_2,
-    Logic_3,
-    enum_thread_index_end,
-};
+struct StressThreadTag;
 
 struct StressRuntimeTraits {
-    using Thread = StressThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(StressThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(af::thread_group<StressThreadTag, 4>());
     static constexpr std::size_t spsc_queue_capacity = 8192;
     static constexpr std::size_t external_queue_capacity = 8192;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
@@ -42,6 +32,9 @@ struct StressRuntimeTraits {
 
 using StressRuntime = af::AsyncRuntime<StressRuntimeTraits>;
 using StressTaskBase = StressRuntime::Task;
+using StressThread = StressRuntime::Thread;
+
+inline constexpr auto stress_threads = StressRuntime::thread_group<StressThreadTag>();
 
 struct StressCounters {
     std::atomic<int> configured{0};
@@ -61,7 +54,7 @@ public:
         mode_ = seed % 3;
         state_ = State::Start;
         counters_->configured.fetch_add(1, std::memory_order_release);
-        return schedule(static_cast<StressThread>(seed & 3));
+        return schedule(stress_threads.at(static_cast<std::uint16_t>(seed & 3)));
     }
 
     ~StressTask() override {
@@ -85,8 +78,8 @@ private:
             }
             if (mode_ == 1) {
                 state_ = State::Hop;
-                const auto next = static_cast<StressThread>(
-                    (StressRuntime::current_thread_index() + 1U) % StressRuntime::thread_count);
+                const auto next = StressRuntime::thread_from_index(static_cast<std::uint16_t>(
+                    (StressRuntime::current_thread_index() + 1U) % StressRuntime::thread_count));
                 return pending_on(next);
             }
             counters_->pending_entered.fetch_add(1, std::memory_order_release);

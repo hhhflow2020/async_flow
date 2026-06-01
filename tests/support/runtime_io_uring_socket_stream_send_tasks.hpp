@@ -5,9 +5,9 @@ public:
     explicit UringStreamSendTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
 
     bool do_it(int fd, std::atomic<int> *completed) {
-        stream_.reset(IoTestThread::IO_0, fd);
+        stream_.reset(IoTestThreads::IO_0, fd);
         completed_ = completed;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -34,9 +34,9 @@ public:
     explicit UringStreamSendZcTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
 
     bool do_it(int fd, std::atomic<int> *completed) {
-        stream_.reset(IoTestThread::IO_0, fd);
+        stream_.reset(IoTestThreads::IO_0, fd);
         completed_ = completed;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:

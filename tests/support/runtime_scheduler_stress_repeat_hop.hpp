@@ -1,17 +1,9 @@
 #pragma once
 
-enum class RepeatHopThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    Logic_1,
-    enum_thread_index_end,
-};
+struct RepeatHopThreadTag;
 
 struct RepeatHopRuntimeTraits {
-    using Thread = RepeatHopThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(RepeatHopThread::enum_thread_index_end);
+    static constexpr auto threads = af::thread_layout(af::thread_group<RepeatHopThreadTag, 2>());
     static constexpr std::size_t spsc_queue_capacity = 65536;
     static constexpr std::size_t external_queue_capacity = 65536;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
@@ -21,6 +13,14 @@ struct RepeatHopRuntimeTraits {
 
 using RepeatHopRuntime = af::AsyncRuntime<RepeatHopRuntimeTraits>;
 using RepeatHopTaskBase = RepeatHopRuntime::Task;
+using RepeatHopThread = RepeatHopRuntime::Thread;
+
+struct RepeatHopThreads {
+    static constexpr RepeatHopThread Logic_0 =
+        RepeatHopRuntime::thread_group<RepeatHopThreadTag>().template at<0>();
+    static constexpr RepeatHopThread Logic_1 =
+        RepeatHopRuntime::thread_group<RepeatHopThreadTag>().template at<1>();
+};
 
 class RepeatHopTask final : public RepeatHopTaskBase {
 public:
@@ -36,20 +36,20 @@ public:
         post_failures_ = post_failures;
         progress_ = progress;
         last_thread_ = last_thread;
-        return schedule(RepeatHopThread::Logic_0);
+        return schedule(RepeatHopThreads::Logic_0);
     }
 
 private:
     af::TaskResult run() override {
         runs_->fetch_add(1, std::memory_order_relaxed);
         progress_[id_].fetch_add(1, std::memory_order_relaxed);
-        last_thread_[id_].store(RepeatHopRuntime::current_thread() == RepeatHopThread::Logic_0 ? 0
-                                                                                               : 1,
+        last_thread_[id_].store(RepeatHopRuntime::current_thread() == RepeatHopThreads::Logic_0 ? 0
+                                                                                                : 1,
                                 std::memory_order_relaxed);
         if (hops_-- > 0) {
-            const auto next = RepeatHopRuntime::current_thread() == RepeatHopThread::Logic_0
-                                  ? RepeatHopThread::Logic_1
-                                  : RepeatHopThread::Logic_0;
+            const auto next = RepeatHopRuntime::current_thread() == RepeatHopThreads::Logic_0
+                                  ? RepeatHopThreads::Logic_1
+                                  : RepeatHopThreads::Logic_0;
             if (!schedule(next)) {
                 post_failures_->fetch_add(1, std::memory_order_relaxed);
                 if (remaining_->fetch_sub(1, std::memory_order_acq_rel) == 1) {

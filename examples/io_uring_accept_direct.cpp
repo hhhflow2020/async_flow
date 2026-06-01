@@ -10,7 +10,7 @@ int main() {
     using namespace io_uring_accept_direct_example;
 
     direct_accept_async::init();
-    if (!direct_accept_async::io_uring_backend_available(DirectAcceptThread::IO_0)) {
+    if (!direct_accept_async::io_uring_backend_available(DirectAcceptThreads::IO_0)) {
         std::cout << "io_uring backend unavailable\n";
         direct_accept_async::shutdown();
         return 0;

@@ -7,12 +7,12 @@ public:
     bool do_it(std::atomic<int> *completed, std::atomic<int> *error) {
         completed_ = completed;
         error_ = error;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
     af::TaskResult run() override {
-        af::IoFile<IoTestThread> file(IoTestThread::IO_0, -1);
+        af::IoFile<IoTestThread> file(IoTestThreads::IO_0, -1);
         af::IoOpState read{};
         af::IoOpState write{};
         char value = 0;

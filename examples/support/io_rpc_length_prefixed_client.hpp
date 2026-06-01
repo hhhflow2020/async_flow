@@ -17,13 +17,13 @@ public:
 
     bool do_it(int fd, sockaddr_in server, socklen_t server_size, bool *ok, int *error,
                bool *response_ok) {
-        stream_.reset(RpcThread::IO_0, fd);
+        stream_.reset(RpcThreads::IO_0, fd);
         server_ = server;
         server_size_ = server_size;
         ok_ = ok;
         error_ = error;
         response_ok_ = response_ok;
-        return schedule(RpcThread::IO_0);
+        return schedule(RpcThreads::IO_0);
     }
 
 private:

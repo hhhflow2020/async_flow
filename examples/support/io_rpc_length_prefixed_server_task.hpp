@@ -5,10 +5,10 @@ public:
     explicit RpcServerTask(RpcTask::FactoryToken token) : RpcTask(token) {}
 
     bool do_it(int listener_fd, bool *ok, int *error) {
-        listener_.reset(RpcThread::IO_0, listener_fd);
+        listener_.reset(RpcThreads::IO_0, listener_fd);
         ok_ = ok;
         error_ = error;
-        return schedule(RpcThread::IO_0);
+        return schedule(RpcThreads::IO_0);
     }
 
     [[nodiscard]] const char *request_data() const noexcept {
@@ -78,7 +78,7 @@ private:
         }
 
         accepted_.reset(fd);
-        stream_.reset(RpcThread::IO_0, accepted_.get());
+        stream_.reset(RpcThreads::IO_0, accepted_.get());
         state_ = State::ReadRequestHeader;
         return again();
     }

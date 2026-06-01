@@ -11,7 +11,7 @@ public:
         reuse_value_ = reuse_value;
         local_port_ = local_port;
         ran_on_ = ran_on;
-        return schedule(IoTestThread::IO_0);
+        return schedule(IoTestThreads::IO_0);
     }
 
 private:
@@ -32,13 +32,13 @@ private:
 
     af::TaskResult create_socket() {
         state_ = State::FinishSocket;
-        return consume_socket_status(af::io_socket(*this, IoTestThread::IO_0, AF_INET,
+        return consume_socket_status(af::io_socket(*this, IoTestThreads::IO_0, AF_INET,
                                                    SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0,
                                                    &opened_fd_, socket_));
     }
 
     af::TaskResult finish_socket() {
-        return consume_socket_status(af::io_socket(*this, IoTestThread::IO_0, AF_INET,
+        return consume_socket_status(af::io_socket(*this, IoTestThreads::IO_0, AF_INET,
                                                    SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0,
                                                    &opened_fd_, socket_));
     }
@@ -52,7 +52,7 @@ private:
         }
         owned_.reset(opened_fd_);
         opened_fd_ = -1;
-        listener_.reset(IoTestThread::IO_0, owned_.get());
+        listener_.reset(IoTestThreads::IO_0, owned_.get());
         return configure_listener();
     }
 
