@@ -135,6 +135,7 @@ Resolved items:
 - `runtime_public_parallel_api_fragment.hpp` is now a 7-line umbrella over shard splitting, parallel shard dispatch overloads, and ordered-start public APIs. The split keeps these public scheduling templates inline while separating data partitioning from owner-resume orchestration.
 - Public socket accept/connect submit wrappers and matching io_uring executor submit wrappers are now small umbrellas over accept and connect operation families. The accept-direct and accept-multishot paths remain grouped with accept because they share validation and SQE opcode semantics.
 - `basic_task_fragment.hpp` is now a 20-line class shell. Public task API, protected task helpers, lifetime reference handling, scheduling/wake state machine, and storage layout live in dedicated class-body fragments. Storage fields remain together in `basic_task_storage_fragment.hpp`.
+- `basic_task_schedule_fragment.hpp` is now an 8-line umbrella over schedule constants, Created/Pending schedule admission, Running wake resolution, and requested-thread encoding helpers. The Running -> Pending wake boundary remains separately auditable in the Running wake fragment.
 - `object_pool.hpp` is now a small shell over storage layout, slot acquire/release, and lifecycle fragments. The split preserves the TLS cache, cache-line slot sizing, MPMC free-list, and atomic block/hot-block fields.
 
 Current file-size snapshot after the pass:
@@ -178,7 +179,11 @@ Current file-size snapshot after the pass:
 - `include/af/detail/basic_task_public_fragment.hpp`: 29 lines.
 - `include/af/detail/basic_task_protected_fragment.hpp`: 72 lines.
 - `include/af/detail/basic_task_lifetime_fragment.hpp`: 26 lines.
-- `include/af/detail/basic_task_schedule_fragment.hpp`: 167 lines.
+- `include/af/detail/basic_task_schedule_fragment.hpp`: 8 lines.
+- `include/af/detail/basic_task_schedule_constants_fragment.hpp`: 8 lines.
+- `include/af/detail/basic_task_schedule_state_fragment.hpp`: 52 lines.
+- `include/af/detail/basic_task_running_wake_fragment.hpp`: 88 lines.
+- `include/af/detail/basic_task_requested_thread_fragment.hpp`: 28 lines.
 - `include/af/detail/basic_task_storage_fragment.hpp`: 18 lines.
 - `include/af/detail/object_pool.hpp`: 38 lines.
 - `include/af/detail/object_pool_storage_fragment.hpp`: 68 lines.
@@ -813,6 +818,25 @@ Additional validation after the ready enqueue route split:
   - `BM_RuntimeIoThreadHop/8192` mean: 4.28 ms real, 1.917 M/s.
   - `BM_RuntimeParallelShards/128` mean: 0.505 ms real, 253.635 k/s.
   - `BM_RuntimeParallelShards/512` mean: 1.83 ms real, 280.185 k/s.
+
+Additional validation after the `BasicTask` schedule split:
+
+- `basic_task_schedule_fragment.hpp` is now an 8-line umbrella:
+  - `basic_task_schedule_constants_fragment.hpp`: 8 lines.
+  - `basic_task_schedule_state_fragment.hpp`: 52 lines.
+  - `basic_task_running_wake_fragment.hpp`: 88 lines.
+  - `basic_task_requested_thread_fragment.hpp`: 28 lines.
+- The split is structural: no `TaskState` transition, run-epoch handling, requested-thread atomic operation, memory ordering, queue routing, wake ordering, lock, or allocation behavior changed.
+- Local `git diff --check`: passed.
+- Remote clang Debug task/scheduler targeted tests: 45/45 passed.
+- Remote clang TSAN task/scheduler/config targeted tests: 46/46 passed, with no ThreadSanitizer report.
+- Remote clang Release full runtime test suite: 138 total, 135 passed, 3 skipped, 0 failed.
+- Remote clang Release runtime benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+  - `BM_RuntimeExternalStart/8192` mean: 6.94 ms real, 1.193 M/s.
+  - `BM_RuntimeCrossThreadHop/8192` mean: 13.0 ms real, 634.102 k/s.
+  - `BM_RuntimeIoThreadHop/8192` mean: 4.25 ms real, 1.930 M/s.
+  - `BM_RuntimeParallelShards/128` mean: 0.503 ms real, 256.183 k/s.
+  - `BM_RuntimeParallelShards/512` mean: 1.98 ms real, 260.199 k/s.
 
 ### Latest Test/Example Scan: Long Files Remain Mostly In Fixtures
 

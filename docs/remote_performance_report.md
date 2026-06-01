@@ -790,3 +790,39 @@ Interpretation:
 - Same-thread runtime posts remain an explicit local-queue route, while cross-thread runtime posts remain an explicit per-source SPSC route.
 - The TSAN target covers self-post local FIFO behavior, cross-thread SPSC hops, above-64 ready-source words, shutdown behavior, parallel owner resume, and the Running-to-Pending wake boundary.
 - The benchmark canary is within the existing noisy remote range for these scheduler cases and does not show a gross regression from this structural split.
+
+## 2026-06-01 BasicTask Schedule Split Validation
+
+This run validates the structural split of the `BasicTask` scheduling and running-wake state-machine fragment on the requested remote Linux host with `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2`.
+
+Changes under validation:
+
+- `basic_task_schedule_fragment.hpp` is now an 8-line umbrella.
+- `basic_task_schedule_constants_fragment.hpp` owns requested-thread/epoch packing constants.
+- `basic_task_schedule_state_fragment.hpp` owns `request_schedule()`, cancel rollback, and simple schedule-state accessors.
+- `basic_task_running_wake_fragment.hpp` owns run-epoch publication, Running wake registration, request consumption, and Running/Pending resolution.
+- `basic_task_requested_thread_fragment.hpp` owns requested-thread clearing and encode/decode helpers.
+- The split keeps all helpers inline in `BasicTask`; it does not change `TaskState` transitions, requested-thread atomics, run-epoch ordering, queue routing, locks, allocations, or wake behavior.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Remote clang Debug task/scheduler targeted tests: 45/45 passed.
+- Remote clang TSAN task/scheduler/config targeted tests: 46/46 passed, no ThreadSanitizer report.
+- Remote clang Release full runtime suite: 138 total, 135 passed, 3 skipped, 0 failed.
+
+Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | CPU Mean | Throughput Mean |
+| --- | ---: | ---: | ---: |
+| `BM_RuntimeExternalStart/8192` | 6.94 ms | 6.94 ms | 1.193 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 13.0 ms | 4.57 ms | 634.102 k/s |
+| `BM_RuntimeIoThreadHop/8192` | 4.25 ms | 4.24 ms | 1.930 M/s |
+| `BM_RuntimeParallelShards/128` | 0.503 ms | 0.488 ms | 256.183 k/s |
+| `BM_RuntimeParallelShards/512` | 1.98 ms | 1.93 ms | 260.199 k/s |
+
+Interpretation:
+
+- The Running -> Pending wake boundary is now isolated in `basic_task_running_wake_fragment.hpp`, making the epoch/request-slot logic easier to audit without changing it.
+- The TSAN target covers Running wake resolution, self-post local FIFO behavior, cross-thread SPSC hops, above-64 ready-source words, shutdown behavior, and parallel owner resume.
+- The benchmark canary remains within the same noisy remote range as recent scheduler-structure splits and does not show a gross regression from this mechanical split.
