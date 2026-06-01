@@ -35,11 +35,11 @@ struct statx;
 
 namespace af {
 
-#define AF_IO_TYPES_FRAGMENT_INCLUDE
-#include "af/detail/io_types_base_fragment.hpp"
-#include "af/detail/io_types_provided_buffer_fragment.hpp"
-#include "af/detail/io_types_status_fragment.hpp"
-#include "af/detail/io_types_unique_fd_fragment.hpp"
-#undef AF_IO_TYPES_FRAGMENT_INCLUDE
+#define AF_IO_TYPES_DETAIL_INCLUDE
+#include "af/detail/io_types_base.hpp"
+#include "af/detail/io_types_provided_buffer.hpp"
+#include "af/detail/io_types_status.hpp"
+#include "af/detail/io_types_unique_fd.hpp"
+#undef AF_IO_TYPES_DETAIL_INCLUDE
 
 } // namespace af
