@@ -143,7 +143,7 @@ Correctness and performance audit points:
 - `BasicTask` now explicitly friends `detail::Executor<RuntimeT, TraitsT>` because the executor is no longer nested inside `AsyncRuntime`.
 - Public IO was moved behind a CRTP base to create a real API component boundary without adding virtual dispatch, allocation, `std::function`, or extra queues.
 - Executor lifecycle/resource/IO-backend/scheduler behavior is now class-out-of-line template code included after the complete class declaration. This keeps private-state access and inlining while avoiding class-body include splicing.
-- Unreferenced runtime fragment entrypoints and their unreferenced child implementation fragments have been removed from the active framework tree. The only remaining framework `*_fragment.hpp` file is an existing dirty worktree file that is not included by active non-fragment headers and was left untouched. Do not use historical fragment files as the model for new core-runtime structure.
+- Unreferenced runtime fragment entrypoints and their unreferenced child implementation fragments have been removed from the active framework tree. There are no remaining framework headers under `include/af/detail` named `*_fragment.hpp`; the last orphaned completion-operation fragment was unreachable and semantically duplicate with the active `runtime_executor_io_backend.hpp` implementation. Do not use historical fragment files as the model for new core-runtime structure.
 
 Validation after this correction:
 

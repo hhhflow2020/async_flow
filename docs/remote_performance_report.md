@@ -1703,3 +1703,22 @@ Correctness checks:
 Interpretation:
 
 - This is dead internal-header cleanup. A new build or benchmark run was not collected for this pass because the deleted child fragments are not reachable from active code.
+
+## 2026-06-01 Stale Runtime Fragment Orphan Cleanup
+
+This follow-up removes the final orphaned framework runtime fragment header after checking that its pending cancel-drain completion logic already exists in the active `runtime_executor_io_backend.hpp` implementation.
+
+Changes under validation:
+
+- Removed `include/af/detail/runtime_executor_io_uring_backend_completion_operation_fragment.hpp`.
+- The removed file was not referenced by active framework headers, tests, examples, benchmarks, CMake, or Conan metadata.
+- No active scheduler, executor, IO backend, public IO, task lifecycle, queue, state layout, syscall, lock, allocation, memory ordering, or public API behavior changed.
+
+Correctness checks:
+
+- Local scan for framework `include/af/detail/*fragment.hpp` files: no matches.
+- Local scan for `#include "af/detail/*fragment.hpp"` in non-fragment framework headers, tests, examples, benchmarks, CMake, and Conan metadata: no matches.
+
+Interpretation:
+
+- This is dead internal-header cleanup. A new build or benchmark run was not collected for this pass because the deleted orphan header was unreachable and its behavior was already present in the active implementation.
