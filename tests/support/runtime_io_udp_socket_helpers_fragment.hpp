@@ -38,6 +38,38 @@ bool create_udp_loopback_sockets(UdpLoopbackSockets& sockets) {
                &sockets.address_size) == 0;
 }
 
+bool connect_udp_loopback_sockets(UdpLoopbackSockets& sockets) {
+    sockaddr_in sender_address{};
+    sender_address.sin_family = AF_INET;
+    sender_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    sender_address.sin_port = 0;
+    if (::bind(
+            sockets.sender.get(),
+            reinterpret_cast<sockaddr*>(&sender_address),
+            sizeof(sender_address)) != 0) {
+        return false;
+    }
+
+    socklen_t sender_address_size = sizeof(sender_address);
+    if (::getsockname(
+            sockets.sender.get(),
+            reinterpret_cast<sockaddr*>(&sender_address),
+            &sender_address_size) != 0) {
+        return false;
+    }
+
+    if (::connect(
+            sockets.receiver.get(),
+            reinterpret_cast<sockaddr*>(&sender_address),
+            sender_address_size) != 0) {
+        return false;
+    }
+    return ::connect(
+               sockets.sender.get(),
+               reinterpret_cast<sockaddr*>(&sockets.address),
+               sockets.address_size) == 0;
+}
+
 ssize_t send_udp_payload(const UdpLoopbackSockets& sockets, const void* data, std::size_t size) {
     return ::sendto(
         sockets.sender.get(),
