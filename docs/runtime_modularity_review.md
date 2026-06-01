@@ -520,10 +520,9 @@ Additional validation after the io_uring stream recv multishot task split:
 
 Additional validation after the io_uring file lifecycle test support split:
 
-- `tests/support/runtime_io_file_lifecycle_tasks_fragment.hpp` is now a 63-line task shell.
-- `tests/support/runtime_io_file_lifecycle_task_flow_fragment.hpp` owns the state dispatcher.
-- `tests/support/runtime_io_file_lifecycle_task_file_ops_fragment.hpp` owns open, fallocate, write, fsync, read, and close handling.
-- `tests/support/runtime_io_file_lifecycle_task_namespace_ops_fragment.hpp` owns statx, rename, and unlink handling.
+Status: superseded by the io_uring file test support de-fragmenting pass below. The earlier split was mechanically correct, but it used class-body `#include` splicing and did not create an independent abstraction boundary.
+
+- `tests/support/runtime_io_file_lifecycle_tasks_fragment.hpp` was temporarily a 63-line task shell over flow, file-operation, and namespace-operation fragments.
 - No runtime scheduling, IO backend, queue, memory-ordering, public API, or test assertion behavior changed in this pass; only test support ownership changed.
 - Local `git diff --check`: passed.
 - Local Release `asyncflow_runtime_tests` build: passed; local targeted run reported `io_uring backend is Linux-only`.
@@ -533,16 +532,26 @@ Additional validation after the io_uring file lifecycle test support split:
 
 Additional validation after the io_uring fixed-file read/write test support split:
 
-- `tests/support/runtime_io_file_fixed_file_rw_tasks_fragment.hpp` is now a 53-line task shell.
-- `tests/support/runtime_io_file_fixed_file_rw_task_flow_fragment.hpp` owns the state dispatcher.
-- `tests/support/runtime_io_file_fixed_file_rw_task_registration_fragment.hpp` owns missing-table checks, file/buffer registration, duplicate registration validation, and unregister completion.
-- `tests/support/runtime_io_file_fixed_file_rw_task_io_fragment.hpp` owns fixed-buffer write/read, vectored write/read, and fsync handling.
+Status: superseded by the io_uring file test support de-fragmenting pass below. The earlier split was mechanically correct, but it used class-body `#include` splicing and did not create an independent abstraction boundary.
+
+- `tests/support/runtime_io_file_fixed_file_rw_tasks_fragment.hpp` was temporarily a 53-line task shell over flow, registration, and IO-operation fragments.
 - No runtime scheduling, IO backend, queue, memory-ordering, public API, task field layout, or test assertion behavior changed in this pass; only test support ownership changed.
 - Local `git diff --check`: passed.
 - Local Release `asyncflow_runtime_tests` build: passed; local targeted run reported `io_uring backend is Linux-only`.
 - Remote clang Debug `asyncflow_runtime_tests` targeted run: skipped by test logic with `io_uring backend unavailable`.
 - Remote clang TSAN `asyncflow_runtime_tests` targeted run: skipped by test logic with `io_uring backend unavailable` and no ThreadSanitizer report.
 - Remote clang Release `asyncflow_runtime_tests` targeted run: skipped by test logic with `io_uring backend unavailable`.
+
+Additional validation after the io_uring file test support de-fragmenting pass:
+
+- `tests/support/runtime_io_file_lifecycle_tasks_fragment.hpp` is now a cohesive `UringFileLifecycleTask` class definition again, with the state dispatcher and file/namespace operation handlers kept in declaration order.
+- `tests/support/runtime_io_file_fixed_file_rw_tasks_fragment.hpp` is now a cohesive `UringFixedFileTask` class definition again, with registration, fixed-buffer IO, vectored IO, fsync, and unregister handling kept in declaration order.
+- Removed six fragment headers that existed only to splice private methods into those two class bodies.
+- No runtime scheduling, IO backend, queue, memory-ordering, public API, task field layout, or test assertion behavior changed in this pass; only over-fragmented test support source layout changed.
+- Local `git diff --check`: passed.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.0` fresh Debug `asyncflow_runtime_tests` build: passed.
+- Remote clang Debug `UringIoRuntimeFileFixture.*` targeted run: 11 tests loaded and skipped by test logic with `io_uring backend unavailable`.
+- Remote clang Debug full `asyncflow_runtime_tests` run: 141 tests, 118 passed, 23 skipped.
 
 Additional validation after the io_uring stream/UDP recv multishot test support split and backend diagnosis:
 

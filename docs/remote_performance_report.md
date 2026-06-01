@@ -437,6 +437,8 @@ Interpretation:
 
 This run validates the test support split that turned `tests/support/runtime_io_file_lifecycle_tasks_fragment.hpp` into a 63-line task shell over flow, file-operation, and namespace-operation fragments.
 
+Status: superseded by the io_uring file test support de-fragmenting validation later on 2026-06-01. The split validated here was mechanically correct, but the class-body `#include` splice style is no longer the desired modularity pattern.
+
 Correctness and race checks:
 
 - Local `git diff --check`: passed.
@@ -453,6 +455,8 @@ Interpretation:
 ## 2026-06-01 io_uring Fixed-File Read/Write Test Support Split Validation
 
 This run validates the test support split that turned `tests/support/runtime_io_file_fixed_file_rw_tasks_fragment.hpp` into a 53-line task shell over flow, registration, and IO-operation fragments.
+
+Status: superseded by the io_uring file test support de-fragmenting validation later on 2026-06-01. The split validated here was mechanically correct, but the class-body `#include` splice style is no longer the desired modularity pattern.
 
 Correctness and race checks:
 
@@ -1172,3 +1176,25 @@ Interpretation:
 
 - The cleanup removes an over-fragmented adapter class-body structure without changing IO routing, queue selection, syscall paths, io_uring submit paths, memory ordering, or ownership behavior.
 - The benchmark canary stayed in the same sub-nanosecond helper-level range as previous adapter checks, which is the expected result for an inline-only source layout cleanup.
+
+## 2026-06-01 io_uring File Test Support De-Fragmenting Validation
+
+This run validates the cleanup that removes class-body `#include` splicing from the io_uring file lifecycle and fixed-file read/write test support tasks.
+
+Changes under validation:
+
+- `UringFileLifecycleTask` now keeps its state dispatcher plus open, fallocate, write, fsync, read, statx, rename, unlink, and close handlers in one cohesive class definition.
+- `UringFixedFileTask` now keeps its state dispatcher plus file/buffer registration, fixed-buffer IO, vectored IO, fsync, and unregister handlers in one cohesive class definition.
+- Removed the six task fragment headers that existed only to splice private methods into those two class bodies.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.0` fresh Debug `asyncflow_runtime_tests` build: passed.
+- Remote clang Debug `UringIoRuntimeFileFixture.*` targeted run: 11 tests loaded and skipped by test logic with `io_uring backend unavailable`.
+- Remote clang Debug full `asyncflow_runtime_tests` run: 141 tests, 118 passed, 23 skipped.
+
+Interpretation:
+
+- This pass changed only test support layout. Runtime scheduling, IO backend behavior, queue selection, memory ordering, public APIs, task field layout, and test assertions were unchanged.
+- No Release benchmark was run for this pass because no production runtime path or benchmarked helper path changed.
