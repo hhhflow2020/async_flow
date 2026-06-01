@@ -71,7 +71,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - io_uring fixed file/buffer test support is now a small umbrella over fixed-buffer, fixed-file read/write, fixed-file update, and openat-direct task fragments.
 - IO benchmark support now keeps the hot benchmark-facing fake task shell small and splits FakeRuntime stubs by Linux socket, POSIX message, POSIX fixed file, accept/connect, and filesystem helpers. Adapter benchmark cases are also split by stream/listener, datagram, and resource/file-like families.
 - Runtime benchmarks are now split into shared runtime benchmark task support, external-start, thread-hop, and parallel-shard benchmark families. This keeps benchmark harness changes separate from the task/state-machine fixtures they measure.
-- The length-prefixed RPC example is now split into runtime traits, server/process task, client task, and a thin executable entry point.
+- The length-prefixed RPC example is now split into runtime traits, server/process task fragments, client flow/request/response fragments, and a thin executable entry point.
 - The vectored IO example is now split into runtime/common helpers, stream readv/writev tasks, datagram recvmsg/sendmsg tasks, and a thin executable entry point.
 - The io_uring UDP recvmsg multishot example is now split into runtime/wait helpers, UDP socket setup helpers, a small provided-buffer multishot task shell, flow/ring/recv fragments, and a thin executable entry point.
 - The io_uring accept-direct example is now split into runtime/wait helpers, socket setup/read-write helpers, the fixed-file accept round-trip task, and a thin executable entry point.
@@ -325,6 +325,20 @@ Additional validation after the length-prefixed RPC server example split:
 - Remote clang TSAN `asyncflow_io_rpc_length_prefixed_example` build/run: passed with `rpc response_ok=1` and no ThreadSanitizer report.
 - Remote clang Release `asyncflow_io_rpc_length_prefixed_example` build/run: passed with `rpc response_ok=1`.
 
+Additional validation after the length-prefixed RPC client example split:
+
+- `examples/support/io_rpc_length_prefixed_client.hpp` is now a 77-line client task shell.
+- `examples/support/io_rpc_length_prefixed_client_flow.hpp` owns the state dispatcher and completion path.
+- `examples/support/io_rpc_length_prefixed_client_request.hpp` owns connect, request frame setup, and request send handlers.
+- `examples/support/io_rpc_length_prefixed_client_response.hpp` owns response header/body parsing and response validation.
+- No runtime scheduling, IO backend, queue, memory-ordering, or public API behavior changed in this pass; only example support ownership changed.
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_io_rpc_length_prefixed_example` build: passed; local run reported `rpc length-prefixed example is Linux-only`.
+- Remote clang Debug `asyncflow_io_rpc_length_prefixed_example` build/run: passed with `rpc length-prefixed backend=epoll-fallback` and `rpc response_ok=1`.
+- Remote clang TSAN `asyncflow_io_rpc_length_prefixed_example` build/run: passed with `rpc response_ok=1` and no ThreadSanitizer report.
+- Remote clang Release `asyncflow_io_rpc_length_prefixed_example` build/run: passed with `rpc response_ok=1`.
+- The remote build log showed a short clock-skew warning after rsync because modified file timestamps were a few seconds ahead of the container clock; each configuration still rebuilt the target and completed the RPC round trip.
+
 Additional validation after the io_uring fixed-file task split:
 
 - `examples/support/io_uring_fixed_file_task.hpp` is now a 77-line task shell.
@@ -422,7 +436,7 @@ Issue ledger:
 - Resolved: `basic_task_fragment.hpp` now uses class-body fragments for public/protected task helpers, schedule-state transitions, lifetime/destroy helpers, and one final storage-layout block.
 - Resolved: `io_common_detail_state_fragment.hpp` is split by helper family, and the epoll readiness path no longer depends on a deferred-delete/rearm-hint cleanup path.
 - Resolved: the old combined runtime stress source was removed. Lifecycle, cross-thread hop, and parallel shard stress cases now live in separate test sources; reusable state machines live in support headers.
-- P2: several IO tests and examples remain moderately dense after the first pass. `runtime_io_uring_socket_datagram_tests.cpp` and `runtime_io_stream_transfer_tests.cpp` were reduced by extracting repeated fixture setup into shared test support; `io_rpc_length_prefixed_server.hpp`, `io_uring_fixed_file_task.hpp`, and `io_uring_file_lifecycle_task.hpp` were reduced to small task/umbrella shells over role or operation-family fragments. Future edits should split by protocol role, transfer mode, or operation family instead of appending new states to the existing file.
+- P2: several IO tests and examples remain moderately dense after the first pass. `runtime_io_uring_socket_datagram_tests.cpp` and `runtime_io_stream_transfer_tests.cpp` were reduced by extracting repeated fixture setup into shared test support; `io_rpc_length_prefixed_client.hpp`, `io_rpc_length_prefixed_server.hpp`, `io_uring_fixed_file_task.hpp`, and `io_uring_file_lifecycle_task.hpp` were reduced to small task/umbrella shells over role or operation-family fragments. Future edits should split by protocol role, transfer mode, or operation family instead of appending new states to the existing file.
 - P2: older examples such as `io_epoll.cpp`, `io_event.cpp`, `io_timer.cpp`, `io_native_readiness.cpp`, and several multishot examples still use explicit atomics to observe readiness/completion from `main`. Prefer task-owned state machines plus `ShutdownPolicy::WaitForTasks` for examples unless the example is specifically demonstrating cross-thread observation.
 
 Performance guardrails:
@@ -486,7 +500,7 @@ Current issue ledger:
 - P1: future changes must not append new operation families directly into `async_runtime.hpp`. New public methods should enter through the existing public IO/resource/lifecycle/parallel umbrellas, and new executor operations should enter through the matching backend submit/completion fragments.
 - P2: `include/af/detail/bounded_queues.hpp` still contains SPSC, MPSC, and MPMC bounded queues in one file. The implementation is performance-sensitive and cache-line aligned, so a split is acceptable only as a mechanical separation into queue-family headers with no layout or memory-order changes, followed by queue benchmarks.
 - P2: several test support files remain dense state-machine collections: stream sendfile/splice support, file lifecycle support, fixed-file read/write support, and io_uring multishot recv/recvmsg support. These should continue moving toward operation-family task fragments when touched.
-- P2: several examples remain long because they combine protocol framing, socket IO, task state machines, and result reporting. The fixed-file round trip, file lifecycle, UDP recvmsg multishot, and length-prefixed RPC server paths have been reduced to focused fragments; the biggest current examples are now the length-prefixed RPC client and remaining UDP recv multishot task variants. Prefer protocol/helper headers plus small task headers for future edits.
+- P2: several examples remain long because they combine protocol framing, socket IO, task state machines, and result reporting. The fixed-file round trip, file lifecycle, UDP recvmsg multishot, and length-prefixed RPC client/server paths have been reduced to focused fragments; the biggest current examples are now the remaining UDP recv multishot task variants and older readiness examples. Prefer protocol/helper headers plus small task headers for future edits.
 - P2: `tests/utility_tests.cpp` is now one of the largest standalone tests. It should be split by utility domain if new utility coverage is added.
 
 Assessment:
