@@ -124,7 +124,7 @@ Resolved items:
 - The previous `thread_count <= 64` ready-source hint limit is gone. `ReadySourceSet<ThreadCount>` stores ready sources across cache-line-aligned 64-bit words and supports runtimes above 64 threads.
 - Ready-source bits are hints, not correctness state. `pop_one()` now checks ready-source words, clears an empty source only after an SPSC pop miss, immediately rechecks that SPSC queue, and still has a bounded all-source SPSC fallback scan. This prevents lost/coalesced ready hints from stranding work while avoiding permanent scans of stale sticky bits.
 - A late owner-resume race was fixed in `BasicTask`. Running wake requests are now tagged with a run epoch, `Executor::execute()` uses a `Queued -> Starting -> Running` transition, and a post that races with `finish_pending()` can either defer to the owner or directly transition `Pending -> Queued` and enqueue the task. This prevents a stale `Running` observation from writing `requested_thread_` after the owner has already checked the slot.
-- The new scheduler stress fixtures were moved out of `tests/runtime_stress_tests.cpp` into `tests/support/runtime_scheduler_stress_support.hpp`. The source file now keeps test cases separate from reusable state-machine tasks.
+- Scheduler and runtime stress fixtures are no longer concentrated in one source. Reusable scheduler state machines live in `tests/support/runtime_scheduler_stress_support.hpp`, lifecycle stress helpers live in `tests/support/runtime_lifecycle_stress_support.hpp`, and test cases are split by lifecycle, cross-thread, and parallel concerns.
 - `runtime_executor_core_state_fragment.hpp` is now the executor field-layout owner only. Queue-drain behavior lives in `runtime_executor_pop_fragment.hpp`, and finish/reschedule behavior lives in `runtime_executor_finish_fragment.hpp`. This keeps declaration order and cache placement in one file while separating behavior that changes scheduling state.
 - `runtime_executor_task_fragment.hpp` is now a 7-line umbrella. Ready-source/wake signaling, local queue push/pop, and execute/result dispatch live in `runtime_executor_ready_signal_fragment.hpp`, `runtime_executor_local_queue_fragment.hpp`, and `runtime_executor_execute_fragment.hpp`.
 - `basic_task_fragment.hpp` is now a 20-line class shell. Public task API, protected task helpers, lifetime reference handling, scheduling/wake state machine, and storage layout live in dedicated class-body fragments. Storage fields remain together in `basic_task_storage_fragment.hpp`.
@@ -150,7 +150,10 @@ Current file-size snapshot after the pass:
 - `include/af/detail/basic_task_lifetime_fragment.hpp`: 26 lines.
 - `include/af/detail/basic_task_schedule_fragment.hpp`: 167 lines.
 - `include/af/detail/basic_task_storage_fragment.hpp`: 18 lines.
-- `tests/runtime_stress_tests.cpp`: 353 lines.
+- `tests/runtime_lifecycle_stress_tests.cpp`: 63 lines.
+- `tests/runtime_cross_thread_stress_tests.cpp`: 123 lines.
+- `tests/runtime_parallel_stress_tests.cpp`: 96 lines.
+- `tests/support/runtime_lifecycle_stress_support.hpp`: 109 lines.
 - `tests/support/runtime_scheduler_stress_support.hpp`: 281 lines.
 
 Validation evidence for the final pass:
@@ -249,6 +252,19 @@ Additional validation after the runtime common-state split:
   - `BM_RuntimeParallelShards/128` mean: 0.477 ms real, 268.859 k/s.
   - `BM_RuntimeParallelShards/512` mean: 2.03 ms real, 253.068 k/s.
 
+Additional validation after the runtime stress source split:
+
+- Removed the old combined `tests/runtime_stress_tests.cpp`.
+- Split runtime stress cases into `tests/runtime_lifecycle_stress_tests.cpp`, `tests/runtime_cross_thread_stress_tests.cpp`, and `tests/runtime_parallel_stress_tests.cpp`.
+- Added `tests/support/runtime_lifecycle_stress_support.hpp` for lifecycle stress runtime/task scaffolding. Cross-thread hop and parallel shard stress scaffolding remain in `tests/support/runtime_scheduler_stress_support.hpp`.
+- No runtime scheduling or IO behavior changed in this pass; the split is test-structure only.
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_runtime_tests` build: passed.
+- Local Release `RuntimeStressTests`: 4/4 passed.
+- Remote clang Debug `RuntimeStressTests`: 4/4 passed.
+- Remote clang TSAN `RuntimeStressTests`: 4/4 passed with no ThreadSanitizer report.
+- Remote clang Release full runtime test suite: 132/132 passed, with 21 platform/io_uring capability tests skipped by test logic.
+
 Remaining follow-up:
 
 - Ready-source hints are now correct and bounded, but future benchmarking may justify a rotating ready-word cursor for very large `thread_count` values.
@@ -265,7 +281,7 @@ Current file-size snapshot:
 - `include/af/detail/runtime_dispatch_fragment.hpp`: 195 lines. It remains the main core-runtime split candidate because it owns queue topology, same-thread local enqueue, cross-thread SPSC enqueue, external MPSC enqueue, ready-source signaling, and external-post admission accounting.
 - Resolved after this scan: `include/af/detail/basic_task_fragment.hpp` is now a small class shell over public, protected-helper, lifetime, scheduling, and storage fragments.
 - Resolved after this scan: `include/af/detail/io_common_detail_state_fragment.hpp` is now a small umbrella over IO target, wait-arm, wait-state, io_uring-status, and iovec helper fragments.
-- `tests/runtime_stress_tests.cpp`: 317 lines. The new repeated cross-thread hop stress fixture should move into a support fragment once the scheduler fix is validated.
+- Resolved after this scan: the old combined `tests/runtime_stress_tests.cpp` was removed. Runtime stress test cases are split by concern, and reusable stress state machines live in support headers.
 - The largest remaining examples/tests are now fixture/state-machine files, not the runtime shell: `io_rpc_length_prefixed_server.hpp`, `io_uring_fixed_file_task.hpp`, `runtime_io_uring_socket_datagram_tests.cpp`, `runtime_io_stream_transfer_tests.cpp`, and `io_uring_file_lifecycle_task.hpp`.
 
 Active correctness/performance issues to track:
@@ -287,7 +303,7 @@ Modularity rule for the next pass:
 Recommended immediate order:
 
 1. Finish and validate the cross-thread SPSC visibility/wakeup fix.
-2. Move repeated-hop stress support out of `tests/runtime_stress_tests.cpp`.
+2. Completed: move repeated-hop stress support out of the old combined runtime stress source.
 3. Split `runtime_dispatch_fragment.hpp` into queue topology, ready enqueue, and external-post admission fragments.
 4. Completed: split executor pop/finish behavior out of `runtime_executor_core_state_fragment.hpp`, leaving only state layout in that file.
 5. Completed: split `runtime_executor_task_fragment.hpp` once the preceding scheduler benchmarks were clean.
@@ -306,7 +322,7 @@ Issue ledger:
 - Resolved: `runtime_executor_task_fragment.hpp` is split into ready signaling/wake, local queue, and execute/finish dispatch fragments. The split was followed by same-thread, cross-thread, external-start, IO-thread hop, and parallel-shard benchmark canaries.
 - Resolved: `basic_task_fragment.hpp` now uses class-body fragments for public/protected task helpers, schedule-state transitions, lifetime/destroy helpers, and one final storage-layout block.
 - Resolved: `io_common_detail_state_fragment.hpp` is split by helper family, and the epoll readiness path no longer depends on a deferred-delete/rearm-hint cleanup path.
-- P2: `runtime_stress_tests.cpp` now contains both StopImmediately lifecycle stress and repeated cross-thread hop stress. Move the repeated-hop runtime/task into `tests/support/runtime_lifecycle_cross_thread_hop_support_fragment.hpp` and keep the source file as test cases only.
+- Resolved: the old combined runtime stress source was removed. Lifecycle, cross-thread hop, and parallel shard stress cases now live in separate test sources; reusable state machines live in support headers.
 - P2: several IO tests and examples remain moderately dense after the first pass. Notable current files are `runtime_io_uring_socket_datagram_tests.cpp`, `runtime_io_stream_transfer_tests.cpp`, `io_rpc_length_prefixed_server.hpp`, `io_uring_fixed_file_task.hpp`, and `io_uring_file_lifecycle_task.hpp`. Future edits should split by protocol role, transfer mode, or operation family instead of appending new states to the existing file.
 - P2: older examples such as `io_epoll.cpp`, `io_event.cpp`, `io_timer.cpp`, `io_native_readiness.cpp`, and several multishot examples still use explicit atomics to observe readiness/completion from `main`. Prefer task-owned state machines plus `ShutdownPolicy::WaitForTasks` for examples unless the example is specifically demonstrating cross-thread observation.
 
@@ -325,7 +341,7 @@ Recommended next split order:
 2. Split `runtime_dispatch_fragment.hpp` into topology, ready enqueue, and external-post admission fragments.
 3. Completed: split executor pop/finish behavior out of `runtime_executor_core_state_fragment.hpp`, leaving field layout in that file.
 4. Completed: split `runtime_executor_task_fragment.hpp` after the first two P1 splits benchmarked cleanly.
-5. Split `runtime_stress_tests.cpp` support for repeated cross-thread hops so future scheduler regressions are easier to isolate.
+5. Completed: split runtime stress sources and support so lifecycle, cross-thread hop, and parallel shard regressions are easier to isolate.
 
 ### 2026-06-01 Core Fixed-Thread Runtime Modularity Audit
 

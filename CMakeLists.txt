@@ -177,7 +177,9 @@ if(ASYNCFLOW_BUILD_TESTS)
         tests/runtime_parallel_shards_tests.cpp
         tests/runtime_ordered_start_tests.cpp
         tests/runtime_ordered_batch_tests.cpp
-        tests/runtime_stress_tests.cpp
+        tests/runtime_lifecycle_stress_tests.cpp
+        tests/runtime_cross_thread_stress_tests.cpp
+        tests/runtime_parallel_stress_tests.cpp
         tests/queue_tests.cpp
         tests/pool_tests.cpp
         tests/io_state_utility_tests.cpp

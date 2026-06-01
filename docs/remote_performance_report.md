@@ -236,3 +236,21 @@ Interpretation:
 
 - The split is structural and keeps all common runtime types inside `AsyncRuntime` class scope, so hot paths remain inline/template-visible.
 - The removed tuning knob no longer controlled any storage reservation after deferred epoll delete cleanup was deleted. Removing it avoids a misleading no-op API while preserving active IO reserve knobs.
+
+## 2026-06-01 Runtime Stress Source Split Validation
+
+This run validates the test-structure split that removed the old combined `tests/runtime_stress_tests.cpp`. Runtime stress cases are now split by concern into lifecycle, cross-thread hop, and parallel shard sources, with reusable state machines in support headers.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_runtime_tests` build: passed.
+- Local Release `RuntimeStressTests`: 4/4 passed.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2` Debug `RuntimeStressTests`: 4/4 passed.
+- Remote clang TSAN `RuntimeStressTests`: 4/4 passed with no ThreadSanitizer report.
+- Remote clang Release full runtime suite: 132/132 passed; 21 platform/io_uring capability tests were skipped by test logic.
+
+Interpretation:
+
+- This pass changed only test layout and CMake source registration. It did not change runtime scheduling, IO paths, queue selection, memory ordering, or wake behavior.
+- The split keeps lifecycle shutdown pressure, cross-thread SPSC hop pressure, above-64-thread ready-source coverage, and parallel owner-resume pressure independently addressable.
