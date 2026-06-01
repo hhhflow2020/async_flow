@@ -132,7 +132,7 @@ Current core-runtime layout:
 - `include/af/detail/runtime_dispatch.hpp`: queue topology, local/SPSC/external enqueue paths, ready-route selection, and external-post admission accounting.
 - `include/af/detail/runtime_task_lifecycle.hpp`: task object pools, handle release, optional StopImmediately registry/cancel, and unfinished-task accounting.
 - `include/af/detail/runtime_parallel.hpp`: ordered-start, ordered-batch guard, shard task/runner, and shard dispatch.
-- `include/af/detail/runtime_executor.hpp`: standalone `detail::Executor<RuntimeT, TraitsT>` declaration/state-layout component. Lifecycle/notify behavior lives in `runtime_executor_lifecycle.hpp`; io_uring backend status and resource registration lives in `runtime_executor_io_resources.hpp`; IO backend setup/poll/completion/operation cleanup lives in `runtime_executor_io_backend.hpp`; Linux epoll readiness setup/poll/wait/cancel lives in `runtime_executor_epoll_backend.hpp`; ready/local-queue execution and run-loop scheduling live in `runtime_executor_scheduler.hpp`.
+- `include/af/detail/runtime_executor.hpp`: standalone `detail::Executor<RuntimeT, TraitsT>` declaration/state-layout component. Lifecycle/notify behavior lives in `runtime_executor_lifecycle.hpp`; io_uring backend status and resource registration lives in `runtime_executor_io_resources.hpp`; IO backend setup/poll/completion/operation cleanup lives in `runtime_executor_io_backend.hpp`; Linux epoll readiness setup/poll/wait/cancel lives in `runtime_executor_epoll_backend.hpp`; private Linux io_uring submit helpers live in `runtime_executor_io_submit_core.hpp`; ready/local-queue execution and run-loop scheduling live in `runtime_executor_scheduler.hpp`.
 
 Correctness and performance audit points:
 
@@ -149,11 +149,11 @@ Validation after this correction:
 - Remote clang Debug full runtime suite with `--security-opt seccomp=unconfined`: 143 total, 140 passed, 3 skipped.
 - Remote clang Release build of `asyncflow_runtime_tests` and `asyncflow_runtime_benchmarks`: passed.
 - Remote clang Release full runtime suite with `--security-opt seccomp=unconfined`: 143 total, 140 passed, 3 skipped.
-- Release benchmark canary after the executor epoll backend split, 3 repetitions with `--benchmark_min_time=0.05s`: `BM_RuntimeExternalStart/8192` mean 6.62 ms, `BM_RuntimeCrossThreadHop/8192` mean 12.5 ms, `BM_RuntimeIoThreadHop/8192` mean 4.28 ms, `BM_RuntimeParallelShards/128` mean 0.477 ms.
+- Release benchmark canary after the executor io_uring submit-core split, 3 repetitions with `--benchmark_min_time=0.05s`: `BM_RuntimeExternalStart/8192` mean 7.29 ms, `BM_RuntimeCrossThreadHop/8192` mean 13.0 ms, `BM_RuntimeIoThreadHop/8192` mean 4.28 ms, `BM_RuntimeParallelShards/128` mean 0.484 ms.
 
 Remaining follow-up:
 
-- P1: `runtime_executor.hpp` is still large at 3356 lines after the epoll split. Do not re-split it by access sections. The next acceptable split should continue moving real operation families out as class-out-of-line template definitions or extract backend-specific helper components with explicit owner boundaries.
+- P1: `runtime_executor.hpp` is still large at 2627 lines after the io_uring submit-core split. Do not re-split it by access sections. The next acceptable split should continue moving real operation families out as class-out-of-line template definitions or extract backend-specific helper components with explicit owner boundaries.
 - P2: non-core IO headers such as `io_common` and several `io_*` public umbrellas still use fragment includes. They should be cleaned opportunistically when the split can follow real operation-family or class boundaries.
 
 ### 2026-06-01 Scheduler Correctness And Modularity Pass

@@ -1425,3 +1425,38 @@ Interpretation:
 
 - This pass changes only declaration/definition placement. epoll fd/eventfd setup, wake coalescing, one-shot wait registration, io_uring poll-wait fallback, cancel behavior, task wake behavior, locks, atomics, allocations, and ownership semantics are unchanged.
 - `runtime_executor.hpp` dropped from 3605 lines to 3356 lines. Further executor work should target remaining real operation families; kqueue should be handled separately on a platform where it can be compiled and tested directly.
+
+## 2026-06-01 Executor io_uring Submit Core Split
+
+This run validates the split of private Linux io_uring submit helpers into a normal implementation header.
+
+Changes under validation:
+
+- `runtime_executor.hpp` now keeps private submit-core APIs as declarations near the executor state layout.
+- `runtime_executor_io_submit_core.hpp` owns the class-out-of-line template definitions for provided-buffer group lookup, buffer submit, fast SQE submit, socket submit, fixed-file read/write submit, generic submit validation, message/address attachment, SQE filling, and `submit_io_uring_op()`.
+- The split leaves the generic submit argument/kind structs in the executor declaration so private type layout and submit classification remain auditable next to the executor state.
+- The split keeps all code header-only/template-visible and does not reintroduce class-body `#include` splicing.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed before this documentation update.
+- Local scan for `#include "af/detail/*fragment.hpp"` inside framework class/struct bodies: no matches.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.0` Debug `asyncflow_runtime_tests` build: passed.
+- Remote clang Debug full runtime suite under `--security-opt seccomp=unconfined`: 143 tests, 140 passed, 3 skipped, 0 failed.
+- Remote clang Release `asyncflow_runtime_tests` and `asyncflow_runtime_benchmarks` build: passed.
+- Remote clang Release full runtime suite under `--security-opt seccomp=unconfined`: 143 tests, 140 passed, 3 skipped, 0 failed.
+
+Release benchmark canary, second run, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | Throughput Mean |
+| --- | ---: | ---: |
+| `BM_RuntimeExternalStart/8192` | 7.29 ms | 1.124 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 13.0 ms | 630.069 k/s |
+| `BM_RuntimeIoThreadHop/8192` | 4.28 ms | 1.915 M/s |
+| `BM_RuntimeParallelShards/128` | 0.484 ms | 265.840 k/s |
+
+Interpretation:
+
+- This pass changes only declaration/definition placement. SQE contents, io_uring operation ownership, submit batching, fixed-resource validation, provided-buffer checks, message/address storage, locks, atomics, allocations, and task wake behavior are unchanged.
+- The runtime hop benchmarks do not directly exercise the moved io_uring submit helpers; the external/cross-thread values remain within the historical canary range but are noisy enough that they should not be treated as a stable microarchitectural baseline.
+- `runtime_executor.hpp` dropped from 3356 lines to 2627 lines. Further executor work should target remaining real operation families, especially public submit wrappers or platform-specific kqueue code when a kqueue-capable runner is available.
