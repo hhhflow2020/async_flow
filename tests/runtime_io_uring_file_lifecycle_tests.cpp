@@ -16,10 +16,7 @@ TEST_F(UringIoRuntimeFileFixture, IoUringThreadOpensFileWithOpenAt) {
 
     std::atomic<int> completed{0};
     std::atomic<char> byte_read{0};
-    ASSERT_TRUE(UringIoRuntime::start_task<UringOpenAtFileTask>(
-        path,
-        &completed,
-        &byte_read));
+    ASSERT_TRUE(UringIoRuntime::start_task<UringOpenAtFileTask>(path, &completed, &byte_read));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(byte_read.load(std::memory_order_acquire), 'O');
 
@@ -49,11 +46,7 @@ TEST_F(UringIoRuntimeFileFixture, IoUringFileLifecycleRunsOnIoThread) {
     std::atomic<int> close_released{0};
     std::atomic<std::uint64_t> observed_size{0};
     ASSERT_TRUE(UringIoRuntime::start_task<UringFileLifecycleTask>(
-        path,
-        renamed_path,
-        &completed,
-        &close_released,
-        &observed_size));
+        path, renamed_path, &completed, &close_released, &observed_size));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
 
     EXPECT_EQ(close_released.load(std::memory_order_acquire), 1);
@@ -96,13 +89,7 @@ TEST_F(UringIoRuntimeFileFixture, IoUringFilesystemOpsRunOnIoThread) {
     std::atomic<int> error{0};
     std::atomic<std::uint64_t> observed_size{0};
     ASSERT_TRUE(UringIoRuntime::start_task<UringFilesystemOpsTask>(
-        dir_path,
-        file_path,
-        hardlink_path,
-        symlink_path,
-        &completed,
-        &error,
-        &observed_size));
+        dir_path, file_path, hardlink_path, symlink_path, &completed, &error, &observed_size));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
 
     const int task_error = error.load(std::memory_order_acquire);

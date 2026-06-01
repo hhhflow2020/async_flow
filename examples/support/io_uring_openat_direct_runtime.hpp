@@ -26,8 +26,7 @@ struct DirectOpenRuntimeTraits {
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 
     static constexpr af::ThreadKind thread_kind(DirectOpenThread thread) noexcept {
-        return thread == DirectOpenThread::IO_0 ? af::ThreadKind::IoUring
-                                                : af::ThreadKind::Worker;
+        return thread == DirectOpenThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
     }
 };
 
@@ -42,7 +41,7 @@ struct DirectOpenRoundTripResult {
 [[nodiscard]] inline bool unsupported_direct_open_error(int error) noexcept {
     return error == EINVAL || error == EBADF || error == ENOSYS || error == ENXIO
 #ifdef EOPNOTSUPP
-        || error == EOPNOTSUPP
+           || error == EOPNOTSUPP
 #endif
         ;
 }

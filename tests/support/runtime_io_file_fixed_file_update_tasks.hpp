@@ -5,11 +5,8 @@ public:
     explicit UringFixedFileUpdateTask(UringIoTaskBase::FactoryToken token)
         : UringIoTaskBase(token) {}
 
-    bool do_it(
-        int first_fd,
-        int second_fd,
-        std::atomic<int>* completed,
-        std::atomic<int>* packed_read) {
+    bool do_it(int first_fd, int second_fd, std::atomic<int> *completed,
+               std::atomic<int> *packed_read) {
         first_fd_ = first_fd;
         second_fd_ = second_fd;
         completed_ = completed;
@@ -49,24 +46,16 @@ private:
 
     af::TaskResult register_file() {
         int error = 0;
-        if (UringIoRuntime::io_update_registered_files(
-                IoTestThread::IO_0,
-                0,
-                &second_fd_,
-                1,
-                &error) ||
+        if (UringIoRuntime::io_update_registered_files(IoTestThread::IO_0, 0, &second_fd_, 1,
+                                                       &error) ||
             error != ENOENT) {
             return failed();
         }
         if (!UringIoRuntime::io_register_files(IoTestThread::IO_0, &first_fd_, 1, &error)) {
             return failed();
         }
-        if (UringIoRuntime::io_update_registered_files(
-                IoTestThread::IO_0,
-                1,
-                &second_fd_,
-                1,
-                &error) ||
+        if (UringIoRuntime::io_update_registered_files(IoTestThread::IO_0, 1, &second_fd_, 1,
+                                                       &error) ||
             error != EINVAL) {
             return failed();
         }
@@ -75,12 +64,8 @@ private:
     }
 
     af::TaskResult read_first() {
-        const af::IoStatus status = file_.read_at(
-            *this,
-            &first_read_,
-            sizeof(first_read_),
-            0,
-            first_read_state_);
+        const af::IoStatus status =
+            file_.read_at(*this, &first_read_, sizeof(first_read_), 0, first_read_state_);
         if (status.pending()) {
             return pending();
         }
@@ -93,12 +78,8 @@ private:
 
     af::TaskResult update_file() {
         int error = 0;
-        if (!UringIoRuntime::io_update_registered_files(
-                IoTestThread::IO_0,
-                0,
-                &second_fd_,
-                1,
-                &error)) {
+        if (!UringIoRuntime::io_update_registered_files(IoTestThread::IO_0, 0, &second_fd_, 1,
+                                                        &error)) {
             return failed();
         }
         state_ = State::ReadSecond;
@@ -106,16 +87,13 @@ private:
     }
 
     af::TaskResult read_second() {
-        const af::IoStatus status = file_.read_at(
-            *this,
-            &second_read_,
-            sizeof(second_read_),
-            0,
-            second_read_state_);
+        const af::IoStatus status =
+            file_.read_at(*this, &second_read_, sizeof(second_read_), 0, second_read_state_);
         if (status.pending()) {
             return pending();
         }
-        if (!status.ready() || status.bytes != sizeof(second_read_) || second_read_ != second_value_) {
+        if (!status.ready() || status.bytes != sizeof(second_read_) ||
+            second_read_ != second_value_) {
             return failed();
         }
         state_ = State::Unregister;
@@ -127,9 +105,8 @@ private:
         if (!UringIoRuntime::io_unregister_files(IoTestThread::IO_0, &error)) {
             return failed();
         }
-        const int packed =
-            (static_cast<int>(static_cast<unsigned char>(first_read_)) << 8) |
-            static_cast<int>(static_cast<unsigned char>(second_read_));
+        const int packed = (static_cast<int>(static_cast<unsigned char>(first_read_)) << 8) |
+                           static_cast<int>(static_cast<unsigned char>(second_read_));
         packed_read_->store(packed, std::memory_order_release);
         completed_->fetch_add(1, std::memory_order_release);
         return done();
@@ -145,6 +122,6 @@ private:
     char second_read_{0};
     af::IoOpState first_read_state_{};
     af::IoOpState second_read_state_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* packed_read_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *packed_read_{nullptr};
 };

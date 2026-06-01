@@ -41,15 +41,13 @@ struct UdpLoopbackSockets {
         address.sin_family = AF_INET;
         address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         address.sin_port = 0;
-        if (::bind(receiver.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+        if (::bind(receiver.get(), reinterpret_cast<sockaddr *>(&address), sizeof(address)) != 0) {
             return false;
         }
 
         address_size = sizeof(address);
-        return ::getsockname(
-            receiver.get(),
-            reinterpret_cast<sockaddr*>(&address),
-            &address_size) == 0;
+        return ::getsockname(receiver.get(), reinterpret_cast<sockaddr *>(&address),
+                             &address_size) == 0;
     }
 };
 

@@ -15,13 +15,8 @@ class RpcClientTask final : public RpcTask {
 public:
     explicit RpcClientTask(RpcTask::FactoryToken token) : RpcTask(token) {}
 
-    bool do_it(
-        int fd,
-        sockaddr_in server,
-        socklen_t server_size,
-        bool* ok,
-        int* error,
-        bool* response_ok) {
+    bool do_it(int fd, sockaddr_in server, socklen_t server_size, bool *ok, int *error,
+               bool *response_ok) {
         stream_.reset(RpcThread::IO_0, fd);
         server_ = server;
         server_size_ = server_size;
@@ -64,10 +59,7 @@ private:
 
     af::TaskResult connect() {
         const af::IoStatus status = stream_.connect(
-            *this,
-            reinterpret_cast<const sockaddr*>(&server_),
-            server_size_,
-            connect_);
+            *this, reinterpret_cast<const sockaddr *>(&server_), server_size_, connect_);
         if (status.pending()) {
             return pending();
         }
@@ -89,10 +81,7 @@ private:
 
     af::TaskResult send_request_header() {
         const af::IoStatus status = stream_.send_some(
-            *this,
-            request_header_ + request_header_written_,
-            4U - request_header_written_,
-            write_);
+            *this, request_header_ + request_header_written_, 4U - request_header_written_, write_);
         if (status.pending()) {
             return pending();
         }
@@ -109,11 +98,8 @@ private:
     }
 
     af::TaskResult send_request_body() {
-        const af::IoStatus status = stream_.send_some(
-            *this,
-            request_ + request_written_,
-            request_size_ - request_written_,
-            write_);
+        const af::IoStatus status = stream_.send_some(*this, request_ + request_written_,
+                                                      request_size_ - request_written_, write_);
         if (status.pending()) {
             return pending();
         }
@@ -131,10 +117,7 @@ private:
 
     af::TaskResult read_response_header() {
         const af::IoStatus status = stream_.recv_some(
-            *this,
-            response_header_ + response_header_read_,
-            4U - response_header_read_,
-            read_);
+            *this, response_header_ + response_header_read_, 4U - response_header_read_, read_);
         if (status.pending()) {
             return pending();
         }
@@ -163,11 +146,8 @@ private:
             return complete(0);
         }
 
-        const af::IoStatus status = stream_.recv_some(
-            *this,
-            response_ + response_read_,
-            response_size_ - response_read_,
-            read_);
+        const af::IoStatus status = stream_.recv_some(*this, response_ + response_read_,
+                                                      response_size_ - response_read_, read_);
         if (status.pending()) {
             return pending();
         }
@@ -205,9 +185,9 @@ private:
     std::size_t response_size_{0};
     std::size_t response_read_{0};
 
-    bool* ok_{nullptr};
-    int* error_{nullptr};
-    bool* response_ok_{nullptr};
+    bool *ok_{nullptr};
+    int *error_{nullptr};
+    bool *response_ok_{nullptr};
 };
 
 } // namespace io_rpc_length_prefixed_example

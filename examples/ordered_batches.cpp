@@ -13,8 +13,8 @@ struct PlayerDeltaStream {};
 struct PlayerDeltaBatch {
     std::uint64_t batch_id{0};
     std::vector<int> deltas;
-    std::atomic<int>* total_delta{nullptr};
-    std::array<std::atomic<std::uint64_t>, player_logic_shard_count>* shard_batch_seen{nullptr};
+    std::atomic<int> *total_delta{nullptr};
+    std::array<std::atomic<std::uint64_t>, player_logic_shard_count> *shard_batch_seen{nullptr};
 };
 
 class ApplyPlayerDeltaBatchTask final : public Task {
@@ -51,17 +51,14 @@ private:
     af::TaskResult apply_batch() {
         state_ = State::Finish;
         async::parallel_shards_ordered(
-            player_logic_begin,
-            sharded_deltas_,
-            batch_.batch_id,
-            this,
-            [this](std::uint16_t shard, std::vector<int>& deltas, std::uint64_t batch_id) {
+            player_logic_begin, sharded_deltas_, batch_.batch_id, this,
+            [this](std::uint16_t shard, std::vector<int> &deltas, std::uint64_t batch_id) {
                 apply_shard(shard, deltas, batch_id);
             });
         return pending();
     }
 
-    void apply_shard(std::uint16_t shard, const std::vector<int>& deltas, std::uint64_t batch_id) {
+    void apply_shard(std::uint16_t shard, const std::vector<int> &deltas, std::uint64_t batch_id) {
         (*batch_.shard_batch_seen)[shard].store(batch_id, std::memory_order_release);
         int local_delta = 0;
         for (int delta : deltas) {
@@ -92,8 +89,7 @@ private:
     af::TaskResult run() override {
         const bool started =
             async::start_ordered_task<PlayerDeltaStream, ApplyPlayerDeltaBatchTask>(
-                AppThread::Logic_0,
-                std::move(batch_));
+                AppThread::Logic_0, std::move(batch_));
         AF_ASSERT(started);
         return started ? done() : failed();
     }
@@ -113,10 +109,10 @@ int main() {
         auto second_task = async::make_task<SubmitPlayerDeltaBatchTask>();
         auto first_task = async::make_task<SubmitPlayerDeltaBatchTask>();
 
-        [[maybe_unused]] const bool second_started = second_task->do_it(
-            PlayerDeltaBatch{2, {5, 6}, &total_delta, &shard_batch_seen});
-        [[maybe_unused]] const bool first_started = first_task->do_it(
-            PlayerDeltaBatch{1, {1, 2, 3, 4}, &total_delta, &shard_batch_seen});
+        [[maybe_unused]] const bool second_started =
+            second_task->do_it(PlayerDeltaBatch{2, {5, 6}, &total_delta, &shard_batch_seen});
+        [[maybe_unused]] const bool first_started =
+            first_task->do_it(PlayerDeltaBatch{1, {1, 2, 3, 4}, &total_delta, &shard_batch_seen});
         AF_ASSERT(second_started);
         AF_ASSERT(first_started);
     }
@@ -125,8 +121,9 @@ int main() {
 
     std::cout << "ordered total delta: " << total_delta.load(std::memory_order_relaxed) << '\n';
     for (std::uint16_t shard = 0; shard < player_logic_shard_count; ++shard) {
-        std::cout << "shard " << shard << " last batch: "
-                  << shard_batch_seen[shard].load(std::memory_order_acquire) << '\n';
+        std::cout << "shard " << shard
+                  << " last batch: " << shard_batch_seen[shard].load(std::memory_order_acquire)
+                  << '\n';
     }
 
     return 0;

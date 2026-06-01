@@ -7,11 +7,8 @@ TEST_F(ParallelRuntimeFixture, ParallelShardsNonEmptyOnlySkipsEmptyShards) {
     std::array<std::atomic<int>, 4> shard_hits{};
     std::atomic<int> sum{0};
 
-    ASSERT_TRUE(Runtime::start_task<ParallelTask>(
-        af::ParallelMode::NonEmptyOnly,
-        &completed,
-        &shard_hits,
-        &sum));
+    ASSERT_TRUE(Runtime::start_task<ParallelTask>(af::ParallelMode::NonEmptyOnly, &completed,
+                                                  &shard_hits, &sum));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(shard_hits[0].load(), 1);
     EXPECT_EQ(shard_hits[1].load(), 0);
@@ -25,13 +22,10 @@ TEST_F(ParallelRuntimeFixture, ParallelShardsAllShardsRunsNoopShards) {
     std::array<std::atomic<int>, 4> shard_hits{};
     std::atomic<int> sum{0};
 
-    ASSERT_TRUE(Runtime::start_task<ParallelTask>(
-        af::ParallelMode::AllShards,
-        &completed,
-        &shard_hits,
-        &sum));
+    ASSERT_TRUE(Runtime::start_task<ParallelTask>(af::ParallelMode::AllShards, &completed,
+                                                  &shard_hits, &sum));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
-    for (const auto& hit : shard_hits) {
+    for (const auto &hit : shard_hits) {
         EXPECT_EQ(hit.load(), 1);
     }
     EXPECT_EQ(sum.load(), 6);

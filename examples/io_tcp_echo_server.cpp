@@ -18,8 +18,7 @@ int main() {
         return 0;
     }
 
-    std::cout << "tcp echo backends="
-              << echo_backend_name(EchoThread::IO_0) << ','
+    std::cout << "tcp echo backends=" << echo_backend_name(EchoThread::IO_0) << ','
               << echo_backend_name(EchoThread::IO_1) << '\n';
 
     EchoLoopbackListener listener{};
@@ -35,11 +34,7 @@ int main() {
     int server_error = 0;
 
     const bool server_started = echo_async::start_task<EchoServerTask>(
-        listener.fd.get(),
-        sessions.data(),
-        sessions.size(),
-        &server_ok,
-        &server_error);
+        listener.fd.get(), sessions.data(), sessions.size(), &server_ok, &server_error);
 
     constexpr EchoPayload request0{{'H', 'E', 'L', 'L', 'O', 'I', 'O', 'A'}};
     constexpr EchoPayload request1{{'A', 'S', 'Y', 'N', 'C', 'I', 'O', 'B'}};
@@ -49,20 +44,14 @@ int main() {
     af::UniqueFd client0 = echo_make_tcp_socket();
     af::UniqueFd client1 = echo_make_tcp_socket();
     const bool clients_ready = static_cast<bool>(client0) && static_cast<bool>(client1);
-    const bool client0_started = clients_ready && echo_async::start_task<EchoClientTask>(
-        std::move(client0),
-        EchoThread::IO_0,
-        listener.address,
-        listener.address_size,
-        request0,
-        &clients[0]);
-    const bool client1_started = clients_ready && echo_async::start_task<EchoClientTask>(
-        std::move(client1),
-        EchoThread::IO_1,
-        listener.address,
-        listener.address_size,
-        request1,
-        &clients[1]);
+    const bool client0_started =
+        clients_ready && echo_async::start_task<EchoClientTask>(
+                             std::move(client0), EchoThread::IO_0, listener.address,
+                             listener.address_size, request0, &clients[0]);
+    const bool client1_started =
+        clients_ready && echo_async::start_task<EchoClientTask>(
+                             std::move(client1), EchoThread::IO_1, listener.address,
+                             listener.address_size, request1, &clients[1]);
 
     AF_ASSERT(server_started && client0_started && client1_started);
     if (!server_started || !client0_started || !client1_started) {
@@ -73,19 +62,13 @@ int main() {
 
     echo_async::shutdown();
 
-    const bool ok =
-        server_ok &&
-        server_error == 0 &&
-        sessions[0].ok &&
-        sessions[1].ok &&
-        clients[0].ok &&
-        clients[1].ok &&
-        clients[0].response == expected0 &&
-        clients[1].response == expected1;
+    const bool ok = server_ok && server_error == 0 && sessions[0].ok && sessions[1].ok &&
+                    clients[0].ok && clients[1].ok && clients[0].response == expected0 &&
+                    clients[1].response == expected1;
     if (!ok) {
         std::cout << "tcp echo failed: server_error=" << server_error
-                  << " client0_error=" << clients[0].error
-                  << " client1_error=" << clients[1].error << '\n';
+                  << " client0_error=" << clients[0].error << " client1_error=" << clients[1].error
+                  << '\n';
         return 1;
     }
 

@@ -10,8 +10,7 @@
 
 namespace af::detail {
 
-template <std::size_t ThreadCount>
-class ReadySourceSet {
+template <std::size_t ThreadCount> class ReadySourceSet {
     static_assert(ThreadCount > 0, "ReadySourceSet requires at least one runtime thread");
 
     static constexpr std::size_t bits_per_word = 64;
@@ -21,12 +20,11 @@ class ReadySourceSet {
     };
 
 public:
-    static constexpr std::size_t word_count =
-        (ThreadCount + bits_per_word - 1U) / bits_per_word;
+    static constexpr std::size_t word_count = (ThreadCount + bits_per_word - 1U) / bits_per_word;
 
     ReadySourceSet() = default;
-    ReadySourceSet(const ReadySourceSet&) = delete;
-    ReadySourceSet& operator=(const ReadySourceSet&) = delete;
+    ReadySourceSet(const ReadySourceSet &) = delete;
+    ReadySourceSet &operator=(const ReadySourceSet &) = delete;
 
     void mark(std::uint16_t source) noexcept {
         const std::size_t word = word_index(source);

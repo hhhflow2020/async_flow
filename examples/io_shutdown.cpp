@@ -37,7 +37,7 @@ class ShutdownWriteTask final : public ShutdownTaskBase {
 public:
     explicit ShutdownWriteTask(ShutdownTaskBase::FactoryToken token) : ShutdownTaskBase(token) {}
 
-    bool do_it(int fd, int* error) {
+    bool do_it(int fd, int *error) {
         stream_.reset(ShutdownThread::IO_0, fd);
         error_ = error;
         return schedule(ShutdownThread::IO_0);
@@ -59,7 +59,7 @@ private:
 
     af::TcpStream<ShutdownThread> stream_{};
     af::IoOpState shutdown_{};
-    int* error_{nullptr};
+    int *error_{nullptr};
 };
 
 void close_pair(int (&fds)[2]) {
@@ -115,7 +115,8 @@ int main() {
     }
 
     std::cout << "io shutdown backend="
-              << (shutdown_async::io_uring_backend_available(ShutdownThread::IO_0) ? "io_uring" : "fallback")
+              << (shutdown_async::io_uring_backend_available(ShutdownThread::IO_0) ? "io_uring"
+                                                                                   : "fallback")
               << " eof=1\n";
     close_pair(fds);
     return 0;

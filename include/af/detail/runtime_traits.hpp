@@ -7,8 +7,7 @@
 
 namespace af::detail {
 
-template <typename TraitsT>
-struct RuntimeTraitsConfig {
+template <typename TraitsT> struct RuntimeTraitsConfig {
     static constexpr std::size_t spsc_queue_capacity = [] {
         if constexpr (requires { TraitsT::spsc_queue_capacity; }) {
             return static_cast<std::size_t>(TraitsT::spsc_queue_capacity);
@@ -51,8 +50,7 @@ struct RuntimeTraitsConfig {
 
     static constexpr std::size_t task_pool_remote_release_batch_size = [] {
         if constexpr (requires { TraitsT::task_pool_remote_release_batch_size; }) {
-            return static_cast<std::size_t>(
-                TraitsT::task_pool_remote_release_batch_size);
+            return static_cast<std::size_t>(TraitsT::task_pool_remote_release_batch_size);
         } else {
             return static_cast<std::size_t>(64);
         }
@@ -76,8 +74,7 @@ struct RuntimeTraitsConfig {
 
     static constexpr std::size_t task_pool_local_cache_set_size = [] {
         if constexpr (requires { TraitsT::task_pool_local_cache_set_size; }) {
-            return static_cast<std::size_t>(
-                TraitsT::task_pool_local_cache_set_size);
+            return static_cast<std::size_t>(TraitsT::task_pool_local_cache_set_size);
         } else {
             return static_cast<std::size_t>(1);
         }
@@ -85,8 +82,7 @@ struct RuntimeTraitsConfig {
 
     static constexpr std::size_t task_pool_direct_release_set_size = [] {
         if constexpr (requires { TraitsT::task_pool_direct_release_set_size; }) {
-            return static_cast<std::size_t>(
-                TraitsT::task_pool_direct_release_set_size);
+            return static_cast<std::size_t>(TraitsT::task_pool_direct_release_set_size);
         } else {
             return static_cast<std::size_t>(4);
         }
@@ -94,8 +90,7 @@ struct RuntimeTraitsConfig {
 
     static constexpr std::size_t task_pool_local_cache_capacity = [] {
         if constexpr (requires { TraitsT::task_pool_local_cache_capacity; }) {
-            return static_cast<std::size_t>(
-                TraitsT::task_pool_local_cache_capacity);
+            return static_cast<std::size_t>(TraitsT::task_pool_local_cache_capacity);
         } else {
             return static_cast<std::size_t>(64);
         }

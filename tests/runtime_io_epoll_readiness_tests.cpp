@@ -43,12 +43,8 @@ TEST_F(IoRuntimeEpollFixture, EpollIoThreadRearmsReadableFdWithSameState) {
     std::atomic<int> reads{0};
     char output[2]{};
 
-    ASSERT_TRUE(IoRuntime::start_task<SocketRepeatedReadableTask>(
-        fds[0],
-        &armed,
-        &completed,
-        &reads,
-        output));
+    ASSERT_TRUE(IoRuntime::start_task<SocketRepeatedReadableTask>(fds[0], &armed, &completed,
+                                                                  &reads, output));
     ASSERT_TRUE(wait_until_at_least(armed, 1));
 
     const char first = 'a';

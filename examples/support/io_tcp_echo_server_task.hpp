@@ -17,14 +17,10 @@ class EchoServerTask final : public EchoTask {
 public:
     explicit EchoServerTask(EchoTask::FactoryToken token) : EchoTask(token) {}
 
-    bool do_it(
-        int listener_fd,
-        EchoSessionResult* sessions,
-        std::size_t session_count,
-        bool* ok,
-        int* error) {
-        if (listener_fd < 0 || sessions == nullptr || session_count == 0U ||
-            ok == nullptr || error == nullptr) {
+    bool do_it(int listener_fd, EchoSessionResult *sessions, std::size_t session_count, bool *ok,
+               int *error) {
+        if (listener_fd < 0 || sessions == nullptr || session_count == 0U || ok == nullptr ||
+            error == nullptr) {
             return false;
         }
 
@@ -41,11 +37,7 @@ private:
         peer_size_ = sizeof(peer_);
         int accepted_fd = -1;
         const af::IoStatus status = listener_.accept_some(
-            *this,
-            reinterpret_cast<sockaddr*>(&peer_),
-            &peer_size_,
-            &accepted_fd,
-            accept_);
+            *this, reinterpret_cast<sockaddr *>(&peer_), &peer_size_, &accepted_fd, accept_);
         if (status.pending()) {
             return pending();
         }
@@ -55,10 +47,8 @@ private:
 
         af::UniqueFd accepted(accepted_fd);
         const EchoThread io_thread = echo_io_thread(accepted_count_);
-        if (!echo_async::start_task<EchoSessionTask>(
-                std::move(accepted),
-                io_thread,
-                &sessions_[accepted_count_])) {
+        if (!echo_async::start_task<EchoSessionTask>(std::move(accepted), io_thread,
+                                                     &sessions_[accepted_count_])) {
             return finish(EAGAIN);
         }
 
@@ -82,11 +72,11 @@ private:
     sockaddr_storage peer_{};
     socklen_t peer_size_{sizeof(peer_)};
     af::IoOpState accept_{};
-    EchoSessionResult* sessions_{nullptr};
+    EchoSessionResult *sessions_{nullptr};
     std::size_t session_count_{0};
     std::size_t accepted_count_{0};
-    bool* ok_{nullptr};
-    int* error_{nullptr};
+    bool *ok_{nullptr};
+    int *error_{nullptr};
 };
 
 } // namespace io_tcp_echo_example

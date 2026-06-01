@@ -7,7 +7,7 @@
 
 namespace {
 
-void BM_RuntimeParallelShards(benchmark::State& state) {
+void BM_RuntimeParallelShards(benchmark::State &state) {
     af_bench::runtime::Runtime::init();
     for (auto _ : state) {
         const int task_count = static_cast<int>(state.range(0));
@@ -18,8 +18,7 @@ void BM_RuntimeParallelShards(benchmark::State& state) {
             remaining.fetch_add(1, std::memory_order_relaxed);
             const bool ok =
                 af_bench::runtime::Runtime::start_task<af_bench::runtime::ParallelShardTask>(
-                    &remaining,
-                    &sum);
+                    &remaining, &sum);
             if (!ok) {
                 af_bench::runtime::undo_remaining(remaining);
                 state.SkipWithError("Runtime::start_task<ParallelShardTask> failed");

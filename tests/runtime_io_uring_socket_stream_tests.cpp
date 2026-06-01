@@ -99,11 +99,8 @@ TEST_F(UringIoRuntimeSocketStreamFixture, IoUringThreadHandlesVectoredStreamOrFa
     std::atomic<int> armed{0};
     std::atomic<int> completed{0};
     std::atomic<int> request_seen{0};
-    ASSERT_TRUE(UringIoRuntime::start_task<UringStreamVectoredTask>(
-        fds[0],
-        &armed,
-        &completed,
-        &request_seen));
+    ASSERT_TRUE(UringIoRuntime::start_task<UringStreamVectoredTask>(fds[0], &armed, &completed,
+                                                                    &request_seen));
     ASSERT_TRUE(wait_until_at_least(armed, 1));
 
     const char request[2]{'C', 'D'};
@@ -137,12 +134,7 @@ TEST_F(UringIoRuntimeSocketStreamFixture, IoUringCompletionCancelIsNotConsumable
     std::atomic<int> completed{0};
     std::atomic<int> error{0};
     ASSERT_TRUE(UringIoRuntime::start_task<UringSelfCancelRecvCompletionTask>(
-        fds[0],
-        &wait_kind,
-        &cancel_result,
-        &immediate_pending,
-        &completed,
-        &error));
+        fds[0], &wait_kind, &cancel_result, &immediate_pending, &completed, &error));
 
     if (!wait_until_at_least(completed, 1)) {
         const char value = 'x';
@@ -150,8 +142,7 @@ TEST_F(UringIoRuntimeSocketStreamFixture, IoUringCompletionCancelIsNotConsumable
         ASSERT_TRUE(wait_until_at_least(completed, 1));
     }
 
-    if (wait_kind.load(std::memory_order_acquire) !=
-        static_cast<int>(af::IoWaitKind::Completion)) {
+    if (wait_kind.load(std::memory_order_acquire) != static_cast<int>(af::IoWaitKind::Completion)) {
         close_pair(fds);
         GTEST_SKIP() << "recv did not remain as an io_uring completion operation";
     }
@@ -181,11 +172,8 @@ TEST_F(UringIoRuntimeSocketStreamFixture, IoUringThreadConnectsTcpStreamOrFallsB
     ASSERT_GE(client, 0);
 
     std::atomic<int> completed{0};
-    ASSERT_TRUE(UringIoRuntime::start_task<UringTcpConnectTask>(
-        client,
-        address,
-        address_size,
-        &completed));
+    ASSERT_TRUE(
+        UringIoRuntime::start_task<UringTcpConnectTask>(client, address, address_size, &completed));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
 
     int accepted = accept_tcp_until_ready(listener);

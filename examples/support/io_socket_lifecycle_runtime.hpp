@@ -49,11 +49,10 @@ struct SocketLifecycleServerResult {
     std::uint16_t port{0};
 };
 
-[[nodiscard]] inline const char* socket_lifecycle_backend_name() noexcept {
+[[nodiscard]] inline const char *socket_lifecycle_backend_name() noexcept {
 #if defined(__linux__)
-    return socket_async::io_uring_backend_available(SocketThread::IO_0)
-        ? "io_uring"
-        : "epoll-fallback";
+    return socket_async::io_uring_backend_available(SocketThread::IO_0) ? "io_uring"
+                                                                        : "epoll-fallback";
 #elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
     return "kqueue";
 #else

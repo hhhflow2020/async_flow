@@ -16,9 +16,8 @@ class SocketLifecycleServerTask final : public SocketTask {
 public:
     explicit SocketLifecycleServerTask(SocketTask::FactoryToken token) : SocketTask(token) {}
 
-    bool do_it(
-        SocketLifecycleServerResult* server_result,
-        SocketLifecycleClientResult* client_result) {
+    bool do_it(SocketLifecycleServerResult *server_result,
+               SocketLifecycleClientResult *client_result) {
         if (server_result == nullptr || client_result == nullptr) {
             return false;
         }
@@ -48,25 +47,15 @@ private:
 
     af::TaskResult create_listener() {
         state_ = State::FinishListener;
-        return consume_listener_status(af::io_socket(
-            *this,
-            SocketThread::IO_0,
-            AF_INET,
-            lifecycle_stream_socket_type(),
-            0,
-            &listener_fd_,
-            socket_));
+        return consume_listener_status(af::io_socket(*this, SocketThread::IO_0, AF_INET,
+                                                     lifecycle_stream_socket_type(), 0,
+                                                     &listener_fd_, socket_));
     }
 
     af::TaskResult finish_listener() {
-        return consume_listener_status(af::io_socket(
-            *this,
-            SocketThread::IO_0,
-            AF_INET,
-            lifecycle_stream_socket_type(),
-            0,
-            &listener_fd_,
-            socket_));
+        return consume_listener_status(af::io_socket(*this, SocketThread::IO_0, AF_INET,
+                                                     lifecycle_stream_socket_type(), 0,
+                                                     &listener_fd_, socket_));
     }
 
     af::TaskResult consume_listener_status(af::IoStatus status) {
@@ -89,12 +78,8 @@ private:
 
     af::TaskResult configure_listener() {
         const int one = 1;
-        af::IoStatus status = listener_.setsockopt(
-            *this,
-            SOL_SOCKET,
-            SO_REUSEADDR,
-            &one,
-            sizeof(one));
+        af::IoStatus status =
+            listener_.setsockopt(*this, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
         if (!status.ready()) {
             return finish(status.failed() ? status.error : EIO);
         }
@@ -103,10 +88,8 @@ private:
         address.sin_family = AF_INET;
         address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         address.sin_port = 0;
-        status = listener_.bind(
-            *this,
-            reinterpret_cast<const sockaddr*>(&address),
-            sizeof(address));
+        status =
+            listener_.bind(*this, reinterpret_cast<const sockaddr *>(&address), sizeof(address));
         if (!status.ready()) {
             return finish(status.failed() ? status.error : EIO);
         }
@@ -117,22 +100,17 @@ private:
         }
 
         socklen_t address_size = sizeof(bound_address_);
-        status = listener_.getsockname(
-            *this,
-            reinterpret_cast<sockaddr*>(&bound_address_),
-            &address_size);
+        status = listener_.getsockname(*this, reinterpret_cast<sockaddr *>(&bound_address_),
+                                       &address_size);
         if (!status.ready()) {
             return finish(status.failed() ? status.error : EIO);
         }
-        if (bound_address_.sin_family != AF_INET ||
-            bound_address_.sin_port == 0 ||
+        if (bound_address_.sin_family != AF_INET || bound_address_.sin_port == 0 ||
             address_size == 0U) {
             return finish(EIO);
         }
 
-        if (!socket_async::start_task<SocketLifecycleClientTask>(
-                bound_address_,
-                client_result_)) {
+        if (!socket_async::start_task<SocketLifecycleClientTask>(bound_address_, client_result_)) {
             return finish(EAGAIN);
         }
 
@@ -141,12 +119,8 @@ private:
     }
 
     af::TaskResult accept_client() {
-        const af::IoStatus status = listener_.accept_some(
-            *this,
-            nullptr,
-            nullptr,
-            &accepted_fd_,
-            accept_);
+        const af::IoStatus status =
+            listener_.accept_some(*this, nullptr, nullptr, &accepted_fd_, accept_);
         if (status.pending()) {
             return pending();
         }
@@ -159,10 +133,8 @@ private:
         af::TcpStream<SocketThread> accepted_stream(SocketThread::IO_0, accepted_owned_.get());
         sockaddr_storage peer{};
         socklen_t peer_size = sizeof(peer);
-        const af::IoStatus peer_status = accepted_stream.getpeername(
-            *this,
-            reinterpret_cast<sockaddr*>(&peer),
-            &peer_size);
+        const af::IoStatus peer_status =
+            accepted_stream.getpeername(*this, reinterpret_cast<sockaddr *>(&peer), &peer_size);
         if (!peer_status.ready() || peer_size == 0U) {
             return finish(peer_status.failed() ? peer_status.error : EIO);
         }
@@ -189,8 +161,8 @@ private:
     af::UniqueFd accepted_owned_{};
     af::TcpListener<SocketThread> listener_{};
     sockaddr_in bound_address_{};
-    SocketLifecycleServerResult* server_result_{nullptr};
-    SocketLifecycleClientResult* client_result_{nullptr};
+    SocketLifecycleServerResult *server_result_{nullptr};
+    SocketLifecycleClientResult *client_result_{nullptr};
 };
 
 } // namespace io_socket_lifecycle_example

@@ -4,14 +4,9 @@ class SendZcSocketTask final : public IoTaskBase {
 public:
     explicit SendZcSocketTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(
-        int socket_fd,
-        const char* payload,
-        std::size_t total_size,
-        std::size_t chunk_size,
-        std::atomic<int>* completed,
-        std::atomic<int>* calls,
-        std::atomic<std::size_t>* bytes_sent) {
+    bool do_it(int socket_fd, const char *payload, std::size_t total_size, std::size_t chunk_size,
+               std::atomic<int> *completed, std::atomic<int> *calls,
+               std::atomic<std::size_t> *bytes_sent) {
         stream_.reset(IoTestThread::IO_0, socket_fd);
         payload_ = payload;
         total_size_ = total_size;
@@ -35,8 +30,7 @@ private:
 
         const std::size_t remaining = total_size_ - sent_;
         const std::size_t count = remaining < chunk_size_ ? remaining : chunk_size_;
-        const af::IoStatus status =
-            stream_.send_zc_some(*this, payload_ + sent_, count, send_);
+        const af::IoStatus status = stream_.send_zc_some(*this, payload_ + sent_, count, send_);
         if (status.pending()) {
             return pending();
         }
@@ -51,28 +45,23 @@ private:
     }
 
     af::TcpStream<IoTestThread> stream_{};
-    const char* payload_{nullptr};
+    const char *payload_{nullptr};
     std::size_t total_size_{0};
     std::size_t chunk_size_{0};
     std::size_t sent_{0};
     af::IoOpState send_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* calls_{nullptr};
-    std::atomic<std::size_t>* bytes_sent_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *calls_{nullptr};
+    std::atomic<std::size_t> *bytes_sent_{nullptr};
 };
 
 class SendvZcSocketTask final : public IoTaskBase {
 public:
     explicit SendvZcSocketTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(
-        int socket_fd,
-        const char* first,
-        std::size_t first_size,
-        const char* second,
-        std::size_t second_size,
-        std::atomic<int>* completed,
-        std::atomic<std::size_t>* bytes_sent) {
+    bool do_it(int socket_fd, const char *first, std::size_t first_size, const char *second,
+               std::size_t second_size, std::atomic<int> *completed,
+               std::atomic<std::size_t> *bytes_sent) {
         stream_.reset(IoTestThread::IO_0, socket_fd);
         first_ = first;
         first_size_ = first_size;
@@ -93,15 +82,12 @@ private:
 
         int iov_count = 0;
         if (sent_ < first_size_) {
-            iov_[iov_count++] = iovec{
-                const_cast<char*>(first_ + sent_),
-                first_size_ - sent_};
-            iov_[iov_count++] = iovec{const_cast<char*>(second_), second_size_};
+            iov_[iov_count++] = iovec{const_cast<char *>(first_ + sent_), first_size_ - sent_};
+            iov_[iov_count++] = iovec{const_cast<char *>(second_), second_size_};
         } else {
             const std::size_t second_offset = sent_ - first_size_;
-            iov_[iov_count++] = iovec{
-                const_cast<char*>(second_ + second_offset),
-                second_size_ - second_offset};
+            iov_[iov_count++] =
+                iovec{const_cast<char *>(second_ + second_offset), second_size_ - second_offset};
         }
 
         const af::IoStatus status = stream_.sendv_zc_some(*this, iov_, iov_count, send_);
@@ -118,13 +104,13 @@ private:
     }
 
     af::TcpStream<IoTestThread> stream_{};
-    const char* first_{nullptr};
-    const char* second_{nullptr};
+    const char *first_{nullptr};
+    const char *second_{nullptr};
     std::size_t first_size_{0};
     std::size_t second_size_{0};
     std::size_t sent_{0};
     iovec iov_[2]{};
     af::IoOpState send_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<std::size_t>* bytes_sent_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<std::size_t> *bytes_sent_{nullptr};
 };

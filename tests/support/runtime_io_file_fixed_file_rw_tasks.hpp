@@ -4,7 +4,7 @@ class UringFixedFileTask final : public UringIoTaskBase {
 public:
     explicit UringFixedFileTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
 
-    bool do_it(int fd, std::atomic<int>* completed, std::atomic<char>* byte_read) {
+    bool do_it(int fd, std::atomic<int> *completed, std::atomic<char> *byte_read) {
         fd_ = fd;
         file_.reset(IoTestThread::IO_0, 0);
         completed_ = completed;
@@ -50,12 +50,7 @@ private:
     }
 
     af::TaskResult register_file() {
-        const af::IoStatus no_table = file_.write_at(
-            *this,
-            &value_,
-            sizeof(value_),
-            0,
-            no_table_);
+        const af::IoStatus no_table = file_.write_at(*this, &value_, sizeof(value_), 0, no_table_);
         if (!no_table.failed() || no_table.error != ENXIO) {
             return failed();
         }
@@ -66,33 +61,19 @@ private:
         }
 
         int duplicate_error = 0;
-        if (UringIoRuntime::io_register_files(
-                IoTestThread::IO_0,
-                &fd_,
-                1,
-                &duplicate_error) ||
+        if (UringIoRuntime::io_register_files(IoTestThread::IO_0, &fd_, 1, &duplicate_error) ||
             duplicate_error != EALREADY) {
             return failed();
         }
 
         af::IoFixedFile<IoTestThread> bad_file(IoTestThread::IO_0, 1);
-        const af::IoStatus bad_index = bad_file.write_at(
-            *this,
-            &value_,
-            sizeof(value_),
-            0,
-            bad_index_);
+        const af::IoStatus bad_index =
+            bad_file.write_at(*this, &value_, sizeof(value_), 0, bad_index_);
         if (!bad_index.failed() || bad_index.error != EINVAL) {
             return failed();
         }
 
-        const af::IoStatus no_buffer = file_.write_fixed_at(
-            *this,
-            buffer_,
-            1,
-            0,
-            0,
-            no_buffer_);
+        const af::IoStatus no_buffer = file_.write_fixed_at(*this, buffer_, 1, 0, 0, no_buffer_);
         if (!no_buffer.failed() || no_buffer.error != ENOBUFS) {
             return failed();
         }
@@ -109,11 +90,8 @@ private:
     }
 
     af::TaskResult write_value() {
-        const af::IoStatus status = file_.write_fixed_at(
-            *this,
-            af::IoFixedBuffer{buffer_, 1, 0},
-            0,
-            write_);
+        const af::IoStatus status =
+            file_.write_fixed_at(*this, af::IoFixedBuffer{buffer_, 1, 0}, 0, write_);
         if (status.pending()) {
             return pending();
         }
@@ -128,12 +106,7 @@ private:
     af::TaskResult write_vectored() {
         write_iov_[0] = iovec{&vector_write_[0], 1};
         write_iov_[1] = iovec{&vector_write_[1], 1};
-        const af::IoStatus status = file_.writev_at(
-            *this,
-            write_iov_,
-            2,
-            1,
-            writev_);
+        const af::IoStatus status = file_.writev_at(*this, write_iov_, 2, 1, writev_);
         if (status.pending()) {
             return pending();
         }
@@ -157,11 +130,8 @@ private:
     }
 
     af::TaskResult read_value() {
-        const af::IoStatus status = file_.read_fixed_at(
-            *this,
-            af::IoFixedBuffer{buffer_, 1, 0},
-            0,
-            read_state_);
+        const af::IoStatus status =
+            file_.read_fixed_at(*this, af::IoFixedBuffer{buffer_, 1, 0}, 0, read_state_);
         if (status.pending()) {
             return pending();
         }
@@ -175,19 +145,12 @@ private:
     af::TaskResult read_vectored() {
         read_iov_[0] = iovec{&vector_read_[0], 1};
         read_iov_[1] = iovec{&vector_read_[1], 1};
-        const af::IoStatus status = file_.readv_at(
-            *this,
-            read_iov_,
-            2,
-            1,
-            readv_);
+        const af::IoStatus status = file_.readv_at(*this, read_iov_, 2, 1, readv_);
         if (status.pending()) {
             return pending();
         }
-        if (!status.ready() ||
-            status.bytes != sizeof(vector_read_) ||
-            vector_read_[0] != vector_write_[0] ||
-            vector_read_[1] != vector_write_[1]) {
+        if (!status.ready() || status.bytes != sizeof(vector_read_) ||
+            vector_read_[0] != vector_write_[0] || vector_read_[1] != vector_write_[1]) {
             return failed();
         }
         state_ = State::Unregister;
@@ -224,6 +187,6 @@ private:
     af::IoOpState fsync_{};
     af::IoOpState read_state_{};
     af::IoOpState readv_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<char>* byte_read_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<char> *byte_read_{nullptr};
 };

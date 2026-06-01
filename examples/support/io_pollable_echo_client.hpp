@@ -39,7 +39,7 @@ public:
         return fd_;
     }
 
-    [[nodiscard]] const char* response_data() const noexcept {
+    [[nodiscard]] const char *response_data() const noexcept {
         return response_;
     }
 
@@ -75,11 +75,7 @@ private:
 
     PollableStep step_send() noexcept {
         while (sent_ < sizeof(request_)) {
-            const ssize_t n = ::send(
-                fd_,
-                request_ + sent_,
-                sizeof(request_) - sent_,
-                MSG_NOSIGNAL);
+            const ssize_t n = ::send(fd_, request_ + sent_, sizeof(request_) - sent_, MSG_NOSIGNAL);
             if (n > 0) {
                 sent_ += static_cast<std::size_t>(n);
                 continue;
@@ -108,11 +104,7 @@ private:
 
     PollableStep step_recv() noexcept {
         while (received_ < sizeof(response_)) {
-            const ssize_t n = ::recv(
-                fd_,
-                response_ + received_,
-                sizeof(response_) - received_,
-                0);
+            const ssize_t n = ::recv(fd_, response_ + received_, sizeof(response_) - received_, 0);
             if (n > 0) {
                 received_ += static_cast<std::size_t>(n);
                 continue;

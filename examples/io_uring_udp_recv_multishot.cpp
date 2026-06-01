@@ -29,14 +29,10 @@ int main() {
     socklen_t sender_address_size = sizeof(sender_address);
     if (!bind_loopback(receiver.get(), receiver_address, receiver_address_size) ||
         !bind_loopback(sender.get(), sender_address, sender_address_size) ||
-        ::connect(
-            receiver.get(),
-            reinterpret_cast<sockaddr*>(&sender_address),
-            sender_address_size) != 0 ||
-        ::connect(
-            sender.get(),
-            reinterpret_cast<sockaddr*>(&receiver_address),
-            receiver_address_size) != 0) {
+        ::connect(receiver.get(), reinterpret_cast<sockaddr *>(&sender_address),
+                  sender_address_size) != 0 ||
+        ::connect(sender.get(), reinterpret_cast<sockaddr *>(&receiver_address),
+                  receiver_address_size) != 0) {
         std::cout << "udp bind/connect failed\n";
         udp_recv_async::shutdown();
         return 1;
@@ -45,11 +41,8 @@ int main() {
     std::atomic<int> armed{0};
     int packed_read = 0;
     std::atomic<int> error{0};
-    const bool started = udp_recv_async::start_task<UdpRecvMultishotTask>(
-        receiver.get(),
-        &armed,
-        &packed_read,
-        &error);
+    const bool started = udp_recv_async::start_task<UdpRecvMultishotTask>(receiver.get(), &armed,
+                                                                          &packed_read, &error);
     AF_ASSERT(started);
 
     if (!started || !wait_until_armed_or_error(armed, error)) {
@@ -60,8 +53,7 @@ int main() {
     if (armed.load(std::memory_order_acquire) == 0) {
         const int task_error = error.load(std::memory_order_acquire);
         if (task_error != 0) {
-            std::cout << "io_uring UDP recv_multishot unsupported error="
-                      << task_error << '\n';
+            std::cout << "io_uring UDP recv_multishot unsupported error=" << task_error << '\n';
             udp_recv_async::shutdown();
             return 0;
         }
@@ -71,8 +63,7 @@ int main() {
     }
 
     const char payload[] = {'U', 'M'};
-    if (::send(sender.get(), payload, 1, 0) != 1 ||
-        ::send(sender.get(), payload + 1, 1, 0) != 1) {
+    if (::send(sender.get(), payload, 1, 0) != 1 || ::send(sender.get(), payload + 1, 1, 0) != 1) {
         std::cout << "send payload failed\n";
         udp_recv_async::shutdown();
         return 1;
@@ -87,8 +78,7 @@ int main() {
     }
 
     const int packed = packed_read;
-    std::cout << "io_uring UDP recv_multishot bytes="
-              << static_cast<char>((packed >> 8) & 0xff)
+    std::cout << "io_uring UDP recv_multishot bytes=" << static_cast<char>((packed >> 8) & 0xff)
               << static_cast<char>(packed & 0xff) << '\n';
     return 0;
 #else

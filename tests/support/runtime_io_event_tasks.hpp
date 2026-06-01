@@ -1,15 +1,11 @@
 #pragma once
 
-template <typename TaskBaseT>
-class BasicEventFdTask final : public TaskBaseT {
+template <typename TaskBaseT> class BasicEventFdTask final : public TaskBaseT {
 public:
     explicit BasicEventFdTask(typename TaskBaseT::FactoryToken token) : TaskBaseT(token) {}
 
-    bool do_it(
-        int fd,
-        std::atomic<int>* armed,
-        std::atomic<int>* completed,
-        std::atomic<std::uint64_t>* value) {
+    bool do_it(int fd, std::atomic<int> *armed, std::atomic<int> *completed,
+               std::atomic<std::uint64_t> *value) {
         event_.reset(IoTestThread::IO_0, fd);
         armed_ = armed;
         completed_ = completed;
@@ -35,9 +31,9 @@ private:
 
     af::IoEvent<IoTestThread> event_{};
     af::IoOpState wait_{};
-    std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<std::uint64_t>* value_{nullptr};
+    std::atomic<int> *armed_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<std::uint64_t> *value_{nullptr};
 };
 
 using EventFdTask = BasicEventFdTask<IoTaskBase>;

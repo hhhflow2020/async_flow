@@ -13,13 +13,8 @@ class FixedFileRoundTripTask final : public FixedFileTask {
 public:
     explicit FixedFileRoundTripTask(FixedFileTask::FactoryToken token) : FixedFileTask(token) {}
 
-    bool do_it(
-        int fd,
-        int updated_fd,
-        int* error,
-        char* byte_read,
-        int* vectored_read,
-        char* updated_byte_read) {
+    bool do_it(int fd, int updated_fd, int *error, char *byte_read, int *vectored_read,
+               char *updated_byte_read) {
         fd_ = fd;
         updated_fd_ = updated_fd;
         error_ = error;
@@ -96,12 +91,8 @@ private:
 
     af::TaskResult update_file() {
         int error = 0;
-        if (!fixed_file_async::io_update_registered_files(
-                FixedFileThread::IO_0,
-                0,
-                &updated_fd_,
-                1,
-                &error)) {
+        if (!fixed_file_async::io_update_registered_files(FixedFileThread::IO_0, 0, &updated_fd_, 1,
+                                                          &error)) {
             return complete(error == 0 ? EIO : error);
         }
         state_ = State::ReadUpdated;
@@ -122,11 +113,8 @@ private:
     }
 
     af::TaskResult write_value() {
-        const af::IoStatus status = file_.write_fixed_at(
-            *this,
-            af::IoFixedBuffer{buffer_, 1, 0},
-            0,
-            write_);
+        const af::IoStatus status =
+            file_.write_fixed_at(*this, af::IoFixedBuffer{buffer_, 1, 0}, 0, write_);
         if (status.pending()) {
             return pending();
         }
@@ -141,12 +129,7 @@ private:
     af::TaskResult write_vectored() {
         write_iov_[0] = iovec{&vector_write_[0], 1};
         write_iov_[1] = iovec{&vector_write_[1], 1};
-        const af::IoStatus status = file_.writev_at(
-            *this,
-            write_iov_,
-            2,
-            1,
-            writev_);
+        const af::IoStatus status = file_.writev_at(*this, write_iov_, 2, 1, writev_);
         if (status.pending()) {
             return pending();
         }
@@ -170,11 +153,8 @@ private:
     }
 
     af::TaskResult read_value() {
-        const af::IoStatus status = file_.read_fixed_at(
-            *this,
-            af::IoFixedBuffer{buffer_, 1, 0},
-            0,
-            read_state_);
+        const af::IoStatus status =
+            file_.read_fixed_at(*this, af::IoFixedBuffer{buffer_, 1, 0}, 0, read_state_);
         if (status.pending()) {
             return pending();
         }
@@ -188,19 +168,12 @@ private:
     af::TaskResult read_vectored() {
         read_iov_[0] = iovec{&vector_read_[0], 1};
         read_iov_[1] = iovec{&vector_read_[1], 1};
-        const af::IoStatus status = file_.readv_at(
-            *this,
-            read_iov_,
-            2,
-            1,
-            readv_);
+        const af::IoStatus status = file_.readv_at(*this, read_iov_, 2, 1, readv_);
         if (status.pending()) {
             return pending();
         }
-        if (!status.ready() ||
-            status.bytes != sizeof(vector_read_) ||
-            vector_read_[0] != vector_write_[0] ||
-            vector_read_[1] != vector_write_[1]) {
+        if (!status.ready() || status.bytes != sizeof(vector_read_) ||
+            vector_read_[0] != vector_write_[0] || vector_read_[1] != vector_write_[1]) {
             return complete(status.failed() ? status.error : EIO);
         }
         *vectored_read_ = pack_vectored_read();
@@ -209,12 +182,8 @@ private:
     }
 
     af::TaskResult read_updated_value() {
-        const af::IoStatus status = file_.read_at(
-            *this,
-            &updated_read_,
-            sizeof(updated_read_),
-            0,
-            updated_read_state_);
+        const af::IoStatus status =
+            file_.read_at(*this, &updated_read_, sizeof(updated_read_), 0, updated_read_state_);
         if (status.pending()) {
             return pending();
         }
@@ -247,10 +216,10 @@ private:
     af::IoOpState read_state_{};
     af::IoOpState readv_{};
     af::IoOpState updated_read_state_{};
-    int* error_{nullptr};
-    char* byte_read_{nullptr};
-    int* vectored_read_{nullptr};
-    char* updated_byte_read_{nullptr};
+    int *error_{nullptr};
+    char *byte_read_{nullptr};
+    int *vectored_read_{nullptr};
+    char *updated_byte_read_{nullptr};
 };
 
 } // namespace io_uring_fixed_file_example

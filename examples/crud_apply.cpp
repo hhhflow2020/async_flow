@@ -53,22 +53,16 @@ private:
         state_ = State::Finish;
         sharded_ops_ = af::split_change_batch(batch_, player_logic_shard_count);
         async::parallel_shards_ordered(
-            player_logic_begin,
-            sharded_ops_,
-            batch_.batch_id,
-            af::retryable_ordered_batch_options,
+            player_logic_begin, sharded_ops_, batch_.batch_id, af::retryable_ordered_batch_options,
             this,
-            [](std::uint16_t shard, auto& ops, std::uint64_t) {
-                return apply_shard(shard, ops);
-            });
+            [](std::uint16_t shard, auto &ops, std::uint64_t) { return apply_shard(shard, ops); });
         return pending();
     }
 
-    static bool apply_shard(
-        std::uint16_t shard,
-        const std::vector<af::CrudOp<std::uint64_t, PlayerProfile>>& ops) {
-        auto& store = player_stores[shard];
-        for (const auto& op : ops) {
+    static bool apply_shard(std::uint16_t shard,
+                            const std::vector<af::CrudOp<std::uint64_t, PlayerProfile>> &ops) {
+        auto &store = player_stores[shard];
+        for (const auto &op : ops) {
             if (!apply_op(store, op)) {
                 return false;
             }
@@ -76,9 +70,7 @@ private:
         return true;
     }
 
-    static bool apply_op(
-        PlayerStore& store,
-        const af::CrudOp<std::uint64_t, PlayerProfile>& op) {
+    static bool apply_op(PlayerStore &store, const af::CrudOp<std::uint64_t, PlayerProfile> &op) {
         switch (op.type) {
         case af::OpType::Add:
             store[op.key] = op.value;
@@ -106,15 +98,14 @@ private:
             applied_batches.fetch_add(1, std::memory_order_release);
             return done();
         }
-        std::cout << "batch " << batch_.batch_id << " failed on "
-                  << last_parallel_failures() << " shard(s)\n";
+        std::cout << "batch " << batch_.batch_id << " failed on " << last_parallel_failures()
+                  << " shard(s)\n";
         return failed();
     }
 
     State state_{State::Apply};
     PlayerChangeBatch batch_;
-    af::ShardedOps<af::CrudOp<std::uint64_t, PlayerProfile>> sharded_ops_{
-        player_logic_shard_count};
+    af::ShardedOps<af::CrudOp<std::uint64_t, PlayerProfile>> sharded_ops_{player_logic_shard_count};
 };
 
 class SubmitPlayerCrudBatchTask final : public Task {
@@ -129,8 +120,7 @@ public:
 private:
     af::TaskResult run() override {
         const bool ok = async::start_ordered_task<PlayerCrudStream, ApplyPlayerCrudBatchTask>(
-            AppThread::IO_0,
-            std::move(batch_));
+            AppThread::IO_0, std::move(batch_));
         return ok ? done() : failed();
     }
 
@@ -140,16 +130,16 @@ private:
 int main() {
     async::init();
 
-    [[maybe_unused]] const bool second_started = async::start_task<SubmitPlayerCrudBatchTask>(
-        PlayerChangeBatch{
+    [[maybe_unused]] const bool second_started =
+        async::start_task<SubmitPlayerCrudBatchTask>(PlayerChangeBatch{
             2,
             {
                 {af::OpType::Update, 1001U, {3, 250}},
                 {af::OpType::Add, 1003U, {1, 30}},
             },
         });
-    [[maybe_unused]] const bool first_started = async::start_task<SubmitPlayerCrudBatchTask>(
-        PlayerChangeBatch{
+    [[maybe_unused]] const bool first_started =
+        async::start_task<SubmitPlayerCrudBatchTask>(PlayerChangeBatch{
             1,
             {
                 {af::OpType::Add, 1001U, {2, 100}},
@@ -163,9 +153,8 @@ int main() {
 
     std::cout << "applied batches: " << applied_batches.load(std::memory_order_acquire) << '\n';
     for (std::uint16_t shard = 0; shard < player_logic_shard_count; ++shard) {
-        for (const auto& [player_id, profile] : player_stores[shard]) {
-            std::cout << "shard " << shard << " player " << player_id
-                      << " level " << profile.level
+        for (const auto &[player_id, profile] : player_stores[shard]) {
+            std::cout << "shard " << shard << " player " << player_id << " level " << profile.level
                       << " gold " << profile.gold << '\n';
         }
     }

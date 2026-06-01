@@ -28,10 +28,7 @@ int main() {
     std::atomic<int> error{0};
     int packed_read = 0;
     const bool started = direct_accept_async::start_task<DirectAcceptRoundTripTask>(
-        listener.get(),
-        &armed,
-        &error,
-        &packed_read);
+        listener.get(), &armed, &error, &packed_read);
     AF_ASSERT(started);
     if (!started) {
         direct_accept_async::shutdown();
@@ -58,10 +55,8 @@ int main() {
         direct_accept_async::shutdown();
         return 1;
     }
-    const int connect_rc = ::connect(
-        client.get(),
-        reinterpret_cast<sockaddr*>(&address),
-        sizeof(address));
+    const int connect_rc =
+        ::connect(client.get(), reinterpret_cast<sockaddr *>(&address), sizeof(address));
     if (connect_rc != 0 && errno != EINPROGRESS) {
         std::cerr << "client connect failed\n";
         direct_accept_async::shutdown();
@@ -91,9 +86,8 @@ int main() {
         return 1;
     }
 
-    std::cout << "io_uring accept direct packed="
-              << packed_read
-              << " response=" << response[0] << response[1] << '\n';
+    std::cout << "io_uring accept direct packed=" << packed_read << " response=" << response[0]
+              << response[1] << '\n';
     return 0;
 #else
     std::cout << "io_uring accept direct example is Linux-only\n";

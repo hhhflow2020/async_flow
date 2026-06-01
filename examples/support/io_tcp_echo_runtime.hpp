@@ -70,7 +70,7 @@ struct EchoClientResult {
     return (index & 1U) == 0U ? EchoThread::IO_0 : EchoThread::IO_1;
 }
 
-[[nodiscard]] inline const char* echo_backend_name(EchoThread thread) noexcept {
+[[nodiscard]] inline const char *echo_backend_name(EchoThread thread) noexcept {
     static_cast<void>(thread);
 #if defined(__linux__)
     return echo_async::io_uring_backend_available(thread) ? "io_uring" : "epoll-fallback";
@@ -81,8 +81,8 @@ struct EchoClientResult {
 #endif
 }
 
-inline void lowercase_ascii(EchoPayload& payload) noexcept {
-    for (char& ch : payload) {
+inline void lowercase_ascii(EchoPayload &payload) noexcept {
+    for (char &ch : payload) {
         if (ch >= 'A' && ch <= 'Z') {
             ch = static_cast<char>(ch - 'A' + 'a');
         }

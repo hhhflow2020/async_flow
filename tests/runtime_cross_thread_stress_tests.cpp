@@ -31,14 +31,9 @@ TEST(RuntimeStressTests, RepeatedCrossThreadHopBurstsComplete) {
         for (int i = 0; i < tasks_per_burst; ++i) {
             last_thread[static_cast<std::size_t>(i)].store(-1, std::memory_order_relaxed);
             remaining.fetch_add(1, std::memory_order_relaxed);
-            if (!RepeatHopRuntime::start_task<RepeatHopTask>(
-                    hops_per_task,
-                    i,
-                    &remaining,
-                    &runs,
-                    &post_failures,
-                    progress.data(),
-                    last_thread.data())) {
+            if (!RepeatHopRuntime::start_task<RepeatHopTask>(hops_per_task, i, &remaining, &runs,
+                                                             &post_failures, progress.data(),
+                                                             last_thread.data())) {
                 if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
                     remaining.notify_one();
                 }
@@ -54,20 +49,19 @@ TEST(RuntimeStressTests, RepeatedCrossThreadHopBurstsComplete) {
             int min_id = -1;
             int min_thread = -1;
             for (int i = 0; i < tasks_per_burst; ++i) {
-                const int value = progress[static_cast<std::size_t>(i)].load(
-                    std::memory_order_acquire);
+                const int value =
+                    progress[static_cast<std::size_t>(i)].load(std::memory_order_acquire);
                 if (value < min_progress) {
                     min_progress = value;
                     min_id = i;
-                    min_thread = last_thread[static_cast<std::size_t>(i)].load(
-                        std::memory_order_acquire);
+                    min_thread =
+                        last_thread[static_cast<std::size_t>(i)].load(std::memory_order_acquire);
                 }
             }
             ADD_FAILURE() << "cross-thread hop burst did not drain, burst=" << burst
                           << " remaining=" << remaining.load(std::memory_order_acquire)
                           << " runs=" << runs.load(std::memory_order_acquire)
-                          << " post_failures="
-                          << post_failures.load(std::memory_order_acquire)
+                          << " post_failures=" << post_failures.load(std::memory_order_acquire)
                           << " min_id=" << min_id << " min_progress=" << min_progress
                           << " last_thread=" << min_thread
                           << " expected_runs=" << tasks_per_burst * (hops_per_task + 1);
@@ -92,11 +86,8 @@ TEST(RuntimeStressTests, AboveSixtyFourThreadCrossWordHopCompletes) {
 
     for (int i = 0; i < task_count; ++i) {
         remaining.fetch_add(1, std::memory_order_relaxed);
-        if (!WideHopRuntime::start_task<WideHopTask>(
-                hops_per_task,
-                &remaining,
-                &runs,
-                &post_failures)) {
+        if (!WideHopRuntime::start_task<WideHopTask>(hops_per_task, &remaining, &runs,
+                                                     &post_failures)) {
             if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
                 remaining.notify_one();
             }

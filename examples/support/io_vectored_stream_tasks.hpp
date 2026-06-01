@@ -12,7 +12,7 @@ class ServerTask final : public VectoredTask {
 public:
     explicit ServerTask(VectoredTask::FactoryToken token) : VectoredTask(token) {}
 
-    bool do_it(int fd, bool* ok, int* request_seen) {
+    bool do_it(int fd, bool *ok, int *request_seen) {
         stream_.reset(VectoredThread::IO_0, fd);
         ok_ = ok;
         request_seen_ = request_seen;
@@ -77,15 +77,15 @@ private:
     iovec response_iov_[2]{};
     af::IoOpState read_{};
     af::IoOpState write_{};
-    bool* ok_{nullptr};
-    int* request_seen_{nullptr};
+    bool *ok_{nullptr};
+    int *request_seen_{nullptr};
 };
 
 class ClientTask final : public VectoredTask {
 public:
     explicit ClientTask(VectoredTask::FactoryToken token) : VectoredTask(token) {}
 
-    bool do_it(int fd, bool* ok, int* response_seen) {
+    bool do_it(int fd, bool *ok, int *response_seen) {
         stream_.reset(VectoredThread::IO_0, fd);
         ok_ = ok;
         response_seen_ = response_seen;
@@ -150,8 +150,8 @@ private:
     iovec response_iov_[2]{};
     af::IoOpState write_{};
     af::IoOpState read_{};
-    bool* ok_{nullptr};
-    int* response_seen_{nullptr};
+    bool *ok_{nullptr};
+    int *response_seen_{nullptr};
 };
 
 } // namespace io_vectored_example

@@ -15,11 +15,9 @@ struct SendfileStaticFile {
 
     bool create() noexcept {
         char path[96]{};
-        const int path_written = std::snprintf(
-            path,
-            sizeof(path),
-            "/tmp/asyncflow-sendfile-static-%ld",
-            static_cast<long>(::getpid()));
+        const int path_written =
+            std::snprintf(path, sizeof(path), "/tmp/asyncflow-sendfile-static-%ld",
+                          static_cast<long>(::getpid()));
         if (path_written < 0 || static_cast<std::size_t>(path_written) >= sizeof(path)) {
             return false;
         }

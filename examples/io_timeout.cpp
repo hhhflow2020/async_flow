@@ -11,7 +11,7 @@
 namespace {
 
 void close_pair(int (&fds)[2]) {
-    for (int& fd : fds) {
+    for (int &fd : fds) {
         if (fd >= 0) {
             ::close(fd);
             fd = -1;
@@ -23,10 +23,7 @@ class ReadWithTimeoutTask final : public Task {
 public:
     explicit ReadWithTimeoutTask(Task::FactoryToken token) : Task(token) {}
 
-    bool do_it(
-        int fd,
-        std::chrono::nanoseconds timeout,
-        int* error) {
+    bool do_it(int fd, std::chrono::nanoseconds timeout, int *error) {
         fd_ = fd;
         timeout_ = timeout;
         error_ = error;
@@ -53,22 +50,13 @@ private:
     af::TaskResult arm_read() {
         state_ = State::Resume;
         deadline_.set_after(timeout_);
-        const af::IoStatus status = af::io_read_some(
-            *this,
-            AppThread::IO_0,
-            fd_,
-            &value_,
-            sizeof(value_),
-            read_);
+        const af::IoStatus status =
+            af::io_read_some(*this, AppThread::IO_0, fd_, &value_, sizeof(value_), read_);
         if (!status.pending()) {
             return failed();
         }
 
-        const af::IoStatus timeout = af::arm_io_timeout(
-            *this,
-            AppThread::IO_0,
-            deadline_,
-            read_);
+        const af::IoStatus timeout = af::arm_io_timeout(*this, AppThread::IO_0, deadline_, read_);
         if (!timeout.pending()) {
             return failed();
         }
@@ -76,11 +64,7 @@ private:
     }
 
     af::TaskResult resume_read() {
-        const af::IoStatus timeout = af::arm_io_timeout(
-            *this,
-            AppThread::IO_0,
-            deadline_,
-            read_);
+        const af::IoStatus timeout = af::arm_io_timeout(*this, AppThread::IO_0, deadline_, read_);
         if (timeout.pending()) {
             return pending();
         }
@@ -92,13 +76,8 @@ private:
             return failed();
         }
 
-        const af::IoStatus status = af::io_read_some(
-            *this,
-            AppThread::IO_0,
-            fd_,
-            &value_,
-            sizeof(value_),
-            read_);
+        const af::IoStatus status =
+            af::io_read_some(*this, AppThread::IO_0, fd_, &value_, sizeof(value_), read_);
         *error_ = status.failed() ? status.error : 0;
         return done();
     }
@@ -109,7 +88,7 @@ private:
     char value_{0};
     af::IoOpState read_{};
     af::IoDeadline deadline_{};
-    int* error_{nullptr};
+    int *error_{nullptr};
 };
 
 } // namespace
@@ -132,10 +111,7 @@ int main() {
     }
 
     int error = 0;
-    if (!async::start_task<ReadWithTimeoutTask>(
-            fds[0],
-            std::chrono::milliseconds(5),
-            &error)) {
+    if (!async::start_task<ReadWithTimeoutTask>(fds[0], std::chrono::milliseconds(5), &error)) {
         std::cerr << "timeout task did not start\n";
         close_pair(fds);
         async::shutdown();

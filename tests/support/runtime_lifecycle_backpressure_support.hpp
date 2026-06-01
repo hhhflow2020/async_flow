@@ -23,7 +23,7 @@ class BlockingTinyTask final : public TinyTask {
 public:
     explicit BlockingTinyTask(TinyTask::FactoryToken token) : TinyTask(token) {}
 
-    bool do_it(std::atomic<int>* started, std::atomic<bool>* release, std::atomic<int>* completed) {
+    bool do_it(std::atomic<int> *started, std::atomic<bool> *release, std::atomic<int> *completed) {
         started_ = started;
         release_ = release;
         completed_ = completed;
@@ -41,16 +41,16 @@ private:
         return done();
     }
 
-    std::atomic<int>* started_{nullptr};
-    std::atomic<bool>* release_{nullptr};
-    std::atomic<int>* completed_{nullptr};
+    std::atomic<int> *started_{nullptr};
+    std::atomic<bool> *release_{nullptr};
+    std::atomic<int> *completed_{nullptr};
 };
 
 class TinyNoopTask final : public TinyTask {
 public:
     explicit TinyNoopTask(TinyTask::FactoryToken token) : TinyTask(token) {}
 
-    bool do_it(std::atomic<int>* completed, std::atomic<int>* destroyed) {
+    bool do_it(std::atomic<int> *completed, std::atomic<int> *destroyed) {
         completed_ = completed;
         destroyed_ = destroyed;
         return schedule(TinyThread::Logic_0);
@@ -66,8 +66,8 @@ private:
         return done();
     }
 
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* destroyed_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *destroyed_{nullptr};
 };
 
 enum class YieldThread : std::int16_t {
@@ -94,7 +94,7 @@ class YieldCountTask final : public YieldTask {
 public:
     explicit YieldCountTask(YieldTask::FactoryToken token) : YieldTask(token) {}
 
-    bool do_it(YieldThread thread, std::atomic<int>* completed) {
+    bool do_it(YieldThread thread, std::atomic<int> *completed) {
         completed_ = completed;
         return schedule(thread);
     }
@@ -105,14 +105,14 @@ private:
         return done();
     }
 
-    std::atomic<int>* completed_{nullptr};
+    std::atomic<int> *completed_{nullptr};
 };
 
 class YieldFanoutTask final : public YieldTask {
 public:
     explicit YieldFanoutTask(YieldTask::FactoryToken token) : YieldTask(token) {}
 
-    bool do_it(int child_count, std::atomic<int>* completed, std::atomic<bool>* all_started) {
+    bool do_it(int child_count, std::atomic<int> *completed, std::atomic<bool> *all_started) {
         child_count_ = child_count;
         completed_ = completed;
         all_started_ = all_started;
@@ -132,6 +132,6 @@ private:
     }
 
     int child_count_{0};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<bool>* all_started_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<bool> *all_started_{nullptr};
 };

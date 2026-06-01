@@ -13,7 +13,7 @@ class MultishotAcceptTask final : public AcceptTask {
 public:
     explicit MultishotAcceptTask(AcceptTask::FactoryToken token) : AcceptTask(token) {}
 
-    bool do_it(int fd, int target_accepts, MultishotAcceptResult* result) {
+    bool do_it(int fd, int target_accepts, MultishotAcceptResult *result) {
         if (fd < 0 || target_accepts <= 0 || result == nullptr) {
             return false;
         }
@@ -40,12 +40,8 @@ private:
     }
 
     af::TaskResult accept_one() {
-        const af::IoStatus status = listener_.accept_multishot(
-            *this,
-            nullptr,
-            nullptr,
-            &accepted_fd_,
-            accept_);
+        const af::IoStatus status =
+            listener_.accept_multishot(*this, nullptr, nullptr, &accepted_fd_, accept_);
         if (status.pending()) {
             return pending();
         }
@@ -89,7 +85,7 @@ private:
     int accepted_fd_{-1};
     int target_accepts_{0};
     af::IoOpState accept_{};
-    MultishotAcceptResult* result_{nullptr};
+    MultishotAcceptResult *result_{nullptr};
 };
 
 } // namespace io_uring_multishot_accept_example

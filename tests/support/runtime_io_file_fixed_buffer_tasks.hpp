@@ -5,10 +5,7 @@ public:
     explicit UringFixedBufferFileTask(UringIoTaskBase::FactoryToken token)
         : UringIoTaskBase(token) {}
 
-    bool do_it(
-        int fd,
-        std::atomic<int>* completed,
-        std::atomic<char>* byte_read) {
+    bool do_it(int fd, std::atomic<int> *completed, std::atomic<char> *byte_read) {
         file_.reset(IoTestThread::IO_0, fd);
         completed_ = completed;
         byte_read_ = byte_read;
@@ -45,13 +42,7 @@ private:
     }
 
     af::TaskResult register_buffer() {
-        const af::IoStatus no_buffer = file_.write_fixed_at(
-            *this,
-            buffer_,
-            1,
-            0,
-            0,
-            no_buffer_);
+        const af::IoStatus no_buffer = file_.write_fixed_at(*this, buffer_, 1, 0, 0, no_buffer_);
         if (!no_buffer.failed() || no_buffer.error != ENOBUFS) {
             return failed();
         }
@@ -62,13 +53,7 @@ private:
             return failed();
         }
 
-        const af::IoStatus bad_index = file_.write_fixed_at(
-            *this,
-            buffer_,
-            1,
-            0,
-            1,
-            bad_index_);
+        const af::IoStatus bad_index = file_.write_fixed_at(*this, buffer_, 1, 0, 1, bad_index_);
         if (!bad_index.failed() || bad_index.error != EINVAL) {
             return failed();
         }
@@ -79,11 +64,8 @@ private:
     }
 
     af::TaskResult write_value() {
-        const af::IoStatus status = file_.write_fixed_at(
-            *this,
-            af::IoFixedBuffer{buffer_, 1, 0},
-            0,
-            write_);
+        const af::IoStatus status =
+            file_.write_fixed_at(*this, af::IoFixedBuffer{buffer_, 1, 0}, 0, write_);
         if (status.pending()) {
             return pending();
         }
@@ -108,11 +90,8 @@ private:
     }
 
     af::TaskResult read_value() {
-        const af::IoStatus status = file_.read_fixed_at(
-            *this,
-            af::IoFixedBuffer{buffer_, 1, 0},
-            0,
-            read_);
+        const af::IoStatus status =
+            file_.read_fixed_at(*this, af::IoFixedBuffer{buffer_, 1, 0}, 0, read_);
         if (status.pending()) {
             return pending();
         }
@@ -142,6 +121,6 @@ private:
     af::IoOpState write_{};
     af::IoOpState fsync_{};
     af::IoOpState read_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<char>* byte_read_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<char> *byte_read_{nullptr};
 };

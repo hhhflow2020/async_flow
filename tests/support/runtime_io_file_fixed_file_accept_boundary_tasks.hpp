@@ -5,13 +5,9 @@ public:
     explicit FixedFileAcceptDirectBoundaryTask(IoTaskBase::FactoryToken token)
         : IoTaskBase(token) {}
 
-    bool do_it(
-        std::atomic<int>* completed,
-        std::atomic<int>* bad_fd_error,
-        std::atomic<int>* null_output_error,
-        std::atomic<int>* bad_address_error,
-        std::atomic<int>* bad_index_error,
-        std::atomic<int>* unavailable_error) {
+    bool do_it(std::atomic<int> *completed, std::atomic<int> *bad_fd_error,
+               std::atomic<int> *null_output_error, std::atomic<int> *bad_address_error,
+               std::atomic<int> *bad_index_error, std::atomic<int> *unavailable_error) {
         completed_ = completed;
         bad_fd_error_ = bad_fd_error;
         null_output_error_ = null_output_error;
@@ -32,56 +28,21 @@ private:
         af::IoOpState bad_index{};
         af::IoOpState unavailable{};
 
-        const af::IoStatus bad_fd_status = af::io_accept_direct(
-            *this,
-            IoTestThread::IO_0,
-            -1,
-            nullptr,
-            nullptr,
-            SOCK_NONBLOCK | SOCK_CLOEXEC,
-            0,
-            &accepted_direct,
-            bad_fd);
-        const af::IoStatus null_output_status = af::io_accept_direct(
-            *this,
-            IoTestThread::IO_0,
-            placeholder_fd,
-            nullptr,
-            nullptr,
-            SOCK_NONBLOCK | SOCK_CLOEXEC,
-            0,
-            nullptr,
-            null_output);
+        const af::IoStatus bad_fd_status =
+            af::io_accept_direct(*this, IoTestThread::IO_0, -1, nullptr, nullptr,
+                                 SOCK_NONBLOCK | SOCK_CLOEXEC, 0, &accepted_direct, bad_fd);
+        const af::IoStatus null_output_status =
+            af::io_accept_direct(*this, IoTestThread::IO_0, placeholder_fd, nullptr, nullptr,
+                                 SOCK_NONBLOCK | SOCK_CLOEXEC, 0, nullptr, null_output);
         const af::IoStatus bad_address_status = af::io_accept_direct(
-            *this,
-            IoTestThread::IO_0,
-            placeholder_fd,
-            reinterpret_cast<sockaddr*>(&peer),
-            nullptr,
-            SOCK_NONBLOCK | SOCK_CLOEXEC,
-            0,
-            &accepted_direct,
-            bad_address);
-        const af::IoStatus bad_index_status = af::io_accept_direct(
-            *this,
-            IoTestThread::IO_0,
-            placeholder_fd,
-            nullptr,
-            nullptr,
-            SOCK_NONBLOCK | SOCK_CLOEXEC,
-            -1,
-            &accepted_direct,
-            bad_index);
-        const af::IoStatus unavailable_status = af::io_accept_direct(
-            *this,
-            IoTestThread::IO_0,
-            placeholder_fd,
-            nullptr,
-            nullptr,
-            SOCK_NONBLOCK | SOCK_CLOEXEC,
-            0,
-            &accepted_direct,
-            unavailable);
+            *this, IoTestThread::IO_0, placeholder_fd, reinterpret_cast<sockaddr *>(&peer), nullptr,
+            SOCK_NONBLOCK | SOCK_CLOEXEC, 0, &accepted_direct, bad_address);
+        const af::IoStatus bad_index_status =
+            af::io_accept_direct(*this, IoTestThread::IO_0, placeholder_fd, nullptr, nullptr,
+                                 SOCK_NONBLOCK | SOCK_CLOEXEC, -1, &accepted_direct, bad_index);
+        const af::IoStatus unavailable_status =
+            af::io_accept_direct(*this, IoTestThread::IO_0, placeholder_fd, nullptr, nullptr,
+                                 SOCK_NONBLOCK | SOCK_CLOEXEC, 0, &accepted_direct, unavailable);
 
         if (!bad_fd_status.failed() || bad_fd_status.error != EBADF ||
             !null_output_status.failed() || null_output_status.error != EINVAL ||
@@ -101,10 +62,10 @@ private:
         return done();
     }
 
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* bad_fd_error_{nullptr};
-    std::atomic<int>* null_output_error_{nullptr};
-    std::atomic<int>* bad_address_error_{nullptr};
-    std::atomic<int>* bad_index_error_{nullptr};
-    std::atomic<int>* unavailable_error_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *bad_fd_error_{nullptr};
+    std::atomic<int> *null_output_error_{nullptr};
+    std::atomic<int> *bad_address_error_{nullptr};
+    std::atomic<int> *bad_index_error_{nullptr};
+    std::atomic<int> *unavailable_error_{nullptr};
 };

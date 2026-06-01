@@ -22,9 +22,8 @@ int main() {
     }
 
     DirectOpenRoundTripResult result{};
-    const bool started = direct_open_async::start_task<DirectOpenRoundTripTask>(
-        temp_path.path,
-        &result);
+    const bool started =
+        direct_open_async::start_task<DirectOpenRoundTripTask>(temp_path.path, &result);
     AF_ASSERT(started);
 
     if (!started) {

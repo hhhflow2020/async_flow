@@ -17,13 +17,8 @@ class EchoClientTask final : public EchoTask {
 public:
     explicit EchoClientTask(EchoTask::FactoryToken token) : EchoTask(token) {}
 
-    bool do_it(
-        af::UniqueFd fd,
-        EchoThread io_thread,
-        sockaddr_in server,
-        socklen_t server_size,
-        EchoPayload request,
-        EchoClientResult* result) {
+    bool do_it(af::UniqueFd fd, EchoThread io_thread, sockaddr_in server, socklen_t server_size,
+               EchoPayload request, EchoClientResult *result) {
         fd_ = std::move(fd);
         if (!fd_ || result == nullptr) {
             return false;
@@ -60,10 +55,7 @@ private:
 
     af::TaskResult connect() {
         const af::IoStatus status = stream_.connect(
-            *this,
-            reinterpret_cast<const sockaddr*>(&server_),
-            server_size_,
-            connect_);
+            *this, reinterpret_cast<const sockaddr *>(&server_), server_size_, connect_);
         if (status.pending()) {
             return pending();
         }
@@ -76,11 +68,8 @@ private:
     }
 
     af::TaskResult send_request() {
-        const af::IoStatus status = stream_.send_some(
-            *this,
-            request_.data() + sent_,
-            request_.size() - sent_,
-            write_);
+        const af::IoStatus status =
+            stream_.send_some(*this, request_.data() + sent_, request_.size() - sent_, write_);
         if (status.pending()) {
             return pending();
         }
@@ -98,11 +87,9 @@ private:
     }
 
     af::TaskResult receive_response() {
-        const af::IoStatus status = stream_.recv_some(
-            *this,
-            result_->response.data() + result_->received,
-            result_->response.size() - result_->received,
-            read_);
+        const af::IoStatus status =
+            stream_.recv_some(*this, result_->response.data() + result_->received,
+                              result_->response.size() - result_->received, read_);
         if (status.pending()) {
             return pending();
         }
@@ -137,7 +124,7 @@ private:
     af::IoOpState connect_{};
     af::IoOpState write_{};
     af::IoOpState read_{};
-    EchoClientResult* result_{nullptr};
+    EchoClientResult *result_{nullptr};
 };
 
 } // namespace io_tcp_echo_example

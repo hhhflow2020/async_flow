@@ -12,7 +12,7 @@
 
 namespace {
 
-bool wait_until(std::atomic<int>& value, int expected) {
+bool wait_until(std::atomic<int> &value, int expected) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (value.load(std::memory_order_acquire) < expected) {
         if (std::chrono::steady_clock::now() > deadline) {
@@ -28,7 +28,7 @@ class ReadOneByteTask final : public Task {
 public:
     explicit ReadOneByteTask(Task::FactoryToken token) : Task(token) {}
 
-    bool do_it(int fd, std::atomic<int>* armed) {
+    bool do_it(int fd, std::atomic<int> *armed) {
         fd_ = fd;
         armed_ = armed;
         return schedule(AppThread::IO_0);
@@ -53,13 +53,8 @@ private:
 
     af::TaskResult arm_read() {
         state_ = State::Consume;
-        const af::IoStatus status = af::io_read_some(
-            *this,
-            AppThread::IO_0,
-            fd_,
-            &value_,
-            sizeof(value_),
-            read_);
+        const af::IoStatus status =
+            af::io_read_some(*this, AppThread::IO_0, fd_, &value_, sizeof(value_), read_);
         if (!status.pending()) {
             return failed();
         }
@@ -68,13 +63,8 @@ private:
     }
 
     af::TaskResult consume() {
-        const af::IoStatus status = af::io_read_some(
-            *this,
-            AppThread::IO_0,
-            fd_,
-            &value_,
-            sizeof(value_),
-            read_);
+        const af::IoStatus status =
+            af::io_read_some(*this, AppThread::IO_0, fd_, &value_, sizeof(value_), read_);
         if (!status.ready() || status.bytes != sizeof(value_)) {
             return failed();
         }
@@ -86,7 +76,7 @@ private:
     int fd_{-1};
     char value_{0};
     af::IoOpState read_{};
-    std::atomic<int>* armed_{nullptr};
+    std::atomic<int> *armed_{nullptr};
 };
 #endif
 

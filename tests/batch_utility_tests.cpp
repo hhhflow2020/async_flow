@@ -34,9 +34,7 @@ TEST(UtilityTests, SplitByShardGroupsByKey) {
     };
 
     std::vector<Op> ops{{0, 10}, {1, 11}, {4, 14}, {6, 16}};
-    auto sharded = Runtime::split_by_shard(std::move(ops), 4, [](const Op& op) {
-        return op.key;
-    });
+    auto sharded = Runtime::split_by_shard(std::move(ops), 4, [](const Op &op) { return op.key; });
 
     ASSERT_EQ(sharded.shard_count(), 4);
     ASSERT_EQ(sharded.shards[0].size(), 2);
@@ -76,12 +74,7 @@ TEST(UtilityTests, SplitChangeBatchSupportsCustomShardFunction) {
         },
     };
 
-    auto sharded = af::split_change_batch(
-        batch,
-        2,
-        [](std::uint64_t key) {
-            return key / 10U;
-        });
+    auto sharded = af::split_change_batch(batch, 2, [](std::uint64_t key) { return key / 10U; });
 
     EXPECT_EQ(batch.batch_id, 7U);
     EXPECT_TRUE(batch.ops.empty());
@@ -97,9 +90,7 @@ TEST(UtilityTests, BatchSequencerBuffersOutOfOrderBatches) {
     af::BatchSequencer<int> sequencer(1);
     std::vector<int> submitted;
 
-    auto submit = [&](int value) {
-        submitted.push_back(value);
-    };
+    auto submit = [&](int value) { submitted.push_back(value); };
 
     EXPECT_EQ(sequencer.submit(2, 20, submit), af::BatchSubmitStatus::Buffered);
     EXPECT_EQ(sequencer.submit(2, 200, submit), af::BatchSubmitStatus::Duplicate);

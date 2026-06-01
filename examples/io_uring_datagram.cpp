@@ -30,14 +30,9 @@ int main() {
     char response_seen = 0;
 
     const bool server_started = datagram_async::start_task<DatagramServerTask>(
-        sockets.server.get(),
-        &server_ok,
-        &request_seen);
+        sockets.server.get(), &server_ok, &request_seen);
     const bool client_started = datagram_async::start_task<DatagramClientTask>(
-        sockets.client.get(),
-        sockets.server_address,
-        sockets.server_size,
-        &client_ok,
+        sockets.client.get(), sockets.server_address, sockets.server_size, &client_ok,
         &response_seen);
     AF_ASSERT(server_started && client_started);
 
@@ -53,8 +48,7 @@ int main() {
         return 1;
     }
 
-    std::cout << "server request=" << request_seen
-              << " client response=" << response_seen << '\n';
+    std::cout << "server request=" << request_seen << " client response=" << response_seen << '\n';
     return 0;
 #else
     std::cout << "datagram example requires POSIX sockets\n";

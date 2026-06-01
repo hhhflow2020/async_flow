@@ -1,7 +1,6 @@
 #pragma once
 
-template <typename T>
-bool wait_until_at_least(std::atomic<T>& value, T expected) {
+template <typename T> bool wait_until_at_least(std::atomic<T> &value, T expected) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (value.load(std::memory_order_acquire) < expected) {
         if (std::chrono::steady_clock::now() > deadline) {

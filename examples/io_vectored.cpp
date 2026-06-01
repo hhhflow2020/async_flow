@@ -34,10 +34,9 @@ int main() {
         return 1;
     }
 
-    const char* backend =
-        vectored_async::io_uring_backend_available(VectoredThread::IO_0)
-            ? "io_uring"
-            : "epoll-fallback";
+    const char *backend = vectored_async::io_uring_backend_available(VectoredThread::IO_0)
+                              ? "io_uring"
+                              : "epoll-fallback";
     std::cout << "vectored stream backend=" << backend << '\n';
 
     af::UniqueFd udp_receiver(::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
@@ -52,13 +51,14 @@ int main() {
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     address.sin_port = 0;
-    if (::bind(udp_receiver.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+    if (::bind(udp_receiver.get(), reinterpret_cast<sockaddr *>(&address), sizeof(address)) != 0) {
         std::cerr << "udp bind failed\n";
         vectored_async::shutdown();
         return 1;
     }
     socklen_t address_size = sizeof(address);
-    if (::getsockname(udp_receiver.get(), reinterpret_cast<sockaddr*>(&address), &address_size) != 0) {
+    if (::getsockname(udp_receiver.get(), reinterpret_cast<sockaddr *>(&address), &address_size) !=
+        0) {
         std::cerr << "udp getsockname failed\n";
         vectored_async::shutdown();
         return 1;
@@ -69,18 +69,11 @@ int main() {
     bool datagram_send_ok = false;
     int datagram_seen = 0;
     int datagram_bytes_sent = 0;
-    if (!vectored_async::start_task<DatagramReceiverTask>(
-            udp_receiver.get(),
-            &datagram_armed,
-            &datagram_recv_ok,
-            &datagram_seen) ||
+    if (!vectored_async::start_task<DatagramReceiverTask>(udp_receiver.get(), &datagram_armed,
+                                                          &datagram_recv_ok, &datagram_seen) ||
         !wait_until(datagram_armed, 1) ||
-        !vectored_async::start_task<DatagramSenderTask>(
-            udp_sender.get(),
-            address,
-            address_size,
-            &datagram_send_ok,
-            &datagram_bytes_sent)) {
+        !vectored_async::start_task<DatagramSenderTask>(udp_sender.get(), address, address_size,
+                                                        &datagram_send_ok, &datagram_bytes_sent)) {
         std::cerr << "vectored datagram task start/arm failed\n";
         vectored_async::shutdown();
         return 1;
@@ -92,10 +85,10 @@ int main() {
         return 1;
     }
 
-    std::cout << "request=0x" << std::hex << request_seen
-              << " response=0x" << response_seen << '\n';
-    std::cout << "datagram=0x" << datagram_seen
-              << " bytes_sent=" << std::dec << datagram_bytes_sent << '\n';
+    std::cout << "request=0x" << std::hex << request_seen << " response=0x" << response_seen
+              << '\n';
+    std::cout << "datagram=0x" << datagram_seen << " bytes_sent=" << std::dec << datagram_bytes_sent
+              << '\n';
     return 0;
 #else
     std::cout << "vectored io example is Linux-only\n";

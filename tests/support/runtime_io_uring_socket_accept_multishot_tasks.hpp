@@ -5,13 +5,8 @@ public:
     explicit UringTcpAcceptMultishotTask(UringIoTaskBase::FactoryToken token)
         : UringIoTaskBase(token) {}
 
-    bool do_it(
-        int fd,
-        int target_accepts,
-        std::atomic<int>* armed,
-        std::atomic<int>* completed,
-        std::atomic<int>* accepted_count,
-        std::atomic<int>* error) {
+    bool do_it(int fd, int target_accepts, std::atomic<int> *armed, std::atomic<int> *completed,
+               std::atomic<int> *accepted_count, std::atomic<int> *error) {
         listener_.reset(IoTestThread::IO_0, fd);
         target_accepts_ = target_accepts;
         armed_ = armed;
@@ -38,12 +33,8 @@ private:
     }
 
     af::TaskResult accept_one() {
-        const af::IoStatus status = listener_.accept_multishot(
-            *this,
-            nullptr,
-            nullptr,
-            &accepted_fd_,
-            accept_);
+        const af::IoStatus status =
+            listener_.accept_multishot(*this, nullptr, nullptr, &accepted_fd_, accept_);
         if (status.pending()) {
             if (!armed_once_) {
                 armed_once_ = true;
@@ -72,7 +63,8 @@ private:
             return done();
         }
         if (!UringIoRuntime::cancel_io(IoTestThread::IO_0, accept_)) {
-            error_->store(accept_.wait.error == 0 ? EIO : accept_.wait.error, std::memory_order_release);
+            error_->store(accept_.wait.error == 0 ? EIO : accept_.wait.error,
+                          std::memory_order_release);
             completed_->fetch_add(1, std::memory_order_release);
             return done();
         }
@@ -101,8 +93,8 @@ private:
     int target_accepts_{0};
     bool armed_once_{false};
     af::IoOpState accept_{};
-    std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* accepted_count_{nullptr};
-    std::atomic<int>* error_{nullptr};
+    std::atomic<int> *armed_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *accepted_count_{nullptr};
+    std::atomic<int> *error_{nullptr};
 };

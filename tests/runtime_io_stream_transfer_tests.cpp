@@ -12,11 +12,7 @@ TEST_F(IoRuntimeStreamFixture, StreamAdapterSendfileSendsFileToSocket) {
     const char payload[] = "asyncflow-sendfile";
     constexpr std::size_t payload_size = sizeof(payload) - 1U;
     af::UniqueFd file;
-    ASSERT_TRUE(create_temp_file_with_payload(
-        file,
-        "asyncflow-sendfile",
-        payload,
-        payload_size));
+    ASSERT_TRUE(create_temp_file_with_payload(file, "asyncflow-sendfile", payload, payload_size));
 
     StreamSocketPair sockets;
     ASSERT_TRUE(create_stream_socket_pair(sockets));
@@ -25,14 +21,7 @@ TEST_F(IoRuntimeStreamFixture, StreamAdapterSendfileSendsFileToSocket) {
     std::atomic<int> calls{0};
     std::atomic<std::size_t> bytes_sent{0};
     ASSERT_TRUE(IoRuntime::start_task<SendfileSocketTask>(
-        sockets.first.get(),
-        file.get(),
-        payload_size,
-        3,
-        true,
-        &completed,
-        &calls,
-        &bytes_sent));
+        sockets.first.get(), file.get(), payload_size, 3, true, &completed, &calls, &bytes_sent));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), payload_size);
     EXPECT_GT(calls.load(std::memory_order_acquire), 1);
@@ -53,11 +42,8 @@ TEST_F(IoRuntimeStreamFixture, SendfileWaitsForSocketWritableWhenBufferIsFull) {
 
     const char payload = 'P';
     af::UniqueFd file;
-    ASSERT_TRUE(create_temp_file_with_payload(
-        file,
-        "asyncflow-sendfile-pending",
-        &payload,
-        sizeof(payload)));
+    ASSERT_TRUE(create_temp_file_with_payload(file, "asyncflow-sendfile-pending", &payload,
+                                              sizeof(payload)));
 
     BlockingTcpConnection connection;
     ASSERT_TRUE(create_blocked_tcp_connection(connection));
@@ -65,12 +51,8 @@ TEST_F(IoRuntimeStreamFixture, SendfileWaitsForSocketWritableWhenBufferIsFull) {
     std::atomic<int> pending_seen{0};
     std::atomic<int> completed{0};
     std::atomic<std::size_t> bytes_sent{0};
-    ASSERT_TRUE(IoRuntime::start_task<PendingSendfileTask>(
-        connection.server.get(),
-        file.get(),
-        &pending_seen,
-        &completed,
-        &bytes_sent));
+    ASSERT_TRUE(IoRuntime::start_task<PendingSendfileTask>(connection.server.get(), file.get(),
+                                                           &pending_seen, &completed, &bytes_sent));
     ASSERT_TRUE(wait_until_at_least(pending_seen, 1));
 
     drain_available(connection.client.get());
@@ -89,34 +71,24 @@ TEST_F(UringIoRuntimePollFixture, IoUringPollReadinessResumesSendfileWhenSocketW
 
     const char payload = 'R';
     af::UniqueFd file;
-    ASSERT_TRUE(create_temp_file_with_payload(
-        file,
-        "asyncflow-uring-poll-sendfile",
-        &payload,
-        sizeof(payload)));
+    ASSERT_TRUE(create_temp_file_with_payload(file, "asyncflow-uring-poll-sendfile", &payload,
+                                              sizeof(payload)));
 
     BlockingTcpConnection connection;
     ASSERT_TRUE(create_blocked_tcp_connection(connection));
 
-    std::atomic<af::IoOpState*> state{nullptr};
+    std::atomic<af::IoOpState *> state{nullptr};
     std::atomic<int> wait_kind{-1};
     std::atomic<int> pending_seen{0};
     std::atomic<int> completed{0};
     std::atomic<int> error{-1};
     std::atomic<std::size_t> bytes_sent{0};
     ASSERT_TRUE(UringIoRuntime::start_task<UringPendingSendfilePollTask>(
-        connection.server.get(),
-        file.get(),
-        &state,
-        &wait_kind,
-        &pending_seen,
-        &completed,
-        &error,
+        connection.server.get(), file.get(), &state, &wait_kind, &pending_seen, &completed, &error,
         &bytes_sent));
     ASSERT_TRUE(wait_until_at_least(pending_seen, 1));
-    EXPECT_EQ(
-        wait_kind.load(std::memory_order_acquire),
-        static_cast<int>(af::IoWaitKind::Readiness));
+    EXPECT_EQ(wait_kind.load(std::memory_order_acquire),
+              static_cast<int>(af::IoWaitKind::Readiness));
 
     drain_available(connection.client.get());
     ASSERT_TRUE(wait_until_at_least(completed, 1));
@@ -135,43 +107,30 @@ TEST_F(UringIoRuntimePollFixture, IoUringPollReadinessCancelPendingSendfileWait)
 
     const char payload = 'C';
     af::UniqueFd file;
-    ASSERT_TRUE(create_temp_file_with_payload(
-        file,
-        "asyncflow-uring-poll-cancel",
-        &payload,
-        sizeof(payload)));
+    ASSERT_TRUE(create_temp_file_with_payload(file, "asyncflow-uring-poll-cancel", &payload,
+                                              sizeof(payload)));
 
     BlockingTcpConnection connection;
     ASSERT_TRUE(create_blocked_tcp_connection(connection));
 
-    std::atomic<af::IoOpState*> state{nullptr};
+    std::atomic<af::IoOpState *> state{nullptr};
     std::atomic<int> wait_kind{-1};
     std::atomic<int> pending_seen{0};
     std::atomic<int> completed{0};
     std::atomic<int> error{-1};
     std::atomic<std::size_t> bytes_sent{0};
     ASSERT_TRUE(UringIoRuntime::start_task<UringPendingSendfilePollTask>(
-        connection.server.get(),
-        file.get(),
-        &state,
-        &wait_kind,
-        &pending_seen,
-        &completed,
-        &error,
+        connection.server.get(), file.get(), &state, &wait_kind, &pending_seen, &completed, &error,
         &bytes_sent));
     ASSERT_TRUE(wait_until_at_least(pending_seen, 1));
-    ASSERT_EQ(
-        wait_kind.load(std::memory_order_acquire),
-        static_cast<int>(af::IoWaitKind::Readiness));
+    ASSERT_EQ(wait_kind.load(std::memory_order_acquire),
+              static_cast<int>(af::IoWaitKind::Readiness));
 
     std::atomic<int> cancel_completed{0};
     std::atomic<int> cancel_result{0};
     std::atomic<int> cancel_error{0};
-    ASSERT_TRUE(UringIoRuntime::start_task<UringCancelIoStateTask>(
-        &state,
-        &cancel_completed,
-        &cancel_result,
-        &cancel_error));
+    ASSERT_TRUE(UringIoRuntime::start_task<UringCancelIoStateTask>(&state, &cancel_completed,
+                                                                   &cancel_result, &cancel_error));
     ASSERT_TRUE(wait_until_at_least(cancel_completed, 1));
     EXPECT_EQ(cancel_result.load(std::memory_order_acquire), 1);
     EXPECT_EQ(cancel_error.load(std::memory_order_acquire), ECANCELED);
@@ -201,12 +160,8 @@ TEST_F(IoRuntimeStreamFixture, SpliceTransfersPipeContentWithNullOffsets) {
 
     std::atomic<int> completed{0};
     std::atomic<std::size_t> bytes_spliced{0};
-    ASSERT_TRUE(IoRuntime::start_task<SplicePipeTask>(
-        input.read.get(),
-        output.write.get(),
-        payload_size,
-        &completed,
-        &bytes_spliced));
+    ASSERT_TRUE(IoRuntime::start_task<SplicePipeTask>(input.read.get(), output.write.get(),
+                                                      payload_size, &completed, &bytes_spliced));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(bytes_spliced.load(std::memory_order_acquire), payload_size);
 

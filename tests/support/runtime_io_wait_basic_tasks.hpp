@@ -4,7 +4,7 @@ class SocketHangupTask final : public IoTaskBase {
 public:
     explicit SocketHangupTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(int fd, std::atomic<int>* armed, std::atomic<int>* closed) {
+    bool do_it(int fd, std::atomic<int> *armed, std::atomic<int> *closed) {
         fd_ = fd;
         armed_ = armed;
         closed_ = closed;
@@ -13,13 +13,8 @@ public:
 
 private:
     af::TaskResult run() override {
-        const af::IoStatus status = af::io_read_some(
-            *this,
-            IoTestThread::IO_0,
-            fd_,
-            &value_,
-            sizeof(value_),
-            read_);
+        const af::IoStatus status =
+            af::io_read_some(*this, IoTestThread::IO_0, fd_, &value_, sizeof(value_), read_);
         if (status.pending()) {
             armed_->fetch_add(1, std::memory_order_release);
             return pending();
@@ -34,15 +29,15 @@ private:
     int fd_{-1};
     char value_{0};
     af::IoOpState read_{};
-    std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* closed_{nullptr};
+    std::atomic<int> *armed_{nullptr};
+    std::atomic<int> *closed_{nullptr};
 };
 
 class DuplicateWaitRejectedTask final : public IoTaskBase {
 public:
     explicit DuplicateWaitRejectedTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(int fd, std::atomic<int>* rejected, std::atomic<int>* error) {
+    bool do_it(int fd, std::atomic<int> *rejected, std::atomic<int> *error) {
         fd_ = fd;
         rejected_ = rejected;
         error_ = error;
@@ -61,15 +56,15 @@ private:
     }
 
     int fd_{-1};
-    std::atomic<int>* rejected_{nullptr};
-    std::atomic<int>* error_{nullptr};
+    std::atomic<int> *rejected_{nullptr};
+    std::atomic<int> *error_{nullptr};
 };
 
 class BadFdReadTask final : public IoTaskBase {
 public:
     explicit BadFdReadTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(std::atomic<int>* completed, std::atomic<int>* error) {
+    bool do_it(std::atomic<int> *completed, std::atomic<int> *error) {
         completed_ = completed;
         error_ = error;
         return schedule(IoTestThread::IO_0);
@@ -79,13 +74,8 @@ private:
     af::TaskResult run() override {
         char value = 0;
         af::IoOpState read{};
-        const af::IoStatus status = af::io_read_some(
-            *this,
-            IoTestThread::IO_0,
-            -1,
-            &value,
-            sizeof(value),
-            read);
+        const af::IoStatus status =
+            af::io_read_some(*this, IoTestThread::IO_0, -1, &value, sizeof(value), read);
         if (!status.failed()) {
             return failed();
         }
@@ -94,6 +84,6 @@ private:
         return done();
     }
 
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* error_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *error_{nullptr};
 };

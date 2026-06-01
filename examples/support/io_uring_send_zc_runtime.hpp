@@ -25,8 +25,7 @@ struct SendZcRuntimeTraits {
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 
     static constexpr af::ThreadKind thread_kind(SendZcThread thread) noexcept {
-        return thread == SendZcThread::IO_0 ? af::ThreadKind::IoUring
-                                            : af::ThreadKind::Worker;
+        return thread == SendZcThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
     }
 };
 

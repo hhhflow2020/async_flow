@@ -14,11 +14,7 @@ TEST_F(IoRuntimeEpollFixture, EpollIoThreadResumesTimerFdFromAdapter) {
     std::atomic<int> armed{0};
     std::atomic<int> completed{0};
     std::atomic<std::uint64_t> expirations{0};
-    ASSERT_TRUE(IoRuntime::start_task<TimerFdTask>(
-        timer.get(),
-        &armed,
-        &completed,
-        &expirations));
+    ASSERT_TRUE(IoRuntime::start_task<TimerFdTask>(timer.get(), &armed, &completed, &expirations));
     ASSERT_TRUE(wait_until_at_least(armed, 1));
 
     int error = 0;
@@ -42,11 +38,7 @@ TEST_F(IoRuntimeEpollFixture, EpollIoThreadResumesEventFdFromAdapter) {
     std::atomic<int> armed{0};
     std::atomic<int> completed{0};
     std::atomic<std::uint64_t> value{0};
-    ASSERT_TRUE(IoRuntime::start_task<EventFdTask>(
-        event.get(),
-        &armed,
-        &completed,
-        &value));
+    ASSERT_TRUE(IoRuntime::start_task<EventFdTask>(event.get(), &armed, &completed, &value));
     ASSERT_TRUE(wait_until_at_least(armed, 1));
 
     int error = 0;

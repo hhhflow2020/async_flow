@@ -29,15 +29,10 @@ public:
     explicit ParallelResumeTask(ParallelResumeTaskBase::FactoryToken token)
         : ParallelResumeTaskBase(token) {}
 
-    bool do_it(
-        int id,
-        std::atomic<int>* remaining,
-        std::atomic<int>* completed,
-        std::atomic<int>* failures,
-        std::atomic<int>* shard_runs,
-        std::atomic<std::uint64_t>* sum,
-        std::atomic<int>* task_stage,
-        std::atomic<int>* task_shards) {
+    bool do_it(int id, std::atomic<int> *remaining, std::atomic<int> *completed,
+               std::atomic<int> *failures, std::atomic<int> *shard_runs,
+               std::atomic<std::uint64_t> *sum, std::atomic<int> *task_stage,
+               std::atomic<int> *task_shards) {
         id_ = id;
         remaining_ = remaining;
         completed_ = completed;
@@ -66,11 +61,8 @@ private:
             state_ = State::Finish;
             task_stage_[id_].store(2, std::memory_order_relaxed);
             ParallelResumeRuntime::parallel_shards(
-                ParallelResumeThread::Logic_0,
-                ops_,
-                af::ParallelMode::AllShards,
-                this,
-                [this](std::uint16_t shard, std::vector<std::uint64_t>& shard_ops) {
+                ParallelResumeThread::Logic_0, ops_, af::ParallelMode::AllShards, this,
+                [this](std::uint16_t shard, std::vector<std::uint64_t> &shard_ops) {
                     task_shards_[id_ * 4 + shard].fetch_add(1, std::memory_order_relaxed);
                     shard_runs_->fetch_add(1, std::memory_order_relaxed);
                     std::uint64_t local = 0;
@@ -100,11 +92,11 @@ private:
     State state_{State::Split};
     af::ShardedOps<std::uint64_t> ops_{4};
     int id_{0};
-    std::atomic<int>* remaining_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* failures_{nullptr};
-    std::atomic<int>* shard_runs_{nullptr};
-    std::atomic<std::uint64_t>* sum_{nullptr};
-    std::atomic<int>* task_stage_{nullptr};
-    std::atomic<int>* task_shards_{nullptr};
+    std::atomic<int> *remaining_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *failures_{nullptr};
+    std::atomic<int> *shard_runs_{nullptr};
+    std::atomic<std::uint64_t> *sum_{nullptr};
+    std::atomic<int> *task_stage_{nullptr};
+    std::atomic<int> *task_shards_{nullptr};
 };

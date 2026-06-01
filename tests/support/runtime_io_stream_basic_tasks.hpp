@@ -4,11 +4,8 @@ class StreamAdapterEchoTask final : public IoTaskBase {
 public:
     explicit StreamAdapterEchoTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(
-        int fd,
-        std::atomic<int>* armed,
-        std::atomic<int>* completed,
-        std::atomic<char>* byte_read) {
+    bool do_it(int fd, std::atomic<int> *armed, std::atomic<int> *completed,
+               std::atomic<char> *byte_read) {
         stream_.reset(IoTestThread::IO_0, fd);
         armed_ = armed;
         completed_ = completed;
@@ -34,11 +31,7 @@ private:
     }
 
     af::TaskResult read_request() {
-        const af::IoStatus status = stream_.recv_some(
-            *this,
-            &request_,
-            sizeof(request_),
-            read_);
+        const af::IoStatus status = stream_.recv_some(*this, &request_, sizeof(request_), read_);
         if (status.pending()) {
             armed_->fetch_add(1, std::memory_order_release);
             return pending();
@@ -52,11 +45,7 @@ private:
     }
 
     af::TaskResult send_response() {
-        const af::IoStatus status = stream_.send_some(
-            *this,
-            &response_,
-            sizeof(response_),
-            write_);
+        const af::IoStatus status = stream_.send_some(*this, &response_, sizeof(response_), write_);
         if (status.pending()) {
             return pending();
         }
@@ -73,17 +62,16 @@ private:
     char response_{'R'};
     af::IoOpState read_{};
     af::IoOpState write_{};
-    std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<char>* byte_read_{nullptr};
+    std::atomic<int> *armed_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<char> *byte_read_{nullptr};
 };
 
-template <typename BaseTask>
-class BasicStreamShutdownTask final : public BaseTask {
+template <typename BaseTask> class BasicStreamShutdownTask final : public BaseTask {
 public:
     explicit BasicStreamShutdownTask(typename BaseTask::FactoryToken token) : BaseTask(token) {}
 
-    bool do_it(int fd, std::atomic<int>* completed, std::atomic<int>* error) {
+    bool do_it(int fd, std::atomic<int> *completed, std::atomic<int> *error) {
         stream_.reset(IoTestThread::IO_0, fd);
         completed_ = completed;
         error_ = error;
@@ -107,8 +95,8 @@ private:
 
     af::TcpStream<IoTestThread> stream_{};
     af::IoOpState shutdown_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* error_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *error_{nullptr};
 };
 
 using StreamShutdownTask = BasicStreamShutdownTask<IoTaskBase>;

@@ -15,11 +15,8 @@ TEST_F(IoRuntimeStreamFixture, StreamAdapterReceivesAndSendsSocketBytes) {
     std::atomic<int> armed{0};
     std::atomic<int> completed{0};
     std::atomic<char> byte_read{0};
-    ASSERT_TRUE(IoRuntime::start_task<StreamAdapterEchoTask>(
-        fds[0],
-        &armed,
-        &completed,
-        &byte_read));
+    ASSERT_TRUE(
+        IoRuntime::start_task<StreamAdapterEchoTask>(fds[0], &armed, &completed, &byte_read));
     ASSERT_TRUE(wait_until_at_least(armed, 1));
 
     const char request = 'Q';

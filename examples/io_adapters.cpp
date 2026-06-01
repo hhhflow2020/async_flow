@@ -40,15 +40,11 @@ int main() {
         async::start_task<StreamPeerTask>(stream.client.get(), &stream_peer);
     const bool udp_receive_started =
         async::start_task<UdpReceiveTask>(udp.receiver.get(), &udp_receive);
-    const bool udp_send_started = async::start_task<UdpSendTask>(
-        udp.sender.get(),
-        udp.address,
-        udp.address_size,
-        &udp_send);
-    AF_ASSERT(stream_echo_started && stream_peer_started &&
-              udp_receive_started && udp_send_started);
-    if (!stream_echo_started || !stream_peer_started ||
-        !udp_receive_started || !udp_send_started) {
+    const bool udp_send_started =
+        async::start_task<UdpSendTask>(udp.sender.get(), udp.address, udp.address_size, &udp_send);
+    AF_ASSERT(stream_echo_started && stream_peer_started && udp_receive_started &&
+              udp_send_started);
+    if (!stream_echo_started || !stream_peer_started || !udp_receive_started || !udp_send_started) {
         std::cout << "IO adapter task start failed\n";
         async::shutdown();
         return 1;
@@ -65,11 +61,9 @@ int main() {
         return 1;
     }
 
-    std::cout << "stream request=" << stream_echo.request
-              << " response=" << stream_echo.response
+    std::cout << "stream request=" << stream_echo.request << " response=" << stream_echo.response
               << " peer_received=" << stream_peer.response << '\n';
-    std::cout << "udp datagram=" << udp_receive.value
-              << " sent=" << udp_send.value << '\n';
+    std::cout << "udp datagram=" << udp_receive.value << " sent=" << udp_send.value << '\n';
     return 0;
 #else
     std::cout << "IO adapter example is Linux-only\n";

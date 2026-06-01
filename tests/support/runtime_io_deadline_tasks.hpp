@@ -4,14 +4,9 @@ class TimeoutSocketReadTask final : public IoTaskBase {
 public:
     explicit TimeoutSocketReadTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(
-        int fd,
-        std::chrono::nanoseconds timeout,
-        std::atomic<af::IoOpState*>* state,
-        std::atomic<int>* armed,
-        std::atomic<int>* completed,
-        std::atomic<int>* error,
-        std::atomic<char>* byte_read) {
+    bool do_it(int fd, std::chrono::nanoseconds timeout, std::atomic<af::IoOpState *> *state,
+               std::atomic<int> *armed, std::atomic<int> *completed, std::atomic<int> *error,
+               std::atomic<char> *byte_read) {
         fd_ = fd;
         timeout_ = timeout;
         state_ = state;
@@ -42,21 +37,13 @@ private:
     af::TaskResult arm_read() {
         state_machine_ = State::Resume;
         deadline_.set_after(timeout_);
-        const af::IoStatus status = af::io_read_some(
-            *this,
-            IoTestThread::IO_0,
-            fd_,
-            &value_,
-            sizeof(value_),
-            read_);
+        const af::IoStatus status =
+            af::io_read_some(*this, IoTestThread::IO_0, fd_, &value_, sizeof(value_), read_);
         if (!status.pending()) {
             return failed();
         }
-        const af::IoStatus timeout = af::arm_io_timeout(
-            *this,
-            IoTestThread::IO_0,
-            deadline_,
-            read_);
+        const af::IoStatus timeout =
+            af::arm_io_timeout(*this, IoTestThread::IO_0, deadline_, read_);
         if (!timeout.pending()) {
             return failed();
         }
@@ -66,11 +53,8 @@ private:
     }
 
     af::TaskResult resume_read() {
-        const af::IoStatus timeout = af::arm_io_timeout(
-            *this,
-            IoTestThread::IO_0,
-            deadline_,
-            read_);
+        const af::IoStatus timeout =
+            af::arm_io_timeout(*this, IoTestThread::IO_0, deadline_, read_);
         if (timeout.pending()) {
             return pending();
         }
@@ -83,13 +67,8 @@ private:
             return failed();
         }
 
-        const af::IoStatus status = af::io_read_some(
-            *this,
-            IoTestThread::IO_0,
-            fd_,
-            &value_,
-            sizeof(value_),
-            read_);
+        const af::IoStatus status =
+            af::io_read_some(*this, IoTestThread::IO_0, fd_, &value_, sizeof(value_), read_);
         if (status.ready() && status.bytes == sizeof(value_)) {
             byte_read_->store(value_, std::memory_order_release);
             error_->store(0, std::memory_order_release);
@@ -110,9 +89,9 @@ private:
     char value_{0};
     af::IoOpState read_{};
     af::IoDeadline deadline_{};
-    std::atomic<af::IoOpState*>* state_{nullptr};
-    std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* error_{nullptr};
-    std::atomic<char>* byte_read_{nullptr};
+    std::atomic<af::IoOpState *> *state_{nullptr};
+    std::atomic<int> *armed_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *error_{nullptr};
+    std::atomic<char> *byte_read_{nullptr};
 };

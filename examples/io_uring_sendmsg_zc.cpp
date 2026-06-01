@@ -43,13 +43,8 @@ class SendmsgZcTask final : public SendmsgZcTaskBase {
 public:
     explicit SendmsgZcTask(SendmsgZcTaskBase::FactoryToken token) : SendmsgZcTaskBase(token) {}
 
-    bool do_it(
-        int socket_fd,
-        const char* first,
-        std::size_t first_size,
-        const char* second,
-        std::size_t second_size,
-        std::size_t* bytes_sent) {
+    bool do_it(int socket_fd, const char *first, std::size_t first_size, const char *second,
+               std::size_t second_size, std::size_t *bytes_sent) {
         stream_.reset(SendmsgZcThread::IO_0, socket_fd);
         first_ = first;
         first_size_ = first_size;
@@ -68,15 +63,12 @@ private:
 
         int iov_count = 0;
         if (sent_ < first_size_) {
-            iov_[iov_count++] = iovec{
-                const_cast<char*>(first_ + sent_),
-                first_size_ - sent_};
-            iov_[iov_count++] = iovec{const_cast<char*>(second_), second_size_};
+            iov_[iov_count++] = iovec{const_cast<char *>(first_ + sent_), first_size_ - sent_};
+            iov_[iov_count++] = iovec{const_cast<char *>(second_), second_size_};
         } else {
             const std::size_t second_offset = sent_ - first_size_;
-            iov_[iov_count++] = iovec{
-                const_cast<char*>(second_ + second_offset),
-                second_size_ - second_offset};
+            iov_[iov_count++] =
+                iovec{const_cast<char *>(second_ + second_offset), second_size_ - second_offset};
         }
 
         const af::IoStatus status = stream_.sendv_zc_some(*this, iov_, iov_count, send_);
@@ -93,17 +85,17 @@ private:
     }
 
     af::TcpStream<SendmsgZcThread> stream_{};
-    const char* first_{nullptr};
-    const char* second_{nullptr};
+    const char *first_{nullptr};
+    const char *second_{nullptr};
     std::size_t first_size_{0};
     std::size_t second_size_{0};
     std::size_t sent_{0};
     iovec iov_[2]{};
     af::IoOpState send_{};
-    std::size_t* bytes_sent_{nullptr};
+    std::size_t *bytes_sent_{nullptr};
 };
 
-bool read_exact_until(int fd, char* output, std::size_t size) {
+bool read_exact_until(int fd, char *output, std::size_t size) {
     std::size_t offset = 0;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (offset < size) {
@@ -152,12 +144,7 @@ int main() {
     const bool has_uring = sendmsg_zc_async::io_uring_backend_available(SendmsgZcThread::IO_0);
     std::size_t bytes_sent{0};
     const bool started = sendmsg_zc_async::start_task<SendmsgZcTask>(
-        sender.get(),
-        first,
-        first_size,
-        second,
-        second_size,
-        &bytes_sent);
+        sender.get(), first, first_size, second, second_size, &bytes_sent);
     if (!started) {
         std::cerr << "sendmsg_zc task did not start\n";
         sendmsg_zc_async::shutdown();

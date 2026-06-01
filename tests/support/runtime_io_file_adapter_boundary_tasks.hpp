@@ -4,7 +4,7 @@ class FileAdapterBoundaryTask final : public IoTaskBase {
 public:
     explicit FileAdapterBoundaryTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(std::atomic<int>* completed, std::atomic<int>* error) {
+    bool do_it(std::atomic<int> *completed, std::atomic<int> *error) {
         completed_ = completed;
         error_ = error;
         return schedule(IoTestThread::IO_0);
@@ -20,9 +20,8 @@ private:
         const af::IoStatus zero_read = file.read_some(*this, nullptr, 0, read);
         const af::IoStatus zero_write = file.write_some(*this, nullptr, 0, write);
         const af::IoStatus bad_read = file.read_some(*this, &value, sizeof(value), read);
-        if (!zero_read.ready() || zero_read.bytes != 0U ||
-            !zero_write.ready() || zero_write.bytes != 0U ||
-            !bad_read.failed()) {
+        if (!zero_read.ready() || zero_read.bytes != 0U || !zero_write.ready() ||
+            zero_write.bytes != 0U || !bad_read.failed()) {
             return failed();
         }
 
@@ -31,6 +30,6 @@ private:
         return done();
     }
 
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* error_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *error_{nullptr};
 };

@@ -1,15 +1,11 @@
 #pragma once
 
-template <typename TaskBaseT>
-class BasicUdpVectoredRecvTask final : public TaskBaseT {
+template <typename TaskBaseT> class BasicUdpVectoredRecvTask final : public TaskBaseT {
 public:
     explicit BasicUdpVectoredRecvTask(typename TaskBaseT::FactoryToken token) : TaskBaseT(token) {}
 
-    bool do_it(
-        int fd,
-        std::atomic<int>* armed,
-        std::atomic<int>* completed,
-        std::atomic<int>* payload_seen) {
+    bool do_it(int fd, std::atomic<int> *armed, std::atomic<int> *completed,
+               std::atomic<int> *payload_seen) {
         socket_.reset(IoTestThread::IO_0, fd);
         armed_ = armed;
         completed_ = completed;
@@ -23,12 +19,7 @@ private:
         iov_[0] = iovec{&payload_[0], 1};
         iov_[1] = iovec{&payload_[1], 1};
         const af::IoStatus status = socket_.recvv_from_some(
-            *this,
-            iov_,
-            2,
-            reinterpret_cast<sockaddr*>(&peer_),
-            &peer_size_,
-            recv_);
+            *this, iov_, 2, reinterpret_cast<sockaddr *>(&peer_), &peer_size_, recv_);
         if (status.pending()) {
             armed_->fetch_add(1, std::memory_order_release);
             return this->pending();
@@ -37,9 +28,8 @@ private:
             return this->failed();
         }
 
-        const int combined =
-            (static_cast<unsigned char>(payload_[0]) << 8) |
-            static_cast<unsigned char>(payload_[1]);
+        const int combined = (static_cast<unsigned char>(payload_[0]) << 8) |
+                             static_cast<unsigned char>(payload_[1]);
         payload_seen_->store(combined, std::memory_order_release);
         completed_->fetch_add(1, std::memory_order_release);
         return this->done();
@@ -51,24 +41,19 @@ private:
     sockaddr_storage peer_{};
     socklen_t peer_size_{sizeof(peer_)};
     af::IoOpState recv_{};
-    std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* payload_seen_{nullptr};
+    std::atomic<int> *armed_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *payload_seen_{nullptr};
 };
 
 template <typename TaskBaseT, bool ZeroCopy = false>
 class BasicUdpVectoredSendToTask final : public TaskBaseT {
 public:
-    explicit BasicUdpVectoredSendToTask(typename TaskBaseT::FactoryToken token) : TaskBaseT(token) {}
+    explicit BasicUdpVectoredSendToTask(typename TaskBaseT::FactoryToken token)
+        : TaskBaseT(token) {}
 
-    bool do_it(
-        int fd,
-        sockaddr_in address,
-        socklen_t address_size,
-        char first,
-        char second,
-        std::atomic<int>* completed,
-        std::atomic<int>* bytes_sent) {
+    bool do_it(int fd, sockaddr_in address, socklen_t address_size, char first, char second,
+               std::atomic<int> *completed, std::atomic<int> *bytes_sent) {
         socket_.reset(IoTestThread::IO_0, fd);
         address_ = address;
         address_size_ = address_size;
@@ -85,21 +70,13 @@ private:
         iov_[1] = iovec{&payload_[1], 1};
         const af::IoStatus status = [&]() {
             if constexpr (ZeroCopy) {
-                return socket_.sendv_zc_to_some(
-                    *this,
-                    iov_,
-                    2,
-                    reinterpret_cast<const sockaddr*>(&address_),
-                    address_size_,
-                    send_);
+                return socket_.sendv_zc_to_some(*this, iov_, 2,
+                                                reinterpret_cast<const sockaddr *>(&address_),
+                                                address_size_, send_);
             } else {
-                return socket_.sendv_to_some(
-                    *this,
-                    iov_,
-                    2,
-                    reinterpret_cast<const sockaddr*>(&address_),
-                    address_size_,
-                    send_);
+                return socket_.sendv_to_some(*this, iov_, 2,
+                                             reinterpret_cast<const sockaddr *>(&address_),
+                                             address_size_, send_);
             }
         }();
         if (status.pending()) {
@@ -120,8 +97,8 @@ private:
     char payload_[2]{};
     iovec iov_[2]{};
     af::IoOpState send_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* bytes_sent_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *bytes_sent_{nullptr};
 };
 
 using UdpVectoredRecvTask = BasicUdpVectoredRecvTask<IoTaskBase>;

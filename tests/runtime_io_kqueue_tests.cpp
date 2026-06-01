@@ -83,7 +83,7 @@ TEST_F(IoRuntimeKqueueFixture, KqueueIoThreadCancelsPendingReadWait) {
     int fds[2]{-1, -1};
     ASSERT_TRUE(make_socket_pair(fds));
 
-    std::atomic<af::IoOpState*> state{nullptr};
+    std::atomic<af::IoOpState *> state{nullptr};
     std::atomic<int> armed{0};
     std::atomic<int> read_completed{0};
     std::atomic<int> read_error{0};
@@ -92,21 +92,12 @@ TEST_F(IoRuntimeKqueueFixture, KqueueIoThreadCancelsPendingReadWait) {
     std::atomic<int> second_cancel{-1};
     std::atomic<int> cancel_error{0};
 
-    ASSERT_TRUE(IoRuntime::start_task<CancellableSocketReadTask>(
-        fds[0],
-        &state,
-        &armed,
-        &read_completed,
-        &read_error));
+    ASSERT_TRUE(IoRuntime::start_task<CancellableSocketReadTask>(fds[0], &state, &armed,
+                                                                 &read_completed, &read_error));
     ASSERT_TRUE(wait_until_at_least(armed, 1));
 
     ASSERT_TRUE(IoRuntime::start_task<CancelIoStateTask>(
-        &state,
-        true,
-        &cancel_completed,
-        &first_cancel,
-        &second_cancel,
-        &cancel_error));
+        &state, true, &cancel_completed, &first_cancel, &second_cancel, &cancel_error));
     ASSERT_TRUE(wait_until_at_least(cancel_completed, 1));
     ASSERT_TRUE(wait_until_at_least(read_completed, 1));
 
@@ -124,20 +115,14 @@ TEST_F(IoRuntimeKqueueFixture, KqueueIoThreadTimesOutPendingRead) {
     int fds[2]{-1, -1};
     ASSERT_TRUE(make_socket_pair(fds));
 
-    std::atomic<af::IoOpState*> state{nullptr};
+    std::atomic<af::IoOpState *> state{nullptr};
     std::atomic<int> armed{0};
     std::atomic<int> completed{0};
     std::atomic<int> error{0};
     std::atomic<char> byte_read{0};
 
     ASSERT_TRUE(IoRuntime::start_task<TimeoutSocketReadTask>(
-        fds[0],
-        std::chrono::milliseconds(2),
-        &state,
-        &armed,
-        &completed,
-        &error,
-        &byte_read));
+        fds[0], std::chrono::milliseconds(2), &state, &armed, &completed, &error, &byte_read));
     ASSERT_TRUE(wait_until_at_least(armed, 1));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(error.load(std::memory_order_acquire), ETIMEDOUT);
@@ -151,20 +136,14 @@ TEST_F(IoRuntimeKqueueFixture, KqueueTimeoutIsCanceledWhenReadCompletesFirst) {
     int fds[2]{-1, -1};
     ASSERT_TRUE(make_socket_pair(fds));
 
-    std::atomic<af::IoOpState*> state{nullptr};
+    std::atomic<af::IoOpState *> state{nullptr};
     std::atomic<int> armed{0};
     std::atomic<int> completed{0};
     std::atomic<int> error{0};
     std::atomic<char> byte_read{0};
 
     ASSERT_TRUE(IoRuntime::start_task<TimeoutSocketReadTask>(
-        fds[0],
-        std::chrono::seconds(5),
-        &state,
-        &armed,
-        &completed,
-        &error,
-        &byte_read));
+        fds[0], std::chrono::seconds(5), &state, &armed, &completed, &error, &byte_read));
     ASSERT_TRUE(wait_until_at_least(armed, 1));
 
     const char value = 't';

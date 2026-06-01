@@ -38,11 +38,9 @@ struct TcpRuntimeTraits {
 using tcp_async = af::AsyncRuntime<TcpRuntimeTraits>;
 using TcpTask = tcp_async::Task;
 
-[[nodiscard]] inline const char* tcp_backend_name() noexcept {
+[[nodiscard]] inline const char *tcp_backend_name() noexcept {
 #if defined(__linux__)
-    return tcp_async::io_uring_backend_available(TcpThread::IO_0)
-        ? "io_uring"
-        : "epoll-fallback";
+    return tcp_async::io_uring_backend_available(TcpThread::IO_0) ? "io_uring" : "epoll-fallback";
 #elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
     return "kqueue";
 #else

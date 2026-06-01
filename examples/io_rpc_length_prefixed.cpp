@@ -14,10 +14,8 @@ int main() {
         return 0;
     }
 
-    const char* backend =
-        rpc_async::io_uring_backend_available(RpcThread::IO_0)
-            ? "enabled"
-            : "epoll-fallback";
+    const char *backend =
+        rpc_async::io_uring_backend_available(RpcThread::IO_0) ? "enabled" : "epoll-fallback";
     std::cout << "rpc length-prefixed backend=" << backend << '\n';
 
     af::UniqueFd listener(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
@@ -32,7 +30,7 @@ int main() {
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     address.sin_port = 0;
-    if (::bind(listener.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 ||
+    if (::bind(listener.get(), reinterpret_cast<sockaddr *>(&address), sizeof(address)) != 0 ||
         ::listen(listener.get(), 16) != 0) {
         std::cout << "tcp bind/listen failed\n";
         rpc_async::shutdown();
@@ -40,7 +38,7 @@ int main() {
     }
 
     socklen_t address_size = sizeof(address);
-    if (::getsockname(listener.get(), reinterpret_cast<sockaddr*>(&address), &address_size) != 0) {
+    if (::getsockname(listener.get(), reinterpret_cast<sockaddr *>(&address), &address_size) != 0) {
         std::cout << "tcp getsockname failed\n";
         rpc_async::shutdown();
         return 1;
@@ -52,17 +50,10 @@ int main() {
     int client_error = 0;
     bool response_ok = false;
 
-    const bool server_started = rpc_async::start_task<RpcServerTask>(
-        listener.get(),
-        &server_ok,
-        &server_error);
+    const bool server_started =
+        rpc_async::start_task<RpcServerTask>(listener.get(), &server_ok, &server_error);
     const bool client_started = rpc_async::start_task<RpcClientTask>(
-        client.get(),
-        address,
-        address_size,
-        &client_ok,
-        &client_error,
-        &response_ok);
+        client.get(), address, address_size, &client_ok, &client_error, &response_ok);
     AF_ASSERT(server_started && client_started);
 
     if (!server_started || !client_started) {
@@ -80,8 +71,8 @@ int main() {
     }
 
     if (server_error != 0 || client_error != 0) {
-        std::cout << "rpc failed: server_error=" << server_error
-                  << " client_error=" << client_error << '\n';
+        std::cout << "rpc failed: server_error=" << server_error << " client_error=" << client_error
+                  << '\n';
         return 1;
     }
 

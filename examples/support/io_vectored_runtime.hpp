@@ -40,7 +40,7 @@ struct VectoredRuntimeTraits {
 using vectored_async = af::AsyncRuntime<VectoredRuntimeTraits>;
 using VectoredTask = vectored_async::Task;
 
-inline bool wait_until(std::atomic<int>& value, int expected) {
+inline bool wait_until(std::atomic<int> &value, int expected) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (value.load(std::memory_order_acquire) < expected) {
         if (std::chrono::steady_clock::now() > deadline) {

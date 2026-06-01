@@ -5,11 +5,8 @@ public:
     explicit UringOpenAtDirectFileTask(UringIoTaskBase::FactoryToken token)
         : UringIoTaskBase(token) {}
 
-    bool do_it(
-        const char* path,
-        std::atomic<int>* completed,
-        std::atomic<int>* error,
-        std::atomic<char>* byte_read) {
+    bool do_it(const char *path, std::atomic<int> *completed, std::atomic<int> *error,
+               std::atomic<char> *byte_read) {
         path_ = path;
         completed_ = completed;
         error_ = error;
@@ -62,16 +59,9 @@ private:
     }
 
     af::TaskResult open_direct() {
-        const af::IoStatus status = af::io_openat_direct(
-            *this,
-            IoTestThread::IO_0,
-            AT_FDCWD,
-            path_,
-            O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC,
-            0600U,
-            0,
-            &file_,
-            open_);
+        const af::IoStatus status =
+            af::io_openat_direct(*this, IoTestThread::IO_0, AT_FDCWD, path_,
+                                 O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC, 0600U, 0, &file_, open_);
         if (status.pending()) {
             return pending();
         }
@@ -134,7 +124,7 @@ private:
     }
 
     State state_{State::Register};
-    const char* path_{nullptr};
+    const char *path_{nullptr};
     af::IoFixedFile<IoTestThread> file_{};
     char value_{'D'};
     char read_{0};
@@ -143,7 +133,7 @@ private:
     af::IoOpState write_{};
     af::IoOpState fsync_{};
     af::IoOpState read_state_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* error_{nullptr};
-    std::atomic<char>* byte_read_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *error_{nullptr};
+    std::atomic<char> *byte_read_{nullptr};
 };

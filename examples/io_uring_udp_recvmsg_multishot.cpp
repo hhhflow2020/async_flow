@@ -39,12 +39,7 @@ int main() {
     int peer_count = 0;
     std::atomic<int> error{0};
     const bool started = udp_recvmsg_async::start_task<UdpRecvmsgMultishotTask>(
-        receiver.get(),
-        sender_address.sin_port,
-        &armed,
-        &packed_read,
-        &peer_count,
-        &error);
+        receiver.get(), sender_address.sin_port, &armed, &packed_read, &peer_count, &error);
     AF_ASSERT(started);
 
     if (!started || !wait_until_armed_or_error(armed, error)) {
@@ -55,8 +50,7 @@ int main() {
     if (armed.load(std::memory_order_acquire) == 0) {
         const int task_error = error.load(std::memory_order_acquire);
         if (task_error != 0) {
-            std::cout << "io_uring UDP recvmsg_multishot unsupported error="
-                      << task_error << '\n';
+            std::cout << "io_uring UDP recvmsg_multishot unsupported error=" << task_error << '\n';
             udp_recvmsg_async::shutdown();
             return 0;
         }
@@ -66,20 +60,10 @@ int main() {
     }
 
     const char payload[] = {'R', 'M'};
-    if (::sendto(
-            sender.get(),
-            payload,
-            1,
-            0,
-            reinterpret_cast<sockaddr*>(&receiver_address),
-            receiver_address_size) != 1 ||
-        ::sendto(
-            sender.get(),
-            payload + 1,
-            1,
-            0,
-            reinterpret_cast<sockaddr*>(&receiver_address),
-            receiver_address_size) != 1) {
+    if (::sendto(sender.get(), payload, 1, 0, reinterpret_cast<sockaddr *>(&receiver_address),
+                 receiver_address_size) != 1 ||
+        ::sendto(sender.get(), payload + 1, 1, 0, reinterpret_cast<sockaddr *>(&receiver_address),
+                 receiver_address_size) != 1) {
         std::cout << "send payload failed\n";
         udp_recvmsg_async::shutdown();
         return 1;
@@ -94,10 +78,8 @@ int main() {
     }
 
     const int packed = packed_read;
-    std::cout << "io_uring UDP recvmsg_multishot bytes="
-              << static_cast<char>((packed >> 8) & 0xff)
-              << static_cast<char>(packed & 0xff)
-              << " peers=" << peer_count << '\n';
+    std::cout << "io_uring UDP recvmsg_multishot bytes=" << static_cast<char>((packed >> 8) & 0xff)
+              << static_cast<char>(packed & 0xff) << " peers=" << peer_count << '\n';
     return 0;
 #else
     std::cout << "io_uring UDP recvmsg_multishot example is Linux-only\n";

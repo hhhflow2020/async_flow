@@ -48,7 +48,7 @@ TEST(RuntimeStressTests, ConcurrentInitShutdownAndStartTask) {
     }
 
     stop.store(true, std::memory_order_release);
-    for (auto& producer : producers) {
+    for (auto &producer : producers) {
         producer.join();
     }
     StressRuntime::shutdown();
@@ -57,7 +57,6 @@ TEST(RuntimeStressTests, ConcurrentInitShutdownAndStartTask) {
     EXPECT_GT(counters.configured.load(std::memory_order_acquire), 0);
     EXPECT_GT(counters.accepted.load(std::memory_order_acquire), 0);
     EXPECT_GT(counters.pending_entered.load(std::memory_order_acquire), 0);
-    EXPECT_EQ(
-        counters.destroyed.load(std::memory_order_acquire),
-        counters.configured.load(std::memory_order_acquire));
+    EXPECT_EQ(counters.destroyed.load(std::memory_order_acquire),
+              counters.configured.load(std::memory_order_acquire));
 }

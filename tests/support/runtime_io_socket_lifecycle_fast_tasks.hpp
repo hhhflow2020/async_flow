@@ -4,7 +4,7 @@ class PendingSocketWaitTask final : public FastIoTaskBase {
 public:
     explicit PendingSocketWaitTask(FastIoTaskBase::FactoryToken token) : FastIoTaskBase(token) {}
 
-    bool do_it(int fd, std::atomic<int>* armed) {
+    bool do_it(int fd, std::atomic<int> *armed) {
         fd_ = fd;
         armed_ = armed;
         return schedule(IoTestThread::IO_0);
@@ -21,14 +21,14 @@ private:
 
     int fd_{-1};
     af::IoResult result_{};
-    std::atomic<int>* armed_{nullptr};
+    std::atomic<int> *armed_{nullptr};
 };
 
 class FastIoDoneTask final : public FastIoTaskBase {
 public:
     explicit FastIoDoneTask(FastIoTaskBase::FactoryToken token) : FastIoTaskBase(token) {}
 
-    bool do_it(std::atomic<int>* completed) {
+    bool do_it(std::atomic<int> *completed) {
         completed_ = completed;
         return schedule(IoTestThread::IO_0);
     }
@@ -39,5 +39,5 @@ private:
         return done();
     }
 
-    std::atomic<int>* completed_{nullptr};
+    std::atomic<int> *completed_{nullptr};
 };

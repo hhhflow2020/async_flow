@@ -14,11 +14,8 @@ TEST_F(IoRuntimeStreamFixture, StreamAdapterReceivesAndSendsVectoredSocketBytes)
     std::atomic<int> armed{0};
     std::atomic<int> completed{0};
     std::atomic<int> request_seen{0};
-    ASSERT_TRUE(IoRuntime::start_task<StreamVectoredEchoTask>(
-        fds[0],
-        &armed,
-        &completed,
-        &request_seen));
+    ASSERT_TRUE(
+        IoRuntime::start_task<StreamVectoredEchoTask>(fds[0], &armed, &completed, &request_seen));
     ASSERT_TRUE(wait_until_at_least(armed, 1));
 
     const char request[2]{'A', 'B'};
@@ -53,14 +50,8 @@ TEST_F(IoRuntimeStreamFixture, StreamAdapterSendvZcSendsSocketBytes) {
     constexpr std::size_t payload_size = first_size + second_size;
     std::atomic<int> completed{0};
     std::atomic<std::size_t> bytes_sent{0};
-    ASSERT_TRUE(IoRuntime::start_task<SendvZcSocketTask>(
-        fds[0],
-        first,
-        first_size,
-        second,
-        second_size,
-        &completed,
-        &bytes_sent));
+    ASSERT_TRUE(IoRuntime::start_task<SendvZcSocketTask>(fds[0], first, first_size, second,
+                                                         second_size, &completed, &bytes_sent));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), payload_size);
 

@@ -42,7 +42,7 @@ public:
     explicit FixedBufferRoundTripTask(FixedBufferTask::FactoryToken token)
         : FixedBufferTask(token) {}
 
-    bool do_it(int fd, char* byte_read) {
+    bool do_it(int fd, char *byte_read) {
         file_.reset(FixedBufferThread::IO_0, fd);
         byte_read_ = byte_read;
         return schedule(FixedBufferThread::IO_0);
@@ -90,11 +90,8 @@ private:
     }
 
     af::TaskResult write_value() {
-        const af::IoStatus status = file_.write_fixed_at(
-            *this,
-            af::IoFixedBuffer{buffer_, 1, 0},
-            0,
-            write_);
+        const af::IoStatus status =
+            file_.write_fixed_at(*this, af::IoFixedBuffer{buffer_, 1, 0}, 0, write_);
         if (status.pending()) {
             return pending();
         }
@@ -119,11 +116,8 @@ private:
     }
 
     af::TaskResult read_value() {
-        const af::IoStatus status = file_.read_fixed_at(
-            *this,
-            af::IoFixedBuffer{buffer_, 1, 0},
-            0,
-            read_);
+        const af::IoStatus status =
+            file_.read_fixed_at(*this, af::IoFixedBuffer{buffer_, 1, 0}, 0, read_);
         if (status.pending()) {
             return pending();
         }
@@ -151,7 +145,7 @@ private:
     af::IoOpState write_{};
     af::IoOpState fsync_{};
     af::IoOpState read_{};
-    char* byte_read_{nullptr};
+    char *byte_read_{nullptr};
 };
 #endif
 
@@ -176,9 +170,7 @@ int main() {
     af::UniqueFd file(fd);
 
     char byte_read{0};
-    const bool started = fixed_async::start_task<FixedBufferRoundTripTask>(
-        file.get(),
-        &byte_read);
+    const bool started = fixed_async::start_task<FixedBufferRoundTripTask>(file.get(), &byte_read);
     AF_ASSERT(started);
 
     if (!started) {

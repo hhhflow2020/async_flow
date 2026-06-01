@@ -4,7 +4,7 @@ class UringStreamSendTask final : public UringIoTaskBase {
 public:
     explicit UringStreamSendTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
 
-    bool do_it(int fd, std::atomic<int>* completed) {
+    bool do_it(int fd, std::atomic<int> *completed) {
         stream_.reset(IoTestThread::IO_0, fd);
         completed_ = completed;
         return schedule(IoTestThread::IO_0);
@@ -26,15 +26,14 @@ private:
     af::TcpStream<IoTestThread> stream_{};
     char value_{'S'};
     af::IoOpState write_{};
-    std::atomic<int>* completed_{nullptr};
+    std::atomic<int> *completed_{nullptr};
 };
 
 class UringStreamSendZcTask final : public UringIoTaskBase {
 public:
-    explicit UringStreamSendZcTask(UringIoTaskBase::FactoryToken token)
-        : UringIoTaskBase(token) {}
+    explicit UringStreamSendZcTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
 
-    bool do_it(int fd, std::atomic<int>* completed) {
+    bool do_it(int fd, std::atomic<int> *completed) {
         stream_.reset(IoTestThread::IO_0, fd);
         completed_ = completed;
         return schedule(IoTestThread::IO_0);
@@ -60,5 +59,5 @@ private:
     af::TcpStream<IoTestThread> stream_{};
     char value_{'Z'};
     af::IoOpState write_{};
-    std::atomic<int>* completed_{nullptr};
+    std::atomic<int> *completed_{nullptr};
 };

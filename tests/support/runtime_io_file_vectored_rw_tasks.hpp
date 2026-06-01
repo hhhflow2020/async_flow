@@ -5,7 +5,7 @@ public:
     explicit UringFileVectoredReadWriteTask(UringIoTaskBase::FactoryToken token)
         : UringIoTaskBase(token) {}
 
-    bool do_it(int fd, std::atomic<int>* completed, std::atomic<int>* bytes_read) {
+    bool do_it(int fd, std::atomic<int> *completed, std::atomic<int> *bytes_read) {
         file_.reset(IoTestThread::IO_0, fd);
         completed_ = completed;
         bytes_read_ = bytes_read;
@@ -84,6 +84,6 @@ private:
     af::IoOpState write_{};
     af::IoOpState fsync_{};
     af::IoOpState read_state_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* bytes_read_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *bytes_read_{nullptr};
 };

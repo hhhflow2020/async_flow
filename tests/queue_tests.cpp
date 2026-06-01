@@ -70,7 +70,7 @@ TEST(QueueTests, BoundedMpscSupportsConcurrentProducers) {
         }
     }
 
-    for (auto& producer : producers) {
+    for (auto &producer : producers) {
         producer.join();
     }
 

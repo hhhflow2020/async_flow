@@ -14,11 +14,8 @@ TEST_F(IoRuntimeDatagramFixture, EpollIoThreadResumesUdpRecvFromHelper) {
     std::atomic<int> armed{0};
     std::atomic<int> completed{0};
     std::atomic<char> byte_read{0};
-    ASSERT_TRUE(IoRuntime::start_task<UdpRecvTask>(
-        sockets.receiver.get(),
-        &armed,
-        &completed,
-        &byte_read));
+    ASSERT_TRUE(
+        IoRuntime::start_task<UdpRecvTask>(sockets.receiver.get(), &armed, &completed, &byte_read));
     ASSERT_TRUE(wait_until_at_least(armed, 1));
 
     const char value = 'u';
@@ -42,11 +39,8 @@ TEST_F(IoRuntimeDatagramFixture, EpollIoThreadReceivesVectoredUdpDatagramFromHel
     std::atomic<int> armed{0};
     std::atomic<int> completed{0};
     std::atomic<int> payload_seen{0};
-    ASSERT_TRUE(IoRuntime::start_task<UdpVectoredRecvTask>(
-        sockets.receiver.get(),
-        &armed,
-        &completed,
-        &payload_seen));
+    ASSERT_TRUE(IoRuntime::start_task<UdpVectoredRecvTask>(sockets.receiver.get(), &armed,
+                                                           &completed, &payload_seen));
     ASSERT_TRUE(wait_until_at_least(armed, 1));
 
     const char payload[2]{'u', 'v'};
@@ -74,12 +68,8 @@ TEST_F(IoRuntimeDatagramFixture, EpollIoThreadAcceptsUdpZeroLengthDatagram) {
     const char value = 0;
     ASSERT_EQ(send_udp_payload(sockets, &value, 0), 0);
 
-    ASSERT_TRUE(IoRuntime::start_task<UdpRecvTask>(
-        sockets.receiver.get(),
-        &armed,
-        &completed,
-        &byte_read,
-        0U));
+    ASSERT_TRUE(IoRuntime::start_task<UdpRecvTask>(sockets.receiver.get(), &armed, &completed,
+                                                   &byte_read, 0U));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(byte_read.load(std::memory_order_acquire), 'z');
 #else

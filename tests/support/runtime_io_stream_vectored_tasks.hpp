@@ -4,11 +4,8 @@ class StreamVectoredEchoTask final : public IoTaskBase {
 public:
     explicit StreamVectoredEchoTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(
-        int fd,
-        std::atomic<int>* armed,
-        std::atomic<int>* completed,
-        std::atomic<int>* request_seen) {
+    bool do_it(int fd, std::atomic<int> *armed, std::atomic<int> *completed,
+               std::atomic<int> *request_seen) {
         stream_.reset(IoTestThread::IO_0, fd);
         armed_ = armed;
         completed_ = completed;
@@ -75,7 +72,7 @@ private:
     char response_[2]{'X', 'Y'};
     af::IoOpState read_{};
     af::IoOpState write_{};
-    std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* request_seen_{nullptr};
+    std::atomic<int> *armed_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *request_seen_{nullptr};
 };

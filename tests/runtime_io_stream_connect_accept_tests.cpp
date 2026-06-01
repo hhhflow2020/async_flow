@@ -20,7 +20,7 @@ TEST_F(IoRuntimeStreamFixture, EpollIoThreadAcceptsTcpConnectionFromHelper) {
 
     int client = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     ASSERT_GE(client, 0);
-    const int rc = ::connect(client, reinterpret_cast<sockaddr*>(&address), address_size);
+    const int rc = ::connect(client, reinterpret_cast<sockaddr *>(&address), address_size);
     ASSERT_TRUE(rc == 0 || errno == EINPROGRESS);
 
     ASSERT_TRUE(wait_until_at_least(completed, 1));
@@ -48,12 +48,7 @@ TEST_F(IoRuntimeStreamFixture, AcceptMultishotReportsInvalidAndUnavailableBacken
     std::atomic<int> address_error{0};
     std::atomic<int> unavailable_error{0};
     ASSERT_TRUE(IoRuntime::start_task<TcpAcceptMultishotBoundaryTask>(
-        listener,
-        &completed,
-        &invalid_error,
-        &null_error,
-        &address_error,
-        &unavailable_error));
+        listener, &completed, &invalid_error, &null_error, &address_error, &unavailable_error));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(invalid_error.load(std::memory_order_acquire), EBADF);
     EXPECT_EQ(null_error.load(std::memory_order_acquire), EINVAL);
@@ -81,12 +76,7 @@ TEST_F(IoRuntimeStreamFixture, RecvMultishotReportsInvalidAndUnavailableBackend)
     std::atomic<int> unavailable_error{0};
     std::atomic<int> register_error{0};
     ASSERT_TRUE(IoRuntime::start_task<RecvMultishotBoundaryTask>(
-        fds[0],
-        &completed,
-        &invalid_error,
-        &null_error,
-        &unavailable_error,
-        &register_error));
+        fds[0], &completed, &invalid_error, &null_error, &unavailable_error, &register_error));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(invalid_error.load(std::memory_order_acquire), EBADF);
     EXPECT_EQ(null_error.load(std::memory_order_acquire), EINVAL);

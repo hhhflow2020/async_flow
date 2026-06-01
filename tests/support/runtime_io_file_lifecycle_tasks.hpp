@@ -2,15 +2,10 @@
 
 class UringFileLifecycleTask final : public UringIoTaskBase {
 public:
-    explicit UringFileLifecycleTask(UringIoTaskBase::FactoryToken token)
-        : UringIoTaskBase(token) {}
+    explicit UringFileLifecycleTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
 
-    bool do_it(
-        const char* path,
-        const char* renamed_path,
-        std::atomic<int>* completed,
-        std::atomic<int>* close_released,
-        std::atomic<std::uint64_t>* observed_size) {
+    bool do_it(const char *path, const char *renamed_path, std::atomic<int> *completed,
+               std::atomic<int> *close_released, std::atomic<std::uint64_t> *observed_size) {
         path_ = path;
         renamed_path_ = renamed_path;
         completed_ = completed;
@@ -66,15 +61,9 @@ private:
 
     af::TaskResult open_file() {
         int fd = -1;
-        const af::IoStatus status = af::io_openat(
-            *this,
-            IoTestThread::IO_0,
-            AT_FDCWD,
-            path_,
-            O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC,
-            0600U,
-            &fd,
-            open_);
+        const af::IoStatus status =
+            af::io_openat(*this, IoTestThread::IO_0, AT_FDCWD, path_,
+                          O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC, 0600U, &fd, open_);
         if (status.pending()) {
             return pending();
         }
@@ -88,14 +77,8 @@ private:
     }
 
     af::TaskResult fallocate_file() {
-        const af::IoStatus status = af::io_fallocate(
-            *this,
-            IoTestThread::IO_0,
-            owned_.get(),
-            FALLOC_FL_KEEP_SIZE,
-            0,
-            4096,
-            fallocate_);
+        const af::IoStatus status = af::io_fallocate(*this, IoTestThread::IO_0, owned_.get(),
+                                                     FALLOC_FL_KEEP_SIZE, 0, 4096, fallocate_);
         if (status.pending()) {
             return pending();
         }
@@ -143,15 +126,8 @@ private:
     }
 
     af::TaskResult stat_file() {
-        const af::IoStatus status = af::io_statx(
-            *this,
-            IoTestThread::IO_0,
-            AT_FDCWD,
-            path_,
-            0,
-            STATX_SIZE,
-            &stat_,
-            stat_state_);
+        const af::IoStatus status = af::io_statx(*this, IoTestThread::IO_0, AT_FDCWD, path_, 0,
+                                                 STATX_SIZE, &stat_, stat_state_);
         if (status.pending()) {
             return pending();
         }
@@ -164,15 +140,8 @@ private:
     }
 
     af::TaskResult rename_file() {
-        const af::IoStatus status = af::io_renameat(
-            *this,
-            IoTestThread::IO_0,
-            AT_FDCWD,
-            path_,
-            AT_FDCWD,
-            renamed_path_,
-            0,
-            rename_);
+        const af::IoStatus status = af::io_renameat(*this, IoTestThread::IO_0, AT_FDCWD, path_,
+                                                    AT_FDCWD, renamed_path_, 0, rename_);
         if (status.pending()) {
             return pending();
         }
@@ -184,13 +153,8 @@ private:
     }
 
     af::TaskResult unlink_file() {
-        const af::IoStatus status = af::io_unlinkat(
-            *this,
-            IoTestThread::IO_0,
-            AT_FDCWD,
-            renamed_path_,
-            0,
-            unlink_);
+        const af::IoStatus status =
+            af::io_unlinkat(*this, IoTestThread::IO_0, AT_FDCWD, renamed_path_, 0, unlink_);
         if (status.pending()) {
             return pending();
         }
@@ -218,8 +182,8 @@ private:
     }
 
     State state_{State::Open};
-    const char* path_{nullptr};
-    const char* renamed_path_{nullptr};
+    const char *path_{nullptr};
+    const char *renamed_path_{nullptr};
     af::UniqueFd owned_{};
     af::IoFile<IoTestThread> file_{};
     char value_{'L'};
@@ -234,7 +198,7 @@ private:
     af::IoOpState rename_{};
     af::IoOpState unlink_{};
     af::IoOpState close_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* close_released_{nullptr};
-    std::atomic<std::uint64_t>* observed_size_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *close_released_{nullptr};
+    std::atomic<std::uint64_t> *observed_size_{nullptr};
 };

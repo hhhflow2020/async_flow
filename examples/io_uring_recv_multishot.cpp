@@ -25,11 +25,8 @@ int main() {
     std::atomic<int> armed{0};
     int packed_read = 0;
     std::atomic<int> error{0};
-    const bool started = recv_async::start_task<RecvMultishotTask>(
-        sockets.receiver.get(),
-        &armed,
-        &packed_read,
-        &error);
+    const bool started = recv_async::start_task<RecvMultishotTask>(sockets.receiver.get(), &armed,
+                                                                   &packed_read, &error);
     AF_ASSERT(started);
 
     if (!started || !wait_until_armed_or_error(armed, error)) {
@@ -40,8 +37,7 @@ int main() {
     if (armed.load(std::memory_order_acquire) == 0) {
         const int task_error = error.load(std::memory_order_acquire);
         if (task_error != 0) {
-            std::cout << "io_uring recv_multishot unsupported error="
-                      << task_error << '\n';
+            std::cout << "io_uring recv_multishot unsupported error=" << task_error << '\n';
             recv_async::shutdown();
             return 0;
         }
@@ -66,8 +62,7 @@ int main() {
     }
 
     const int packed = packed_read;
-    std::cout << "io_uring recv_multishot bytes="
-              << static_cast<char>((packed >> 8) & 0xff)
+    std::cout << "io_uring recv_multishot bytes=" << static_cast<char>((packed >> 8) & 0xff)
               << static_cast<char>(packed & 0xff) << '\n';
     return 0;
 #else

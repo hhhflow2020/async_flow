@@ -23,8 +23,7 @@ int main() {
 
     socket_async::shutdown();
     std::cout << "socket lifecycle backend=" << socket_lifecycle_backend_name()
-              << " port=" << server.port
-              << " server_error=" << server.error
+              << " port=" << server.port << " server_error=" << server.error
               << " client_error=" << client.error << '\n';
     return server.ok && client.ok ? 0 : 1;
 #else

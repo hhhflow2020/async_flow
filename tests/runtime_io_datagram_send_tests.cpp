@@ -14,13 +14,9 @@ TEST_F(IoRuntimeDatagramFixture, EpollIoThreadSendsUdpDatagramFromHelper) {
     std::atomic<int> completed{0};
     std::atomic<int> bytes_sent{0};
     const char value = 's';
-    ASSERT_TRUE(IoRuntime::start_task<UdpSendToTask>(
-        sockets.sender.get(),
-        sockets.address,
-        sockets.address_size,
-        value,
-        &completed,
-        &bytes_sent));
+    ASSERT_TRUE(IoRuntime::start_task<UdpSendToTask>(sockets.sender.get(), sockets.address,
+                                                     sockets.address_size, value, &completed,
+                                                     &bytes_sent));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), 1);
 
@@ -43,14 +39,9 @@ TEST_F(IoRuntimeDatagramFixture, EpollIoThreadSendsVectoredUdpDatagramFromHelper
 
     std::atomic<int> completed{0};
     std::atomic<int> bytes_sent{0};
-    ASSERT_TRUE(IoRuntime::start_task<UdpVectoredSendToTask>(
-        sockets.sender.get(),
-        sockets.address,
-        sockets.address_size,
-        'd',
-        'g',
-        &completed,
-        &bytes_sent));
+    ASSERT_TRUE(IoRuntime::start_task<UdpVectoredSendToTask>(sockets.sender.get(), sockets.address,
+                                                             sockets.address_size, 'd', 'g',
+                                                             &completed, &bytes_sent));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), 2);
 
@@ -75,12 +66,7 @@ TEST_F(IoRuntimeDatagramFixture, EpollIoThreadSendsVectoredUdpDatagramWithSendms
     std::atomic<int> completed{0};
     std::atomic<int> bytes_sent{0};
     ASSERT_TRUE(IoRuntime::start_task<UdpVectoredZcSendToTask>(
-        sockets.sender.get(),
-        sockets.address,
-        sockets.address_size,
-        'z',
-        'c',
-        &completed,
+        sockets.sender.get(), sockets.address, sockets.address_size, 'z', 'c', &completed,
         &bytes_sent));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), 2);

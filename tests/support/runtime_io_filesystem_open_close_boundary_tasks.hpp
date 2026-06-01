@@ -4,7 +4,7 @@ class OpenAtBoundaryTask final : public IoTaskBase {
 public:
     explicit OpenAtBoundaryTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(std::atomic<int>* completed, std::atomic<int>* error) {
+    bool do_it(std::atomic<int> *completed, std::atomic<int> *error) {
         completed_ = completed;
         error_ = error;
         return schedule(IoTestThread::IO_0);
@@ -17,33 +17,15 @@ private:
         af::IoOpState no_uring{};
         af::IoOpState close_no_uring{};
         int opened = -1;
-        const af::IoStatus null_path_status = af::io_openat(
-            *this,
-            IoTestThread::IO_0,
-            AT_FDCWD,
-            nullptr,
-            O_RDONLY | O_CLOEXEC,
-            0,
-            &opened,
-            null_path);
-        const af::IoStatus null_output_status = af::io_openat(
-            *this,
-            IoTestThread::IO_0,
-            AT_FDCWD,
-            "/tmp/asyncflow-openat-boundary",
-            O_RDONLY | O_CLOEXEC,
-            0,
-            nullptr,
-            null_output);
-        const af::IoStatus no_uring_status = af::io_openat(
-            *this,
-            IoTestThread::IO_0,
-            AT_FDCWD,
-            "/tmp/asyncflow-openat-boundary",
-            O_RDONLY | O_CLOEXEC,
-            0,
-            &opened,
-            no_uring);
+        const af::IoStatus null_path_status =
+            af::io_openat(*this, IoTestThread::IO_0, AT_FDCWD, nullptr, O_RDONLY | O_CLOEXEC, 0,
+                          &opened, null_path);
+        const af::IoStatus null_output_status =
+            af::io_openat(*this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-boundary",
+                          O_RDONLY | O_CLOEXEC, 0, nullptr, null_output);
+        const af::IoStatus no_uring_status =
+            af::io_openat(*this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-boundary",
+                          O_RDONLY | O_CLOEXEC, 0, &opened, no_uring);
         af::UniqueFd event = af::make_eventfd();
         if (!event) {
             return failed();
@@ -62,6 +44,6 @@ private:
         return done();
     }
 
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* error_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *error_{nullptr};
 };

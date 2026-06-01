@@ -4,12 +4,8 @@ class CancellableSocketReadTask final : public IoTaskBase {
 public:
     explicit CancellableSocketReadTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(
-        int fd,
-        std::atomic<af::IoOpState*>* state,
-        std::atomic<int>* armed,
-        std::atomic<int>* completed,
-        std::atomic<int>* error) {
+    bool do_it(int fd, std::atomic<af::IoOpState *> *state, std::atomic<int> *armed,
+               std::atomic<int> *completed, std::atomic<int> *error) {
         fd_ = fd;
         state_ = state;
         armed_ = armed;
@@ -37,13 +33,8 @@ private:
 
     af::TaskResult arm_read() {
         state_machine_ = State::Finish;
-        const af::IoStatus status = af::io_read_some(
-            *this,
-            IoTestThread::IO_0,
-            fd_,
-            &value_,
-            sizeof(value_),
-            read_);
+        const af::IoStatus status =
+            af::io_read_some(*this, IoTestThread::IO_0, fd_, &value_, sizeof(value_), read_);
         if (!status.pending()) {
             return failed();
         }
@@ -53,13 +44,8 @@ private:
     }
 
     af::TaskResult finish_read() {
-        const af::IoStatus status = af::io_read_some(
-            *this,
-            IoTestThread::IO_0,
-            fd_,
-            &value_,
-            sizeof(value_),
-            read_);
+        const af::IoStatus status =
+            af::io_read_some(*this, IoTestThread::IO_0, fd_, &value_, sizeof(value_), read_);
         if (!status.failed() || status.error != ECANCELED) {
             return failed();
         }
@@ -72,23 +58,19 @@ private:
     int fd_{-1};
     char value_{0};
     af::IoOpState read_{};
-    std::atomic<af::IoOpState*>* state_{nullptr};
-    std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* error_{nullptr};
+    std::atomic<af::IoOpState *> *state_{nullptr};
+    std::atomic<int> *armed_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *error_{nullptr};
 };
 
 class CancelIoStateTask final : public IoTaskBase {
 public:
     explicit CancelIoStateTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(
-        std::atomic<af::IoOpState*>* state,
-        bool cancel_twice,
-        std::atomic<int>* completed,
-        std::atomic<int>* first_result,
-        std::atomic<int>* second_result,
-        std::atomic<int>* error) {
+    bool do_it(std::atomic<af::IoOpState *> *state, bool cancel_twice, std::atomic<int> *completed,
+               std::atomic<int> *first_result, std::atomic<int> *second_result,
+               std::atomic<int> *error) {
         state_ = state;
         cancel_twice_ = cancel_twice;
         completed_ = completed;
@@ -100,7 +82,7 @@ public:
 
 private:
     af::TaskResult run() override {
-        af::IoOpState* state = state_->load(std::memory_order_acquire);
+        af::IoOpState *state = state_->load(std::memory_order_acquire);
         if (state == nullptr) {
             return failed();
         }
@@ -118,19 +100,19 @@ private:
         return done();
     }
 
-    std::atomic<af::IoOpState*>* state_{nullptr};
+    std::atomic<af::IoOpState *> *state_{nullptr};
     bool cancel_twice_{false};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* first_result_{nullptr};
-    std::atomic<int>* second_result_{nullptr};
-    std::atomic<int>* error_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *first_result_{nullptr};
+    std::atomic<int> *second_result_{nullptr};
+    std::atomic<int> *error_{nullptr};
 };
 
 class CancelIdleIoStateTask final : public IoTaskBase {
 public:
     explicit CancelIdleIoStateTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(std::atomic<int>* completed, std::atomic<int>* result, std::atomic<int>* error) {
+    bool do_it(std::atomic<int> *completed, std::atomic<int> *result, std::atomic<int> *error) {
         completed_ = completed;
         result_ = result;
         error_ = error;
@@ -147,7 +129,7 @@ private:
         return done();
     }
 
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* result_{nullptr};
-    std::atomic<int>* error_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *result_{nullptr};
+    std::atomic<int> *error_{nullptr};
 };

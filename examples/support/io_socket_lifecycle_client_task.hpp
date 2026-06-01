@@ -16,7 +16,7 @@ class SocketLifecycleClientTask final : public SocketTask {
 public:
     explicit SocketLifecycleClientTask(SocketTask::FactoryToken token) : SocketTask(token) {}
 
-    bool do_it(sockaddr_in server, SocketLifecycleClientResult* result) {
+    bool do_it(sockaddr_in server, SocketLifecycleClientResult *result) {
         if (result == nullptr) {
             return false;
         }
@@ -47,24 +47,12 @@ private:
     af::TaskResult create_socket() {
         state_ = State::FinishSocket;
         return consume_socket_status(af::io_socket(
-            *this,
-            SocketThread::IO_0,
-            AF_INET,
-            lifecycle_stream_socket_type(),
-            0,
-            &fd_,
-            socket_));
+            *this, SocketThread::IO_0, AF_INET, lifecycle_stream_socket_type(), 0, &fd_, socket_));
     }
 
     af::TaskResult finish_socket() {
         return consume_socket_status(af::io_socket(
-            *this,
-            SocketThread::IO_0,
-            AF_INET,
-            lifecycle_stream_socket_type(),
-            0,
-            &fd_,
-            socket_));
+            *this, SocketThread::IO_0, AF_INET, lifecycle_stream_socket_type(), 0, &fd_, socket_));
     }
 
     af::TaskResult consume_socket_status(af::IoStatus status) {
@@ -88,10 +76,7 @@ private:
 
     af::TaskResult connect() {
         const af::IoStatus status = stream_.connect(
-            *this,
-            reinterpret_cast<const sockaddr*>(&server_),
-            sizeof(server_),
-            connect_);
+            *this, reinterpret_cast<const sockaddr *>(&server_), sizeof(server_), connect_);
         if (status.pending()) {
             return pending();
         }
@@ -117,7 +102,7 @@ private:
     af::TcpStream<SocketThread> stream_{};
     af::IoOpState socket_{};
     af::IoOpState connect_{};
-    SocketLifecycleClientResult* result_{nullptr};
+    SocketLifecycleClientResult *result_{nullptr};
 };
 
 } // namespace io_socket_lifecycle_example

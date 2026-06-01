@@ -6,8 +6,8 @@ struct OrderedStartFailureStream {};
 struct OrderedStartBatch {
     std::uint64_t batch_id{0};
     int value{0};
-    std::vector<int>* applied{nullptr};
-    std::atomic<int>* completed{nullptr};
+    std::vector<int> *applied{nullptr};
+    std::atomic<int> *completed{nullptr};
 };
 
 class OrderedStartApplyTask final : public Task {
@@ -32,10 +32,10 @@ private:
 struct OrderedStartFailureBatch {
     std::uint64_t batch_id{0};
     int value{0};
-    std::vector<int>* applied{nullptr};
-    std::atomic<int>* attempts{nullptr};
-    std::atomic<int>* completed{nullptr};
-    std::atomic<bool>* fail_first_start{nullptr};
+    std::vector<int> *applied{nullptr};
+    std::atomic<int> *attempts{nullptr};
+    std::atomic<int> *completed{nullptr};
+    std::atomic<bool> *fail_first_start{nullptr};
 };
 
 class OrderedStartFailingApplyTask final : public Task {

@@ -17,12 +17,8 @@ class FilesystemOpsTask final : public FsTaskBase {
 public:
     explicit FilesystemOpsTask(FsTaskBase::FactoryToken token) : FsTaskBase(token) {}
 
-    bool do_it(
-        const char* dir_path,
-        const char* file_path,
-        const char* hardlink_path,
-        const char* symlink_path,
-        FsResult* result) {
+    bool do_it(const char *dir_path, const char *file_path, const char *hardlink_path,
+               const char *symlink_path, FsResult *result) {
         dir_path_ = dir_path;
         file_path_ = file_path;
         hardlink_path_ = hardlink_path;
@@ -102,14 +98,8 @@ private:
 
     af::TaskResult open_file() {
         int fd = -1;
-        const af::IoStatus status = af::io_openat2(
-            *this,
-            FsThread::IO_0,
-            AT_FDCWD,
-            file_path_,
-            &how_,
-            &fd,
-            open_);
+        const af::IoStatus status =
+            af::io_openat2(*this, FsThread::IO_0, AT_FDCWD, file_path_, &how_, &fd, open_);
         if (status.pending()) {
             return pending();
         }
@@ -160,15 +150,8 @@ private:
     }
 
     af::TaskResult stat_file() {
-        const af::IoStatus status = af::io_statx(
-            *this,
-            FsThread::IO_0,
-            AT_FDCWD,
-            file_path_,
-            0,
-            STATX_SIZE,
-            &stat_,
-            stat_state_);
+        const af::IoStatus status = af::io_statx(*this, FsThread::IO_0, AT_FDCWD, file_path_, 0,
+                                                 STATX_SIZE, &stat_, stat_state_);
         if (status.pending()) {
             return pending();
         }
@@ -193,15 +176,8 @@ private:
     }
 
     af::TaskResult link_file() {
-        const af::IoStatus status = af::io_linkat(
-            *this,
-            FsThread::IO_0,
-            AT_FDCWD,
-            file_path_,
-            AT_FDCWD,
-            hardlink_path_,
-            0,
-            link_);
+        const af::IoStatus status = af::io_linkat(*this, FsThread::IO_0, AT_FDCWD, file_path_,
+                                                  AT_FDCWD, hardlink_path_, 0, link_);
         if (status.pending()) {
             return pending();
         }
@@ -213,13 +189,8 @@ private:
     }
 
     af::TaskResult symlink_file() {
-        const af::IoStatus status = af::io_symlinkat(
-            *this,
-            FsThread::IO_0,
-            file_path_,
-            AT_FDCWD,
-            symlink_path_,
-            symlink_);
+        const af::IoStatus status =
+            af::io_symlinkat(*this, FsThread::IO_0, file_path_, AT_FDCWD, symlink_path_, symlink_);
         if (status.pending()) {
             return pending();
         }
@@ -230,11 +201,8 @@ private:
         return again();
     }
 
-    af::TaskResult unlink_path(
-        const char* path,
-        State next_state,
-        int flags,
-        bool final_state = false) {
+    af::TaskResult unlink_path(const char *path, State next_state, int flags,
+                               bool final_state = false) {
         const af::IoStatus status =
             af::io_unlinkat(*this, FsThread::IO_0, AT_FDCWD, path, flags, unlink_);
         if (status.pending()) {
@@ -252,11 +220,11 @@ private:
     }
 
     State state_{State::Mkdir};
-    const char* dir_path_{nullptr};
-    const char* file_path_{nullptr};
-    const char* hardlink_path_{nullptr};
-    const char* symlink_path_{nullptr};
-    FsResult* result_{nullptr};
+    const char *dir_path_{nullptr};
+    const char *file_path_{nullptr};
+    const char *hardlink_path_{nullptr};
+    const char *symlink_path_{nullptr};
+    FsResult *result_{nullptr};
     struct open_how how_{};
     af::UniqueFd owned_{};
     af::IoFile<FsThread> file_{};

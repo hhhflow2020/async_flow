@@ -61,18 +61,14 @@ struct DatagramLoopbackSockets {
         server_address.sin_family = AF_INET;
         server_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         server_address.sin_port = 0;
-        if (::bind(
-                server.get(),
-                reinterpret_cast<sockaddr*>(&server_address),
-                sizeof(server_address)) != 0) {
+        if (::bind(server.get(), reinterpret_cast<sockaddr *>(&server_address),
+                   sizeof(server_address)) != 0) {
             return false;
         }
 
         server_size = sizeof(server_address);
-        return ::getsockname(
-            server.get(),
-            reinterpret_cast<sockaddr*>(&server_address),
-            &server_size) == 0;
+        return ::getsockname(server.get(), reinterpret_cast<sockaddr *>(&server_address),
+                             &server_size) == 0;
     }
 };
 

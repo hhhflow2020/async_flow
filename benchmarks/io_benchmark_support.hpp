@@ -20,12 +20,11 @@ enum class BenchIoThread : std::int16_t {
 #include "detail/io_benchmark_runtime_posix_accept.hpp"
 #include "detail/io_benchmark_runtime_filesystem.hpp"
 
-struct FakeRuntime :
-    FakeRuntimeLinuxSocketOps,
-    FakeRuntimePosixMessageOps,
-    FakeRuntimePosixFileOps,
-    FakeRuntimePosixAcceptOps,
-    FakeRuntimeFilesystemOps {
+struct FakeRuntime : FakeRuntimeLinuxSocketOps,
+                     FakeRuntimePosixMessageOps,
+                     FakeRuntimePosixFileOps,
+                     FakeRuntimePosixAcceptOps,
+                     FakeRuntimeFilesystemOps {
     static constexpr std::uint16_t invalid_thread_index = 1;
 
     static bool is_runtime_thread() noexcept {
@@ -48,98 +47,48 @@ struct FakeRuntime :
         return false;
     }
 
-    static bool io_submit_socket(
-        BenchIoThread,
-        int,
-        int,
-        int,
-        std::uint32_t,
-        void*,
-        af::IoResult*) noexcept {
+    static bool io_submit_socket(BenchIoThread, int, int, int, std::uint32_t, void *,
+                                 af::IoResult *) noexcept {
         return false;
     }
 
-    static bool io_wait(
-        BenchIoThread,
-        int,
-        std::uint32_t,
-        void*,
-        af::IoResult*,
-        bool = false) noexcept {
+    static bool io_wait(BenchIoThread, int, std::uint32_t, void *, af::IoResult *,
+                        bool = false) noexcept {
         return false;
     }
 
-    static bool io_submit_recv(
-        BenchIoThread,
-        int,
-        void*,
-        std::size_t,
-        std::uint32_t,
-        void*,
-        af::IoResult*) noexcept {
+    static bool io_submit_recv(BenchIoThread, int, void *, std::size_t, std::uint32_t, void *,
+                               af::IoResult *) noexcept {
         return false;
     }
 
-    static bool io_submit_timeout(
-        BenchIoThread,
-        std::chrono::nanoseconds,
-        void*,
-        af::IoResult*) noexcept {
+    static bool io_submit_timeout(BenchIoThread, std::chrono::nanoseconds, void *,
+                                  af::IoResult *) noexcept {
         return false;
     }
 
-    static bool io_submit_send(
-        BenchIoThread,
-        int,
-        const void*,
-        std::size_t,
-        std::uint32_t,
-        void*,
-        af::IoResult*) noexcept {
+    static bool io_submit_send(BenchIoThread, int, const void *, std::size_t, std::uint32_t, void *,
+                               af::IoResult *) noexcept {
         return false;
     }
 
-    static bool io_submit_recv_fixed_file(
-        BenchIoThread,
-        int,
-        void*,
-        std::size_t,
-        std::uint32_t,
-        void*,
-        af::IoResult*) noexcept {
+    static bool io_submit_recv_fixed_file(BenchIoThread, int, void *, std::size_t, std::uint32_t,
+                                          void *, af::IoResult *) noexcept {
         return false;
     }
 
-    static bool io_submit_send_fixed_file(
-        BenchIoThread,
-        int,
-        const void*,
-        std::size_t,
-        std::uint32_t,
-        void*,
-        af::IoResult*) noexcept {
+    static bool io_submit_send_fixed_file(BenchIoThread, int, const void *, std::size_t,
+                                          std::uint32_t, void *, af::IoResult *) noexcept {
         return false;
     }
 
-    static bool io_submit_read_at(
-        BenchIoThread,
-        int,
-        void*,
-        std::size_t,
-        std::uint64_t,
-        void*,
-        af::IoResult*) noexcept {
+    static bool io_submit_read_at(BenchIoThread, int, void *, std::size_t, std::uint64_t, void *,
+                                  af::IoResult *) noexcept {
         return false;
     }
 
-    static bool io_submit_write_at(
-        BenchIoThread,
-        int,
-        const void*,
-        std::size_t,
-        std::uint64_t,
-        void*,
-        af::IoResult*) noexcept {
+    static bool io_submit_write_at(BenchIoThread, int, const void *, std::size_t, std::uint64_t,
+                                   void *, af::IoResult *) noexcept {
         return false;
     }
 };

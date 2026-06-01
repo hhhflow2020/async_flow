@@ -15,10 +15,7 @@ class EchoSessionTask final : public EchoTask {
 public:
     explicit EchoSessionTask(EchoTask::FactoryToken token) : EchoTask(token) {}
 
-    bool do_it(
-        af::UniqueFd fd,
-        EchoThread io_thread,
-        EchoSessionResult* result) {
+    bool do_it(af::UniqueFd fd, EchoThread io_thread, EchoSessionResult *result) {
         fd_ = std::move(fd);
         if (!fd_ || result == nullptr) {
             return false;
@@ -51,11 +48,8 @@ private:
     }
 
     af::TaskResult receive_request() {
-        const af::IoStatus status = stream_.recv_some(
-            *this,
-            payload_.data() + received_,
-            payload_.size() - received_,
-            read_);
+        const af::IoStatus status = stream_.recv_some(*this, payload_.data() + received_,
+                                                      payload_.size() - received_, read_);
         if (status.pending()) {
             return pending();
         }
@@ -79,11 +73,8 @@ private:
     }
 
     af::TaskResult send_response() {
-        const af::IoStatus status = stream_.send_some(
-            *this,
-            payload_.data() + sent_,
-            payload_.size() - sent_,
-            write_);
+        const af::IoStatus status =
+            stream_.send_some(*this, payload_.data() + sent_, payload_.size() - sent_, write_);
         if (status.pending()) {
             return pending();
         }
@@ -116,7 +107,7 @@ private:
     std::size_t sent_{0};
     af::IoOpState read_{};
     af::IoOpState write_{};
-    EchoSessionResult* result_{nullptr};
+    EchoSessionResult *result_{nullptr};
 };
 
 } // namespace io_tcp_echo_example

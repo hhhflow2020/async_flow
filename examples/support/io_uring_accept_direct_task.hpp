@@ -15,11 +15,8 @@ public:
     explicit DirectAcceptRoundTripTask(DirectAcceptTask::FactoryToken token)
         : DirectAcceptTask(token) {}
 
-    bool do_it(
-        int listener_fd,
-        std::atomic<int>* armed,
-        std::atomic<int>* error,
-        int* packed_read) {
+    bool do_it(int listener_fd, std::atomic<int> *armed, std::atomic<int> *error,
+               int *packed_read) {
         listener_.reset(DirectAcceptThread::IO_0, listener_fd);
         armed_ = armed;
         error_ = error;
@@ -59,11 +56,7 @@ private:
     af::TaskResult register_sparse_slot() {
         const int sparse = -1;
         int error = 0;
-        if (!direct_accept_async::io_register_files(
-                DirectAcceptThread::IO_0,
-                &sparse,
-                1,
-                &error)) {
+        if (!direct_accept_async::io_register_files(DirectAcceptThread::IO_0, &sparse, 1, &error)) {
             return complete(error == 0 ? EIO : error);
         }
         registered_ = true;
@@ -72,13 +65,8 @@ private:
     }
 
     af::TaskResult accept_direct() {
-        const af::IoStatus status = listener_.accept_direct(
-            *this,
-            nullptr,
-            nullptr,
-            0,
-            &accepted_,
-            accept_);
+        const af::IoStatus status =
+            listener_.accept_direct(*this, nullptr, nullptr, 0, &accepted_, accept_);
         if (status.pending()) {
             if (!armed_once_) {
                 armed_once_ = true;
@@ -99,8 +87,7 @@ private:
     af::TaskResult recv_request() {
         request_iov_[0] = iovec{&request_[0], 1};
         request_iov_[1] = iovec{&request_[1], 1};
-        const af::IoStatus status =
-            accepted_.recvv_some(*this, request_iov_, 2, recv_);
+        const af::IoStatus status = accepted_.recvv_some(*this, request_iov_, 2, recv_);
         if (status.pending()) {
             return pending();
         }
@@ -115,8 +102,7 @@ private:
     af::TaskResult send_response() {
         response_iov_[0] = iovec{&response_[0], 1};
         response_iov_[1] = iovec{&response_[1], 1};
-        const af::IoStatus status =
-            accepted_.sendv_some(*this, response_iov_, 2, send_);
+        const af::IoStatus status = accepted_.sendv_some(*this, response_iov_, 2, send_);
         if (status.pending()) {
             return pending();
         }
@@ -130,9 +116,8 @@ private:
     af::TaskResult complete(int error) {
         if (registered_) {
             int unregister_error = 0;
-            if (!direct_accept_async::io_unregister_files(
-                    DirectAcceptThread::IO_0,
-                    &unregister_error) &&
+            if (!direct_accept_async::io_unregister_files(DirectAcceptThread::IO_0,
+                                                          &unregister_error) &&
                 error == 0) {
                 error = unregister_error == 0 ? EIO : unregister_error;
             }
@@ -159,9 +144,9 @@ private:
     af::IoOpState accept_{};
     af::IoOpState recv_{};
     af::IoOpState send_{};
-    std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* error_{nullptr};
-    int* packed_read_{nullptr};
+    std::atomic<int> *armed_{nullptr};
+    std::atomic<int> *error_{nullptr};
+    int *packed_read_{nullptr};
 };
 
 } // namespace io_uring_accept_direct_example

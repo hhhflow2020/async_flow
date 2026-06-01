@@ -33,26 +33,22 @@ struct MultishotAcceptListener {
         address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         address.sin_port = 0;
         address_size = sizeof(address);
-        return ::bind(fd.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0 &&
+        return ::bind(fd.get(), reinterpret_cast<sockaddr *>(&address), sizeof(address)) == 0 &&
                ::listen(fd.get(), 16) == 0 &&
-               ::getsockname(fd.get(), reinterpret_cast<sockaddr*>(&address), &address_size) == 0;
+               ::getsockname(fd.get(), reinterpret_cast<sockaddr *>(&address), &address_size) == 0;
     }
 };
 
 template <std::size_t Count>
-[[nodiscard]] bool connect_accept_clients(
-    const sockaddr_in& address,
-    socklen_t address_size,
-    std::array<af::UniqueFd, Count>& clients) noexcept {
-    for (af::UniqueFd& client : clients) {
+[[nodiscard]] bool connect_accept_clients(const sockaddr_in &address, socklen_t address_size,
+                                          std::array<af::UniqueFd, Count> &clients) noexcept {
+    for (af::UniqueFd &client : clients) {
         client = make_accept_tcp_socket();
         if (!client) {
             return false;
         }
-        const int rc = ::connect(
-            client.get(),
-            reinterpret_cast<const sockaddr*>(&address),
-            address_size);
+        const int rc =
+            ::connect(client.get(), reinterpret_cast<const sockaddr *>(&address), address_size);
         if (rc != 0 && errno != EINPROGRESS) {
             return false;
         }

@@ -13,7 +13,7 @@ namespace io_pollable_client_example {
 
 #if defined(__linux__)
 
-inline bool read_exact_until(int fd, char* output, std::size_t size) {
+inline bool read_exact_until(int fd, char *output, std::size_t size) {
     std::size_t read_bytes = 0;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (read_bytes < size && std::chrono::steady_clock::now() < deadline) {
@@ -34,7 +34,7 @@ inline bool read_exact_until(int fd, char* output, std::size_t size) {
     return read_bytes == size;
 }
 
-inline bool write_exact_until(int fd, const char* input, std::size_t size) {
+inline bool write_exact_until(int fd, const char *input, std::size_t size) {
     std::size_t written = 0;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (written < size && std::chrono::steady_clock::now() < deadline) {

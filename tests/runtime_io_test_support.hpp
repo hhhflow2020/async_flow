@@ -100,7 +100,7 @@ void drain_available(int fd) {
     }
 }
 
-bool read_exact_until(int fd, char* output, std::size_t size) {
+bool read_exact_until(int fd, char *output, std::size_t size) {
     std::size_t offset = 0;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (offset < size) {
@@ -126,7 +126,7 @@ bool read_exact_until(int fd, char* output, std::size_t size) {
     return true;
 }
 
-bool write_exact_until(int fd, const char* input, std::size_t size) {
+bool write_exact_until(int fd, const char *input, std::size_t size) {
     std::size_t offset = 0;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (offset < size) {
@@ -149,7 +149,7 @@ bool write_exact_until(int fd, const char* input, std::size_t size) {
     return true;
 }
 
-bool create_tcp_listener(int& listener, sockaddr_in& address, socklen_t& address_size) {
+bool create_tcp_listener(int &listener, sockaddr_in &address, socklen_t &address_size) {
     listener = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     if (listener < 0) {
         return false;
@@ -159,7 +159,7 @@ bool create_tcp_listener(int& listener, sockaddr_in& address, socklen_t& address
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     address.sin_port = 0;
-    if (::bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 ||
+    if (::bind(listener, reinterpret_cast<sockaddr *>(&address), sizeof(address)) != 0 ||
         ::listen(listener, 16) != 0) {
         ::close(listener);
         listener = -1;
@@ -167,7 +167,7 @@ bool create_tcp_listener(int& listener, sockaddr_in& address, socklen_t& address
     }
 
     address_size = sizeof(address);
-    if (::getsockname(listener, reinterpret_cast<sockaddr*>(&address), &address_size) != 0) {
+    if (::getsockname(listener, reinterpret_cast<sockaddr *>(&address), &address_size) != 0) {
         ::close(listener);
         listener = -1;
         return false;
@@ -192,7 +192,7 @@ int accept_tcp_until_ready(int listener) {
     }
 }
 
-void close_fd(int& fd) {
+void close_fd(int &fd) {
     if (fd >= 0) {
         ::close(fd);
         fd = -1;

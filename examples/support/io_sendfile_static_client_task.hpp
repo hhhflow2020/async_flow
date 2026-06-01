@@ -17,7 +17,7 @@ public:
     explicit StaticSendfileClientTask(SendfileTaskBase::FactoryToken token)
         : SendfileTaskBase(token) {}
 
-    bool do_it(sockaddr_in server, socklen_t server_size, SendfileClientResult* result) {
+    bool do_it(sockaddr_in server, socklen_t server_size, SendfileClientResult *result) {
         if (server_size == 0U || result == nullptr) {
             return false;
         }
@@ -51,25 +51,15 @@ private:
 
     af::TaskResult create_socket() {
         state_ = State::FinishSocket;
-        return consume_socket_status(af::io_socket(
-            *this,
-            SendfileThread::IO_0,
-            AF_INET,
-            SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
-            0,
-            &fd_,
-            socket_));
+        return consume_socket_status(af::io_socket(*this, SendfileThread::IO_0, AF_INET,
+                                                   SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0,
+                                                   &fd_, socket_));
     }
 
     af::TaskResult finish_socket() {
-        return consume_socket_status(af::io_socket(
-            *this,
-            SendfileThread::IO_0,
-            AF_INET,
-            SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
-            0,
-            &fd_,
-            socket_));
+        return consume_socket_status(af::io_socket(*this, SendfileThread::IO_0, AF_INET,
+                                                   SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0,
+                                                   &fd_, socket_));
     }
 
     af::TaskResult consume_socket_status(af::IoStatus status) {
@@ -89,10 +79,7 @@ private:
 
     af::TaskResult connect() {
         const af::IoStatus status = stream_.connect(
-            *this,
-            reinterpret_cast<const sockaddr*>(&server_),
-            server_size_,
-            connect_);
+            *this, reinterpret_cast<const sockaddr *>(&server_), server_size_, connect_);
         if (status.pending()) {
             return pending();
         }
@@ -105,11 +92,9 @@ private:
     }
 
     af::TaskResult receive_payload() {
-        const af::IoStatus status = stream_.recv_some(
-            *this,
-            result_->received.data() + result_->bytes_read,
-            result_->received.size() - result_->bytes_read,
-            recv_);
+        const af::IoStatus status =
+            stream_.recv_some(*this, result_->received.data() + result_->bytes_read,
+                              result_->received.size() - result_->bytes_read, recv_);
         if (status.pending()) {
             return pending();
         }
@@ -144,7 +129,7 @@ private:
     af::IoOpState socket_{};
     af::IoOpState connect_{};
     af::IoOpState recv_{};
-    SendfileClientResult* result_{nullptr};
+    SendfileClientResult *result_{nullptr};
 };
 
 } // namespace io_sendfile_static_example

@@ -26,14 +26,9 @@ class RepeatHopTask final : public RepeatHopTaskBase {
 public:
     explicit RepeatHopTask(RepeatHopTaskBase::FactoryToken token) : RepeatHopTaskBase(token) {}
 
-    bool do_it(
-        int hops,
-        int id,
-        std::atomic<int>* remaining,
-        std::atomic<int>* runs,
-        std::atomic<int>* post_failures,
-        std::atomic<int>* progress,
-        std::atomic<int>* last_thread) {
+    bool do_it(int hops, int id, std::atomic<int> *remaining, std::atomic<int> *runs,
+               std::atomic<int> *post_failures, std::atomic<int> *progress,
+               std::atomic<int> *last_thread) {
         hops_ = hops;
         id_ = id;
         remaining_ = remaining;
@@ -48,13 +43,13 @@ private:
     af::TaskResult run() override {
         runs_->fetch_add(1, std::memory_order_relaxed);
         progress_[id_].fetch_add(1, std::memory_order_relaxed);
-        last_thread_[id_].store(
-            RepeatHopRuntime::current_thread() == RepeatHopThread::Logic_0 ? 0 : 1,
-            std::memory_order_relaxed);
+        last_thread_[id_].store(RepeatHopRuntime::current_thread() == RepeatHopThread::Logic_0 ? 0
+                                                                                               : 1,
+                                std::memory_order_relaxed);
         if (hops_-- > 0) {
             const auto next = RepeatHopRuntime::current_thread() == RepeatHopThread::Logic_0
-                ? RepeatHopThread::Logic_1
-                : RepeatHopThread::Logic_0;
+                                  ? RepeatHopThread::Logic_1
+                                  : RepeatHopThread::Logic_0;
             if (!schedule(next)) {
                 post_failures_->fetch_add(1, std::memory_order_relaxed);
                 if (remaining_->fetch_sub(1, std::memory_order_acq_rel) == 1) {
@@ -73,9 +68,9 @@ private:
 
     int hops_{0};
     int id_{0};
-    std::atomic<int>* remaining_{nullptr};
-    std::atomic<int>* runs_{nullptr};
-    std::atomic<int>* post_failures_{nullptr};
-    std::atomic<int>* progress_{nullptr};
-    std::atomic<int>* last_thread_{nullptr};
+    std::atomic<int> *remaining_{nullptr};
+    std::atomic<int> *runs_{nullptr};
+    std::atomic<int> *post_failures_{nullptr};
+    std::atomic<int> *progress_{nullptr};
+    std::atomic<int> *last_thread_{nullptr};
 };

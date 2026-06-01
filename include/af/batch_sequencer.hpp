@@ -41,8 +41,7 @@ struct OrderedBatchFailureDecision {
     }
 };
 
-template <typename BatchId = std::uint64_t>
-class OrderedBatchRetrySkipPolicy {
+template <typename BatchId = std::uint64_t> class OrderedBatchRetrySkipPolicy {
 public:
     explicit OrderedBatchRetrySkipPolicy(OrderedBatchRetrySkipOptions options = {})
         : options_(options) {}
@@ -80,18 +79,16 @@ private:
     absl::flat_hash_map<BatchId, std::uint32_t> failures_;
 };
 
-template <typename Batch>
-class BatchSequencer {
+template <typename Batch> class BatchSequencer {
 public:
-    explicit BatchSequencer(std::uint64_t first_batch_id = 1)
-        : next_batch_id_(first_batch_id) {}
+    explicit BatchSequencer(std::uint64_t first_batch_id = 1) : next_batch_id_(first_batch_id) {}
 
     [[nodiscard]] std::uint64_t next_batch_id() const noexcept {
         return next_batch_id_;
     }
 
     template <typename SubmitFn>
-    BatchSubmitStatus submit(std::uint64_t batch_id, Batch batch, SubmitFn&& submit_fn) {
+    BatchSubmitStatus submit(std::uint64_t batch_id, Batch batch, SubmitFn &&submit_fn) {
         if (batch_id < next_batch_id_) {
             return BatchSubmitStatus::Duplicate;
         }
@@ -110,14 +107,12 @@ public:
     }
 
 private:
-    template <typename SubmitFn>
-    void submit_ready(Batch batch, SubmitFn& submit_fn) {
+    template <typename SubmitFn> void submit_ready(Batch batch, SubmitFn &submit_fn) {
         submit_fn(std::move(batch));
         ++next_batch_id_;
     }
 
-    template <typename SubmitFn>
-    void drain_ready(SubmitFn& submit_fn) {
+    template <typename SubmitFn> void drain_ready(SubmitFn &submit_fn) {
         for (;;) {
             auto it = pending_.find(next_batch_id_);
             if (it == pending_.end()) {

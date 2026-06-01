@@ -29,16 +29,10 @@ int main() {
     char request_seen = 0;
     char response_seen = 0;
 
-    const bool server_started = tcp_async::start_task<TcpServerTask>(
-        sockets.listener.get(),
-        &server_ok,
-        &request_seen);
+    const bool server_started =
+        tcp_async::start_task<TcpServerTask>(sockets.listener.get(), &server_ok, &request_seen);
     const bool client_started = tcp_async::start_task<TcpClientTask>(
-        sockets.client.get(),
-        sockets.address,
-        sockets.address_size,
-        &client_ok,
-        &response_seen);
+        sockets.client.get(), sockets.address, sockets.address_size, &client_ok, &response_seen);
     AF_ASSERT(server_started && client_started);
 
     if (!server_started || !client_started) {
@@ -53,8 +47,7 @@ int main() {
         return 1;
     }
 
-    std::cout << "server request=" << request_seen
-              << " client response=" << response_seen << '\n';
+    std::cout << "server request=" << request_seen << " client response=" << response_seen << '\n';
     return 0;
 #else
     std::cout << "tcp connect/accept example requires POSIX sockets\n";

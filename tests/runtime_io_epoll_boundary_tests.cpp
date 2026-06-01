@@ -82,10 +82,7 @@ TEST_F(IoRuntimeEpollFixture, FixedFileHelpersHandleInvalidAndUnavailableBackend
     std::atomic<int> resource_invalid_error{0};
     std::atomic<int> resource_null_error{0};
     ASSERT_TRUE(IoRuntime::start_task<FixedFileResourceBoundaryTask>(
-        &completed,
-        &register_error,
-        &resource_unavailable_error,
-        &resource_invalid_error,
+        &completed, &register_error, &resource_unavailable_error, &resource_invalid_error,
         &resource_null_error));
 
     std::atomic<int> accept_bad_fd_error{0};
@@ -94,21 +91,14 @@ TEST_F(IoRuntimeEpollFixture, FixedFileHelpersHandleInvalidAndUnavailableBackend
     std::atomic<int> accept_bad_index_error{0};
     std::atomic<int> accept_unavailable_error{0};
     ASSERT_TRUE(IoRuntime::start_task<FixedFileAcceptDirectBoundaryTask>(
-        &completed,
-        &accept_bad_fd_error,
-        &accept_null_output_error,
-        &accept_bad_address_error,
-        &accept_bad_index_error,
-        &accept_unavailable_error));
+        &completed, &accept_bad_fd_error, &accept_null_output_error, &accept_bad_address_error,
+        &accept_bad_index_error, &accept_unavailable_error));
 
     std::atomic<int> data_unavailable_error{0};
     std::atomic<int> data_invalid_error{0};
     std::atomic<int> data_null_error{0};
     ASSERT_TRUE(IoRuntime::start_task<FixedFileDataBoundaryTask>(
-        &completed,
-        &data_unavailable_error,
-        &data_invalid_error,
-        &data_null_error));
+        &completed, &data_unavailable_error, &data_invalid_error, &data_null_error));
 
     ASSERT_TRUE(wait_until_at_least(completed, 3));
     EXPECT_EQ(register_error.load(std::memory_order_acquire), ENOSYS);
@@ -192,10 +182,7 @@ TEST_F(IoRuntimeEpollFixture, EventFdAdapterHandlesInvalidOperations) {
 
     af::UniqueFd event = af::make_eventfd();
     ASSERT_TRUE(event);
-    EXPECT_FALSE(af::write_eventfd(
-        event.get(),
-        std::numeric_limits<std::uint64_t>::max(),
-        error));
+    EXPECT_FALSE(af::write_eventfd(event.get(), std::numeric_limits<std::uint64_t>::max(), error));
     EXPECT_EQ(error, EINVAL);
 
     std::atomic<int> completed{0};
@@ -219,12 +206,9 @@ TEST_F(IoRuntimeEpollFixture, OpenAtHelperHandlesInvalidOperations) {
     std::atomic<int> metadata_error{0};
     std::atomic<int> namespace_error{0};
     ASSERT_TRUE(IoRuntime::start_task<OpenAtBoundaryTask>(&completed, &open_error));
-    ASSERT_TRUE(IoRuntime::start_task<FilesystemMetadataBoundaryTask>(
-        &completed,
-        &metadata_error));
-    ASSERT_TRUE(IoRuntime::start_task<FilesystemNamespaceBoundaryTask>(
-        &completed,
-        &namespace_error));
+    ASSERT_TRUE(IoRuntime::start_task<FilesystemMetadataBoundaryTask>(&completed, &metadata_error));
+    ASSERT_TRUE(
+        IoRuntime::start_task<FilesystemNamespaceBoundaryTask>(&completed, &namespace_error));
     ASSERT_TRUE(wait_until_at_least(completed, 3));
     EXPECT_EQ(open_error.load(std::memory_order_acquire), ENOSYS);
     EXPECT_EQ(metadata_error.load(std::memory_order_acquire), ENOSYS);

@@ -29,19 +29,16 @@ public:
     explicit RunningPendingWakerTask(RunningPendingTaskBase::FactoryToken token)
         : RunningPendingTaskBase(token) {}
 
-    bool do_it(
-        RunningPendingOwnerTask* owner,
-        std::atomic<int>* wake_flag,
-        std::atomic<int>* wake_attempts,
-        std::atomic<int>* failures);
+    bool do_it(RunningPendingOwnerTask *owner, std::atomic<int> *wake_flag,
+               std::atomic<int> *wake_attempts, std::atomic<int> *failures);
 
 private:
     af::TaskResult run() override;
 
-    RunningPendingOwnerTask* owner_{nullptr};
-    std::atomic<int>* wake_flag_{nullptr};
-    std::atomic<int>* wake_attempts_{nullptr};
-    std::atomic<int>* failures_{nullptr};
+    RunningPendingOwnerTask *owner_{nullptr};
+    std::atomic<int> *wake_flag_{nullptr};
+    std::atomic<int> *wake_attempts_{nullptr};
+    std::atomic<int> *failures_{nullptr};
 };
 
 class RunningPendingOwnerTask final : public RunningPendingTaskBase {
@@ -49,14 +46,9 @@ public:
     explicit RunningPendingOwnerTask(RunningPendingTaskBase::FactoryToken token)
         : RunningPendingTaskBase(token) {}
 
-    bool do_it(
-        int id,
-        std::atomic<int>* remaining,
-        std::atomic<int>* completed,
-        std::atomic<int>* wake_attempts,
-        std::atomic<int>* failures,
-        std::atomic<int>* stages,
-        std::atomic<int>* wake_flags) {
+    bool do_it(int id, std::atomic<int> *remaining, std::atomic<int> *completed,
+               std::atomic<int> *wake_attempts, std::atomic<int> *failures,
+               std::atomic<int> *stages, std::atomic<int> *wake_flags) {
         id_ = id;
         remaining_ = remaining;
         completed_ = completed;
@@ -84,10 +76,7 @@ private:
             state_ = State::Finish;
             stages_[id_].store(2, std::memory_order_release);
             if (!RunningPendingRuntime::start_task<RunningPendingWakerTask>(
-                    this,
-                    wake_flag_,
-                    wake_attempts_,
-                    failures_)) {
+                    this, wake_flag_, wake_attempts_, failures_)) {
                 failures_->fetch_add(1, std::memory_order_relaxed);
                 complete();
                 return failed();
@@ -127,19 +116,18 @@ private:
 
     State state_{State::ArmWake};
     int id_{0};
-    std::atomic<int>* remaining_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* wake_attempts_{nullptr};
-    std::atomic<int>* failures_{nullptr};
-    std::atomic<int>* stages_{nullptr};
-    std::atomic<int>* wake_flag_{nullptr};
+    std::atomic<int> *remaining_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *wake_attempts_{nullptr};
+    std::atomic<int> *failures_{nullptr};
+    std::atomic<int> *stages_{nullptr};
+    std::atomic<int> *wake_flag_{nullptr};
 };
 
-inline bool RunningPendingWakerTask::do_it(
-    RunningPendingOwnerTask* owner,
-    std::atomic<int>* wake_flag,
-    std::atomic<int>* wake_attempts,
-    std::atomic<int>* failures) {
+inline bool RunningPendingWakerTask::do_it(RunningPendingOwnerTask *owner,
+                                           std::atomic<int> *wake_flag,
+                                           std::atomic<int> *wake_attempts,
+                                           std::atomic<int> *failures) {
     owner_ = owner;
     wake_flag_ = wake_flag;
     wake_attempts_ = wake_attempts;

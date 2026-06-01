@@ -4,7 +4,7 @@ class IoHopTask final : public IoTaskBase {
 public:
     explicit IoHopTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(std::atomic<int>* completed, std::atomic<std::uint16_t>* ran_on) {
+    bool do_it(std::atomic<int> *completed, std::atomic<std::uint16_t> *ran_on) {
         completed_ = completed;
         ran_on_ = ran_on;
         return schedule(IoTestThread::Logic_0);
@@ -31,15 +31,15 @@ private:
     }
 
     State state_{State::Logic};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<std::uint16_t>* ran_on_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<std::uint16_t> *ran_on_{nullptr};
 };
 
 class WorkerIoWaitRejectedTask final : public IoTaskBase {
 public:
     explicit WorkerIoWaitRejectedTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(std::atomic<int>* completed, std::atomic<int>* error) {
+    bool do_it(std::atomic<int> *completed, std::atomic<int> *error) {
         completed_ = completed;
         error_ = error;
         return schedule(IoTestThread::Logic_0);
@@ -57,7 +57,6 @@ private:
         return done();
     }
 
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* error_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *error_{nullptr};
 };
-

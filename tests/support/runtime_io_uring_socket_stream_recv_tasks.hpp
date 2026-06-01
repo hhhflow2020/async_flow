@@ -2,13 +2,11 @@
 
 class UringStreamFallbackTask final : public UringIoTaskBase {
 public:
-    explicit UringStreamFallbackTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
+    explicit UringStreamFallbackTask(UringIoTaskBase::FactoryToken token)
+        : UringIoTaskBase(token) {}
 
-    bool do_it(
-        int fd,
-        std::atomic<int>* armed,
-        std::atomic<int>* completed,
-        std::atomic<char>* byte_read) {
+    bool do_it(int fd, std::atomic<int> *armed, std::atomic<int> *completed,
+               std::atomic<char> *byte_read) {
         stream_.reset(IoTestThread::IO_0, fd);
         armed_ = armed;
         completed_ = completed;
@@ -34,9 +32,9 @@ private:
     af::TcpStream<IoTestThread> stream_{};
     char value_{0};
     af::IoOpState read_{};
-    std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<char>* byte_read_{nullptr};
+    std::atomic<int> *armed_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<char> *byte_read_{nullptr};
 };
 
 class UringCancellableSocketRecvTask final : public UringIoTaskBase {
@@ -44,14 +42,9 @@ public:
     explicit UringCancellableSocketRecvTask(UringIoTaskBase::FactoryToken token)
         : UringIoTaskBase(token) {}
 
-    bool do_it(
-        int fd,
-        std::atomic<af::IoOpState*>* state,
-        std::atomic<int>* wait_kind,
-        std::atomic<int>* armed,
-        std::atomic<int>* completed,
-        std::atomic<int>* error,
-        std::atomic<int>* bytes) {
+    bool do_it(int fd, std::atomic<af::IoOpState *> *state, std::atomic<int> *wait_kind,
+               std::atomic<int> *armed, std::atomic<int> *completed, std::atomic<int> *error,
+               std::atomic<int> *bytes) {
         stream_.reset(IoTestThread::IO_0, fd);
         state_ = state;
         wait_kind_ = wait_kind;
@@ -91,23 +84,20 @@ private:
     af::TcpStream<IoTestThread> stream_{};
     char value_{0};
     af::IoOpState recv_{};
-    std::atomic<af::IoOpState*>* state_{nullptr};
-    std::atomic<int>* wait_kind_{nullptr};
-    std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* error_{nullptr};
-    std::atomic<int>* bytes_{nullptr};
+    std::atomic<af::IoOpState *> *state_{nullptr};
+    std::atomic<int> *wait_kind_{nullptr};
+    std::atomic<int> *armed_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *error_{nullptr};
+    std::atomic<int> *bytes_{nullptr};
 };
 
 class UringCancelIoStateTask final : public UringIoTaskBase {
 public:
     explicit UringCancelIoStateTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
 
-    bool do_it(
-        std::atomic<af::IoOpState*>* state,
-        std::atomic<int>* completed,
-        std::atomic<int>* result,
-        std::atomic<int>* error) {
+    bool do_it(std::atomic<af::IoOpState *> *state, std::atomic<int> *completed,
+               std::atomic<int> *result, std::atomic<int> *error) {
         state_ = state;
         completed_ = completed;
         result_ = result;
@@ -117,7 +107,7 @@ public:
 
 private:
     af::TaskResult run() override {
-        af::IoOpState* state = state_->load(std::memory_order_acquire);
+        af::IoOpState *state = state_->load(std::memory_order_acquire);
         if (state == nullptr) {
             return failed();
         }
@@ -129,8 +119,8 @@ private:
         return done();
     }
 
-    std::atomic<af::IoOpState*>* state_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* result_{nullptr};
-    std::atomic<int>* error_{nullptr};
+    std::atomic<af::IoOpState *> *state_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *result_{nullptr};
+    std::atomic<int> *error_{nullptr};
 };

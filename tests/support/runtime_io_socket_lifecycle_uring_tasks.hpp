@@ -4,7 +4,7 @@ class UringSocketCreateTask final : public UringIoTaskBase {
 public:
     explicit UringSocketCreateTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
 
-    bool do_it(std::atomic<int>* completed, std::atomic<int>* error) {
+    bool do_it(std::atomic<int> *completed, std::atomic<int> *error) {
         completed_ = completed;
         error_ = error;
         return schedule(IoTestThread::IO_0);
@@ -28,25 +28,15 @@ private:
 
     af::TaskResult create_socket() {
         state_ = State::FinishSocket;
-        return consume_socket_status(af::io_socket(
-            *this,
-            IoTestThread::IO_0,
-            AF_INET,
-            SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
-            0,
-            &opened_fd_,
-            socket_));
+        return consume_socket_status(af::io_socket(*this, IoTestThread::IO_0, AF_INET,
+                                                   SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0,
+                                                   &opened_fd_, socket_));
     }
 
     af::TaskResult finish_socket() {
-        return consume_socket_status(af::io_socket(
-            *this,
-            IoTestThread::IO_0,
-            AF_INET,
-            SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
-            0,
-            &opened_fd_,
-            socket_));
+        return consume_socket_status(af::io_socket(*this, IoTestThread::IO_0, AF_INET,
+                                                   SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0,
+                                                   &opened_fd_, socket_));
     }
 
     af::TaskResult consume_socket_status(const af::IoStatus status) {
@@ -70,6 +60,6 @@ private:
     State state_{State::CreateSocket};
     af::IoOpState socket_{};
     int opened_fd_{-1};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* error_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *error_{nullptr};
 };

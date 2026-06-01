@@ -35,18 +35,15 @@ class RingTimeoutTask final : public TimeoutTaskBase {
 public:
     explicit RingTimeoutTask(TimeoutTaskBase::FactoryToken token) : TimeoutTaskBase(token) {}
 
-    bool do_it(int* error) {
+    bool do_it(int *error) {
         error_ = error;
         return schedule(TimeoutThread::IO_0);
     }
 
 private:
     af::TaskResult run() override {
-        const af::IoStatus status = af::io_wait_timeout(
-            *this,
-            TimeoutThread::IO_0,
-            std::chrono::milliseconds(2),
-            wait_);
+        const af::IoStatus status =
+            af::io_wait_timeout(*this, TimeoutThread::IO_0, std::chrono::milliseconds(2), wait_);
         if (status.pending()) {
             return pending();
         }
@@ -55,7 +52,7 @@ private:
     }
 
     af::IoOpState wait_{};
-    int* error_{nullptr};
+    int *error_{nullptr};
 };
 
 } // namespace

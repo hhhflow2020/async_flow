@@ -16,14 +16,8 @@ TEST_F(IoRuntimeStreamFixture, StreamAdapterSendZcSendsSocketBytes) {
     std::atomic<int> completed{0};
     std::atomic<int> calls{0};
     std::atomic<std::size_t> bytes_sent{0};
-    ASSERT_TRUE(IoRuntime::start_task<SendZcSocketTask>(
-        fds[0],
-        payload,
-        payload_size,
-        3,
-        &completed,
-        &calls,
-        &bytes_sent));
+    ASSERT_TRUE(IoRuntime::start_task<SendZcSocketTask>(fds[0], payload, payload_size, 3,
+                                                        &completed, &calls, &bytes_sent));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), payload_size);
     EXPECT_GT(calls.load(std::memory_order_acquire), 1);
@@ -51,11 +45,8 @@ TEST_F(IoRuntimeStreamFixture, SendZcWaitsForSocketWritableWhenBufferIsFull) {
     std::atomic<int> pending_seen{0};
     std::atomic<int> completed{0};
     std::atomic<std::size_t> bytes_sent{0};
-    ASSERT_TRUE(IoRuntime::start_task<PendingSendZcTask>(
-        fds[0],
-        &pending_seen,
-        &completed,
-        &bytes_sent));
+    ASSERT_TRUE(
+        IoRuntime::start_task<PendingSendZcTask>(fds[0], &pending_seen, &completed, &bytes_sent));
     ASSERT_TRUE(wait_until_at_least(pending_seen, 1));
 
     drain_available(fds[1]);

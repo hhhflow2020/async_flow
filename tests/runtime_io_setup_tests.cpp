@@ -4,14 +4,10 @@ TEST(IoUringSetupConfig, PopulatesRequestedSetupParams) {
 #if defined(__linux__)
     io_uring_params params{};
     af::detail::configure_io_uring_params(
-        params,
-        af::detail::IoUringSetupRequest{
-            IORING_SETUP_SQPOLL | IORING_SETUP_SUBMIT_ALL |
-                IORING_SETUP_COOP_TASKRUN | IORING_SETUP_SINGLE_ISSUER |
-                IORING_SETUP_DEFER_TASKRUN,
-            2048U,
-            2500U,
-            3});
+        params, af::detail::IoUringSetupRequest{
+                    IORING_SETUP_SQPOLL | IORING_SETUP_SUBMIT_ALL | IORING_SETUP_COOP_TASKRUN |
+                        IORING_SETUP_SINGLE_ISSUER | IORING_SETUP_DEFER_TASKRUN,
+                    2048U, 2500U, 3});
 
     EXPECT_NE(params.flags & IORING_SETUP_SQPOLL, 0U);
     EXPECT_NE(params.flags & IORING_SETUP_SQ_AFF, 0U);
@@ -37,8 +33,8 @@ TEST_F(UringIoRuntimeFixture, IoUringBackendAvailabilityReportsSetupError) {
         return;
     }
     ASSERT_NE(error, 0);
-    GTEST_SKIP() << "io_uring backend unavailable, error=" << error << " ("
-                 << std::strerror(error) << ")";
+    GTEST_SKIP() << "io_uring backend unavailable, error=" << error << " (" << std::strerror(error)
+                 << ")";
 #else
     EXPECT_FALSE(available);
     EXPECT_EQ(error, ENOSYS);

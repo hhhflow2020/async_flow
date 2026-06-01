@@ -30,10 +30,8 @@ TEST(RuntimeShutdownTests, WaitForTasksPolicyBlocksUntilAcceptedTasksComplete) {
     std::atomic<int> completed{0};
     std::atomic<bool> shutdown_done{false};
 
-    ASSERT_TRUE(WaitShutdownRuntime::start_task<WaitShutdownBlockingTask>(
-        &started,
-        &release,
-        &completed));
+    ASSERT_TRUE(
+        WaitShutdownRuntime::start_task<WaitShutdownBlockingTask>(&started, &release, &completed));
     ASSERT_TRUE(wait_until_at_least(started, 1));
 
     std::thread shutdown_thread([&] {
@@ -61,15 +59,12 @@ TEST(RuntimeShutdownTests, WaitForTasksPolicyAllowsRuntimeThreadRescheduleWhileS
     std::atomic<int> completed{0};
     std::atomic<bool> shutdown_done{false};
     std::array<std::atomic<std::uint16_t>, 2> seen{};
-    for (auto& value : seen) {
+    for (auto &value : seen) {
         value.store(WaitShutdownRuntime::invalid_thread_index, std::memory_order_relaxed);
     }
 
-    ASSERT_TRUE(WaitShutdownRuntime::start_task<WaitShutdownHopDuringStopTask>(
-        &started,
-        &release,
-        &completed,
-        &seen));
+    ASSERT_TRUE(WaitShutdownRuntime::start_task<WaitShutdownHopDuringStopTask>(&started, &release,
+                                                                               &completed, &seen));
     ASSERT_TRUE(wait_until_at_least(started, 1));
 
     std::thread shutdown_thread([&] {
@@ -103,10 +98,8 @@ TEST(RuntimeShutdownTests, WaitForTasksPolicyRejectsExternalStartsWhileStopping)
     std::atomic<int> destroyed{0};
     std::atomic<bool> shutdown_done{false};
 
-    ASSERT_TRUE(WaitShutdownRuntime::start_task<WaitShutdownBlockingTask>(
-        &started,
-        &release,
-        &completed));
+    ASSERT_TRUE(
+        WaitShutdownRuntime::start_task<WaitShutdownBlockingTask>(&started, &release, &completed));
     ASSERT_TRUE(wait_until_at_least(started, 1));
 
     std::thread shutdown_thread([&] {

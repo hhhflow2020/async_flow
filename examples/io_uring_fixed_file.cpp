@@ -26,11 +26,7 @@ int main() {
     int vectored_read = 0;
     char updated_byte_read = 0;
     const bool started = fixed_file_async::start_task<FixedFileRoundTripTask>(
-        temp_files.file.get(),
-        temp_files.updated_file.get(),
-        &error,
-        &byte_read,
-        &vectored_read,
+        temp_files.file.get(), temp_files.updated_file.get(), &error, &byte_read, &vectored_read,
         &updated_byte_read);
     AF_ASSERT(started);
 
@@ -50,12 +46,9 @@ int main() {
     }
 
     const int vectored = vectored_read;
-    std::cout << "io_uring fixed file byte="
-              << byte_read
-              << " vectored="
-              << static_cast<char>((vectored >> 8) & 0xff)
-              << static_cast<char>(vectored & 0xff)
-              << " updated=" << updated_byte_read << '\n';
+    std::cout << "io_uring fixed file byte=" << byte_read
+              << " vectored=" << static_cast<char>((vectored >> 8) & 0xff)
+              << static_cast<char>(vectored & 0xff) << " updated=" << updated_byte_read << '\n';
     temp_files.cleanup();
     return 0;
 #else

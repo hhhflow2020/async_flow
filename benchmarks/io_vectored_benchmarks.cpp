@@ -3,7 +3,7 @@
 namespace {
 
 #if !defined(_WIN32)
-void BM_IoStreamAdapterZeroIovSendv(benchmark::State& state) {
+void BM_IoStreamAdapterZeroIovSendv(benchmark::State &state) {
     FakeTask task;
     af::TcpStream<BenchIoThread> stream(BenchIoThread::IO_0, -1);
     af::IoOpState op;
@@ -12,7 +12,7 @@ void BM_IoStreamAdapterZeroIovSendv(benchmark::State& state) {
     }
 }
 
-void BM_IoStreamAdapterZeroIovSendvZc(benchmark::State& state) {
+void BM_IoStreamAdapterZeroIovSendvZc(benchmark::State &state) {
     FakeTask task;
     af::TcpStream<BenchIoThread> stream(BenchIoThread::IO_0, -1);
     af::IoOpState op;
@@ -21,7 +21,7 @@ void BM_IoStreamAdapterZeroIovSendvZc(benchmark::State& state) {
     }
 }
 
-void BM_IoDatagramAdapterZeroIovRecvvFrom(benchmark::State& state) {
+void BM_IoDatagramAdapterZeroIovRecvvFrom(benchmark::State &state) {
     FakeTask task;
     af::UdpSocket<BenchIoThread> socket(BenchIoThread::IO_0, -1);
     af::IoOpState op;
@@ -30,7 +30,7 @@ void BM_IoDatagramAdapterZeroIovRecvvFrom(benchmark::State& state) {
     }
 }
 
-void BM_IoDatagramAdapterZeroIovSendvTo(benchmark::State& state) {
+void BM_IoDatagramAdapterZeroIovSendvTo(benchmark::State &state) {
     FakeTask task;
     af::UdpSocket<BenchIoThread> socket(BenchIoThread::IO_0, -1);
     af::IoOpState op;
@@ -39,7 +39,7 @@ void BM_IoDatagramAdapterZeroIovSendvTo(benchmark::State& state) {
     }
 }
 
-void BM_IoDatagramAdapterZeroIovSendvZcTo(benchmark::State& state) {
+void BM_IoDatagramAdapterZeroIovSendvZcTo(benchmark::State &state) {
     FakeTask task;
     af::UdpSocket<BenchIoThread> socket(BenchIoThread::IO_0, -1);
     af::IoOpState op;

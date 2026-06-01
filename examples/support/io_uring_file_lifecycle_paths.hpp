@@ -17,15 +17,12 @@ struct FileLifecyclePaths {
 
     bool create() {
 #if defined(__linux__)
-        const int path_written = std::snprintf(
-            path.data(),
-            path.size(),
-            "/tmp/asyncflow-lifecycle-%ld",
-            static_cast<long>(::getpid()));
+        const int path_written =
+            std::snprintf(path.data(), path.size(), "/tmp/asyncflow-lifecycle-%ld",
+                          static_cast<long>(::getpid()));
         const int rename_written =
             std::snprintf(renamed_path.data(), renamed_path.size(), "%s.renamed", path.data());
-        if (path_written < 0 ||
-            rename_written < 0 ||
+        if (path_written < 0 || rename_written < 0 ||
             static_cast<std::size_t>(path_written) >= path.size() ||
             static_cast<std::size_t>(rename_written) >= renamed_path.size()) {
             return false;

@@ -14,11 +14,7 @@ class RecvMultishotTask final : public RecvTaskBase {
 public:
     explicit RecvMultishotTask(RecvTaskBase::FactoryToken token) : RecvTaskBase(token) {}
 
-    bool do_it(
-        int fd,
-        std::atomic<int>* armed,
-        int* packed_read,
-        std::atomic<int>* error) {
+    bool do_it(int fd, std::atomic<int> *armed, int *packed_read, std::atomic<int> *error) {
         stream_.reset(RecvThread::IO_0, fd);
         armed_ = armed;
         packed_read_ = packed_read;
@@ -51,10 +47,8 @@ private:
     af::TaskResult complete(int error) {
         if (registered_) {
             int unregister_error = 0;
-            if (recv_async::io_unregister_provided_buffer_ring(
-                    RecvThread::IO_0,
-                    buffer_group,
-                    &unregister_error)) {
+            if (recv_async::io_unregister_provided_buffer_ring(RecvThread::IO_0, buffer_group,
+                                                               &unregister_error)) {
                 registered_ = false;
             }
         }
@@ -79,11 +73,7 @@ private:
 
         int register_error = 0;
         if (!recv_async::io_register_provided_buffer_ring(
-                RecvThread::IO_0,
-                ring_.ring(),
-                ring_.entries(),
-                buffer_group,
-                &register_error)) {
+                RecvThread::IO_0, ring_.ring(), ring_.entries(), buffer_group, &register_error)) {
             return complete(register_error == 0 ? EIO : register_error);
         }
         registered_ = true;
@@ -94,10 +84,8 @@ private:
     af::TaskResult unregister_ring() {
         if (registered_) {
             int unregister_error = 0;
-            if (!recv_async::io_unregister_provided_buffer_ring(
-                    RecvThread::IO_0,
-                    buffer_group,
-                    &unregister_error)) {
+            if (!recv_async::io_unregister_provided_buffer_ring(RecvThread::IO_0, buffer_group,
+                                                                &unregister_error)) {
                 return complete(unregister_error == 0 ? EIO : unregister_error);
             }
             registered_ = false;
@@ -107,8 +95,7 @@ private:
 
     af::TaskResult recv_one() {
         std::uint16_t buffer_id = 0;
-        const af::IoStatus status =
-            stream_.recv_multishot(*this, buffer_group, &buffer_id, recv_);
+        const af::IoStatus status = stream_.recv_multishot(*this, buffer_group, &buffer_id, recv_);
         if (status.pending()) {
             if (!armed_once_) {
                 armed_once_ = true;
@@ -124,14 +111,12 @@ private:
         }
 
         const int shifted = received_ == 0 ? 8 : 0;
-        *packed_read_ |= static_cast<int>(
-            static_cast<unsigned char>(buffers_[buffer_id])) << shifted;
+        *packed_read_ |= static_cast<int>(static_cast<unsigned char>(buffers_[buffer_id]))
+                         << shifted;
         ++received_;
 
-        const af::IoProvidedBuffer buffer{
-            &buffers_[buffer_id],
-            sizeof(buffers_[buffer_id]),
-            buffer_id};
+        const af::IoProvidedBuffer buffer{&buffers_[buffer_id], sizeof(buffers_[buffer_id]),
+                                          buffer_id};
         int add_error = 0;
         if (!ring_.add(&buffer, 1, add_error)) {
             return stop_recv(add_error == 0 ? EIO : add_error);
@@ -154,8 +139,7 @@ private:
 
     af::TaskResult finish_cancel() {
         std::uint16_t ignored = 0;
-        const af::IoStatus status =
-            stream_.recv_multishot(*this, buffer_group, &ignored, recv_);
+        const af::IoStatus status = stream_.recv_multishot(*this, buffer_group, &ignored, recv_);
         if (status.pending()) {
             return pending();
         }
@@ -192,9 +176,9 @@ private:
     bool armed_once_{false};
     bool registered_{false};
     af::IoOpState recv_{};
-    std::atomic<int>* armed_{nullptr};
-    int* packed_read_{nullptr};
-    std::atomic<int>* error_{nullptr};
+    std::atomic<int> *armed_{nullptr};
+    int *packed_read_{nullptr};
+    std::atomic<int> *error_{nullptr};
 };
 
 } // namespace io_uring_recv_multishot_example

@@ -28,9 +28,9 @@ struct SendZcLoopbackListener {
         address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         address.sin_port = 0;
         address_size = sizeof(address);
-        return ::bind(fd.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0 &&
+        return ::bind(fd.get(), reinterpret_cast<sockaddr *>(&address), sizeof(address)) == 0 &&
                ::listen(fd.get(), 8) == 0 &&
-               ::getsockname(fd.get(), reinterpret_cast<sockaddr*>(&address), &address_size) == 0;
+               ::getsockname(fd.get(), reinterpret_cast<sockaddr *>(&address), &address_size) == 0;
     }
 };
 

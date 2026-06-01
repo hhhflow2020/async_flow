@@ -28,12 +28,7 @@ void run_terminal_wake_case(RunningWakeTerminalMode mode) {
         for (int i = 0; i < tasks_per_burst; ++i) {
             remaining.fetch_add(1, std::memory_order_relaxed);
             if (!RunningPendingRuntime::start_task<RunningWakeTerminalOwnerTask>(
-                    mode,
-                    i,
-                    &remaining,
-                    &completed,
-                    &wake_attempts,
-                    &failures,
+                    mode, i, &remaining, &completed, &wake_attempts, &failures,
                     wake_flags.data())) {
                 if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
                     remaining.notify_one();
@@ -85,12 +80,7 @@ TEST(RuntimeStressTests, RunningToPendingWakeDoesNotStrandOwner) {
         for (int i = 0; i < tasks_per_burst; ++i) {
             remaining.fetch_add(1, std::memory_order_relaxed);
             if (!RunningPendingRuntime::start_task<RunningPendingOwnerTask>(
-                    i,
-                    &remaining,
-                    &completed,
-                    &wake_attempts,
-                    &failures,
-                    stages.data(),
+                    i, &remaining, &completed, &wake_attempts, &failures, stages.data(),
                     wake_flags.data())) {
                 if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
                     remaining.notify_one();
@@ -107,8 +97,8 @@ TEST(RuntimeStressTests, RunningToPendingWakeDoesNotStrandOwner) {
             int min_stage = 4;
             int min_id = -1;
             for (int i = 0; i < tasks_per_burst; ++i) {
-                const int stage = stages[static_cast<std::size_t>(i)].load(
-                    std::memory_order_acquire);
+                const int stage =
+                    stages[static_cast<std::size_t>(i)].load(std::memory_order_acquire);
                 if (stage < min_stage) {
                     min_stage = stage;
                     min_id = i;

@@ -14,7 +14,7 @@ class DatagramServerTask final : public DatagramTask {
 public:
     explicit DatagramServerTask(DatagramTask::FactoryToken token) : DatagramTask(token) {}
 
-    bool do_it(int fd, bool* ok, char* request_seen) {
+    bool do_it(int fd, bool *ok, char *request_seen) {
         socket_.reset(DatagramThread::IO_0, fd);
         ok_ = ok;
         request_seen_ = request_seen;
@@ -39,13 +39,9 @@ private:
 
     af::TaskResult receive_request() {
         peer_size_ = sizeof(peer_);
-        const af::IoStatus status = socket_.recv_from_some(
-            *this,
-            &request_,
-            sizeof(request_),
-            reinterpret_cast<sockaddr*>(&peer_),
-            &peer_size_,
-            recv_);
+        const af::IoStatus status =
+            socket_.recv_from_some(*this, &request_, sizeof(request_),
+                                   reinterpret_cast<sockaddr *>(&peer_), &peer_size_, recv_);
         if (status.pending()) {
             return pending();
         }
@@ -59,13 +55,9 @@ private:
     }
 
     af::TaskResult send_response() {
-        const af::IoStatus status = socket_.send_to_some(
-            *this,
-            &response_,
-            sizeof(response_),
-            reinterpret_cast<const sockaddr*>(&peer_),
-            peer_size_,
-            send_);
+        const af::IoStatus status =
+            socket_.send_to_some(*this, &response_, sizeof(response_),
+                                 reinterpret_cast<const sockaddr *>(&peer_), peer_size_, send_);
         if (status.pending()) {
             return pending();
         }
@@ -85,8 +77,8 @@ private:
     socklen_t peer_size_{sizeof(peer_)};
     af::IoOpState recv_{};
     af::IoOpState send_{};
-    bool* ok_{nullptr};
-    char* request_seen_{nullptr};
+    bool *ok_{nullptr};
+    char *request_seen_{nullptr};
 };
 
 } // namespace io_uring_datagram_example

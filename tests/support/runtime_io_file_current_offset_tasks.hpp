@@ -5,11 +5,8 @@ public:
     explicit UringFileCurrentOffsetTask(UringIoTaskBase::FactoryToken token)
         : UringIoTaskBase(token) {}
 
-    bool do_it(
-        int fd,
-        std::atomic<int>* completed,
-        std::atomic<int>* packed_read,
-        std::atomic<int>* pending_submits) {
+    bool do_it(int fd, std::atomic<int> *completed, std::atomic<int> *packed_read,
+               std::atomic<int> *pending_submits) {
         file_.reset(IoTestThread::IO_0, fd);
         completed_ = completed;
         packed_read_ = packed_read;
@@ -104,7 +101,8 @@ private:
     }
 
     af::TaskResult read_one() {
-        const af::IoStatus status = file_.read_some(*this, &read_first_, sizeof(read_first_), read_one_);
+        const af::IoStatus status =
+            file_.read_some(*this, &read_first_, sizeof(read_first_), read_one_);
         if (status.pending()) {
             pending_submits_->fetch_add(1, std::memory_order_release);
             return pending();
@@ -124,14 +122,13 @@ private:
             pending_submits_->fetch_add(1, std::memory_order_release);
             return pending();
         }
-        if (!status.ready() || status.bytes != sizeof(read_rest_) ||
-            read_rest_[0] != second_ || read_rest_[1] != third_) {
+        if (!status.ready() || status.bytes != sizeof(read_rest_) || read_rest_[0] != second_ ||
+            read_rest_[1] != third_) {
             return failed();
         }
-        const int packed =
-            (static_cast<int>(static_cast<unsigned char>(read_first_)) << 16) |
-            (static_cast<int>(static_cast<unsigned char>(read_rest_[0])) << 8) |
-            static_cast<int>(static_cast<unsigned char>(read_rest_[1]));
+        const int packed = (static_cast<int>(static_cast<unsigned char>(read_first_)) << 16) |
+                           (static_cast<int>(static_cast<unsigned char>(read_rest_[0])) << 8) |
+                           static_cast<int>(static_cast<unsigned char>(read_rest_[1]));
         packed_read_->store(packed, std::memory_order_release);
         completed_->fetch_add(1, std::memory_order_release);
         return done();
@@ -151,7 +148,7 @@ private:
     af::IoOpState fsync_{};
     af::IoOpState read_one_{};
     af::IoOpState read_vector_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* packed_read_{nullptr};
-    std::atomic<int>* pending_submits_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *packed_read_{nullptr};
+    std::atomic<int> *pending_submits_{nullptr};
 };

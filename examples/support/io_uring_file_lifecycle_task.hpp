@@ -15,13 +15,9 @@ namespace io_uring_file_lifecycle_example {
 
 class FileLifecycleTask final : public LifecycleTaskBase {
 public:
-    explicit FileLifecycleTask(LifecycleTaskBase::FactoryToken token)
-        : LifecycleTaskBase(token) {}
+    explicit FileLifecycleTask(LifecycleTaskBase::FactoryToken token) : LifecycleTaskBase(token) {}
 
-    bool do_it(
-        const char* path,
-        const char* renamed_path,
-        std::uint64_t* observed_size) {
+    bool do_it(const char *path, const char *renamed_path, std::uint64_t *observed_size) {
         if (!copy_path(path_.data(), path_.size(), path) ||
             !copy_path(renamed_path_.data(), renamed_path_.size(), renamed_path)) {
             return false;
@@ -43,7 +39,7 @@ private:
         Close,
     };
 
-    static bool copy_path(char* output, std::size_t output_size, const char* input) {
+    static bool copy_path(char *output, std::size_t output_size, const char *input) {
         const int written = std::snprintf(output, output_size, "%s", input);
         return written >= 0 && static_cast<std::size_t>(written) < output_size;
     }
@@ -82,15 +78,9 @@ private:
 
     af::TaskResult open_file() {
         int fd = -1;
-        const af::IoStatus status = af::io_openat(
-            *this,
-            LifecycleThread::IO_0,
-            AT_FDCWD,
-            path_.data(),
-            O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC,
-            0600U,
-            &fd,
-            open_);
+        const af::IoStatus status =
+            af::io_openat(*this, LifecycleThread::IO_0, AT_FDCWD, path_.data(),
+                          O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC, 0600U, &fd, open_);
         if (status.pending()) {
             return pending();
         }
@@ -104,14 +94,8 @@ private:
     }
 
     af::TaskResult fallocate_file() {
-        const af::IoStatus status = af::io_fallocate(
-            *this,
-            LifecycleThread::IO_0,
-            owned_.get(),
-            FALLOC_FL_KEEP_SIZE,
-            0,
-            4096,
-            fallocate_);
+        const af::IoStatus status = af::io_fallocate(*this, LifecycleThread::IO_0, owned_.get(),
+                                                     FALLOC_FL_KEEP_SIZE, 0, 4096, fallocate_);
         if (status.pending()) {
             return pending();
         }
@@ -170,15 +154,8 @@ private:
     }
 
     af::TaskResult stat_file() {
-        const af::IoStatus status = af::io_statx(
-            *this,
-            LifecycleThread::IO_0,
-            AT_FDCWD,
-            path_.data(),
-            0,
-            STATX_SIZE,
-            &stat_,
-            stat_state_);
+        const af::IoStatus status = af::io_statx(*this, LifecycleThread::IO_0, AT_FDCWD,
+                                                 path_.data(), 0, STATX_SIZE, &stat_, stat_state_);
         if (status.pending()) {
             return pending();
         }
@@ -191,15 +168,9 @@ private:
     }
 
     af::TaskResult rename_file() {
-        const af::IoStatus status = af::io_renameat(
-            *this,
-            LifecycleThread::IO_0,
-            AT_FDCWD,
-            path_.data(),
-            AT_FDCWD,
-            renamed_path_.data(),
-            0,
-            rename_);
+        const af::IoStatus status =
+            af::io_renameat(*this, LifecycleThread::IO_0, AT_FDCWD, path_.data(), AT_FDCWD,
+                            renamed_path_.data(), 0, rename_);
         if (status.pending()) {
             return pending();
         }
@@ -211,13 +182,8 @@ private:
     }
 
     af::TaskResult unlink_file() {
-        const af::IoStatus status = af::io_unlinkat(
-            *this,
-            LifecycleThread::IO_0,
-            AT_FDCWD,
-            renamed_path_.data(),
-            0,
-            unlink_);
+        const af::IoStatus status = af::io_unlinkat(*this, LifecycleThread::IO_0, AT_FDCWD,
+                                                    renamed_path_.data(), 0, unlink_);
         if (status.pending()) {
             return pending();
         }
@@ -245,7 +211,7 @@ private:
     af::IoOpState rename_{};
     af::IoOpState unlink_{};
     af::IoOpState close_{};
-    std::uint64_t* observed_size_{nullptr};
+    std::uint64_t *observed_size_{nullptr};
 };
 
 } // namespace io_uring_file_lifecycle_example

@@ -1,6 +1,6 @@
 #pragma once
 
-inline bool RpcProcessTask::do_it(RpcServerTask* server) {
+inline bool RpcProcessTask::do_it(RpcServerTask *server) {
     server_ = server;
     return schedule(RpcThread::Logic_0);
 }
@@ -10,7 +10,7 @@ inline af::TaskResult RpcProcessTask::run() {
         return done();
     }
 
-    const char* request = server_->request_data();
+    const char *request = server_->request_data();
     const std::size_t request_size = server_->request_size();
     if (request_size == 4U && std::memcmp(request, "PING", 4U) == 0) {
         server_->set_response("PONG", 4U);

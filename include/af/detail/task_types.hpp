@@ -7,36 +7,36 @@ template <typename RuntimeT, typename TraitsT> class Executor;
 } // namespace detail
 
 enum class TaskResult : std::uint8_t {
-  Done,
-  Pending,
-  Again,
-  Failed,
-  Cancelled,
+    Done,
+    Pending,
+    Again,
+    Failed,
+    Cancelled,
 };
 
 enum class QueueFullPolicy : std::uint8_t {
-  Reject,
-  Yield,
+    Reject,
+    Yield,
 };
 
 enum class ShutdownPolicy : std::uint8_t {
-  WaitForTasks,
-  StopImmediately,
+    WaitForTasks,
+    StopImmediately,
 };
 
 enum class ThreadKind : std::uint8_t {
-  Worker,
-  Io,
-  IoUring,
-  Epoll,
-  Kqueue,
+    Worker,
+    Io,
+    IoUring,
+    Epoll,
+    Kqueue,
 };
 
 enum class TaskState : std::uint8_t {
-  Created,
-  Queued,
-  Starting,
-  Running,
-  Pending,
-  Done,
+    Created,
+    Queued,
+    Starting,
+    Running,
+    Pending,
+    Done,
 };

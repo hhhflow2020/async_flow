@@ -2,96 +2,60 @@
 
 namespace {
 
-void BM_IoOpenAt2NullHow(benchmark::State& state) {
+void BM_IoOpenAt2NullHow(benchmark::State &state) {
     FakeTask task;
     af::IoOpState op;
     int opened = -1;
     for (auto _ : state) {
         benchmark::DoNotOptimize(af::io_openat2(
-            task,
-            BenchIoThread::IO_0,
-            -1,
-            "/tmp/asyncflow-openat2-bench",
-            nullptr,
-            &opened,
-            op));
+            task, BenchIoThread::IO_0, -1, "/tmp/asyncflow-openat2-bench", nullptr, &opened, op));
     }
 }
 
-void BM_IoStatxNullPath(benchmark::State& state) {
+void BM_IoStatxNullPath(benchmark::State &state) {
     FakeTask task;
     af::IoOpState op;
     for (auto _ : state) {
-        benchmark::DoNotOptimize(af::io_statx(
-            task,
-            BenchIoThread::IO_0,
-            -1,
-            nullptr,
-            0,
-            0,
-            nullptr,
-            op));
+        benchmark::DoNotOptimize(
+            af::io_statx(task, BenchIoThread::IO_0, -1, nullptr, 0, 0, nullptr, op));
     }
 }
 
-void BM_IoMkdirAtNullPath(benchmark::State& state) {
+void BM_IoMkdirAtNullPath(benchmark::State &state) {
     FakeTask task;
     af::IoOpState op;
     for (auto _ : state) {
-        benchmark::DoNotOptimize(af::io_mkdirat(
-            task,
-            BenchIoThread::IO_0,
-            -1,
-            nullptr,
-            0700U,
-            op));
+        benchmark::DoNotOptimize(af::io_mkdirat(task, BenchIoThread::IO_0, -1, nullptr, 0700U, op));
     }
 }
 
-void BM_IoSymlinkAtNullTarget(benchmark::State& state) {
+void BM_IoSymlinkAtNullTarget(benchmark::State &state) {
     FakeTask task;
     af::IoOpState op;
     for (auto _ : state) {
-        benchmark::DoNotOptimize(af::io_symlinkat(
-            task,
-            BenchIoThread::IO_0,
-            nullptr,
-            -1,
-            "/tmp/asyncflow-symlinkat-bench",
-            op));
+        benchmark::DoNotOptimize(af::io_symlinkat(task, BenchIoThread::IO_0, nullptr, -1,
+                                                  "/tmp/asyncflow-symlinkat-bench", op));
     }
 }
 
-void BM_IoLinkAtNullOldPath(benchmark::State& state) {
+void BM_IoLinkAtNullOldPath(benchmark::State &state) {
     FakeTask task;
     af::IoOpState op;
     for (auto _ : state) {
-        benchmark::DoNotOptimize(af::io_linkat(
-            task,
-            BenchIoThread::IO_0,
-            -1,
-            nullptr,
-            -1,
-            "/tmp/asyncflow-linkat-bench",
-            0,
-            op));
+        benchmark::DoNotOptimize(af::io_linkat(task, BenchIoThread::IO_0, -1, nullptr, -1,
+                                               "/tmp/asyncflow-linkat-bench", 0, op));
     }
 }
 
-void BM_IoFtruncateInvalidFd(benchmark::State& state) {
+void BM_IoFtruncateInvalidFd(benchmark::State &state) {
     FakeTask task;
     af::IoOpState op;
     for (auto _ : state) {
-        benchmark::DoNotOptimize(af::io_ftruncate(
-            task,
-            BenchIoThread::IO_0,
-            -1,
-            0,
-            op));
+        benchmark::DoNotOptimize(af::io_ftruncate(task, BenchIoThread::IO_0, -1, 0, op));
     }
 }
 
-void BM_IoCloseInvalidFd(benchmark::State& state) {
+void BM_IoCloseInvalidFd(benchmark::State &state) {
     FakeTask task;
     af::IoOpState op;
     for (auto _ : state) {

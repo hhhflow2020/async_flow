@@ -4,15 +4,9 @@ class SendfileSocketTask final : public IoTaskBase {
 public:
     explicit SendfileSocketTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(
-        int socket_fd,
-        int file_fd,
-        std::size_t total_size,
-        std::size_t chunk_size,
-        bool use_null_offset,
-        std::atomic<int>* completed,
-        std::atomic<int>* calls,
-        std::atomic<std::size_t>* bytes_sent) {
+    bool do_it(int socket_fd, int file_fd, std::size_t total_size, std::size_t chunk_size,
+               bool use_null_offset, std::atomic<int> *completed, std::atomic<int> *calls,
+               std::atomic<std::size_t> *bytes_sent) {
         stream_.reset(IoTestThread::IO_0, socket_fd);
         file_fd_ = file_fd;
         total_size_ = total_size;
@@ -37,7 +31,7 @@ private:
 
         const std::size_t remaining = total_size_ - sent_;
         const std::size_t count = remaining < chunk_size_ ? remaining : chunk_size_;
-        af::IoOffset* offset = use_null_offset_ ? nullptr : &offset_;
+        af::IoOffset *offset = use_null_offset_ ? nullptr : &offset_;
         const af::IoStatus status = stream_.sendfile_some(*this, file_fd_, offset, count, send_);
         if (status.pending()) {
             return pending();
@@ -59,21 +53,17 @@ private:
     std::size_t sent_{0};
     bool use_null_offset_{false};
     af::IoOpState send_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* calls_{nullptr};
-    std::atomic<std::size_t>* bytes_sent_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *calls_{nullptr};
+    std::atomic<std::size_t> *bytes_sent_{nullptr};
 };
 
 class PendingSendfileTask final : public IoTaskBase {
 public:
     explicit PendingSendfileTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(
-        int socket_fd,
-        int file_fd,
-        std::atomic<int>* pending_seen,
-        std::atomic<int>* completed,
-        std::atomic<std::size_t>* bytes_sent) {
+    bool do_it(int socket_fd, int file_fd, std::atomic<int> *pending_seen,
+               std::atomic<int> *completed, std::atomic<std::size_t> *bytes_sent) {
         stream_.reset(IoTestThread::IO_0, socket_fd);
         file_fd_ = file_fd;
         pending_seen_ = pending_seen;
@@ -105,9 +95,9 @@ private:
     int file_fd_{-1};
     af::IoOffset offset_{0};
     af::IoOpState send_{};
-    std::atomic<int>* pending_seen_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<std::size_t>* bytes_sent_{nullptr};
+    std::atomic<int> *pending_seen_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<std::size_t> *bytes_sent_{nullptr};
 };
 
 class UringPendingSendfilePollTask final : public UringIoTaskBase {
@@ -115,15 +105,10 @@ public:
     explicit UringPendingSendfilePollTask(UringIoTaskBase::FactoryToken token)
         : UringIoTaskBase(token) {}
 
-    bool do_it(
-        int socket_fd,
-        int file_fd,
-        std::atomic<af::IoOpState*>* state,
-        std::atomic<int>* wait_kind,
-        std::atomic<int>* pending_seen,
-        std::atomic<int>* completed,
-        std::atomic<int>* error,
-        std::atomic<std::size_t>* bytes_sent) {
+    bool do_it(int socket_fd, int file_fd, std::atomic<af::IoOpState *> *state,
+               std::atomic<int> *wait_kind, std::atomic<int> *pending_seen,
+               std::atomic<int> *completed, std::atomic<int> *error,
+               std::atomic<std::size_t> *bytes_sent) {
         stream_.reset(IoTestThread::IO_0, socket_fd);
         file_fd_ = file_fd;
         state_ = state;
@@ -162,10 +147,10 @@ private:
     int file_fd_{-1};
     af::IoOffset offset_{0};
     af::IoOpState send_{};
-    std::atomic<af::IoOpState*>* state_{nullptr};
-    std::atomic<int>* wait_kind_{nullptr};
-    std::atomic<int>* pending_seen_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* error_{nullptr};
-    std::atomic<std::size_t>* bytes_sent_{nullptr};
+    std::atomic<af::IoOpState *> *state_{nullptr};
+    std::atomic<int> *wait_kind_{nullptr};
+    std::atomic<int> *pending_seen_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *error_{nullptr};
+    std::atomic<std::size_t> *bytes_sent_{nullptr};
 };

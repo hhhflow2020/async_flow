@@ -68,7 +68,7 @@ TEST_F(RuntimeFixture, CancelledTaskIsReleased) {
 TEST_F(RuntimeFixture, StateMachineCanHopThreadsAndAgainOnCurrentThread) {
     std::atomic<int> completed{0};
     std::array<std::atomic<std::uint16_t>, 4> seen{};
-    for (auto& value : seen) {
+    for (auto &value : seen) {
         value.store(Runtime::invalid_thread_index, std::memory_order_relaxed);
     }
 

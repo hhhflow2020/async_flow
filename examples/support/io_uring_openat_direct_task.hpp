@@ -14,7 +14,7 @@ class DirectOpenRoundTripTask final : public DirectOpenTask {
 public:
     explicit DirectOpenRoundTripTask(DirectOpenTask::FactoryToken token) : DirectOpenTask(token) {}
 
-    bool do_it(const char* path, DirectOpenRoundTripResult* result) {
+    bool do_it(const char *path, DirectOpenRoundTripResult *result) {
         if (path == nullptr || result == nullptr) {
             return false;
         }
@@ -63,16 +63,9 @@ private:
     }
 
     af::TaskResult open_direct() {
-        const af::IoStatus status = af::io_openat_direct(
-            *this,
-            DirectOpenThread::IO_0,
-            AT_FDCWD,
-            path_,
-            O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC,
-            0600U,
-            0,
-            &file_,
-            open_);
+        const af::IoStatus status =
+            af::io_openat_direct(*this, DirectOpenThread::IO_0, AT_FDCWD, path_,
+                                 O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC, 0600U, 0, &file_, open_);
         if (status.pending()) {
             return pending();
         }
@@ -122,9 +115,8 @@ private:
     af::TaskResult complete(int error) {
         if (registered_) {
             int unregister_error = 0;
-            if (!direct_open_async::io_unregister_files(
-                    DirectOpenThread::IO_0,
-                    &unregister_error) &&
+            if (!direct_open_async::io_unregister_files(DirectOpenThread::IO_0,
+                                                        &unregister_error) &&
                 error == 0) {
                 error = unregister_error == 0 ? EIO : unregister_error;
             }
@@ -136,7 +128,7 @@ private:
     }
 
     State state_{State::Register};
-    const char* path_{nullptr};
+    const char *path_{nullptr};
     af::IoFixedFile<DirectOpenThread> file_{};
     char value_{'D'};
     char read_{0};
@@ -145,7 +137,7 @@ private:
     af::IoOpState write_{};
     af::IoOpState fsync_{};
     af::IoOpState read_state_{};
-    DirectOpenRoundTripResult* result_{nullptr};
+    DirectOpenRoundTripResult *result_{nullptr};
 };
 
 } // namespace io_uring_openat_direct_example

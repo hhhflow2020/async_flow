@@ -4,11 +4,8 @@ class SocketReadableTask final : public IoTaskBase {
 public:
     explicit SocketReadableTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(
-        int fd,
-        std::atomic<int>* armed,
-        std::atomic<int>* completed,
-        std::atomic<char>* byte_read) {
+    bool do_it(int fd, std::atomic<int> *armed, std::atomic<int> *completed,
+               std::atomic<char> *byte_read) {
         fd_ = fd;
         armed_ = armed;
         completed_ = completed;
@@ -35,13 +32,8 @@ private:
 
     af::TaskResult arm_read() {
         state_ = State::Read;
-        const af::IoStatus status = af::io_read_some(
-            *this,
-            IoTestThread::IO_0,
-            fd_,
-            &value_,
-            sizeof(value_),
-            read_);
+        const af::IoStatus status =
+            af::io_read_some(*this, IoTestThread::IO_0, fd_, &value_, sizeof(value_), read_);
         if (!status.pending()) {
             return failed();
         }
@@ -50,13 +42,8 @@ private:
     }
 
     af::TaskResult finish_read() {
-        const af::IoStatus status = af::io_read_some(
-            *this,
-            IoTestThread::IO_0,
-            fd_,
-            &value_,
-            sizeof(value_),
-            read_);
+        const af::IoStatus status =
+            af::io_read_some(*this, IoTestThread::IO_0, fd_, &value_, sizeof(value_), read_);
         if (!status.ready() || status.bytes != sizeof(value_)) {
             return failed();
         }
@@ -69,21 +56,17 @@ private:
     int fd_{-1};
     char value_{0};
     af::IoOpState read_{};
-    std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<char>* byte_read_{nullptr};
+    std::atomic<int> *armed_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<char> *byte_read_{nullptr};
 };
 
 class SocketRepeatedReadableTask final : public IoTaskBase {
 public:
     explicit SocketRepeatedReadableTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(
-        int fd,
-        std::atomic<int>* armed,
-        std::atomic<int>* completed,
-        std::atomic<int>* reads,
-        char* output) {
+    bool do_it(int fd, std::atomic<int> *armed, std::atomic<int> *completed,
+               std::atomic<int> *reads, char *output) {
         fd_ = fd;
         armed_ = armed;
         completed_ = completed;
@@ -111,24 +94,14 @@ private:
 
     af::TaskResult arm_read() {
         state_ = State::Read;
-        const af::IoStatus status = af::io_read_some(
-            *this,
-            IoTestThread::IO_0,
-            fd_,
-            &value_,
-            sizeof(value_),
-            read_);
+        const af::IoStatus status =
+            af::io_read_some(*this, IoTestThread::IO_0, fd_, &value_, sizeof(value_), read_);
         return handle_status(status);
     }
 
     af::TaskResult finish_read() {
-        const af::IoStatus status = af::io_read_some(
-            *this,
-            IoTestThread::IO_0,
-            fd_,
-            &value_,
-            sizeof(value_),
-            read_);
+        const af::IoStatus status =
+            af::io_read_some(*this, IoTestThread::IO_0, fd_, &value_, sizeof(value_), read_);
         return handle_status(status);
     }
 
@@ -159,17 +132,17 @@ private:
     char value_{0};
     std::size_t read_count_{0};
     af::IoOpState read_{};
-    std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* reads_{nullptr};
-    char* output_{nullptr};
+    std::atomic<int> *armed_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *reads_{nullptr};
+    char *output_{nullptr};
 };
 
 class SocketWritableTask final : public IoTaskBase {
 public:
     explicit SocketWritableTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(int fd, std::atomic<int>* armed, std::atomic<int>* completed) {
+    bool do_it(int fd, std::atomic<int> *armed, std::atomic<int> *completed) {
         fd_ = fd;
         armed_ = armed;
         completed_ = completed;
@@ -178,13 +151,8 @@ public:
 
 private:
     af::TaskResult run() override {
-        const af::IoStatus status = af::io_write_some(
-            *this,
-            IoTestThread::IO_0,
-            fd_,
-            &value_,
-            sizeof(value_),
-            write_);
+        const af::IoStatus status =
+            af::io_write_some(*this, IoTestThread::IO_0, fd_, &value_, sizeof(value_), write_);
         if (status.pending()) {
             armed_->fetch_add(1, std::memory_order_release);
             return pending();
@@ -199,6 +167,6 @@ private:
     int fd_{-1};
     char value_{'w'};
     af::IoOpState write_{};
-    std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
+    std::atomic<int> *armed_{nullptr};
+    std::atomic<int> *completed_{nullptr};
 };

@@ -34,13 +34,7 @@ TEST(RuntimeStressTests, ParallelShardOwnerResumesUnderBursts) {
         for (int i = 0; i < tasks_per_burst; ++i) {
             remaining.fetch_add(1, std::memory_order_relaxed);
             if (!ParallelResumeRuntime::start_task<ParallelResumeTask>(
-                    i,
-                    &remaining,
-                    &completed,
-                    &failures,
-                    &shard_runs,
-                    &sum,
-                    task_stage.data(),
+                    i, &remaining, &completed, &failures, &shard_runs, &sum, task_stage.data(),
                     task_shards.data())) {
                 if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
                     remaining.notify_one();
@@ -58,13 +52,12 @@ TEST(RuntimeStressTests, ParallelShardOwnerResumesUnderBursts) {
             int min_id = -1;
             int min_shards = 4;
             for (int i = 0; i < tasks_per_burst; ++i) {
-                const int stage = task_stage[static_cast<std::size_t>(i)].load(
-                    std::memory_order_acquire);
+                const int stage =
+                    task_stage[static_cast<std::size_t>(i)].load(std::memory_order_acquire);
                 int task_shard_count = 0;
                 for (int shard = 0; shard < 4; ++shard) {
-                    task_shard_count +=
-                        task_shards[static_cast<std::size_t>(i * 4 + shard)].load(
-                            std::memory_order_acquire);
+                    task_shard_count += task_shards[static_cast<std::size_t>(i * 4 + shard)].load(
+                        std::memory_order_acquire);
                 }
                 if (stage < min_stage || (stage == min_stage && task_shard_count < min_shards)) {
                     min_stage = stage;
@@ -77,9 +70,8 @@ TEST(RuntimeStressTests, ParallelShardOwnerResumesUnderBursts) {
                           << " completed=" << completed.load(std::memory_order_acquire)
                           << " failures=" << failures.load(std::memory_order_acquire)
                           << " shard_runs=" << shard_runs.load(std::memory_order_acquire)
-                          << " sum=" << sum.load(std::memory_order_acquire)
-                          << " min_id=" << min_id << " min_stage=" << min_stage
-                          << " min_shards=" << min_shards;
+                          << " sum=" << sum.load(std::memory_order_acquire) << " min_id=" << min_id
+                          << " min_stage=" << min_stage << " min_shards=" << min_shards;
             ParallelResumeRuntime::shutdown();
             return;
         }

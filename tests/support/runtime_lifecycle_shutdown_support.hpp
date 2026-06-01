@@ -20,7 +20,7 @@ class NoInitTask final : public NoInitTaskBase {
 public:
     explicit NoInitTask(NoInitTaskBase::FactoryToken token) : NoInitTaskBase(token) {}
 
-    bool do_it(std::atomic<int>* destroyed) {
+    bool do_it(std::atomic<int> *destroyed) {
         destroyed_ = destroyed;
         return schedule(NoInitThread::Logic_0);
     }
@@ -34,7 +34,7 @@ private:
         return failed();
     }
 
-    std::atomic<int>* destroyed_{nullptr};
+    std::atomic<int> *destroyed_{nullptr};
 };
 
 enum class WaitShutdownThread : std::int16_t {
@@ -60,7 +60,7 @@ public:
     explicit WaitShutdownBlockingTask(WaitShutdownTaskBase::FactoryToken token)
         : WaitShutdownTaskBase(token) {}
 
-    bool do_it(std::atomic<int>* started, std::atomic<bool>* release, std::atomic<int>* completed) {
+    bool do_it(std::atomic<int> *started, std::atomic<bool> *release, std::atomic<int> *completed) {
         started_ = started;
         release_ = release;
         completed_ = completed;
@@ -79,9 +79,9 @@ private:
         return done();
     }
 
-    std::atomic<int>* started_{nullptr};
-    std::atomic<bool>* release_{nullptr};
-    std::atomic<int>* completed_{nullptr};
+    std::atomic<int> *started_{nullptr};
+    std::atomic<bool> *release_{nullptr};
+    std::atomic<int> *completed_{nullptr};
 };
 
 class WaitShutdownHopDuringStopTask final : public WaitShutdownTaskBase {
@@ -89,11 +89,8 @@ public:
     explicit WaitShutdownHopDuringStopTask(WaitShutdownTaskBase::FactoryToken token)
         : WaitShutdownTaskBase(token) {}
 
-    bool do_it(
-        std::atomic<int>* started,
-        std::atomic<bool>* release,
-        std::atomic<int>* completed,
-        std::array<std::atomic<std::uint16_t>, 2>* seen) {
+    bool do_it(std::atomic<int> *started, std::atomic<bool> *release, std::atomic<int> *completed,
+               std::array<std::atomic<std::uint16_t>, 2> *seen) {
         started_ = started;
         release_ = release;
         completed_ = completed;
@@ -110,7 +107,8 @@ private:
     af::TaskResult run() override {
         switch (state_) {
         case State::Start:
-            (*seen_)[0].store(WaitShutdownRuntime::current_thread_index(), std::memory_order_release);
+            (*seen_)[0].store(WaitShutdownRuntime::current_thread_index(),
+                              std::memory_order_release);
             started_->fetch_add(1, std::memory_order_release);
             started_->notify_one();
             while (!release_->load(std::memory_order_acquire)) {
@@ -120,7 +118,8 @@ private:
             return pending_on(WaitShutdownThread::DB_0);
 
         case State::Db:
-            (*seen_)[1].store(WaitShutdownRuntime::current_thread_index(), std::memory_order_release);
+            (*seen_)[1].store(WaitShutdownRuntime::current_thread_index(),
+                              std::memory_order_release);
             completed_->fetch_add(1, std::memory_order_release);
             completed_->notify_one();
             return done();
@@ -130,10 +129,10 @@ private:
     }
 
     State state_{State::Start};
-    std::atomic<int>* started_{nullptr};
-    std::atomic<bool>* release_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::array<std::atomic<std::uint16_t>, 2>* seen_{nullptr};
+    std::atomic<int> *started_{nullptr};
+    std::atomic<bool> *release_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::array<std::atomic<std::uint16_t>, 2> *seen_{nullptr};
 };
 
 class WaitShutdownRejectedTask final : public WaitShutdownTaskBase {
@@ -147,7 +146,7 @@ public:
         }
     }
 
-    bool do_it(std::atomic<int>* destroyed) {
+    bool do_it(std::atomic<int> *destroyed) {
         destroyed_ = destroyed;
         return schedule(WaitShutdownThread::Logic_0);
     }
@@ -157,7 +156,7 @@ private:
         return failed();
     }
 
-    std::atomic<int>* destroyed_{nullptr};
+    std::atomic<int> *destroyed_{nullptr};
 };
 
 enum class FastShutdownThread : std::int16_t {
@@ -183,7 +182,7 @@ public:
     explicit FastShutdownPendingTask(FastShutdownTaskBase::FactoryToken token)
         : FastShutdownTaskBase(token) {}
 
-    bool do_it(std::atomic<int>* entered, std::atomic<int>* destroyed = nullptr) {
+    bool do_it(std::atomic<int> *entered, std::atomic<int> *destroyed = nullptr) {
         entered_ = entered;
         destroyed_ = destroyed;
         return schedule(FastShutdownThread::Logic_0);
@@ -202,8 +201,8 @@ private:
         return pending();
     }
 
-    std::atomic<int>* entered_{nullptr};
-    std::atomic<int>* destroyed_{nullptr};
+    std::atomic<int> *entered_{nullptr};
+    std::atomic<int> *destroyed_{nullptr};
 };
 
 static_assert(!std::is_default_constructible_v<NoInitTask>);

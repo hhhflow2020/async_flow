@@ -6,15 +6,10 @@ public:
     explicit UringUdpRecvmsgMultishotTask(UringIoTaskBase::FactoryToken token)
         : UringIoTaskBase(token) {}
 
-    bool do_it(
-        int fd,
-        in_port_t expected_port,
-        std::atomic<int>* armed,
-        std::atomic<int>* completed,
-        std::atomic<int>* read_count,
-        std::atomic<int>* packed_read,
-        std::atomic<int>* peer_count,
-        std::atomic<int>* error) {
+    bool do_it(int fd, in_port_t expected_port, std::atomic<int> *armed,
+               std::atomic<int> *completed, std::atomic<int> *read_count,
+               std::atomic<int> *packed_read, std::atomic<int> *peer_count,
+               std::atomic<int> *error) {
         socket_.reset(IoTestThread::IO_0, fd);
         expected_port_ = expected_port;
         armed_ = armed;
@@ -64,11 +59,7 @@ private:
 
         int register_error = 0;
         if (!UringIoRuntime::io_register_provided_buffer_ring(
-                IoTestThread::IO_0,
-                ring_.ring(),
-                ring_.entries(),
-                buffer_group,
-                &register_error)) {
+                IoTestThread::IO_0, ring_.ring(), ring_.entries(), buffer_group, &register_error)) {
             return complete(register_error == 0 ? EIO : register_error);
         }
         registered_ = true;
@@ -78,13 +69,8 @@ private:
 
     af::TaskResult recv_one() {
         std::uint16_t buffer_id = 0;
-        const af::IoStatus status = socket_.recv_from_multishot(
-            *this,
-            buffer_group,
-            name_capacity,
-            0,
-            &buffer_id,
-            recv_);
+        const af::IoStatus status =
+            socket_.recv_from_multishot(*this, buffer_group, name_capacity, 0, &buffer_id, recv_);
         if (status.pending()) {
             if (!armed_once_) {
                 armed_once_ = true;
@@ -101,22 +87,16 @@ private:
 
         af::IoRecvmsgMultishotView view{};
         int parse_error = 0;
-        if (!af::io_parse_recvmsg_multishot_buffer(
-                buffers_[buffer_id],
-                buffer_size,
-                status.bytes,
-                name_capacity,
-                0,
-                view,
-                parse_error)) {
+        if (!af::io_parse_recvmsg_multishot_buffer(buffers_[buffer_id], buffer_size, status.bytes,
+                                                   name_capacity, 0, view, parse_error)) {
             return stop_recv(parse_error == 0 ? EIO : parse_error);
         }
         if (view.name_size < sizeof(sockaddr_in) || view.payload_size != 1U) {
             return stop_recv(EIO);
         }
 
-        const auto* address = reinterpret_cast<const sockaddr_in*>(
-            buffers_[buffer_id] + view.name_offset);
+        const auto *address =
+            reinterpret_cast<const sockaddr_in *>(buffers_[buffer_id] + view.name_offset);
         if (address->sin_family != AF_INET || address->sin_port != expected_port_) {
             return stop_recv(EIO);
         }
@@ -125,8 +105,8 @@ private:
         const int previous = read_count_->fetch_add(1, std::memory_order_acq_rel);
         const int shifted = previous == 0 ? 8 : 0;
         packed_read_->fetch_or(
-            static_cast<int>(
-                static_cast<unsigned char>(buffers_[buffer_id][view.payload_offset])) << shifted,
+            static_cast<int>(static_cast<unsigned char>(buffers_[buffer_id][view.payload_offset]))
+                << shifted,
             std::memory_order_acq_rel);
 
         const af::IoProvidedBuffer buffer{buffers_[buffer_id], buffer_size, buffer_id};
@@ -152,13 +132,8 @@ private:
 
     af::TaskResult finish_cancel() {
         std::uint16_t ignored = 0;
-        const af::IoStatus status = socket_.recv_from_multishot(
-            *this,
-            buffer_group,
-            name_capacity,
-            0,
-            &ignored,
-            recv_);
+        const af::IoStatus status =
+            socket_.recv_from_multishot(*this, buffer_group, name_capacity, 0, &ignored, recv_);
         if (status.pending()) {
             return pending();
         }
@@ -173,9 +148,7 @@ private:
         if (registered_) {
             int unregister_error = 0;
             if (!UringIoRuntime::io_unregister_provided_buffer_ring(
-                    IoTestThread::IO_0,
-                    buffer_group,
-                    &unregister_error)) {
+                    IoTestThread::IO_0, buffer_group, &unregister_error)) {
                 return complete(unregister_error == 0 ? EIO : unregister_error);
             }
             registered_ = false;
@@ -186,10 +159,8 @@ private:
     af::TaskResult complete(int error) {
         if (registered_) {
             int unregister_error = 0;
-            if (UringIoRuntime::io_unregister_provided_buffer_ring(
-                    IoTestThread::IO_0,
-                    buffer_group,
-                    &unregister_error)) {
+            if (UringIoRuntime::io_unregister_provided_buffer_ring(IoTestThread::IO_0, buffer_group,
+                                                                   &unregister_error)) {
                 registered_ = false;
             }
         }
@@ -227,11 +198,11 @@ private:
     bool armed_once_{false};
     bool registered_{false};
     af::IoOpState recv_{};
-    std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* read_count_{nullptr};
-    std::atomic<int>* packed_read_{nullptr};
-    std::atomic<int>* peer_count_{nullptr};
-    std::atomic<int>* error_{nullptr};
+    std::atomic<int> *armed_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *read_count_{nullptr};
+    std::atomic<int> *packed_read_{nullptr};
+    std::atomic<int> *peer_count_{nullptr};
+    std::atomic<int> *error_{nullptr};
 };
 #endif

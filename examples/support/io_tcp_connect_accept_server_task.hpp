@@ -14,7 +14,7 @@ class TcpServerTask final : public TcpTask {
 public:
     explicit TcpServerTask(TcpTask::FactoryToken token) : TcpTask(token) {}
 
-    bool do_it(int fd, bool* ok, char* request_seen) {
+    bool do_it(int fd, bool *ok, char *request_seen) {
         listener_.reset(TcpThread::IO_0, fd);
         ok_ = ok;
         request_seen_ = request_seen;
@@ -44,11 +44,7 @@ private:
         peer_size_ = sizeof(peer_);
         int fd = -1;
         const af::IoStatus status = listener_.accept_some(
-            *this,
-            reinterpret_cast<sockaddr*>(&peer_),
-            &peer_size_,
-            &fd,
-            accept_);
+            *this, reinterpret_cast<sockaddr *>(&peer_), &peer_size_, &fd, accept_);
         if (status.pending()) {
             return pending();
         }
@@ -100,8 +96,8 @@ private:
     af::IoOpState accept_{};
     af::IoOpState read_{};
     af::IoOpState write_{};
-    bool* ok_{nullptr};
-    char* request_seen_{nullptr};
+    bool *ok_{nullptr};
+    char *request_seen_{nullptr};
 };
 
 } // namespace io_tcp_connect_accept_example

@@ -21,7 +21,7 @@ struct RecvMultishotSocketPair {
     }
 };
 
-inline bool write_payload_once(int fd, const char* payload, std::size_t size) {
+inline bool write_payload_once(int fd, const char *payload, std::size_t size) {
     return ::write(fd, payload, size) == static_cast<ssize_t>(size);
 }
 

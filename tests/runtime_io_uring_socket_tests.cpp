@@ -14,11 +14,8 @@ TEST_F(UringIoRuntimeSocketCoreFixture, IoUringThreadFallsBackToEpollReadiness) 
     std::atomic<int> armed{0};
     std::atomic<int> completed{0};
     std::atomic<char> byte_read{0};
-    ASSERT_TRUE(UringIoRuntime::start_task<UringStreamFallbackTask>(
-        fds[0],
-        &armed,
-        &completed,
-        &byte_read));
+    ASSERT_TRUE(UringIoRuntime::start_task<UringStreamFallbackTask>(fds[0], &armed, &completed,
+                                                                    &byte_read));
     ASSERT_TRUE(wait_until_at_least(armed, 1));
 
     const char value = 'U';
@@ -63,24 +60,17 @@ TEST_F(UringIoRuntimeSocketCoreFixture, IoUringThreadCancelsPendingRecvCompletio
     int fds[2]{-1, -1};
     ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds), 0);
 
-    std::atomic<af::IoOpState*> state{nullptr};
+    std::atomic<af::IoOpState *> state{nullptr};
     std::atomic<int> wait_kind{-1};
     std::atomic<int> armed{0};
     std::atomic<int> recv_completed{0};
     std::atomic<int> recv_error{0};
     std::atomic<int> recv_bytes{-1};
     ASSERT_TRUE(UringIoRuntime::start_task<UringCancellableSocketRecvTask>(
-        fds[0],
-        &state,
-        &wait_kind,
-        &armed,
-        &recv_completed,
-        &recv_error,
-        &recv_bytes));
+        fds[0], &state, &wait_kind, &armed, &recv_completed, &recv_error, &recv_bytes));
     ASSERT_TRUE(wait_until_at_least(armed, 1));
 
-    if (wait_kind.load(std::memory_order_acquire) !=
-        static_cast<int>(af::IoWaitKind::Completion)) {
+    if (wait_kind.load(std::memory_order_acquire) != static_cast<int>(af::IoWaitKind::Completion)) {
         const char value = 'f';
         ASSERT_EQ(::write(fds[1], &value, sizeof(value)), 1);
         ASSERT_TRUE(wait_until_at_least(recv_completed, 1));
@@ -91,11 +81,8 @@ TEST_F(UringIoRuntimeSocketCoreFixture, IoUringThreadCancelsPendingRecvCompletio
     std::atomic<int> cancel_completed{0};
     std::atomic<int> cancel_result{0};
     std::atomic<int> cancel_error{0};
-    ASSERT_TRUE(UringIoRuntime::start_task<UringCancelIoStateTask>(
-        &state,
-        &cancel_completed,
-        &cancel_result,
-        &cancel_error));
+    ASSERT_TRUE(UringIoRuntime::start_task<UringCancelIoStateTask>(&state, &cancel_completed,
+                                                                   &cancel_result, &cancel_error));
     ASSERT_TRUE(wait_until_at_least(cancel_completed, 1));
 
     if (!wait_until_at_least(recv_completed, 1)) {
@@ -127,11 +114,8 @@ TEST_F(UringIoRuntimeSocketCoreFixture, IoUringThreadHandlesTimerFdViaEpollFallb
     std::atomic<int> armed{0};
     std::atomic<int> completed{0};
     std::atomic<std::uint64_t> expirations{0};
-    ASSERT_TRUE(UringIoRuntime::start_task<UringTimerFdTask>(
-        timer.get(),
-        &armed,
-        &completed,
-        &expirations));
+    ASSERT_TRUE(UringIoRuntime::start_task<UringTimerFdTask>(timer.get(), &armed, &completed,
+                                                             &expirations));
     ASSERT_TRUE(wait_until_at_least(armed, 1));
 
     int error = 0;
@@ -155,11 +139,8 @@ TEST_F(UringIoRuntimeSocketCoreFixture, IoUringThreadHandlesEventFdViaEpollFallb
     std::atomic<int> armed{0};
     std::atomic<int> completed{0};
     std::atomic<std::uint64_t> value{0};
-    ASSERT_TRUE(UringIoRuntime::start_task<UringEventFdTask>(
-        event.get(),
-        &armed,
-        &completed,
-        &value));
+    ASSERT_TRUE(
+        UringIoRuntime::start_task<UringEventFdTask>(event.get(), &armed, &completed, &value));
     ASSERT_TRUE(wait_until_at_least(armed, 1));
 
     int error = 0;

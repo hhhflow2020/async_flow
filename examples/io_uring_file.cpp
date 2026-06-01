@@ -40,7 +40,7 @@ class FileRoundTripTask final : public FileTask {
 public:
     explicit FileRoundTripTask(FileTask::FactoryToken token) : FileTask(token) {}
 
-    bool do_it(int fd, char* byte_read) {
+    bool do_it(int fd, char *byte_read) {
         file_.reset(FileThread::IO_0, fd);
         byte_read_ = byte_read;
         return schedule(FileThread::IO_0);
@@ -122,7 +122,7 @@ private:
     af::IoOpState write_{};
     af::IoOpState fsync_{};
     af::IoOpState read_state_{};
-    char* byte_read_{nullptr};
+    char *byte_read_{nullptr};
 };
 #endif
 
@@ -147,9 +147,7 @@ int main() {
     af::UniqueFd file(fd);
 
     char byte_read{0};
-    const bool started = file_async::start_task<FileRoundTripTask>(
-        file.get(),
-        &byte_read);
+    const bool started = file_async::start_task<FileRoundTripTask>(file.get(), &byte_read);
     AF_ASSERT(started);
 
     if (!started) {

@@ -31,10 +31,8 @@ int main() {
     }
 
     MultishotAcceptResult result{};
-    const bool started = accept_async::start_task<MultishotAcceptTask>(
-        listener.fd.get(),
-        target_accepts,
-        &result);
+    const bool started =
+        accept_async::start_task<MultishotAcceptTask>(listener.fd.get(), target_accepts, &result);
     AF_ASSERT(started);
     if (!started) {
         std::cout << "io_uring multishot accept task start failed\n";
@@ -45,12 +43,10 @@ int main() {
 
     if (result.error != 0) {
         if (multishot_accept_unsupported_error(result.error)) {
-            std::cout << "io_uring multishot accept unsupported error="
-                      << result.error << '\n';
+            std::cout << "io_uring multishot accept unsupported error=" << result.error << '\n';
             return 0;
         }
-        std::cout << "io_uring multishot accept failed error="
-                  << result.error << '\n';
+        std::cout << "io_uring multishot accept failed error=" << result.error << '\n';
         return 1;
     }
 

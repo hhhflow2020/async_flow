@@ -4,11 +4,8 @@ class PendingSendZcTask final : public IoTaskBase {
 public:
     explicit PendingSendZcTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(
-        int socket_fd,
-        std::atomic<int>* pending_seen,
-        std::atomic<int>* completed,
-        std::atomic<std::size_t>* bytes_sent) {
+    bool do_it(int socket_fd, std::atomic<int> *pending_seen, std::atomic<int> *completed,
+               std::atomic<std::size_t> *bytes_sent) {
         stream_.reset(IoTestThread::IO_0, socket_fd);
         pending_seen_ = pending_seen;
         completed_ = completed;
@@ -38,7 +35,7 @@ private:
     af::TcpStream<IoTestThread> stream_{};
     char value_{'Z'};
     af::IoOpState send_{};
-    std::atomic<int>* pending_seen_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<std::size_t>* bytes_sent_{nullptr};
+    std::atomic<int> *pending_seen_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<std::size_t> *bytes_sent_{nullptr};
 };

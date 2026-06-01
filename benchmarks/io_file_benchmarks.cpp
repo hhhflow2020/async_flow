@@ -3,7 +3,7 @@
 namespace {
 
 #if !defined(_WIN32)
-void BM_IoFileAdapterZeroIovReadvAt(benchmark::State& state) {
+void BM_IoFileAdapterZeroIovReadvAt(benchmark::State &state) {
     FakeTask task;
     af::IoFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
     af::IoOpState op;
@@ -12,7 +12,7 @@ void BM_IoFileAdapterZeroIovReadvAt(benchmark::State& state) {
     }
 }
 
-void BM_IoFileAdapterZeroByteReadFixedAt(benchmark::State& state) {
+void BM_IoFileAdapterZeroByteReadFixedAt(benchmark::State &state) {
     FakeTask task;
     af::IoFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
     af::IoOpState op;
@@ -21,7 +21,7 @@ void BM_IoFileAdapterZeroByteReadFixedAt(benchmark::State& state) {
     }
 }
 
-void BM_IoFileAdapterZeroByteWriteFixedAt(benchmark::State& state) {
+void BM_IoFileAdapterZeroByteWriteFixedAt(benchmark::State &state) {
     FakeTask task;
     af::IoFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
     af::IoOpState op;
@@ -30,7 +30,7 @@ void BM_IoFileAdapterZeroByteWriteFixedAt(benchmark::State& state) {
     }
 }
 
-void BM_IoFixedFileAdapterZeroByteReadAt(benchmark::State& state) {
+void BM_IoFixedFileAdapterZeroByteReadAt(benchmark::State &state) {
     FakeTask task;
     af::IoFixedFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
     af::IoOpState op;
@@ -39,7 +39,7 @@ void BM_IoFixedFileAdapterZeroByteReadAt(benchmark::State& state) {
     }
 }
 
-void BM_IoFixedFileAdapterZeroByteWriteAt(benchmark::State& state) {
+void BM_IoFixedFileAdapterZeroByteWriteAt(benchmark::State &state) {
     FakeTask task;
     af::IoFixedFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
     af::IoOpState op;
@@ -48,7 +48,7 @@ void BM_IoFixedFileAdapterZeroByteWriteAt(benchmark::State& state) {
     }
 }
 
-void BM_IoFixedFileAdapterZeroIovReadvAt(benchmark::State& state) {
+void BM_IoFixedFileAdapterZeroIovReadvAt(benchmark::State &state) {
     FakeTask task;
     af::IoFixedFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
     af::IoOpState op;
@@ -57,7 +57,7 @@ void BM_IoFixedFileAdapterZeroIovReadvAt(benchmark::State& state) {
     }
 }
 
-void BM_IoFixedFileAdapterZeroIovWritevAt(benchmark::State& state) {
+void BM_IoFixedFileAdapterZeroIovWritevAt(benchmark::State &state) {
     FakeTask task;
     af::IoFixedFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
     af::IoOpState op;
@@ -66,7 +66,7 @@ void BM_IoFixedFileAdapterZeroIovWritevAt(benchmark::State& state) {
     }
 }
 
-void BM_IoFixedFileAdapterZeroByteRecv(benchmark::State& state) {
+void BM_IoFixedFileAdapterZeroByteRecv(benchmark::State &state) {
     FakeTask task;
     af::IoFixedFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
     af::IoOpState op;
@@ -75,7 +75,7 @@ void BM_IoFixedFileAdapterZeroByteRecv(benchmark::State& state) {
     }
 }
 
-void BM_IoFixedFileAdapterZeroByteSend(benchmark::State& state) {
+void BM_IoFixedFileAdapterZeroByteSend(benchmark::State &state) {
     FakeTask task;
     af::IoFixedFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
     af::IoOpState op;
@@ -84,7 +84,7 @@ void BM_IoFixedFileAdapterZeroByteSend(benchmark::State& state) {
     }
 }
 
-void BM_IoFixedFileAdapterZeroIovRecvv(benchmark::State& state) {
+void BM_IoFixedFileAdapterZeroIovRecvv(benchmark::State &state) {
     FakeTask task;
     af::IoFixedFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
     af::IoOpState op;
@@ -93,7 +93,7 @@ void BM_IoFixedFileAdapterZeroIovRecvv(benchmark::State& state) {
     }
 }
 
-void BM_IoFixedFileAdapterZeroIovSendv(benchmark::State& state) {
+void BM_IoFixedFileAdapterZeroIovSendv(benchmark::State &state) {
     FakeTask task;
     af::IoFixedFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
     af::IoOpState op;
@@ -102,29 +102,22 @@ void BM_IoFixedFileAdapterZeroIovSendv(benchmark::State& state) {
     }
 }
 
-void BM_IoFixedFileAdapterZeroByteReadFixedAt(benchmark::State& state) {
+void BM_IoFixedFileAdapterZeroByteReadFixedAt(benchmark::State &state) {
     FakeTask task;
     af::IoFixedFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
     af::IoOpState op;
     for (auto _ : state) {
-        benchmark::DoNotOptimize(file.read_fixed_at(
-            task,
-            af::IoFixedBuffer{nullptr, 0, 0},
-            0,
-            op));
+        benchmark::DoNotOptimize(file.read_fixed_at(task, af::IoFixedBuffer{nullptr, 0, 0}, 0, op));
     }
 }
 
-void BM_IoFixedFileAdapterZeroByteWriteFixedAt(benchmark::State& state) {
+void BM_IoFixedFileAdapterZeroByteWriteFixedAt(benchmark::State &state) {
     FakeTask task;
     af::IoFixedFile<BenchIoThread> file(BenchIoThread::IO_0, -1);
     af::IoOpState op;
     for (auto _ : state) {
-        benchmark::DoNotOptimize(file.write_fixed_at(
-            task,
-            af::IoFixedBuffer{nullptr, 0, 0},
-            0,
-            op));
+        benchmark::DoNotOptimize(
+            file.write_fixed_at(task, af::IoFixedBuffer{nullptr, 0, 0}, 0, op));
     }
 }
 

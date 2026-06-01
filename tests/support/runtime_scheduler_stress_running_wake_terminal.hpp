@@ -12,19 +12,16 @@ public:
     explicit RunningWakeTerminalWakerTask(RunningPendingTaskBase::FactoryToken token)
         : RunningPendingTaskBase(token) {}
 
-    bool do_it(
-        RunningWakeTerminalOwnerTask* owner,
-        std::atomic<int>* wake_flag,
-        std::atomic<int>* wake_attempts,
-        std::atomic<int>* failures);
+    bool do_it(RunningWakeTerminalOwnerTask *owner, std::atomic<int> *wake_flag,
+               std::atomic<int> *wake_attempts, std::atomic<int> *failures);
 
 private:
     af::TaskResult run() override;
 
-    RunningWakeTerminalOwnerTask* owner_{nullptr};
-    std::atomic<int>* wake_flag_{nullptr};
-    std::atomic<int>* wake_attempts_{nullptr};
-    std::atomic<int>* failures_{nullptr};
+    RunningWakeTerminalOwnerTask *owner_{nullptr};
+    std::atomic<int> *wake_flag_{nullptr};
+    std::atomic<int> *wake_attempts_{nullptr};
+    std::atomic<int> *failures_{nullptr};
 };
 
 class RunningWakeTerminalOwnerTask final : public RunningPendingTaskBase {
@@ -32,14 +29,9 @@ public:
     explicit RunningWakeTerminalOwnerTask(RunningPendingTaskBase::FactoryToken token)
         : RunningPendingTaskBase(token) {}
 
-    bool do_it(
-        RunningWakeTerminalMode mode,
-        int id,
-        std::atomic<int>* remaining,
-        std::atomic<int>* completed,
-        std::atomic<int>* wake_attempts,
-        std::atomic<int>* failures,
-        std::atomic<int>* wake_flags) {
+    bool do_it(RunningWakeTerminalMode mode, int id, std::atomic<int> *remaining,
+               std::atomic<int> *completed, std::atomic<int> *wake_attempts,
+               std::atomic<int> *failures, std::atomic<int> *wake_flags) {
         mode_ = mode;
         id_ = id;
         remaining_ = remaining;
@@ -64,10 +56,7 @@ private:
         switch (state_) {
         case State::ArmWake:
             if (!RunningPendingRuntime::start_task<RunningWakeTerminalWakerTask>(
-                    this,
-                    wake_flag_,
-                    wake_attempts_,
-                    failures_)) {
+                    this, wake_flag_, wake_attempts_, failures_)) {
                 failures_->fetch_add(1, std::memory_order_relaxed);
                 complete();
                 return failed();
@@ -117,18 +106,17 @@ private:
     RunningWakeTerminalMode mode_{RunningWakeTerminalMode::Done};
     State state_{State::ArmWake};
     int id_{0};
-    std::atomic<int>* remaining_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* wake_attempts_{nullptr};
-    std::atomic<int>* failures_{nullptr};
-    std::atomic<int>* wake_flag_{nullptr};
+    std::atomic<int> *remaining_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *wake_attempts_{nullptr};
+    std::atomic<int> *failures_{nullptr};
+    std::atomic<int> *wake_flag_{nullptr};
 };
 
-inline bool RunningWakeTerminalWakerTask::do_it(
-    RunningWakeTerminalOwnerTask* owner,
-    std::atomic<int>* wake_flag,
-    std::atomic<int>* wake_attempts,
-    std::atomic<int>* failures) {
+inline bool RunningWakeTerminalWakerTask::do_it(RunningWakeTerminalOwnerTask *owner,
+                                                std::atomic<int> *wake_flag,
+                                                std::atomic<int> *wake_attempts,
+                                                std::atomic<int> *failures) {
     owner_ = owner;
     wake_flag_ = wake_flag;
     wake_attempts_ = wake_attempts;

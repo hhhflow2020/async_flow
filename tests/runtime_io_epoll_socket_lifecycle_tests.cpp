@@ -13,12 +13,8 @@ TEST_F(IoRuntimeEpollFixture, SocketLifecycleHelpersRunOnIoThread) {
     std::atomic<int> reuse_value{0};
     std::atomic<int> local_port{0};
     std::atomic<std::uint16_t> ran_on{IoRuntime::invalid_thread_index};
-    ASSERT_TRUE(IoRuntime::start_task<SocketLifecycleSetupTask>(
-        &completed,
-        &error,
-        &reuse_value,
-        &local_port,
-        &ran_on));
+    ASSERT_TRUE(IoRuntime::start_task<SocketLifecycleSetupTask>(&completed, &error, &reuse_value,
+                                                                &local_port, &ran_on));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(error.load(std::memory_order_acquire), 0);
     EXPECT_NE(reuse_value.load(std::memory_order_acquire), 0);

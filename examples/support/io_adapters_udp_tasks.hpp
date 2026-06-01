@@ -16,7 +16,7 @@ class UdpReceiveTask final : public Task {
 public:
     explicit UdpReceiveTask(Task::FactoryToken token) : Task(token) {}
 
-    bool do_it(int fd, UdpReceiveResult* result) {
+    bool do_it(int fd, UdpReceiveResult *result) {
         if (fd < 0 || result == nullptr) {
             return false;
         }
@@ -28,13 +28,9 @@ public:
 private:
     af::TaskResult run() override {
         peer_size_ = sizeof(peer_);
-        const af::IoStatus status = socket_.recv_from_some(
-            *this,
-            &result_->value,
-            sizeof(result_->value),
-            reinterpret_cast<sockaddr*>(&peer_),
-            &peer_size_,
-            recv_);
+        const af::IoStatus status =
+            socket_.recv_from_some(*this, &result_->value, sizeof(result_->value),
+                                   reinterpret_cast<sockaddr *>(&peer_), &peer_size_, recv_);
         if (status.pending()) {
             return pending();
         }
@@ -59,18 +55,14 @@ private:
     sockaddr_storage peer_{};
     socklen_t peer_size_{sizeof(peer_)};
     af::IoOpState recv_{};
-    UdpReceiveResult* result_{nullptr};
+    UdpReceiveResult *result_{nullptr};
 };
 
 class UdpSendTask final : public Task {
 public:
     explicit UdpSendTask(Task::FactoryToken token) : Task(token) {}
 
-    bool do_it(
-        int fd,
-        sockaddr_in address,
-        socklen_t address_size,
-        UdpSendResult* result) {
+    bool do_it(int fd, sockaddr_in address, socklen_t address_size, UdpSendResult *result) {
         if (fd < 0 || address_size == 0U || result == nullptr) {
             return false;
         }
@@ -84,12 +76,8 @@ public:
 private:
     af::TaskResult run() override {
         const af::IoStatus status = socket_.send_to_some(
-            *this,
-            &value_,
-            sizeof(value_),
-            reinterpret_cast<const sockaddr*>(&address_),
-            address_size_,
-            send_);
+            *this, &value_, sizeof(value_), reinterpret_cast<const sockaddr *>(&address_),
+            address_size_, send_);
         if (status.pending()) {
             return pending();
         }
@@ -114,7 +102,7 @@ private:
     socklen_t address_size_{sizeof(address_)};
     char value_{'U'};
     af::IoOpState send_{};
-    UdpSendResult* result_{nullptr};
+    UdpSendResult *result_{nullptr};
 };
 
 } // namespace io_adapters_example

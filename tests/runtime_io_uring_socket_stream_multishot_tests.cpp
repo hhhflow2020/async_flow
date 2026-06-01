@@ -18,20 +18,12 @@ TEST_F(UringIoRuntimeSocketMultishotFixture, IoUringRecvMultishotUsesProvidedBuf
     std::atomic<int> packed_read{0};
     std::atomic<int> error{0};
     ASSERT_TRUE(UringIoRuntime::start_task<UringRecvMultishotTask>(
-        fds[0],
-        target_reads,
-        &armed,
-        &completed,
-        &read_count,
-        &packed_read,
-        &error));
+        fds[0], target_reads, &armed, &completed, &read_count, &packed_read, &error));
 
     if (!wait_until_at_least(armed, 1)) {
         ASSERT_TRUE(wait_until_at_least(completed, 1));
         const int setup_error = error.load(std::memory_order_acquire);
-        if (setup_error == EINVAL ||
-            setup_error == EOPNOTSUPP ||
-            setup_error == ENOSYS ||
+        if (setup_error == EINVAL || setup_error == EOPNOTSUPP || setup_error == ENOSYS ||
             setup_error == ENOBUFS) {
             close_pair(fds);
             GTEST_SKIP() << "io_uring provided buffer recv_multishot unsupported";
@@ -44,18 +36,15 @@ TEST_F(UringIoRuntimeSocketMultishotFixture, IoUringRecvMultishotUsesProvidedBuf
 
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     const int task_error = error.load(std::memory_order_acquire);
-    if (task_error == EINVAL ||
-        task_error == EOPNOTSUPP ||
-        task_error == ENOSYS ||
+    if (task_error == EINVAL || task_error == EOPNOTSUPP || task_error == ENOSYS ||
         task_error == ENOBUFS) {
         close_pair(fds);
         GTEST_SKIP() << "io_uring provided buffer recv_multishot unsupported";
     }
     EXPECT_EQ(task_error, 0);
     EXPECT_EQ(read_count.load(std::memory_order_acquire), target_reads);
-    EXPECT_EQ(
-        packed_read.load(std::memory_order_acquire),
-        (static_cast<int>('A') << 8) | static_cast<int>('B'));
+    EXPECT_EQ(packed_read.load(std::memory_order_acquire),
+              (static_cast<int>('A') << 8) | static_cast<int>('B'));
 
     close_pair(fds);
 #else

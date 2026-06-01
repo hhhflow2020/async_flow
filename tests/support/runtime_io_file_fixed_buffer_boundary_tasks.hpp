@@ -4,7 +4,7 @@ class FixedBufferBoundaryTask final : public IoTaskBase {
 public:
     explicit FixedBufferBoundaryTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(std::atomic<int>* completed, std::atomic<int>* error) {
+    bool do_it(std::atomic<int> *completed, std::atomic<int> *error) {
         completed_ = completed;
         error_ = error;
         return schedule(IoTestThread::IO_0);
@@ -25,10 +25,8 @@ private:
             return failed();
         }
 
-        const af::IoStatus zero_read =
-            file.read_fixed_at(*this, nullptr, 0, 0, 0, zero);
-        const af::IoStatus bad_read =
-            file.read_fixed_at(*this, &value, sizeof(value), 0, 0, bad);
+        const af::IoStatus zero_read = file.read_fixed_at(*this, nullptr, 0, 0, 0, zero);
+        const af::IoStatus bad_read = file.read_fixed_at(*this, &value, sizeof(value), 0, 0, bad);
         if (!zero_read.ready() || zero_read.bytes != 0U || !bad_read.failed()) {
             return failed();
         }
@@ -38,6 +36,6 @@ private:
         return done();
     }
 
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* error_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *error_{nullptr};
 };

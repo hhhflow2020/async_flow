@@ -2,7 +2,7 @@
 
 namespace {
 
-void BM_IoStreamAdapterZeroByteSend(benchmark::State& state) {
+void BM_IoStreamAdapterZeroByteSend(benchmark::State &state) {
     FakeTask task;
     af::TcpStream<BenchIoThread> stream(BenchIoThread::IO_0, -1);
     af::IoOpState op;
@@ -12,7 +12,7 @@ void BM_IoStreamAdapterZeroByteSend(benchmark::State& state) {
 }
 
 #if defined(__linux__)
-void BM_IoStreamAdapterZeroByteSendZc(benchmark::State& state) {
+void BM_IoStreamAdapterZeroByteSendZc(benchmark::State &state) {
     FakeTask task;
     af::TcpStream<BenchIoThread> stream(BenchIoThread::IO_0, -1);
     af::IoOpState op;
@@ -21,7 +21,7 @@ void BM_IoStreamAdapterZeroByteSendZc(benchmark::State& state) {
     }
 }
 
-void BM_IoStreamAdapterInvalidRecvMultishot(benchmark::State& state) {
+void BM_IoStreamAdapterInvalidRecvMultishot(benchmark::State &state) {
     FakeTask task;
     af::TcpStream<BenchIoThread> stream(BenchIoThread::IO_0, -1);
     af::IoOpState op;
@@ -32,7 +32,7 @@ void BM_IoStreamAdapterInvalidRecvMultishot(benchmark::State& state) {
 }
 #endif
 
-void BM_IoListenerAdapterInvalidAccept(benchmark::State& state) {
+void BM_IoListenerAdapterInvalidAccept(benchmark::State &state) {
     FakeTask task;
     af::TcpListener<BenchIoThread> listener(BenchIoThread::IO_0, -1);
     af::IoOpState op;
@@ -41,38 +41,27 @@ void BM_IoListenerAdapterInvalidAccept(benchmark::State& state) {
     }
 }
 
-void BM_IoListenerAdapterInvalidAcceptDirect(benchmark::State& state) {
+void BM_IoListenerAdapterInvalidAcceptDirect(benchmark::State &state) {
     FakeTask task;
     af::TcpListener<BenchIoThread> listener(BenchIoThread::IO_0, -1);
     af::IoOpState op;
     af::IoFixedFile<BenchIoThread> accepted;
     for (auto _ : state) {
-        benchmark::DoNotOptimize(listener.accept_direct(
-            task,
-            nullptr,
-            nullptr,
-            0,
-            &accepted,
-            op));
+        benchmark::DoNotOptimize(listener.accept_direct(task, nullptr, nullptr, 0, &accepted, op));
     }
 }
 
-void BM_IoListenerAdapterInvalidAcceptMultishot(benchmark::State& state) {
+void BM_IoListenerAdapterInvalidAcceptMultishot(benchmark::State &state) {
     FakeTask task;
     af::TcpListener<BenchIoThread> listener(BenchIoThread::IO_0, -1);
     af::IoOpState op;
     int accepted = -1;
     for (auto _ : state) {
-        benchmark::DoNotOptimize(listener.accept_multishot(
-            task,
-            nullptr,
-            nullptr,
-            &accepted,
-            op));
+        benchmark::DoNotOptimize(listener.accept_multishot(task, nullptr, nullptr, &accepted, op));
     }
 }
 
-void BM_IoStreamAdapterInvalidConnect(benchmark::State& state) {
+void BM_IoStreamAdapterInvalidConnect(benchmark::State &state) {
     FakeTask task;
     af::TcpStream<BenchIoThread> stream(BenchIoThread::IO_0, -1);
     af::IoOpState op;
@@ -81,7 +70,7 @@ void BM_IoStreamAdapterInvalidConnect(benchmark::State& state) {
     }
 }
 
-void BM_IoStreamAdapterInvalidShutdown(benchmark::State& state) {
+void BM_IoStreamAdapterInvalidShutdown(benchmark::State &state) {
     FakeTask task;
     af::TcpStream<BenchIoThread> stream(BenchIoThread::IO_0, -1);
     af::IoOpState op;

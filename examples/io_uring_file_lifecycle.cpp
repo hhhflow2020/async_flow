@@ -24,9 +24,7 @@ int main() {
 
     std::uint64_t observed_size = 0;
     const bool started = lifecycle_async::start_task<FileLifecycleTask>(
-        paths.path.data(),
-        paths.renamed_path.data(),
-        &observed_size);
+        paths.path.data(), paths.renamed_path.data(), &observed_size);
     if (!started) {
         std::cerr << "io_uring lifecycle task start failed\n";
         paths.cleanup();

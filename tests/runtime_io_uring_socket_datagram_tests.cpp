@@ -14,11 +14,8 @@ TEST_F(UringIoRuntimeSocketDatagramFixture, IoUringThreadReceivesUdpDatagramOrFa
     std::atomic<int> armed{0};
     std::atomic<int> completed{0};
     std::atomic<char> byte_read{0};
-    ASSERT_TRUE(UringIoRuntime::start_task<UringUdpRecvTask>(
-        sockets.receiver.get(),
-        &armed,
-        &completed,
-        &byte_read));
+    ASSERT_TRUE(UringIoRuntime::start_task<UringUdpRecvTask>(sockets.receiver.get(), &armed,
+                                                             &completed, &byte_read));
     ASSERT_TRUE(wait_until_at_least(armed, 1));
 
     const char value = 'g';
@@ -30,7 +27,8 @@ TEST_F(UringIoRuntimeSocketDatagramFixture, IoUringThreadReceivesUdpDatagramOrFa
 #endif
 }
 
-TEST_F(UringIoRuntimeSocketDatagramFixture, IoUringThreadReceivesVectoredUdpDatagramOrFallsBackToEpoll) {
+TEST_F(UringIoRuntimeSocketDatagramFixture,
+       IoUringThreadReceivesVectoredUdpDatagramOrFallsBackToEpoll) {
 #if defined(__linux__)
     if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
         GTEST_SKIP() << "io backend unavailable";
@@ -42,11 +40,8 @@ TEST_F(UringIoRuntimeSocketDatagramFixture, IoUringThreadReceivesVectoredUdpData
     std::atomic<int> armed{0};
     std::atomic<int> completed{0};
     std::atomic<int> payload_seen{0};
-    ASSERT_TRUE(UringIoRuntime::start_task<UringUdpVectoredRecvTask>(
-        sockets.receiver.get(),
-        &armed,
-        &completed,
-        &payload_seen));
+    ASSERT_TRUE(UringIoRuntime::start_task<UringUdpVectoredRecvTask>(sockets.receiver.get(), &armed,
+                                                                     &completed, &payload_seen));
     ASSERT_TRUE(wait_until_at_least(armed, 1));
 
     const char payload[2]{'q', 'r'};
@@ -71,11 +66,7 @@ TEST_F(UringIoRuntimeSocketDatagramFixture, IoUringThreadSendsUdpDatagramOrFalls
     std::atomic<int> bytes_sent{0};
     const char value = 'm';
     ASSERT_TRUE(UringIoRuntime::start_task<UringUdpSendToTask>(
-        sockets.sender.get(),
-        sockets.address,
-        sockets.address_size,
-        value,
-        &completed,
+        sockets.sender.get(), sockets.address, sockets.address_size, value, &completed,
         &bytes_sent));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), 1);
@@ -88,7 +79,8 @@ TEST_F(UringIoRuntimeSocketDatagramFixture, IoUringThreadSendsUdpDatagramOrFalls
 #endif
 }
 
-TEST_F(UringIoRuntimeSocketDatagramFixture, IoUringThreadSendsVectoredUdpDatagramOrFallsBackToEpoll) {
+TEST_F(UringIoRuntimeSocketDatagramFixture,
+       IoUringThreadSendsVectoredUdpDatagramOrFallsBackToEpoll) {
 #if defined(__linux__)
     if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
         GTEST_SKIP() << "io backend unavailable";
@@ -100,12 +92,7 @@ TEST_F(UringIoRuntimeSocketDatagramFixture, IoUringThreadSendsVectoredUdpDatagra
     std::atomic<int> completed{0};
     std::atomic<int> bytes_sent{0};
     ASSERT_TRUE(UringIoRuntime::start_task<UringUdpVectoredSendToTask>(
-        sockets.sender.get(),
-        sockets.address,
-        sockets.address_size,
-        'x',
-        'y',
-        &completed,
+        sockets.sender.get(), sockets.address, sockets.address_size, 'x', 'y', &completed,
         &bytes_sent));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), 2);
@@ -119,7 +106,8 @@ TEST_F(UringIoRuntimeSocketDatagramFixture, IoUringThreadSendsVectoredUdpDatagra
 #endif
 }
 
-TEST_F(UringIoRuntimeSocketDatagramFixture, IoUringThreadSendsVectoredUdpDatagramWithSendmsgZcOrFallback) {
+TEST_F(UringIoRuntimeSocketDatagramFixture,
+       IoUringThreadSendsVectoredUdpDatagramWithSendmsgZcOrFallback) {
 #if defined(__linux__)
     if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
         GTEST_SKIP() << "io backend unavailable";
@@ -131,12 +119,7 @@ TEST_F(UringIoRuntimeSocketDatagramFixture, IoUringThreadSendsVectoredUdpDatagra
     std::atomic<int> completed{0};
     std::atomic<int> bytes_sent{0};
     ASSERT_TRUE(UringIoRuntime::start_task<UringUdpVectoredZcSendToTask>(
-        sockets.sender.get(),
-        sockets.address,
-        sockets.address_size,
-        's',
-        'z',
-        &completed,
+        sockets.sender.get(), sockets.address, sockets.address_size, 's', 'z', &completed,
         &bytes_sent));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), 2);

@@ -25,13 +25,9 @@ int main() {
     SendfileServerResult server{};
     SendfileClientResult client{};
     const bool server_started = sendfile_async::start_task<StaticSendfileServerTask>(
-        listener.fd.get(),
-        file.fd.get(),
-        &server);
+        listener.fd.get(), file.fd.get(), &server);
     const bool client_started = sendfile_async::start_task<StaticSendfileClientTask>(
-        listener.address,
-        listener.address_size,
-        &client);
+        listener.address, listener.address_size, &client);
     if (!server_started || !client_started) {
         std::cerr << "sendfile tasks did not start\n";
         sendfile_async::shutdown();
@@ -45,8 +41,7 @@ int main() {
         return 1;
     }
 
-    std::cout << "sendfile bytes=" << server.bytes_sent
-              << " read=" << client.bytes_read << '\n';
+    std::cout << "sendfile bytes=" << server.bytes_sent << " read=" << client.bytes_read << '\n';
     return 0;
 #else
     std::cout << "sendfile example is Linux-only\n";

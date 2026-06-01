@@ -4,7 +4,7 @@ class FilesystemMetadataBoundaryTask final : public IoTaskBase {
 public:
     explicit FilesystemMetadataBoundaryTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(std::atomic<int>* completed, std::atomic<int>* error) {
+    bool do_it(std::atomic<int> *completed, std::atomic<int> *error) {
         completed_ = completed;
         error_ = error;
         return schedule(IoTestThread::IO_0);
@@ -26,51 +26,21 @@ private:
         af::IoOpState ftruncate_bad_fd{};
         struct statx stat{};
 
-        const af::IoStatus stat_no_uring_status = af::io_statx(
-            *this,
-            IoTestThread::IO_0,
-            AT_FDCWD,
-            "/tmp/asyncflow-openat-boundary",
-            0,
-            STATX_SIZE,
-            &stat,
-            stat_no_uring);
-        const af::IoStatus fallocate_no_uring_status = af::io_fallocate(
-            *this,
-            IoTestThread::IO_0,
-            event.get(),
-            FALLOC_FL_KEEP_SIZE,
-            0,
-            4096,
-            fallocate_no_uring);
+        const af::IoStatus stat_no_uring_status =
+            af::io_statx(*this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-boundary", 0,
+                         STATX_SIZE, &stat, stat_no_uring);
+        const af::IoStatus fallocate_no_uring_status =
+            af::io_fallocate(*this, IoTestThread::IO_0, event.get(), FALLOC_FL_KEEP_SIZE, 0, 4096,
+                             fallocate_no_uring);
         const af::IoStatus ftruncate_no_uring_status =
             af::io_ftruncate(*this, IoTestThread::IO_0, event.get(), 0, ftruncate_no_uring);
         const af::IoStatus stat_null_path_status = af::io_statx(
-            *this,
-            IoTestThread::IO_0,
-            AT_FDCWD,
-            nullptr,
-            0,
-            STATX_SIZE,
-            &stat,
-            stat_null_path);
-        const af::IoStatus stat_null_output_status = af::io_statx(
-            *this,
-            IoTestThread::IO_0,
-            AT_FDCWD,
-            "/tmp/asyncflow-openat-boundary",
-            0,
-            STATX_SIZE,
-            nullptr,
-            stat_null_output);
+            *this, IoTestThread::IO_0, AT_FDCWD, nullptr, 0, STATX_SIZE, &stat, stat_null_path);
+        const af::IoStatus stat_null_output_status =
+            af::io_statx(*this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-boundary", 0,
+                         STATX_SIZE, nullptr, stat_null_output);
         const af::IoStatus fallocate_bad_fd_status = af::io_fallocate(
-            *this,
-            IoTestThread::IO_0,
-            -1,
-            FALLOC_FL_KEEP_SIZE,
-            0,
-            4096,
-            fallocate_bad_fd);
+            *this, IoTestThread::IO_0, -1, FALLOC_FL_KEEP_SIZE, 0, 4096, fallocate_bad_fd);
         const af::IoStatus ftruncate_bad_fd_status =
             af::io_ftruncate(*this, IoTestThread::IO_0, -1, 0, ftruncate_bad_fd);
 
@@ -88,6 +58,6 @@ private:
         return done();
     }
 
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* error_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *error_{nullptr};
 };

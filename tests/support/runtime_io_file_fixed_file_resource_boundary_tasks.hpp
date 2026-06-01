@@ -4,12 +4,9 @@ class FixedFileResourceBoundaryTask final : public IoTaskBase {
 public:
     explicit FixedFileResourceBoundaryTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(
-        std::atomic<int>* completed,
-        std::atomic<int>* register_error,
-        std::atomic<int>* unavailable_error,
-        std::atomic<int>* invalid_error,
-        std::atomic<int>* null_error) {
+    bool do_it(std::atomic<int> *completed, std::atomic<int> *register_error,
+               std::atomic<int> *unavailable_error, std::atomic<int> *invalid_error,
+               std::atomic<int> *null_error) {
         completed_ = completed;
         register_error_ = register_error;
         unavailable_error_ = unavailable_error;
@@ -35,11 +32,7 @@ private:
         }
         int null_update_error = 0;
         const bool null_update = IoRuntime::io_update_registered_files(
-            IoTestThread::IO_0,
-            0,
-            nullptr,
-            1,
-            &null_update_error);
+            IoTestThread::IO_0, 0, nullptr, 1, &null_update_error);
         if (null_update || null_update_error != EINVAL) {
             return failed();
         }
@@ -64,72 +57,37 @@ private:
             missing.read_at(*this, &value, sizeof(value), 0, unavailable);
         const af::IoStatus zero_read = invalid.read_at(*this, nullptr, 0, 0, zero);
         const af::IoStatus bad_read = invalid.read_at(*this, &value, sizeof(value), 0, bad);
-        const af::IoStatus null_read =
-            missing.read_at(*this, nullptr, sizeof(value), 0, null_data);
+        const af::IoStatus null_read = missing.read_at(*this, nullptr, sizeof(value), 0, null_data);
         const af::IoStatus fixed_unavailable_read =
             missing.read_fixed_at(*this, buffer, 0, fixed_unavailable);
-        const af::IoStatus fixed_bad_read =
-            invalid.read_fixed_at(*this, buffer, 0, fixed_bad);
+        const af::IoStatus fixed_bad_read = invalid.read_fixed_at(*this, buffer, 0, fixed_bad);
         const af::IoStatus fixed_null_read = missing.read_fixed_at(
-            *this,
-            af::IoFixedBuffer{nullptr, sizeof(value), 0},
-            0,
-            fixed_null);
+            *this, af::IoFixedBuffer{nullptr, sizeof(value), 0}, 0, fixed_null);
 
         af::IoFixedFile<IoTestThread> direct_file{};
-        const af::IoStatus direct_null_path_status = af::io_openat_direct(
-            *this,
-            IoTestThread::IO_0,
-            AT_FDCWD,
-            nullptr,
-            O_RDONLY | O_CLOEXEC,
-            0,
-            0,
-            &direct_file,
-            direct_null_path);
+        const af::IoStatus direct_null_path_status =
+            af::io_openat_direct(*this, IoTestThread::IO_0, AT_FDCWD, nullptr, O_RDONLY | O_CLOEXEC,
+                                 0, 0, &direct_file, direct_null_path);
         const af::IoStatus direct_null_output_status = af::io_openat_direct(
-            *this,
-            IoTestThread::IO_0,
-            AT_FDCWD,
-            "/tmp/asyncflow-openat-direct-boundary",
-            O_RDONLY | O_CLOEXEC,
-            0,
-            0,
-            nullptr,
-            direct_null_output);
+            *this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-direct-boundary",
+            O_RDONLY | O_CLOEXEC, 0, 0, nullptr, direct_null_output);
         const af::IoStatus direct_bad_index_status = af::io_openat_direct(
-            *this,
-            IoTestThread::IO_0,
-            AT_FDCWD,
-            "/tmp/asyncflow-openat-direct-boundary",
-            O_RDONLY | O_CLOEXEC,
-            0,
-            -1,
-            &direct_file,
-            direct_bad_index);
+            *this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-direct-boundary",
+            O_RDONLY | O_CLOEXEC, 0, -1, &direct_file, direct_bad_index);
         const af::IoStatus direct_unavailable_status = af::io_openat_direct(
-            *this,
-            IoTestThread::IO_0,
-            AT_FDCWD,
-            "/tmp/asyncflow-openat-direct-boundary",
-            O_RDONLY | O_CLOEXEC,
-            0,
-            0,
-            &direct_file,
-            direct_unavailable);
+            *this, IoTestThread::IO_0, AT_FDCWD, "/tmp/asyncflow-openat-direct-boundary",
+            O_RDONLY | O_CLOEXEC, 0, 0, &direct_file, direct_unavailable);
 
-        if (!unavailable_read.failed() || unavailable_read.error != ENOSYS ||
-            !zero_read.ready() || zero_read.bytes != 0U ||
-            !bad_read.failed() || bad_read.error != EBADF ||
-            !null_read.failed() || null_read.error != EINVAL ||
-            !fixed_unavailable_read.failed() || fixed_unavailable_read.error != ENOSYS ||
-            !fixed_bad_read.failed() || fixed_bad_read.error != EBADF ||
-            !fixed_null_read.failed() || fixed_null_read.error != EINVAL ||
-            !direct_null_path_status.failed() || direct_null_path_status.error != EINVAL ||
-            !direct_null_output_status.failed() || direct_null_output_status.error != EINVAL ||
-            !direct_bad_index_status.failed() || direct_bad_index_status.error != EBADF ||
-            !direct_unavailable_status.failed() || direct_unavailable_status.error != ENOSYS ||
-            direct_file.valid()) {
+        if (!unavailable_read.failed() || unavailable_read.error != ENOSYS || !zero_read.ready() ||
+            zero_read.bytes != 0U || !bad_read.failed() || bad_read.error != EBADF ||
+            !null_read.failed() || null_read.error != EINVAL || !fixed_unavailable_read.failed() ||
+            fixed_unavailable_read.error != ENOSYS || !fixed_bad_read.failed() ||
+            fixed_bad_read.error != EBADF || !fixed_null_read.failed() ||
+            fixed_null_read.error != EINVAL || !direct_null_path_status.failed() ||
+            direct_null_path_status.error != EINVAL || !direct_null_output_status.failed() ||
+            direct_null_output_status.error != EINVAL || !direct_bad_index_status.failed() ||
+            direct_bad_index_status.error != EBADF || !direct_unavailable_status.failed() ||
+            direct_unavailable_status.error != ENOSYS || direct_file.valid()) {
             return failed();
         }
 
@@ -141,9 +99,9 @@ private:
         return done();
     }
 
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* register_error_{nullptr};
-    std::atomic<int>* unavailable_error_{nullptr};
-    std::atomic<int>* invalid_error_{nullptr};
-    std::atomic<int>* null_error_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *register_error_{nullptr};
+    std::atomic<int> *unavailable_error_{nullptr};
+    std::atomic<int> *invalid_error_{nullptr};
+    std::atomic<int> *null_error_{nullptr};
 };

@@ -4,14 +4,14 @@ class RpcServerTask final : public RpcTask {
 public:
     explicit RpcServerTask(RpcTask::FactoryToken token) : RpcTask(token) {}
 
-    bool do_it(int listener_fd, bool* ok, int* error) {
+    bool do_it(int listener_fd, bool *ok, int *error) {
         listener_.reset(RpcThread::IO_0, listener_fd);
         ok_ = ok;
         error_ = error;
         return schedule(RpcThread::IO_0);
     }
 
-    [[nodiscard]] const char* request_data() const noexcept {
+    [[nodiscard]] const char *request_data() const noexcept {
         return request_;
     }
 
@@ -19,7 +19,7 @@ public:
         return request_size_;
     }
 
-    void set_response(const char* data, std::size_t size) noexcept {
+    void set_response(const char *data, std::size_t size) noexcept {
         if (data == nullptr) {
             response_size_ = 0;
             return;
@@ -84,11 +84,8 @@ private:
     }
 
     af::TaskResult read_request_header() {
-        const af::IoStatus status = stream_.recv_some(
-            *this,
-            request_header_ + request_header_read_,
-            4U - request_header_read_,
-            read_);
+        const af::IoStatus status = stream_.recv_some(*this, request_header_ + request_header_read_,
+                                                      4U - request_header_read_, read_);
         if (status.pending()) {
             return pending();
         }
@@ -118,11 +115,8 @@ private:
             return dispatch_logic();
         }
 
-        const af::IoStatus status = stream_.recv_some(
-            *this,
-            request_ + request_read_,
-            request_size_ - request_read_,
-            read_);
+        const af::IoStatus status = stream_.recv_some(*this, request_ + request_read_,
+                                                      request_size_ - request_read_, read_);
         if (status.pending()) {
             return pending();
         }
@@ -147,11 +141,9 @@ private:
     }
 
     af::TaskResult write_response_header() {
-        const af::IoStatus status = stream_.send_some(
-            *this,
-            response_header_ + response_header_written_,
-            4U - response_header_written_,
-            write_);
+        const af::IoStatus status =
+            stream_.send_some(*this, response_header_ + response_header_written_,
+                              4U - response_header_written_, write_);
         if (status.pending()) {
             return pending();
         }
@@ -172,11 +164,8 @@ private:
             return complete(0);
         }
 
-        const af::IoStatus status = stream_.send_some(
-            *this,
-            response_ + response_written_,
-            response_size_ - response_written_,
-            write_);
+        const af::IoStatus status = stream_.send_some(*this, response_ + response_written_,
+                                                      response_size_ - response_written_, write_);
         if (status.pending()) {
             return pending();
         }
@@ -218,6 +207,6 @@ private:
     std::size_t response_size_{0};
     std::size_t response_written_{0};
 
-    bool* ok_{nullptr};
-    int* error_{nullptr};
+    bool *ok_{nullptr};
+    int *error_{nullptr};
 };

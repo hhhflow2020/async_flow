@@ -35,15 +35,14 @@ struct UdpRecvmsgRuntimeTraits {
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 
     static constexpr af::ThreadKind thread_kind(UdpRecvmsgThread thread) noexcept {
-        return thread == UdpRecvmsgThread::IO_0 ? af::ThreadKind::IoUring
-                                                : af::ThreadKind::Worker;
+        return thread == UdpRecvmsgThread::IO_0 ? af::ThreadKind::IoUring : af::ThreadKind::Worker;
     }
 };
 
 using udp_recvmsg_async = af::AsyncRuntime<UdpRecvmsgRuntimeTraits>;
 using UdpRecvmsgTaskBase = udp_recvmsg_async::Task;
 
-inline bool wait_until_armed_or_error(std::atomic<int>& armed, std::atomic<int>& error) {
+inline bool wait_until_armed_or_error(std::atomic<int> &armed, std::atomic<int> &error) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (armed.load(std::memory_order_acquire) == 0 &&
            error.load(std::memory_order_acquire) == 0) {

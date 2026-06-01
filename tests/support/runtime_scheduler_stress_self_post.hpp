@@ -25,14 +25,9 @@ class SelfPostChildTask final : public SelfPostTaskBase {
 public:
     explicit SelfPostChildTask(SelfPostTaskBase::FactoryToken token) : SelfPostTaskBase(token) {}
 
-    bool do_it(
-        int id,
-        std::atomic<int>* remaining,
-        std::atomic<int>* failures,
-        std::atomic<int>* sequence,
-        std::atomic<int>* order,
-        int order_capacity,
-        std::atomic<int>* root_completed) {
+    bool do_it(int id, std::atomic<int> *remaining, std::atomic<int> *failures,
+               std::atomic<int> *sequence, std::atomic<int> *order, int order_capacity,
+               std::atomic<int> *root_completed) {
         id_ = id;
         remaining_ = remaining;
         failures_ = failures;
@@ -61,25 +56,21 @@ private:
     }
 
     int id_{0};
-    std::atomic<int>* remaining_{nullptr};
-    std::atomic<int>* failures_{nullptr};
-    std::atomic<int>* sequence_{nullptr};
-    std::atomic<int>* order_{nullptr};
+    std::atomic<int> *remaining_{nullptr};
+    std::atomic<int> *failures_{nullptr};
+    std::atomic<int> *sequence_{nullptr};
+    std::atomic<int> *order_{nullptr};
     int order_capacity_{0};
-    std::atomic<int>* root_completed_{nullptr};
+    std::atomic<int> *root_completed_{nullptr};
 };
 
 class SelfPostFanoutTask final : public SelfPostTaskBase {
 public:
     explicit SelfPostFanoutTask(SelfPostTaskBase::FactoryToken token) : SelfPostTaskBase(token) {}
 
-    bool do_it(
-        int child_count,
-        std::atomic<int>* remaining,
-        std::atomic<int>* failures,
-        std::atomic<int>* sequence,
-        std::atomic<int>* order,
-        std::atomic<int>* root_completed) {
+    bool do_it(int child_count, std::atomic<int> *remaining, std::atomic<int> *failures,
+               std::atomic<int> *sequence, std::atomic<int> *order,
+               std::atomic<int> *root_completed) {
         child_count_ = child_count;
         remaining_ = remaining;
         failures_ = failures;
@@ -94,13 +85,7 @@ private:
         for (int id = 0; id < child_count_; ++id) {
             remaining_->fetch_add(1, std::memory_order_relaxed);
             if (!SelfPostRuntime::start_task<SelfPostChildTask>(
-                    id,
-                    remaining_,
-                    failures_,
-                    sequence_,
-                    order_,
-                    child_count_,
-                    root_completed_)) {
+                    id, remaining_, failures_, sequence_, order_, child_count_, root_completed_)) {
                 failures_->fetch_add(1, std::memory_order_relaxed);
                 if (remaining_->fetch_sub(1, std::memory_order_acq_rel) == 1) {
                     remaining_->notify_one();
@@ -116,21 +101,18 @@ private:
     }
 
     int child_count_{0};
-    std::atomic<int>* remaining_{nullptr};
-    std::atomic<int>* failures_{nullptr};
-    std::atomic<int>* sequence_{nullptr};
-    std::atomic<int>* order_{nullptr};
-    std::atomic<int>* root_completed_{nullptr};
+    std::atomic<int> *remaining_{nullptr};
+    std::atomic<int> *failures_{nullptr};
+    std::atomic<int> *sequence_{nullptr};
+    std::atomic<int> *order_{nullptr};
+    std::atomic<int> *root_completed_{nullptr};
 };
 
 class SelfAgainTask final : public SelfPostTaskBase {
 public:
     explicit SelfAgainTask(SelfPostTaskBase::FactoryToken token) : SelfPostTaskBase(token) {}
 
-    bool do_it(
-        int iteration_count,
-        std::atomic<int>* remaining,
-        std::atomic<int>* run_count) {
+    bool do_it(int iteration_count, std::atomic<int> *remaining, std::atomic<int> *run_count) {
         iteration_count_ = iteration_count;
         remaining_ = remaining;
         run_count_ = run_count;
@@ -150,6 +132,6 @@ private:
     }
 
     int iteration_count_{0};
-    std::atomic<int>* remaining_{nullptr};
-    std::atomic<int>* run_count_{nullptr};
+    std::atomic<int> *remaining_{nullptr};
+    std::atomic<int> *run_count_{nullptr};
 };

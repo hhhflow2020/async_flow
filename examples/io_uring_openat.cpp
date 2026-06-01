@@ -42,9 +42,7 @@ class OpenAtRoundTripTask final : public OpenAtTaskBase {
 public:
     explicit OpenAtRoundTripTask(OpenAtTaskBase::FactoryToken token) : OpenAtTaskBase(token) {}
 
-    bool do_it(
-        const char* path,
-        char* byte_read) {
+    bool do_it(const char *path, char *byte_read) {
         const int written = std::snprintf(path_.data(), path_.size(), "%s", path);
         if (written < 0 || static_cast<std::size_t>(written) >= path_.size()) {
             return false;
@@ -80,15 +78,9 @@ private:
 
     af::TaskResult open_file() {
         int fd = -1;
-        const af::IoStatus status = af::io_openat(
-            *this,
-            OpenAtThread::IO_0,
-            AT_FDCWD,
-            path_.data(),
-            O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC,
-            0600U,
-            &fd,
-            open_);
+        const af::IoStatus status =
+            af::io_openat(*this, OpenAtThread::IO_0, AT_FDCWD, path_.data(),
+                          O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC, 0600U, &fd, open_);
         if (status.pending()) {
             return pending();
         }
@@ -147,7 +139,7 @@ private:
     af::IoOpState write_{};
     af::IoOpState fsync_{};
     af::IoOpState read_state_{};
-    char* byte_read_{nullptr};
+    char *byte_read_{nullptr};
 };
 #endif
 
@@ -163,11 +155,8 @@ int main() {
     }
 
     std::array<char, 160> path{};
-    const int written = std::snprintf(
-        path.data(),
-        path.size(),
-        "/tmp/asyncflow-openat-%ld",
-        static_cast<long>(::getpid()));
+    const int written = std::snprintf(path.data(), path.size(), "/tmp/asyncflow-openat-%ld",
+                                      static_cast<long>(::getpid()));
     if (written < 0 || static_cast<std::size_t>(written) >= path.size()) {
         std::cerr << "path formatting failed\n";
         openat_async::shutdown();
@@ -176,9 +165,7 @@ int main() {
     static_cast<void>(::unlink(path.data()));
 
     char byte_read{0};
-    const bool started = openat_async::start_task<OpenAtRoundTripTask>(
-        path.data(),
-        &byte_read);
+    const bool started = openat_async::start_task<OpenAtRoundTripTask>(path.data(), &byte_read);
     if (!started) {
         std::cerr << "io_uring openat task did not start\n";
         static_cast<void>(::unlink(path.data()));

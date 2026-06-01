@@ -38,11 +38,10 @@ struct DatagramRuntimeTraits {
 using datagram_async = af::AsyncRuntime<DatagramRuntimeTraits>;
 using DatagramTask = datagram_async::Task;
 
-[[nodiscard]] inline const char* datagram_backend_name() noexcept {
+[[nodiscard]] inline const char *datagram_backend_name() noexcept {
 #if defined(__linux__)
-    return datagram_async::io_uring_backend_available(DatagramThread::IO_0)
-        ? "io_uring"
-        : "epoll-fallback";
+    return datagram_async::io_uring_backend_available(DatagramThread::IO_0) ? "io_uring"
+                                                                            : "epoll-fallback";
 #elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
     return "kqueue";
 #else

@@ -2,14 +2,11 @@
 
 class UringTcpAcceptDirectTask final : public UringIoTaskBase {
 public:
-    explicit UringTcpAcceptDirectTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
+    explicit UringTcpAcceptDirectTask(UringIoTaskBase::FactoryToken token)
+        : UringIoTaskBase(token) {}
 
-    bool do_it(
-        int fd,
-        std::atomic<int>* armed,
-        std::atomic<int>* completed,
-        std::atomic<int>* error,
-        std::atomic<int>* packed_read) {
+    bool do_it(int fd, std::atomic<int> *armed, std::atomic<int> *completed,
+               std::atomic<int> *error, std::atomic<int> *packed_read) {
         listener_.reset(IoTestThread::IO_0, fd);
         armed_ = armed;
         completed_ = completed;
@@ -59,13 +56,8 @@ private:
     }
 
     af::TaskResult accept_direct() {
-        const af::IoStatus status = listener_.accept_direct(
-            *this,
-            nullptr,
-            nullptr,
-            0,
-            &accepted_,
-            accept_);
+        const af::IoStatus status =
+            listener_.accept_direct(*this, nullptr, nullptr, 0, &accepted_, accept_);
         if (status.pending()) {
             if (!armed_once_) {
                 armed_once_ = true;
@@ -86,8 +78,7 @@ private:
     af::TaskResult recv_request() {
         request_iov_[0] = iovec{&request_[0], 1};
         request_iov_[1] = iovec{&request_[1], 1};
-        const af::IoStatus status =
-            accepted_.recvv_some(*this, request_iov_, 2, recv_);
+        const af::IoStatus status = accepted_.recvv_some(*this, request_iov_, 2, recv_);
         if (status.pending()) {
             return pending();
         }
@@ -102,8 +93,7 @@ private:
     af::TaskResult send_response() {
         response_iov_[0] = iovec{&response_[0], 1};
         response_iov_[1] = iovec{&response_[1], 1};
-        const af::IoStatus status =
-            accepted_.sendv_some(*this, response_iov_, 2, send_);
+        const af::IoStatus status = accepted_.sendv_some(*this, response_iov_, 2, send_);
         if (status.pending()) {
             return pending();
         }
@@ -145,8 +135,8 @@ private:
     af::IoOpState accept_{};
     af::IoOpState recv_{};
     af::IoOpState send_{};
-    std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* error_{nullptr};
-    std::atomic<int>* packed_read_{nullptr};
+    std::atomic<int> *armed_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *error_{nullptr};
+    std::atomic<int> *packed_read_{nullptr};
 };

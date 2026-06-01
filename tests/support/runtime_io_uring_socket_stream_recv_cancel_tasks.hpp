@@ -5,13 +5,9 @@ public:
     explicit UringSelfCancelRecvCompletionTask(UringIoTaskBase::FactoryToken token)
         : UringIoTaskBase(token) {}
 
-    bool do_it(
-        int fd,
-        std::atomic<int>* wait_kind,
-        std::atomic<int>* cancel_result,
-        std::atomic<int>* immediate_pending,
-        std::atomic<int>* completed,
-        std::atomic<int>* error) {
+    bool do_it(int fd, std::atomic<int> *wait_kind, std::atomic<int> *cancel_result,
+               std::atomic<int> *immediate_pending, std::atomic<int> *completed,
+               std::atomic<int> *error) {
         stream_.reset(IoTestThread::IO_0, fd);
         wait_kind_ = wait_kind;
         cancel_result_ = cancel_result;
@@ -97,9 +93,9 @@ private:
     af::TcpStream<IoTestThread> stream_{};
     char value_{0};
     af::IoOpState recv_{};
-    std::atomic<int>* wait_kind_{nullptr};
-    std::atomic<int>* cancel_result_{nullptr};
-    std::atomic<int>* immediate_pending_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* error_{nullptr};
+    std::atomic<int> *wait_kind_{nullptr};
+    std::atomic<int> *cancel_result_{nullptr};
+    std::atomic<int> *immediate_pending_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *error_{nullptr};
 };

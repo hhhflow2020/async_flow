@@ -20,7 +20,7 @@ TEST_F(UringIoRuntimeSocketAcceptFixture, IoUringThreadAcceptsTcpConnectionOrFal
 
     int client = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     ASSERT_GE(client, 0);
-    const int rc = ::connect(client, reinterpret_cast<sockaddr*>(&address), address_size);
+    const int rc = ::connect(client, reinterpret_cast<sockaddr *>(&address), address_size);
     ASSERT_TRUE(rc == 0 || errno == EINPROGRESS);
 
     ASSERT_TRUE(wait_until_at_least(completed, 1));
@@ -46,12 +46,8 @@ TEST_F(UringIoRuntimeSocketAcceptFixture, IoUringAcceptDirectReceivesThroughFixe
     std::atomic<int> completed{0};
     std::atomic<int> error{0};
     std::atomic<int> packed_read{0};
-    ASSERT_TRUE(UringIoRuntime::start_task<UringTcpAcceptDirectTask>(
-        listener,
-        &armed,
-        &completed,
-        &error,
-        &packed_read));
+    ASSERT_TRUE(UringIoRuntime::start_task<UringTcpAcceptDirectTask>(listener, &armed, &completed,
+                                                                     &error, &packed_read));
 
     if (!wait_until_at_least(armed, 1)) {
         ASSERT_TRUE(wait_until_at_least(completed, 1));
@@ -71,15 +67,14 @@ TEST_F(UringIoRuntimeSocketAcceptFixture, IoUringAcceptDirectReceivesThroughFixe
 
     int client = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     ASSERT_GE(client, 0);
-    const int rc = ::connect(client, reinterpret_cast<sockaddr*>(&address), address_size);
+    const int rc = ::connect(client, reinterpret_cast<sockaddr *>(&address), address_size);
     ASSERT_TRUE(rc == 0 || errno == EINPROGRESS);
     const char request[2]{'A', 'B'};
     ASSERT_TRUE(write_exact_until(client, request, sizeof(request)));
 
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     const int task_error = error.load(std::memory_order_acquire);
-    if (task_error == EINVAL || task_error == EBADF || task_error == ENOSYS ||
-        task_error == ENXIO
+    if (task_error == EINVAL || task_error == EBADF || task_error == ENOSYS || task_error == ENXIO
 #ifdef EOPNOTSUPP
         || task_error == EOPNOTSUPP
 #endif
@@ -120,12 +115,7 @@ TEST_F(UringIoRuntimeSocketAcceptFixture, IoUringAcceptMultishotAcceptsMultipleC
     std::atomic<int> accepted_count{0};
     std::atomic<int> error{0};
     ASSERT_TRUE(UringIoRuntime::start_task<UringTcpAcceptMultishotTask>(
-        listener,
-        target_accepts,
-        &armed,
-        &completed,
-        &accepted_count,
-        &error));
+        listener, target_accepts, &armed, &completed, &accepted_count, &error));
 
     if (!wait_until_at_least(armed, 1)) {
         ASSERT_TRUE(wait_until_at_least(completed, 1));
@@ -138,10 +128,10 @@ TEST_F(UringIoRuntimeSocketAcceptFixture, IoUringAcceptMultishotAcceptsMultipleC
     }
 
     int clients[target_accepts]{-1, -1};
-    for (int& client : clients) {
+    for (int &client : clients) {
         client = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
         ASSERT_GE(client, 0);
-        const int rc = ::connect(client, reinterpret_cast<sockaddr*>(&address), address_size);
+        const int rc = ::connect(client, reinterpret_cast<sockaddr *>(&address), address_size);
         ASSERT_TRUE(rc == 0 || errno == EINPROGRESS);
     }
 
@@ -175,12 +165,7 @@ TEST_F(UringIoRuntimeSocketAcceptFixture, IoUringAcceptMultishotCancelDrainsQueu
     std::atomic<int> accepted_count{0};
     std::atomic<int> error{0};
     ASSERT_TRUE(UringIoRuntime::start_task<UringTcpAcceptMultishotTask>(
-        listener,
-        target_accepts,
-        &armed,
-        &completed,
-        &accepted_count,
-        &error));
+        listener, target_accepts, &armed, &completed, &accepted_count, &error));
 
     if (!wait_until_at_least(armed, 1)) {
         ASSERT_TRUE(wait_until_at_least(completed, 1));
@@ -193,10 +178,10 @@ TEST_F(UringIoRuntimeSocketAcceptFixture, IoUringAcceptMultishotCancelDrainsQueu
     }
 
     int clients[4]{-1, -1, -1, -1};
-    for (int& client : clients) {
+    for (int &client : clients) {
         client = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
         ASSERT_GE(client, 0);
-        const int rc = ::connect(client, reinterpret_cast<sockaddr*>(&address), address_size);
+        const int rc = ::connect(client, reinterpret_cast<sockaddr *>(&address), address_size);
         ASSERT_TRUE(rc == 0 || errno == EINPROGRESS);
     }
 

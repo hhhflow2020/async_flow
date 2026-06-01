@@ -21,9 +21,7 @@ int main() {
     const bool server_started =
         send_zc_async::start_task<SendZcServerTask>(listener.fd.get(), &server);
     const bool client_started = send_zc_async::start_task<SendZcClientTask>(
-        listener.address,
-        listener.address_size,
-        &client);
+        listener.address, listener.address_size, &client);
     if (!server_started || !client_started) {
         std::cerr << "send_zc tasks did not start\n";
         send_zc_async::shutdown();
@@ -37,8 +35,7 @@ int main() {
         return 1;
     }
 
-    std::cout << "send_zc bytes=" << server.bytes_sent
-              << " read=" << client.bytes_read
+    std::cout << "send_zc bytes=" << server.bytes_sent << " read=" << client.bytes_read
               << " io_uring=" << (has_uring ? "available" : "fallback") << '\n';
     return 0;
 #else

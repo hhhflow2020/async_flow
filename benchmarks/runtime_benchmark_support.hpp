@@ -36,7 +36,7 @@ struct BenchRuntimeTraits {
 using Runtime = af::AsyncRuntime<BenchRuntimeTraits>;
 using Task = Runtime::Task;
 
-inline void wait_zero(std::atomic<int>& remaining) {
+inline void wait_zero(std::atomic<int> &remaining) {
     while (remaining.load(std::memory_order_acquire) != 0) {
         const int observed = remaining.load(std::memory_order_acquire);
         if (observed != 0) {
@@ -45,7 +45,7 @@ inline void wait_zero(std::atomic<int>& remaining) {
     }
 }
 
-inline void undo_remaining(std::atomic<int>& remaining) {
+inline void undo_remaining(std::atomic<int> &remaining) {
     if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
         remaining.notify_one();
     }
@@ -55,7 +55,7 @@ class CountTask final : public Task {
 public:
     explicit CountTask(Task::FactoryToken token) : Task(token) {}
 
-    bool do_it(BenchThread thread, std::atomic<int>* remaining) {
+    bool do_it(BenchThread thread, std::atomic<int> *remaining) {
         remaining_ = remaining;
         return schedule(thread);
     }
@@ -68,14 +68,14 @@ private:
         return done();
     }
 
-    std::atomic<int>* remaining_{nullptr};
+    std::atomic<int> *remaining_{nullptr};
 };
 
 class HopTask final : public Task {
 public:
     explicit HopTask(Task::FactoryToken token) : Task(token) {}
 
-    bool do_it(int hops, std::atomic<int>* remaining) {
+    bool do_it(int hops, std::atomic<int> *remaining) {
         hops_ = hops;
         remaining_ = remaining;
         return schedule(BenchThread::Logic_0);
@@ -85,8 +85,8 @@ private:
     af::TaskResult run() override {
         if (hops_-- > 0) {
             const auto next = Runtime::current_thread() == BenchThread::Logic_0
-                ? BenchThread::Logic_1
-                : BenchThread::Logic_0;
+                                  ? BenchThread::Logic_1
+                                  : BenchThread::Logic_0;
             return pending_on(next);
         }
 
@@ -97,14 +97,14 @@ private:
     }
 
     int hops_{0};
-    std::atomic<int>* remaining_{nullptr};
+    std::atomic<int> *remaining_{nullptr};
 };
 
 class IoHopTask final : public Task {
 public:
     explicit IoHopTask(Task::FactoryToken token) : Task(token) {}
 
-    bool do_it(std::atomic<int>* remaining) {
+    bool do_it(std::atomic<int> *remaining) {
         remaining_ = remaining;
         state_ = State::Logic;
         return schedule(BenchThread::Logic_0);
@@ -132,14 +132,14 @@ private:
     }
 
     State state_{State::Logic};
-    std::atomic<int>* remaining_{nullptr};
+    std::atomic<int> *remaining_{nullptr};
 };
 
 class ParallelShardTask final : public Task {
 public:
     explicit ParallelShardTask(Task::FactoryToken token) : Task(token) {}
 
-    bool do_it(std::atomic<int>* remaining, std::atomic<std::uint64_t>* sum) {
+    bool do_it(std::atomic<int> *remaining, std::atomic<std::uint64_t> *sum) {
         remaining_ = remaining;
         sum_ = sum;
         ops_ = af::ShardedOps<std::uint64_t>(4);
@@ -159,18 +159,14 @@ private:
         switch (state_) {
         case State::Split:
             state_ = State::Finish;
-            Runtime::parallel_shards(
-                BenchThread::Logic_0,
-                ops_,
-                af::ParallelMode::AllShards,
-                this,
-                [this](std::uint16_t, std::vector<std::uint64_t>& shard_ops) {
-                    std::uint64_t local = 0;
-                    for (auto value : shard_ops) {
-                        local += value;
-                    }
-                    sum_->fetch_add(local, std::memory_order_relaxed);
-                });
+            Runtime::parallel_shards(BenchThread::Logic_0, ops_, af::ParallelMode::AllShards, this,
+                                     [this](std::uint16_t, std::vector<std::uint64_t> &shard_ops) {
+                                         std::uint64_t local = 0;
+                                         for (auto value : shard_ops) {
+                                             local += value;
+                                         }
+                                         sum_->fetch_add(local, std::memory_order_relaxed);
+                                     });
             return pending();
 
         case State::Finish:
@@ -185,8 +181,8 @@ private:
 
     State state_{State::Split};
     af::ShardedOps<std::uint64_t> ops_{4};
-    std::atomic<int>* remaining_{nullptr};
-    std::atomic<std::uint64_t>* sum_{nullptr};
+    std::atomic<int> *remaining_{nullptr};
+    std::atomic<std::uint64_t> *sum_{nullptr};
 };
 
 } // namespace af_bench::runtime

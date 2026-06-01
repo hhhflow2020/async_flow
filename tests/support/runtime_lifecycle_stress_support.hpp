@@ -10,7 +10,7 @@
 namespace af::test::runtime_lifecycle_stress {
 
 inline std::chrono::milliseconds stress_duration() {
-    if (const char* value = std::getenv("ASYNCFLOW_STRESS_MS")) {
+    if (const char *value = std::getenv("ASYNCFLOW_STRESS_MS")) {
         const int parsed = std::atoi(value);
         if (parsed > 0) {
             return std::chrono::milliseconds(parsed);
@@ -56,7 +56,7 @@ class StressTask final : public StressTaskBase {
 public:
     explicit StressTask(StressTaskBase::FactoryToken token) : StressTaskBase(token) {}
 
-    bool do_it(int seed, StressCounters* counters) {
+    bool do_it(int seed, StressCounters *counters) {
         counters_ = counters;
         mode_ = seed % 3;
         state_ = State::Start;
@@ -86,8 +86,7 @@ private:
             if (mode_ == 1) {
                 state_ = State::Hop;
                 const auto next = static_cast<StressThread>(
-                    (StressRuntime::current_thread_index() + 1U) %
-                    StressRuntime::thread_count);
+                    (StressRuntime::current_thread_index() + 1U) % StressRuntime::thread_count);
                 return pending_on(next);
             }
             counters_->pending_entered.fetch_add(1, std::memory_order_release);
@@ -103,7 +102,7 @@ private:
 
     State state_{State::Start};
     int mode_{0};
-    StressCounters* counters_{nullptr};
+    StressCounters *counters_{nullptr};
 };
 
 } // namespace af::test::runtime_lifecycle_stress

@@ -14,7 +14,7 @@ class StreamEchoTask final : public Task {
 public:
     explicit StreamEchoTask(Task::FactoryToken token) : Task(token) {}
 
-    bool do_it(int fd, StreamEchoResult* result) {
+    bool do_it(int fd, StreamEchoResult *result) {
         if (fd < 0 || result == nullptr) {
             return false;
         }
@@ -80,14 +80,14 @@ private:
     char response_{'S'};
     af::IoOpState read_{};
     af::IoOpState write_{};
-    StreamEchoResult* result_{nullptr};
+    StreamEchoResult *result_{nullptr};
 };
 
 class StreamPeerTask final : public Task {
 public:
     explicit StreamPeerTask(Task::FactoryToken token) : Task(token) {}
 
-    bool do_it(int fd, StreamPeerResult* result) {
+    bool do_it(int fd, StreamPeerResult *result) {
         if (fd < 0 || result == nullptr) {
             return false;
         }
@@ -153,7 +153,7 @@ private:
     char request_{'T'};
     af::IoOpState write_{};
     af::IoOpState read_{};
-    StreamPeerResult* result_{nullptr};
+    StreamPeerResult *result_{nullptr};
 };
 
 } // namespace io_adapters_example

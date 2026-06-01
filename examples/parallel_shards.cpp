@@ -17,16 +17,12 @@ class AddGoldBatchTask final : public Task {
 public:
     explicit AddGoldBatchTask(Task::FactoryToken token) : Task(token) {}
 
-    bool do_it(
-        std::vector<AddGoldOp> ops,
-        std::atomic<int>* total_gold,
-        std::array<std::atomic<int>, player_logic_shard_count>* shard_hits) {
+    bool do_it(std::vector<AddGoldOp> ops, std::atomic<int> *total_gold,
+               std::array<std::atomic<int>, player_logic_shard_count> *shard_hits) {
         total_gold_ = total_gold;
         shard_hits_ = shard_hits;
-        sharded_ops_ = async::split_by_shard(
-            std::move(ops),
-            player_logic_shard_count,
-            [](const AddGoldOp& op) { return op.player_id; });
+        sharded_ops_ = async::split_by_shard(std::move(ops), player_logic_shard_count,
+                                             [](const AddGoldOp &op) { return op.player_id; });
         return schedule(AppThread::Logic_0);
     }
 
@@ -50,21 +46,18 @@ private:
 
     af::TaskResult split_to_shards() {
         state_ = State::Finish;
-        async::parallel_shards(
-            player_logic_begin,
-            sharded_ops_,
-            af::ParallelMode::NonEmptyOnly,
-            this,
-            [this](std::uint16_t shard, std::vector<AddGoldOp>& shard_ops) {
-                apply_shard(shard, shard_ops);
-            });
+        async::parallel_shards(player_logic_begin, sharded_ops_, af::ParallelMode::NonEmptyOnly,
+                               this,
+                               [this](std::uint16_t shard, std::vector<AddGoldOp> &shard_ops) {
+                                   apply_shard(shard, shard_ops);
+                               });
         return pending();
     }
 
-    void apply_shard(std::uint16_t shard, const std::vector<AddGoldOp>& shard_ops) {
+    void apply_shard(std::uint16_t shard, const std::vector<AddGoldOp> &shard_ops) {
         (*shard_hits_)[shard].fetch_add(1, std::memory_order_relaxed);
         int local_gold = 0;
-        for (const auto& op : shard_ops) {
+        for (const auto &op : shard_ops) {
             local_gold += op.gold;
         }
         total_gold_->fetch_add(local_gold, std::memory_order_relaxed);
@@ -76,8 +69,8 @@ private:
 
     State state_{State::Split};
     af::ShardedOps<AddGoldOp> sharded_ops_{player_logic_shard_count};
-    std::atomic<int>* total_gold_{nullptr};
-    std::array<std::atomic<int>, player_logic_shard_count>* shard_hits_{nullptr};
+    std::atomic<int> *total_gold_{nullptr};
+    std::array<std::atomic<int>, player_logic_shard_count> *shard_hits_{nullptr};
 };
 
 } // namespace
@@ -97,10 +90,7 @@ int main() {
 
     {
         auto task = async::make_task<AddGoldBatchTask>();
-        [[maybe_unused]] const bool started = task->do_it(
-            std::move(ops),
-            &total_gold,
-            &shard_hits);
+        [[maybe_unused]] const bool started = task->do_it(std::move(ops), &total_gold, &shard_hits);
         AF_ASSERT(started);
     }
 
@@ -108,8 +98,8 @@ int main() {
 
     std::cout << "parallel total gold: " << total_gold.load(std::memory_order_relaxed) << '\n';
     for (std::uint16_t shard = 0; shard < player_logic_shard_count; ++shard) {
-        std::cout << "shard " << shard << " hits: "
-                  << shard_hits[shard].load(std::memory_order_relaxed) << '\n';
+        std::cout << "shard " << shard
+                  << " hits: " << shard_hits[shard].load(std::memory_order_relaxed) << '\n';
     }
 
     return 0;

@@ -33,12 +33,11 @@ struct SendfileRuntimeTraits {
 using sendfile_async = af::AsyncRuntime<SendfileRuntimeTraits>;
 using SendfileTaskBase = sendfile_async::Task;
 
-inline constexpr char sendfile_payload[] =
-    "HTTP/1.1 200 OK\r\n"
-    "Content-Type: text/plain\r\n"
-    "Content-Length: 20\r\n"
-    "\r\n"
-    "asyncflow sendfile\n";
+inline constexpr char sendfile_payload[] = "HTTP/1.1 200 OK\r\n"
+                                           "Content-Type: text/plain\r\n"
+                                           "Content-Length: 20\r\n"
+                                           "\r\n"
+                                           "asyncflow sendfile\n";
 inline constexpr std::size_t sendfile_payload_size = sizeof(sendfile_payload) - 1U;
 using SendfilePayloadBuffer = std::array<char, sendfile_payload_size>;
 

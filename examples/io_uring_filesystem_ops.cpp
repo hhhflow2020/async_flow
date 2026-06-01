@@ -27,11 +27,7 @@ int main() {
 
     FsResult result{};
     const bool scheduled = fs_async::start_task<FilesystemOpsTask>(
-        paths.dir_path,
-        paths.file_path,
-        paths.hardlink_path,
-        paths.symlink_path,
-        &result);
+        paths.dir_path, paths.file_path, paths.hardlink_path, paths.symlink_path, &result);
     if (!scheduled) {
         std::cerr << "failed to schedule filesystem task\n";
         fs_async::shutdown();

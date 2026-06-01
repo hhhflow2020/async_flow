@@ -17,10 +17,7 @@ TEST_F(UringIoRuntimeFileFixture, IoUringBatchedSubmitCompletesBurstWrites) {
     std::atomic<int> completed{0};
     for (int i = 0; i < write_count; ++i) {
         ASSERT_TRUE(UringIoRuntime::start_task<UringBatchedFileWriteTask>(
-            file.get(),
-            static_cast<std::uint64_t>(i),
-            static_cast<char>('a' + i),
-            &completed));
+            file.get(), static_cast<std::uint64_t>(i), static_cast<char>('a' + i), &completed));
     }
 
     ASSERT_TRUE(wait_until_at_least(completed, write_count));

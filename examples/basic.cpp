@@ -23,8 +23,8 @@ public:
 private:
     af::TaskResult run() override {
         const std::lock_guard<std::mutex> lock(cout_mutex);
-        std::cout << "add " << gold_ << " gold to player " << player_id_
-                  << " on logic thread " << async::current_thread_index() << '\n';
+        std::cout << "add " << gold_ << " gold to player " << player_id_ << " on logic thread "
+                  << async::current_thread_index() << '\n';
         return done();
     }
 

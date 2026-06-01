@@ -4,7 +4,7 @@ class UringFileReadWriteTask final : public UringIoTaskBase {
 public:
     explicit UringFileReadWriteTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
 
-    bool do_it(int fd, std::atomic<int>* completed, std::atomic<char>* byte_read) {
+    bool do_it(int fd, std::atomic<int> *completed, std::atomic<char> *byte_read) {
         file_.reset(IoTestThread::IO_0, fd);
         completed_ = completed;
         byte_read_ = byte_read;
@@ -76,6 +76,6 @@ private:
     af::IoOpState write_{};
     af::IoOpState fsync_{};
     af::IoOpState read_state_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<char>* byte_read_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<char> *byte_read_{nullptr};
 };

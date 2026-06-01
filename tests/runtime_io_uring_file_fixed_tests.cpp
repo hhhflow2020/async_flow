@@ -15,10 +15,8 @@ TEST_F(UringIoRuntimeFileFixture, IoUringRegisteredBufferReadsAndWritesAtOffset)
 
     std::atomic<int> completed{0};
     std::atomic<char> byte_read{0};
-    ASSERT_TRUE(UringIoRuntime::start_task<UringFixedBufferFileTask>(
-        file.get(),
-        &completed,
-        &byte_read));
+    ASSERT_TRUE(
+        UringIoRuntime::start_task<UringFixedBufferFileTask>(file.get(), &completed, &byte_read));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(byte_read.load(std::memory_order_acquire), 'B');
 
@@ -42,10 +40,7 @@ TEST_F(UringIoRuntimeFileFixture, IoUringFixedFileWritesFsyncsAndReadsAtOffset) 
 
     std::atomic<int> completed{0};
     std::atomic<char> byte_read{0};
-    ASSERT_TRUE(UringIoRuntime::start_task<UringFixedFileTask>(
-        file.get(),
-        &completed,
-        &byte_read));
+    ASSERT_TRUE(UringIoRuntime::start_task<UringFixedFileTask>(file.get(), &completed, &byte_read));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(byte_read.load(std::memory_order_acquire), 'F');
 
@@ -78,15 +73,11 @@ TEST_F(UringIoRuntimeFileFixture, IoUringFixedFileTableUpdatesRegisteredSlot) {
 
     std::atomic<int> completed{0};
     std::atomic<int> packed_read{0};
-    ASSERT_TRUE(UringIoRuntime::start_task<UringFixedFileUpdateTask>(
-        first.get(),
-        second.get(),
-        &completed,
-        &packed_read));
+    ASSERT_TRUE(UringIoRuntime::start_task<UringFixedFileUpdateTask>(first.get(), second.get(),
+                                                                     &completed, &packed_read));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
-    EXPECT_EQ(
-        packed_read.load(std::memory_order_acquire),
-        (static_cast<int>('1') << 8) | static_cast<int>('2'));
+    EXPECT_EQ(packed_read.load(std::memory_order_acquire),
+              (static_cast<int>('1') << 8) | static_cast<int>('2'));
 
     first.reset();
     second.reset();
@@ -112,11 +103,8 @@ TEST_F(UringIoRuntimeFileFixture, IoUringOpenAtDirectInstallsFixedFileSlot) {
     std::atomic<int> completed{0};
     std::atomic<int> error{0};
     std::atomic<char> byte_read{0};
-    ASSERT_TRUE(UringIoRuntime::start_task<UringOpenAtDirectFileTask>(
-        path,
-        &completed,
-        &error,
-        &byte_read));
+    ASSERT_TRUE(UringIoRuntime::start_task<UringOpenAtDirectFileTask>(path, &completed, &error,
+                                                                      &byte_read));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
 
     const int direct_error = error.load(std::memory_order_acquire);

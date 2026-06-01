@@ -5,12 +5,8 @@
 namespace af {
 
 template <typename TaskT>
-[[nodiscard]] IoStatus io_wait_eventfd(
-    TaskT& task,
-    typename TaskT::Thread thread,
-    int fd,
-    std::uint64_t* value,
-    IoOpState& state) noexcept {
+[[nodiscard]] IoStatus io_wait_eventfd(TaskT &task, typename TaskT::Thread thread, int fd,
+                                       std::uint64_t *value, IoOpState &state) noexcept {
     if (detail::cancelled_wait_ready(state)) [[unlikely]] {
         return detail::consume_cancelled_wait(state);
     }
@@ -50,12 +46,8 @@ template <typename TaskT>
 }
 
 template <typename TaskT>
-[[nodiscard]] IoStatus io_wait_timerfd(
-    TaskT& task,
-    typename TaskT::Thread thread,
-    int fd,
-    std::uint64_t* expirations,
-    IoOpState& state) noexcept {
+[[nodiscard]] IoStatus io_wait_timerfd(TaskT &task, typename TaskT::Thread thread, int fd,
+                                       std::uint64_t *expirations, IoOpState &state) noexcept {
     if (detail::cancelled_wait_ready(state)) [[unlikely]] {
         return detail::consume_cancelled_wait(state);
     }

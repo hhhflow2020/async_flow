@@ -16,8 +16,8 @@ struct PipePair {
     af::UniqueFd write{};
 };
 
-bool write_fd_all(int fd, const void* data, std::size_t size) {
-    const auto* bytes = static_cast<const char*>(data);
+bool write_fd_all(int fd, const void *data, std::size_t size) {
+    const auto *bytes = static_cast<const char *>(data);
     std::size_t offset = 0;
     while (offset < size) {
         const ssize_t n = ::write(fd, bytes + offset, size - offset);
@@ -33,12 +33,8 @@ bool write_fd_all(int fd, const void* data, std::size_t size) {
     return true;
 }
 
-bool create_temp_file_with_payload(
-    af::UniqueFd& file,
-    const char* prefix,
-    const void* payload,
-    std::size_t payload_size,
-    bool rewind_to_start = true) {
+bool create_temp_file_with_payload(af::UniqueFd &file, const char *prefix, const void *payload,
+                                   std::size_t payload_size, bool rewind_to_start = true) {
     char path[128]{};
     const int written = std::snprintf(path, sizeof(path), "/tmp/%s-XXXXXX", prefix);
     if (written < 0 || static_cast<std::size_t>(written) >= sizeof(path)) {
@@ -56,7 +52,7 @@ bool create_temp_file_with_payload(
     return !rewind_to_start || ::lseek(file.get(), 0, SEEK_SET) == 0;
 }
 
-bool create_stream_socket_pair(StreamSocketPair& sockets) {
+bool create_stream_socket_pair(StreamSocketPair &sockets) {
     sockets = StreamSocketPair{};
     int fds[2]{-1, -1};
     if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds) != 0) {
@@ -67,11 +63,11 @@ bool create_stream_socket_pair(StreamSocketPair& sockets) {
     return true;
 }
 
-bool create_blocked_stream_socket_pair(StreamSocketPair& sockets) {
+bool create_blocked_stream_socket_pair(StreamSocketPair &sockets) {
     return create_stream_socket_pair(sockets) && fill_until_blocked(sockets.first.get());
 }
 
-bool create_blocked_tcp_connection(BlockingTcpConnection& connection) {
+bool create_blocked_tcp_connection(BlockingTcpConnection &connection) {
     connection = BlockingTcpConnection{};
 
     int listener = -1;
@@ -87,7 +83,7 @@ bool create_blocked_tcp_connection(BlockingTcpConnection& connection) {
         return false;
     }
     const int rc =
-        ::connect(connection.client.get(), reinterpret_cast<sockaddr*>(&address), address_size);
+        ::connect(connection.client.get(), reinterpret_cast<sockaddr *>(&address), address_size);
     if (rc != 0 && errno != EINPROGRESS) {
         return false;
     }
@@ -98,18 +94,14 @@ bool create_blocked_tcp_connection(BlockingTcpConnection& connection) {
     }
 
     int send_buffer = 4096;
-    if (::setsockopt(
-            connection.server.get(),
-            SOL_SOCKET,
-            SO_SNDBUF,
-            &send_buffer,
-            static_cast<socklen_t>(sizeof(send_buffer))) != 0) {
+    if (::setsockopt(connection.server.get(), SOL_SOCKET, SO_SNDBUF, &send_buffer,
+                     static_cast<socklen_t>(sizeof(send_buffer))) != 0) {
         return false;
     }
     return fill_until_blocked(connection.server.get());
 }
 
-bool create_pipe_pair(PipePair& pipe) {
+bool create_pipe_pair(PipePair &pipe) {
     pipe = PipePair{};
     int fds[2]{-1, -1};
     if (::pipe2(fds, O_NONBLOCK | O_CLOEXEC) != 0) {

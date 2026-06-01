@@ -5,11 +5,7 @@ public:
     explicit UringBatchedFileWriteTask(UringIoTaskBase::FactoryToken token)
         : UringIoTaskBase(token) {}
 
-    bool do_it(
-        int fd,
-        std::uint64_t offset,
-        char value,
-        std::atomic<int>* completed) {
+    bool do_it(int fd, std::uint64_t offset, char value, std::atomic<int> *completed) {
         file_.reset(IoTestThread::IO_0, fd);
         offset_ = offset;
         value_ = value;
@@ -34,5 +30,5 @@ private:
     std::uint64_t offset_{0};
     char value_{0};
     af::IoOpState write_{};
-    std::atomic<int>* completed_{nullptr};
+    std::atomic<int> *completed_{nullptr};
 };

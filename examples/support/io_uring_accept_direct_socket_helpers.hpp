@@ -14,12 +14,12 @@ namespace io_uring_accept_direct_example {
 [[nodiscard]] inline bool unsupported_direct_accept_error(int error) noexcept {
     return error == EINVAL || error == EBADF || error == ENOSYS || error == ENXIO
 #ifdef EOPNOTSUPP
-        || error == EOPNOTSUPP
+           || error == EOPNOTSUPP
 #endif
         ;
 }
 
-inline bool create_loopback_listener(af::UniqueFd& listener, sockaddr_in& address) {
+inline bool create_loopback_listener(af::UniqueFd &listener, sockaddr_in &address) {
     listener.reset(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
     if (!listener) {
         return false;
@@ -32,16 +32,17 @@ inline bool create_loopback_listener(af::UniqueFd& listener, sockaddr_in& addres
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     address.sin_port = 0;
-    if (::bind(listener.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 ||
+    if (::bind(listener.get(), reinterpret_cast<sockaddr *>(&address), sizeof(address)) != 0 ||
         ::listen(listener.get(), 16) != 0) {
         return false;
     }
 
     socklen_t address_size = sizeof(address);
-    return ::getsockname(listener.get(), reinterpret_cast<sockaddr*>(&address), &address_size) == 0;
+    return ::getsockname(listener.get(), reinterpret_cast<sockaddr *>(&address), &address_size) ==
+           0;
 }
 
-inline bool write_exact_until(int fd, const char* input, std::size_t size) {
+inline bool write_exact_until(int fd, const char *input, std::size_t size) {
     std::size_t offset = 0;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (offset < size) {
@@ -64,7 +65,7 @@ inline bool write_exact_until(int fd, const char* input, std::size_t size) {
     return true;
 }
 
-inline bool read_exact_until(int fd, char* output, std::size_t size) {
+inline bool read_exact_until(int fd, char *output, std::size_t size) {
     std::size_t offset = 0;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (offset < size) {

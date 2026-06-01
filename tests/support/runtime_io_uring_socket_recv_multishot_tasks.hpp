@@ -3,37 +3,17 @@
 #if defined(__linux__)
 class UringRecvMultishotTask final : public UringIoTaskBase {
 public:
-    explicit UringRecvMultishotTask(UringIoTaskBase::FactoryToken token)
-        : UringIoTaskBase(token) {}
+    explicit UringRecvMultishotTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
 
-    bool do_it(
-        int fd,
-        int target_reads,
-        std::atomic<int>* armed,
-        std::atomic<int>* completed,
-        std::atomic<int>* read_count,
-        std::atomic<int>* packed_read,
-        std::atomic<int>* error) {
-        return do_it(
-            fd,
-            target_reads,
-            armed,
-            completed,
-            read_count,
-            packed_read,
-            error,
-            false);
+    bool do_it(int fd, int target_reads, std::atomic<int> *armed, std::atomic<int> *completed,
+               std::atomic<int> *read_count, std::atomic<int> *packed_read,
+               std::atomic<int> *error) {
+        return do_it(fd, target_reads, armed, completed, read_count, packed_read, error, false);
     }
 
-    bool do_it(
-        int fd,
-        int target_reads,
-        std::atomic<int>* armed,
-        std::atomic<int>* completed,
-        std::atomic<int>* read_count,
-        std::atomic<int>* packed_read,
-        std::atomic<int>* error,
-        bool datagram) {
+    bool do_it(int fd, int target_reads, std::atomic<int> *armed, std::atomic<int> *completed,
+               std::atomic<int> *read_count, std::atomic<int> *packed_read, std::atomic<int> *error,
+               bool datagram) {
         stream_.reset(IoTestThread::IO_0, fd);
         datagram_.reset(IoTestThread::IO_0, fd);
         target_reads_ = target_reads;
@@ -84,11 +64,7 @@ private:
 
         int register_error = 0;
         if (!UringIoRuntime::io_register_provided_buffer_ring(
-                IoTestThread::IO_0,
-                ring_.ring(),
-                ring_.entries(),
-                buffer_group,
-                &register_error)) {
+                IoTestThread::IO_0, ring_.ring(), ring_.entries(), buffer_group, &register_error)) {
             return complete(register_error == 0 ? EIO : register_error);
         }
         registered_ = true;
@@ -100,9 +76,7 @@ private:
         if (registered_) {
             int unregister_error = 0;
             if (!UringIoRuntime::io_unregister_provided_buffer_ring(
-                    IoTestThread::IO_0,
-                    buffer_group,
-                    &unregister_error)) {
+                    IoTestThread::IO_0, buffer_group, &unregister_error)) {
                 return complete(unregister_error == 0 ? EIO : unregister_error);
             }
             registered_ = false;
@@ -113,10 +87,8 @@ private:
     af::TaskResult complete(int error) {
         if (registered_) {
             int unregister_error = 0;
-            if (UringIoRuntime::io_unregister_provided_buffer_ring(
-                    IoTestThread::IO_0,
-                    buffer_group,
-                    &unregister_error)) {
+            if (UringIoRuntime::io_unregister_provided_buffer_ring(IoTestThread::IO_0, buffer_group,
+                                                                   &unregister_error)) {
                 registered_ = false;
             }
         }
@@ -127,9 +99,9 @@ private:
 
     af::TaskResult recv_one() {
         std::uint16_t buffer_id = 0;
-        const af::IoStatus status = datagram_mode_
-            ? datagram_.recv_multishot(*this, buffer_group, &buffer_id, recv_)
-            : stream_.recv_multishot(*this, buffer_group, &buffer_id, recv_);
+        const af::IoStatus status =
+            datagram_mode_ ? datagram_.recv_multishot(*this, buffer_group, &buffer_id, recv_)
+                           : stream_.recv_multishot(*this, buffer_group, &buffer_id, recv_);
         if (status.pending()) {
             if (!armed_once_) {
                 armed_once_ = true;
@@ -146,14 +118,12 @@ private:
 
         const int previous = read_count_->fetch_add(1, std::memory_order_acq_rel);
         const int shifted = previous == 0 ? 8 : 0;
-        packed_read_->fetch_or(
-            static_cast<int>(static_cast<unsigned char>(buffers_[buffer_id])) << shifted,
-            std::memory_order_acq_rel);
+        packed_read_->fetch_or(static_cast<int>(static_cast<unsigned char>(buffers_[buffer_id]))
+                                   << shifted,
+                               std::memory_order_acq_rel);
 
-        const af::IoProvidedBuffer buffer{
-            &buffers_[buffer_id],
-            sizeof(buffers_[buffer_id]),
-            buffer_id};
+        const af::IoProvidedBuffer buffer{&buffers_[buffer_id], sizeof(buffers_[buffer_id]),
+                                          buffer_id};
         int add_error = 0;
         if (!ring_.add(&buffer, 1, add_error)) {
             return stop_recv(add_error == 0 ? EIO : add_error);
@@ -176,9 +146,9 @@ private:
 
     af::TaskResult finish_cancel() {
         std::uint16_t ignored = 0;
-        const af::IoStatus status = datagram_mode_
-            ? datagram_.recv_multishot(*this, buffer_group, &ignored, recv_)
-            : stream_.recv_multishot(*this, buffer_group, &ignored, recv_);
+        const af::IoStatus status =
+            datagram_mode_ ? datagram_.recv_multishot(*this, buffer_group, &ignored, recv_)
+                           : stream_.recv_multishot(*this, buffer_group, &ignored, recv_);
         if (status.pending()) {
             return pending();
         }
@@ -215,10 +185,10 @@ private:
     bool armed_once_{false};
     bool registered_{false};
     af::IoOpState recv_{};
-    std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* read_count_{nullptr};
-    std::atomic<int>* packed_read_{nullptr};
-    std::atomic<int>* error_{nullptr};
+    std::atomic<int> *armed_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *read_count_{nullptr};
+    std::atomic<int> *packed_read_{nullptr};
+    std::atomic<int> *error_{nullptr};
 };
 #endif

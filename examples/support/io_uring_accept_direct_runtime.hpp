@@ -43,7 +43,7 @@ struct DirectAcceptRuntimeTraits {
 using direct_accept_async = af::AsyncRuntime<DirectAcceptRuntimeTraits>;
 using DirectAcceptTask = direct_accept_async::Task;
 
-inline bool wait_until_armed_or_error(std::atomic<int>& armed, std::atomic<int>& error) {
+inline bool wait_until_armed_or_error(std::atomic<int> &armed, std::atomic<int> &error) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (armed.load(std::memory_order_acquire) == 0 &&
            error.load(std::memory_order_acquire) == 0) {

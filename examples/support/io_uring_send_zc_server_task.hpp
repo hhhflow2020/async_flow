@@ -14,7 +14,7 @@ class SendZcServerTask final : public SendZcTaskBase {
 public:
     explicit SendZcServerTask(SendZcTaskBase::FactoryToken token) : SendZcTaskBase(token) {}
 
-    bool do_it(int listener_fd, SendZcServerResult* result) {
+    bool do_it(int listener_fd, SendZcServerResult *result) {
         if (listener_fd < 0 || result == nullptr) {
             return false;
         }
@@ -40,12 +40,8 @@ private:
     }
 
     af::TaskResult accept_client() {
-        const af::IoStatus status = listener_.accept_some(
-            *this,
-            nullptr,
-            nullptr,
-            &accepted_fd_,
-            accept_);
+        const af::IoStatus status =
+            listener_.accept_some(*this, nullptr, nullptr, &accepted_fd_, accept_);
         if (status.pending()) {
             return pending();
         }
@@ -101,7 +97,7 @@ private:
     std::size_t sent_{0};
     af::IoOpState accept_{};
     af::IoOpState send_{};
-    SendZcServerResult* result_{nullptr};
+    SendZcServerResult *result_{nullptr};
 };
 
 } // namespace io_uring_send_zc_example

@@ -4,12 +4,8 @@ class UdpRecvTask final : public IoTaskBase {
 public:
     explicit UdpRecvTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(
-        int fd,
-        std::atomic<int>* armed,
-        std::atomic<int>* completed,
-        std::atomic<char>* byte_read,
-        std::size_t expected_bytes = 1U) {
+    bool do_it(int fd, std::atomic<int> *armed, std::atomic<int> *completed,
+               std::atomic<char> *byte_read, std::size_t expected_bytes = 1U) {
         socket_.reset(IoTestThread::IO_0, fd);
         armed_ = armed;
         completed_ = completed;
@@ -21,13 +17,9 @@ public:
 private:
     af::TaskResult run() override {
         peer_size_ = sizeof(peer_);
-        const af::IoStatus status = socket_.recv_from_some(
-            *this,
-            &value_,
-            sizeof(value_),
-            reinterpret_cast<sockaddr*>(&peer_),
-            &peer_size_,
-            recv_);
+        const af::IoStatus status =
+            socket_.recv_from_some(*this, &value_, sizeof(value_),
+                                   reinterpret_cast<sockaddr *>(&peer_), &peer_size_, recv_);
         if (status.pending()) {
             armed_->fetch_add(1, std::memory_order_release);
             return pending();
@@ -48,22 +40,17 @@ private:
     sockaddr_storage peer_{};
     socklen_t peer_size_{sizeof(peer_)};
     af::IoOpState recv_{};
-    std::atomic<int>* armed_{nullptr};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<char>* byte_read_{nullptr};
+    std::atomic<int> *armed_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<char> *byte_read_{nullptr};
 };
 
 class UdpSendToTask final : public IoTaskBase {
 public:
     explicit UdpSendToTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(
-        int fd,
-        sockaddr_in address,
-        socklen_t address_size,
-        char value,
-        std::atomic<int>* completed,
-        std::atomic<int>* bytes_sent) {
+    bool do_it(int fd, sockaddr_in address, socklen_t address_size, char value,
+               std::atomic<int> *completed, std::atomic<int> *bytes_sent) {
         socket_.reset(IoTestThread::IO_0, fd);
         address_ = address;
         address_size_ = address_size;
@@ -76,12 +63,8 @@ public:
 private:
     af::TaskResult run() override {
         const af::IoStatus status = socket_.send_to_some(
-            *this,
-            &value_,
-            sizeof(value_),
-            reinterpret_cast<const sockaddr*>(&address_),
-            address_size_,
-            send_);
+            *this, &value_, sizeof(value_), reinterpret_cast<const sockaddr *>(&address_),
+            address_size_, send_);
         if (status.pending()) {
             return pending();
         }
@@ -98,6 +81,6 @@ private:
     socklen_t address_size_{sizeof(address_)};
     char value_{0};
     af::IoOpState send_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<int>* bytes_sent_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *bytes_sent_{nullptr};
 };

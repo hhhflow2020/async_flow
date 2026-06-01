@@ -18,7 +18,7 @@ namespace io_socket_lifecycle_example {
     return type;
 }
 
-[[nodiscard]] inline bool apply_lifecycle_socket_flags(int fd, int& error) noexcept {
+[[nodiscard]] inline bool apply_lifecycle_socket_flags(int fd, int &error) noexcept {
     error = 0;
 #if !defined(SOCK_NONBLOCK)
     const int status_flags = ::fcntl(fd, F_GETFL, 0);

@@ -4,12 +4,8 @@ class SplicePipeTask final : public IoTaskBase {
 public:
     explicit SplicePipeTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(
-        int input_fd,
-        int output_fd,
-        std::size_t total_size,
-        std::atomic<int>* completed,
-        std::atomic<std::size_t>* bytes_spliced) {
+    bool do_it(int input_fd, int output_fd, std::size_t total_size, std::atomic<int> *completed,
+               std::atomic<std::size_t> *bytes_spliced) {
         input_fd_ = input_fd;
         output_fd_ = output_fd;
         total_size_ = total_size;
@@ -28,16 +24,9 @@ private:
             completed_->fetch_add(1, std::memory_order_release);
             return done();
         }
-        const af::IoStatus status = af::io_splice_some(
-            *this,
-            IoTestThread::IO_0,
-            input_fd_,
-            nullptr,
-            output_fd_,
-            nullptr,
-            total_size_ - spliced_,
-            SPLICE_F_NONBLOCK,
-            splice_);
+        const af::IoStatus status =
+            af::io_splice_some(*this, IoTestThread::IO_0, input_fd_, nullptr, output_fd_, nullptr,
+                               total_size_ - spliced_, SPLICE_F_NONBLOCK, splice_);
         if (status.pending()) {
             return pending();
         }
@@ -54,6 +43,6 @@ private:
     std::size_t total_size_{0};
     std::size_t spliced_{0};
     af::IoOpState splice_{};
-    std::atomic<int>* completed_{nullptr};
-    std::atomic<std::size_t>* bytes_spliced_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<std::size_t> *bytes_spliced_{nullptr};
 };

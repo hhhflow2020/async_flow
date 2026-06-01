@@ -16,13 +16,8 @@ public:
     explicit UdpRecvmsgMultishotTask(UdpRecvmsgTaskBase::FactoryToken token)
         : UdpRecvmsgTaskBase(token) {}
 
-    bool do_it(
-        int fd,
-        in_port_t expected_port,
-        std::atomic<int>* armed,
-        int* packed_read,
-        int* peer_count,
-        std::atomic<int>* error) {
+    bool do_it(int fd, in_port_t expected_port, std::atomic<int> *armed, int *packed_read,
+               int *peer_count, std::atomic<int> *error) {
         socket_.reset(UdpRecvmsgThread::IO_0, fd);
         expected_port_ = expected_port;
         armed_ = armed;
@@ -58,9 +53,7 @@ private:
         if (registered_) {
             int unregister_error = 0;
             if (udp_recvmsg_async::io_unregister_provided_buffer_ring(
-                    UdpRecvmsgThread::IO_0,
-                    buffer_group,
-                    &unregister_error)) {
+                    UdpRecvmsgThread::IO_0, buffer_group, &unregister_error)) {
                 registered_ = false;
             }
         }
@@ -84,12 +77,9 @@ private:
         }
 
         int register_error = 0;
-        if (!udp_recvmsg_async::io_register_provided_buffer_ring(
-                UdpRecvmsgThread::IO_0,
-                ring_.ring(),
-                ring_.entries(),
-                buffer_group,
-                &register_error)) {
+        if (!udp_recvmsg_async::io_register_provided_buffer_ring(UdpRecvmsgThread::IO_0,
+                                                                 ring_.ring(), ring_.entries(),
+                                                                 buffer_group, &register_error)) {
             return complete(register_error == 0 ? EIO : register_error);
         }
         registered_ = true;
@@ -101,9 +91,7 @@ private:
         if (registered_) {
             int unregister_error = 0;
             if (!udp_recvmsg_async::io_unregister_provided_buffer_ring(
-                    UdpRecvmsgThread::IO_0,
-                    buffer_group,
-                    &unregister_error)) {
+                    UdpRecvmsgThread::IO_0, buffer_group, &unregister_error)) {
                 return complete(unregister_error == 0 ? EIO : unregister_error);
             }
             registered_ = false;
@@ -113,13 +101,8 @@ private:
 
     af::TaskResult recv_one() {
         std::uint16_t buffer_id = 0;
-        const af::IoStatus status = socket_.recv_from_multishot(
-            *this,
-            buffer_group,
-            name_capacity,
-            0,
-            &buffer_id,
-            recv_);
+        const af::IoStatus status =
+            socket_.recv_from_multishot(*this, buffer_group, name_capacity, 0, &buffer_id, recv_);
         if (status.pending()) {
             if (!armed_once_) {
                 armed_once_ = true;
@@ -136,30 +119,25 @@ private:
 
         af::IoRecvmsgMultishotView view{};
         int parse_error = 0;
-        if (!af::io_parse_recvmsg_multishot_buffer(
-                buffers_[buffer_id],
-                buffer_size,
-                status.bytes,
-                name_capacity,
-                0,
-                view,
-                parse_error)) {
+        if (!af::io_parse_recvmsg_multishot_buffer(buffers_[buffer_id], buffer_size, status.bytes,
+                                                   name_capacity, 0, view, parse_error)) {
             return stop_recv(parse_error == 0 ? EIO : parse_error);
         }
         if (view.name_size < sizeof(sockaddr_in) || view.payload_size != 1U) {
             return stop_recv(EIO);
         }
 
-        const auto* peer = reinterpret_cast<const sockaddr_in*>(
-            buffers_[buffer_id] + view.name_offset);
+        const auto *peer =
+            reinterpret_cast<const sockaddr_in *>(buffers_[buffer_id] + view.name_offset);
         if (peer->sin_family != AF_INET || peer->sin_port != expected_port_) {
             return stop_recv(EIO);
         }
         ++*peer_count_;
 
         const int shifted = received_ == 0 ? 8 : 0;
-        *packed_read_ |= static_cast<int>(
-            static_cast<unsigned char>(buffers_[buffer_id][view.payload_offset])) << shifted;
+        *packed_read_ |=
+            static_cast<int>(static_cast<unsigned char>(buffers_[buffer_id][view.payload_offset]))
+            << shifted;
         ++received_;
 
         const af::IoProvidedBuffer buffer{buffers_[buffer_id], buffer_size, buffer_id};
@@ -185,13 +163,8 @@ private:
 
     af::TaskResult finish_cancel() {
         std::uint16_t ignored = 0;
-        const af::IoStatus status = socket_.recv_from_multishot(
-            *this,
-            buffer_group,
-            name_capacity,
-            0,
-            &ignored,
-            recv_);
+        const af::IoStatus status =
+            socket_.recv_from_multishot(*this, buffer_group, name_capacity, 0, &ignored, recv_);
         if (status.pending()) {
             return pending();
         }
@@ -232,10 +205,10 @@ private:
     bool armed_once_{false};
     bool registered_{false};
     af::IoOpState recv_{};
-    std::atomic<int>* armed_{nullptr};
-    int* packed_read_{nullptr};
-    int* peer_count_{nullptr};
-    std::atomic<int>* error_{nullptr};
+    std::atomic<int> *armed_{nullptr};
+    int *packed_read_{nullptr};
+    int *peer_count_{nullptr};
+    std::atomic<int> *error_{nullptr};
 };
 
 } // namespace io_uring_udp_recvmsg_multishot_example
