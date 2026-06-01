@@ -82,6 +82,10 @@
                 return {detail::ScheduleAction::Deferred, state};
             }
 
+            if (state == TaskState::Done) {
+                return {detail::ScheduleAction::Deferred, state};
+            }
+
             AF_ASSERT(false && "task was scheduled after completion");
             return {detail::ScheduleAction::Rejected, state};
         }

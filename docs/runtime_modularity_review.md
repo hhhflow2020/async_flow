@@ -129,6 +129,7 @@ Resolved items:
 - Ready-source bits are hints, not correctness state. `pop_one()` now checks ready-source words, clears an empty source only after an SPSC pop miss, immediately rechecks that SPSC queue, and still has a bounded all-source SPSC fallback scan. This prevents lost/coalesced ready hints from stranding work while avoiding permanent scans of stale sticky bits.
 - A late owner-resume race was fixed in `BasicTask`. Running wake requests are now tagged with a run epoch, `Executor::execute()` uses a `Queued -> Starting -> Running` transition, and a post that races with `finish_pending()` can either defer to the owner or directly transition `Pending -> Queued` and enqueue the task. This prevents a stale `Running` observation from writing `requested_thread_` after the owner has already checked the slot.
 - The Running -> Pending boundary has direct stress coverage. `RuntimeStressTests.RunningToPendingWakeDoesNotStrandOwner` forces a waker on another runtime thread to post the owner while the owner is still Running and about to return Pending; the owner must resume and complete instead of hanging.
+- Running wake requests are now terminal-state safe. If a wake request arrives while the owner is Running but the owner returns `Done` or `Again` instead of `Pending`, `finish_done()` and `finish_again()` publish the terminal/queued state before consuming the request slot, treating that request as a Pending-only wake instead of a false debug assertion.
 - Scheduler and runtime stress fixtures are no longer concentrated in one source. Reusable scheduler state machines are split by repeat-hop, above-64 wide-hop, parallel owner-resume, and wait-helper fragments; lifecycle stress helpers live in `tests/support/runtime_lifecycle_stress_support.hpp`, and test cases are split by lifecycle, cross-thread, and parallel concerns.
 - `runtime_executor_core_state_fragment.hpp` is now the executor field-layout owner only. Queue-drain behavior lives in `runtime_executor_pop_fragment.hpp`, and finish/reschedule behavior lives in `runtime_executor_finish_fragment.hpp`. This keeps declaration order and cache placement in one file while separating behavior that changes scheduling state.
 - `runtime_executor_task_fragment.hpp` is now a 7-line umbrella. Ready-source/wake signaling, local queue push/pop, and execute/result dispatch live in `runtime_executor_ready_signal_fragment.hpp`, `runtime_executor_local_queue_fragment.hpp`, and `runtime_executor_execute_fragment.hpp`.
@@ -201,7 +202,7 @@ Current file-size snapshot after the pass:
 - `include/af/detail/basic_task_schedule_fragment.hpp`: 8 lines.
 - `include/af/detail/basic_task_schedule_constants_fragment.hpp`: 8 lines.
 - `include/af/detail/basic_task_schedule_state_fragment.hpp`: 52 lines.
-- `include/af/detail/basic_task_running_wake_fragment.hpp`: 88 lines.
+- `include/af/detail/basic_task_running_wake_fragment.hpp`: 92 lines.
 - `include/af/detail/basic_task_requested_thread_fragment.hpp`: 28 lines.
 - `include/af/detail/basic_task_storage_fragment.hpp`: 18 lines.
 - `include/af/detail/object_pool.hpp`: 38 lines.
@@ -213,7 +214,7 @@ Current file-size snapshot after the pass:
 - `tests/runtime_self_post_stress_tests.cpp`: 117 lines.
 - `tests/runtime_cross_thread_stress_tests.cpp`: 123 lines.
 - `tests/runtime_parallel_stress_tests.cpp`: 96 lines.
-- `tests/runtime_running_pending_stress_tests.cpp`: 80 lines.
+- `tests/runtime_running_pending_stress_tests.cpp`: 142 lines.
 - `tests/pool_tests.cpp`: 79 lines.
 - `tests/support/runtime_lifecycle_stress_support.hpp`: 109 lines.
 - `tests/support/runtime_scheduler_stress_support.hpp`: 22 lines.
@@ -222,6 +223,7 @@ Current file-size snapshot after the pass:
 - `tests/support/runtime_scheduler_stress_wide_hop_fragment.hpp`: 70 lines.
 - `tests/support/runtime_scheduler_stress_parallel_resume_fragment.hpp`: 112 lines.
 - `tests/support/runtime_scheduler_stress_running_pending_fragment.hpp`: 160 lines.
+- `tests/support/runtime_scheduler_stress_running_wake_terminal_fragment.hpp`: 149 lines.
 - `tests/support/runtime_scheduler_stress_wait_fragment.hpp`: 15 lines.
 
 Validation evidence for the final pass:
@@ -843,7 +845,7 @@ Additional validation after the `BasicTask` schedule split:
 - `basic_task_schedule_fragment.hpp` is now an 8-line umbrella:
   - `basic_task_schedule_constants_fragment.hpp`: 8 lines.
   - `basic_task_schedule_state_fragment.hpp`: 52 lines.
-  - `basic_task_running_wake_fragment.hpp`: 88 lines.
+  - `basic_task_running_wake_fragment.hpp`: 92 lines.
   - `basic_task_requested_thread_fragment.hpp`: 28 lines.
 - The split is structural: no `TaskState` transition, run-epoch handling, requested-thread atomic operation, memory ordering, queue routing, wake ordering, lock, or allocation behavior changed.
 - Local `git diff --check`: passed.
@@ -856,6 +858,26 @@ Additional validation after the `BasicTask` schedule split:
   - `BM_RuntimeIoThreadHop/8192` mean: 4.25 ms real, 1.930 M/s.
   - `BM_RuntimeParallelShards/128` mean: 0.503 ms real, 256.183 k/s.
   - `BM_RuntimeParallelShards/512` mean: 1.98 ms real, 260.199 k/s.
+
+Additional validation after the Running wake terminal-state fix:
+
+- `finish_done()` and `finish_again()` now publish `Done`/`Queued` before consuming the same-epoch requested-thread slot. This removes false debug assertions when a Running wake request is made but the owner does not return `Pending`.
+- `resolve_running_wake_request()` treats a same-epoch request that resolves after `Done` as deferred/no-op, because the request was observed while the task was Running and is only meaningful for a later `Pending` transition.
+- The fix does not add locks, allocations, queue hops, virtual dispatch, or changes to local/SPSC/MPSC topology, ready-source hints, wake notification, or cache-line-aligned executor state.
+- New stress coverage:
+  - `RuntimeStressTests.RunningWakeBeforeDoneIsBenign`.
+  - `RuntimeStressTests.RunningWakeBeforeAgainIsBenign`.
+- Local `git diff --check`: passed.
+- Remote clang Debug scheduler targeted tests: 8/8 passed.
+- Remote clang TSAN scheduler targeted tests: 8/8 passed, with no ThreadSanitizer report.
+- Remote clang TSAN full runtime test suite: 140 total, 137 passed, 3 skipped, with no ThreadSanitizer report.
+- Remote clang Release full runtime test suite: 140 total, 137 passed, 3 skipped, 0 failed.
+- Remote clang Release runtime benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+  - `BM_RuntimeExternalStart/8192` mean: 6.57 ms real, 1.251 M/s.
+  - `BM_RuntimeCrossThreadHop/8192` mean: 13.6 ms real, 603.135 k/s.
+  - `BM_RuntimeIoThreadHop/8192` mean: 4.22 ms real, 1.945 M/s.
+  - `BM_RuntimeParallelShards/128` mean: 0.486 ms real, 263.680 k/s.
+  - `BM_RuntimeParallelShards/512` mean: 1.83 ms real, 280.443 k/s.
 
 Additional validation after the generic io_uring SQE fill split:
 

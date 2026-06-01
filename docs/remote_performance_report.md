@@ -988,3 +988,43 @@ Interpretation:
 - This is a modularity split only. Registered-buffer lifecycle remains executor-thread-only, and unregistration still flushes pending submissions before rejecting active fixed-buffer operations.
 - The TSAN target covers registered/fixed-buffer IO plus above-64 scheduling, explicit same-thread local queue routing, cross-thread hop pressure, and the Running -> Pending wake boundary.
 - The benchmark canary does not show a gross runtime or helper-level fast-path regression from this structural split.
+
+## 2026-06-01 Running Wake Terminal-State Fix
+
+This run validates a scheduler correctness fix for wake requests that are made while a task is `Running` but the owner returns `Done` or `Again` instead of `Pending`.
+
+Changes under validation:
+
+- `finish_done()` now stores `TaskState::Done` before consuming the same-epoch requested-thread slot.
+- `finish_again()` now stores `TaskState::Queued` before consuming the same-epoch requested-thread slot.
+- `resolve_running_wake_request()` treats a same-epoch request that resolves after `Done` as deferred/no-op because the request was observed while the task was Running and only has scheduling meaning if the owner later becomes `Pending`.
+- The fix does not add locks, allocations, queue hops, virtual dispatch, or changes to local/SPSC/MPSC topology, ready-source hints, wake notification, or cache-line-aligned executor state.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Remote clang Debug scheduler targeted tests: 8/8 passed.
+- Remote clang TSAN scheduler targeted tests: 8/8 passed, no ThreadSanitizer report.
+- Remote clang TSAN full runtime suite: 140 total, 137 passed, 3 skipped, no ThreadSanitizer report.
+- Remote clang Release full runtime suite: 140 total, 137 passed, 3 skipped, 0 failed.
+
+New stress coverage:
+
+- `RuntimeStressTests.RunningWakeBeforeDoneIsBenign`.
+- `RuntimeStressTests.RunningWakeBeforeAgainIsBenign`.
+
+Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | CPU Mean | Throughput Mean |
+| --- | ---: | ---: | ---: |
+| `BM_RuntimeExternalStart/8192` | 6.57 ms | 6.56 ms | 1.251 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 13.6 ms | 4.61 ms | 603.135 k/s |
+| `BM_RuntimeIoThreadHop/8192` | 4.22 ms | 4.21 ms | 1.945 M/s |
+| `BM_RuntimeParallelShards/128` | 0.486 ms | 0.469 ms | 263.680 k/s |
+| `BM_RuntimeParallelShards/512` | 1.83 ms | 1.77 ms | 280.443 k/s |
+
+Interpretation:
+
+- The previous debug-only failure mode was a false invariant: a Running wake request can be real, but still become redundant if the owner completes or requeues itself instead of returning `Pending`.
+- Publishing the non-Running finish state before consuming the request slot narrows the late-request window and keeps the request slot from leaking into the next run epoch.
+- The benchmark canary stays within the existing noisy range for scheduler paths and does not show a gross regression from the correctness fix.
