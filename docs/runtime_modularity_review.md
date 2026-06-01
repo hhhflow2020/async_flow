@@ -123,6 +123,7 @@ Resolved items:
   - `runtime_external_post_gate_fragment.hpp`: external post admission, active-post release, and shutdown drain wait.
 - Runtime-thread self-post is now explicit. `ReadyQueueRoute` names the local-queue and SPSC enqueue routes, and `enqueue_ready_blocking_from_runtime_thread(source, target, task)` dispatches to `enqueue_local_from_runtime_thread_blocking()` when `source == target`, instead of hiding the local queue behind a generic enqueue helper.
 - The previous `thread_count <= 64` ready-source hint limit is gone. `ReadySourceSet<ThreadCount>` stores ready sources across cache-line-aligned 64-bit words and supports runtimes above 64 threads.
+- Runtime config now validates the raw `Traits::thread_count` before narrowing it to the runtime's 16-bit thread index type. This preserves above-64 support while rejecting impossible index counts instead of silently truncating them.
 - Ready-source bits are hints, not correctness state. `pop_one()` now checks ready-source words, clears an empty source only after an SPSC pop miss, immediately rechecks that SPSC queue, and still has a bounded all-source SPSC fallback scan. This prevents lost/coalesced ready hints from stranding work while avoiding permanent scans of stale sticky bits.
 - A late owner-resume race was fixed in `BasicTask`. Running wake requests are now tagged with a run epoch, `Executor::execute()` uses a `Queued -> Starting -> Running` transition, and a post that races with `finish_pending()` can either defer to the owner or directly transition `Pending -> Queued` and enqueue the task. This prevents a stale `Running` observation from writing `requested_thread_` after the owner has already checked the slot.
 - Scheduler and runtime stress fixtures are no longer concentrated in one source. Reusable scheduler state machines are split by repeat-hop, above-64 wide-hop, parallel owner-resume, and wait-helper fragments; lifecycle stress helpers live in `tests/support/runtime_lifecycle_stress_support.hpp`, and test cases are split by lifecycle, cross-thread, and parallel concerns.
@@ -133,6 +134,7 @@ Resolved items:
 Current file-size snapshot after the pass:
 
 - `include/af/async_runtime.hpp`: 239 lines.
+- `include/af/detail/runtime_public_config_fragment.hpp`: 67 lines.
 - `include/af/detail/runtime_dispatch_fragment.hpp`: 7 lines.
 - `include/af/detail/runtime_queue_topology_fragment.hpp`: 30 lines.
 - `include/af/detail/runtime_ready_enqueue_fragment.hpp`: 165 lines.
@@ -152,6 +154,7 @@ Current file-size snapshot after the pass:
 - `include/af/detail/basic_task_schedule_fragment.hpp`: 167 lines.
 - `include/af/detail/basic_task_storage_fragment.hpp`: 18 lines.
 - `tests/runtime_lifecycle_stress_tests.cpp`: 63 lines.
+- `tests/runtime_config_tests.cpp`: 30 lines.
 - `tests/runtime_self_post_stress_tests.cpp`: 117 lines.
 - `tests/runtime_cross_thread_stress_tests.cpp`: 123 lines.
 - `tests/runtime_parallel_stress_tests.cpp`: 96 lines.
@@ -481,6 +484,16 @@ Additional validation after the ready-source word cursor rotation:
   - `BM_RuntimeCrossThreadHop/8192` mean: 11.6 ms real, 709.526 k/s.
   - `BM_RuntimeIoThreadHop/8192` mean: 4.22 ms real, 1.940 M/s.
   - `BM_RuntimeParallelShards/128` mean: 0.541 ms real, 237.390 k/s.
+
+Additional validation after the thread-count config boundary fix:
+
+- `runtime_public_config_fragment.hpp` now checks `Traits::thread_count > 0` and `Traits::thread_count <= UINT16_MAX` before converting it to `std::uint16_t`. This avoids a silent wrap if a user provides a value outside the public thread-index representation.
+- `tests/runtime_config_tests.cpp` adds compile-time and runtime coverage for a 257-thread configuration. This explicitly verifies that the runtime config path is not capped at 64 threads.
+- The change does not alter queue topology, task scheduling, wake behavior, atomics, locks, or hot-path branch structure.
+- Local `git diff --check`: passed.
+- Remote clang Debug targeted config/scheduler tests: 5/5 passed.
+- Remote clang TSAN targeted config/scheduler tests: 5/5 passed, no ThreadSanitizer report.
+- Remote clang Release full runtime test suite: 136 total, 133 passed, 3 platform/kernel capability tests skipped, 0 failed.
 
 Remaining follow-up:
 

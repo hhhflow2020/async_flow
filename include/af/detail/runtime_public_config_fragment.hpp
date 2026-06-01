@@ -2,9 +2,14 @@
 #error "runtime_public_config_fragment.hpp is an AsyncRuntime implementation fragment"
 #endif
 
-    static constexpr std::uint16_t thread_count = Traits::thread_count;
+    static_assert(Traits::thread_count > 0, "AsyncRuntime requires at least one fixed thread");
+    static_assert(
+        static_cast<std::uint64_t>(Traits::thread_count) <=
+            std::numeric_limits<std::uint16_t>::max(),
+        "AsyncRuntime thread_count must fit in 16-bit thread indexes");
+    static constexpr std::uint16_t thread_count =
+        static_cast<std::uint16_t>(Traits::thread_count);
     static constexpr std::uint16_t invalid_thread_index = thread_count;
-    static_assert(thread_count > 0, "AsyncRuntime requires at least one fixed thread");
 
     static constexpr std::size_t spsc_queue_capacity = TraitConfig::spsc_queue_capacity;
     static constexpr std::size_t external_queue_capacity = TraitConfig::external_queue_capacity;

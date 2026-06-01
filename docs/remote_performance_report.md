@@ -584,3 +584,26 @@ Interpretation:
 - The rotation addresses the remaining multi-word ready-source scan bias without weakening the local-queue-vs-SPSC separation added in the previous pass.
 - TSAN and the above-64 scheduler stress coverage did not expose races or stranded work after adding the cursor.
 - The current benchmark canary is sufficient for gross regression detection. A future perf-counter run with 128+/256+ configured worker threads would be needed before making claims about large-thread-count cache and branch behavior.
+
+## 2026-06-01 Thread-Count Config Boundary Validation
+
+This run validates a configuration correctness fix for `AsyncRuntime<Traits>::thread_count`. The runtime now validates the raw trait value before narrowing it to the public 16-bit thread-index representation.
+
+Changes under validation:
+
+- `runtime_public_config_fragment.hpp` checks `Traits::thread_count > 0` before conversion.
+- The same fragment checks `Traits::thread_count <= UINT16_MAX` before conversion, preventing silent wraparound for impossible thread-index counts.
+- `tests/runtime_config_tests.cpp` adds compile-time and runtime coverage for a 257-thread runtime config, explicitly covering a value above 64.
+- The change does not alter queue topology, scheduler state transitions, atomics, locks, wake behavior, or benchmark hot paths.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2` Debug targeted config/scheduler tests: 5/5 passed.
+- Remote clang TSAN targeted config/scheduler tests: 5/5 passed, no ThreadSanitizer report.
+- Remote clang Release full runtime test suite: 136 total, 133 passed, 3 skipped, 0 failed.
+
+Interpretation:
+
+- The runtime remains explicitly capable of above-64 thread counts; the new 257-thread config test protects that API boundary.
+- The only new limit is the existing representation limit implied by `std::uint16_t` thread indexes. It is now an explicit compile-time error instead of silent truncation.

@@ -144,6 +144,7 @@ if(ASYNCFLOW_BUILD_TESTS)
     add_executable(
         asyncflow_runtime_tests
         tests/runtime_lifecycle_basic_tests.cpp
+        tests/runtime_config_tests.cpp
         tests/runtime_backpressure_tests.cpp
         tests/runtime_shutdown_policy_tests.cpp
         tests/runtime_io_setup_tests.cpp
