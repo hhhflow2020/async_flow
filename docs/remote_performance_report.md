@@ -327,3 +327,20 @@ Interpretation:
 
 - This pass changed only example support layout. Runtime scheduling, IO backend behavior, queue selection, memory ordering, and public APIs were unchanged.
 - The split separates the IO-thread accept/read/write server state machine from the logic-thread request processing task while preserving the explicit `rpc_async::post(RpcThread::IO_0, server_)` handoff.
+
+## 2026-06-01 io_uring Fixed-File Task Split Validation
+
+This run validates the example support split that turned `examples/support/io_uring_fixed_file_task.hpp` into a small task shell over flow, IO-operation, and registration/update fragments.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_io_uring_fixed_file_example` build: passed; local run reported `io_uring fixed file example is Linux-only`.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2` Debug `asyncflow_io_uring_fixed_file_example` build/run: passed with `io_uring backend unavailable`.
+- Remote clang TSAN `asyncflow_io_uring_fixed_file_example` build/run: passed with `io_uring backend unavailable` and no ThreadSanitizer report.
+- Remote clang Release `asyncflow_io_uring_fixed_file_example` build/run: passed with `io_uring backend unavailable`.
+
+Interpretation:
+
+- This pass changed only example support layout. Runtime scheduling, IO backend behavior, queue selection, memory ordering, and public APIs were unchanged.
+- The remote host/container combination did not expose the io_uring fixed-file backend path for this example, so this validates build/link/run and TSAN startup/teardown cleanliness rather than the registered-file data path itself.
