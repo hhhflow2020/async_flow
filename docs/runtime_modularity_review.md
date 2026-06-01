@@ -21,7 +21,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - The file IO test support has been split into boundary, normal read/write, fixed-resource, lifecycle/open, and filesystem operation fragments.
 - File IO boundary test support is now split further into plain file adapter boundary, registered fixed-buffer boundary, and fixed-file/direct-descriptor boundary fragments. The fixed-file/direct-descriptor path is further split into resource registration/direct-open, direct-accept, and fixed-file data transfer boundary tasks.
 - File IO read/write test support is now split further into basic offset read/write, vectored offset read/write, and current-offset state-machine fragments, with the previous read/write header kept as a small umbrella.
-- File IO open/lifecycle test support is now split further into batched write, openat round-trip, and full lifecycle state-machine task fragments, with the previous open/lifecycle header kept as a small umbrella.
+- File IO open/lifecycle test support is now split further into batched write, openat round-trip, and full lifecycle task fragments. The full lifecycle task is a small shell over flow, file-operation, and namespace-operation fragments, and the previous open/lifecycle header is kept as a small umbrella.
 - Filesystem boundary test support is now split into open/close, metadata/allocation, and namespace/openat2 operation-family fragments, with the previous filesystem boundary header kept as a small umbrella.
 - File IO filesystem operation test support is now split into a small task shell plus flow, data-operation, and namespace-operation fragments, preserving the single task object layout while separating operation-family logic.
 - Public IO adapter headers are now compatibility umbrellas: `io_socket.hpp`, `io_file.hpp`, and `io_adapters.hpp` include focused inline fragments for lifecycle, data transfer, fixed resources, file descriptors/fixed files, stream/listener, datagram, and event/timer adapters.
@@ -404,6 +404,19 @@ Additional validation after the io_uring stream recv multishot task split:
 - Remote clang TSAN `asyncflow_io_uring_recv_multishot_example` build/run: passed with `io_uring backend unavailable` and no ThreadSanitizer report.
 - Remote clang Release `asyncflow_io_uring_recv_multishot_example` build/run: passed with `io_uring backend unavailable`.
 
+Additional validation after the io_uring file lifecycle test support split:
+
+- `tests/support/runtime_io_file_lifecycle_tasks_fragment.hpp` is now a 63-line task shell.
+- `tests/support/runtime_io_file_lifecycle_task_flow_fragment.hpp` owns the state dispatcher.
+- `tests/support/runtime_io_file_lifecycle_task_file_ops_fragment.hpp` owns open, fallocate, write, fsync, read, and close handling.
+- `tests/support/runtime_io_file_lifecycle_task_namespace_ops_fragment.hpp` owns statx, rename, and unlink handling.
+- No runtime scheduling, IO backend, queue, memory-ordering, public API, or test assertion behavior changed in this pass; only test support ownership changed.
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_runtime_tests` build: passed; local targeted run reported `io_uring backend is Linux-only`.
+- Remote clang Debug `asyncflow_runtime_tests` targeted run: skipped by test logic with `io_uring backend unavailable`.
+- Remote clang TSAN `asyncflow_runtime_tests` targeted run: skipped by test logic with `io_uring backend unavailable` and no ThreadSanitizer report.
+- Remote clang Release `asyncflow_runtime_tests` targeted run: skipped by test logic with `io_uring backend unavailable`.
+
 Remaining follow-up:
 
 - Ready-source hints are now correct and bounded, but future benchmarking may justify a rotating ready-word cursor for very large `thread_count` values.
@@ -525,7 +538,7 @@ Current issue ledger:
 - P1: keep `runtime_executor_core_state_fragment.hpp` as the single executor state-layout owner unless a split explicitly preserves declaration order, alignment, and cache-line placement. Splitting state for aesthetics can silently introduce false sharing or make queue/cache layout audits harder.
 - P1: future changes must not append new operation families directly into `async_runtime.hpp`. New public methods should enter through the existing public IO/resource/lifecycle/parallel umbrellas, and new executor operations should enter through the matching backend submit/completion fragments.
 - P2: `include/af/detail/bounded_queues.hpp` still contains SPSC, MPSC, and MPMC bounded queues in one file. The implementation is performance-sensitive and cache-line aligned, so a split is acceptable only as a mechanical separation into queue-family headers with no layout or memory-order changes, followed by queue benchmarks.
-- P2: several test support files remain dense state-machine collections: stream sendfile/splice support, file lifecycle support, fixed-file read/write support, and io_uring multishot recv/recvmsg support. These should continue moving toward operation-family task fragments when touched.
+- P2: several test support files remain dense state-machine collections: stream sendfile/splice support, fixed-file read/write support, and io_uring multishot recv/recvmsg support. File lifecycle support has been reduced to a small shell over flow/file-operation/namespace-operation fragments. Remaining dense support files should continue moving toward operation-family task fragments when touched.
 - P2: several examples remain long because they combine protocol framing, socket IO, task state machines, and result reporting. The fixed-file round trip, file lifecycle, UDP recvmsg multishot, UDP recv multishot, stream recv multishot, and length-prefixed RPC client/server paths have been reduced to focused fragments; the biggest current examples are now older readiness examples and remaining setup-heavy example entry points. Prefer protocol/helper headers plus small task headers for future edits.
 - P2: `tests/utility_tests.cpp` is now one of the largest standalone tests. It should be split by utility domain if new utility coverage is added.
 
