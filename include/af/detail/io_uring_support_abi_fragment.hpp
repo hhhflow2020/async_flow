@@ -1,0 +1,63 @@
+#if !defined(AF_IO_URING_SUPPORT_FRAGMENT_INCLUDE)
+#error "io_uring_support_abi_fragment.hpp is an io_uring_support implementation fragment"
+#endif
+
+#ifndef IORING_CQE_F_MORE
+#define IORING_CQE_F_MORE (1U << 1U)
+#endif
+
+#ifndef IORING_CQE_F_BUFFER
+#define IORING_CQE_F_BUFFER (1U << 0U)
+#endif
+
+#ifndef IOSQE_BUFFER_SELECT
+#define IOSQE_BUFFER_SELECT (1U << 5U)
+#endif
+
+#ifndef IORING_ACCEPT_MULTISHOT
+#define IORING_ACCEPT_MULTISHOT (1U << 0U)
+#endif
+
+#ifndef IORING_RECV_MULTISHOT
+#define IORING_RECV_MULTISHOT (1U << 1U)
+#endif
+
+#ifndef IORING_REGISTER_PBUF_RING
+#define IORING_REGISTER_PBUF_RING 22U
+#endif
+
+#ifndef IORING_UNREGISTER_PBUF_RING
+#define IORING_UNREGISTER_PBUF_RING 23U
+#endif
+
+#ifndef IORING_CQE_F_NOTIF
+#define IORING_CQE_F_NOTIF (1U << 3U)
+#endif
+
+#ifndef IORING_SETUP_SQPOLL
+#define IORING_SETUP_SQPOLL (1U << 1U)
+#endif
+
+#ifndef IORING_SETUP_SQ_AFF
+#define IORING_SETUP_SQ_AFF (1U << 2U)
+#endif
+
+#ifndef IORING_SETUP_CQSIZE
+#define IORING_SETUP_CQSIZE (1U << 3U)
+#endif
+
+#ifndef IORING_SETUP_SUBMIT_ALL
+#define IORING_SETUP_SUBMIT_ALL (1U << 7U)
+#endif
+
+#ifndef IORING_SETUP_COOP_TASKRUN
+#define IORING_SETUP_COOP_TASKRUN (1U << 8U)
+#endif
+
+#ifndef IORING_SETUP_SINGLE_ISSUER
+#define IORING_SETUP_SINGLE_ISSUER (1U << 12U)
+#endif
+
+#ifndef IORING_SETUP_DEFER_TASKRUN
+#define IORING_SETUP_DEFER_TASKRUN (1U << 13U)
+#endif

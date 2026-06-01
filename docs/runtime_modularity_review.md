@@ -92,6 +92,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - The io_uring send zero-copy example is now split into runtime traits, listener setup, async accept/send_zc server task, async connect/read verification client task, and a thin executable entry point. The network path no longer uses main-thread blocking accept/read polling.
 - The IO adapter example is now split into POSIX socket setup helpers, stream adapter tasks, UDP adapter tasks, result types, and a thin executable entry point. Main no longer uses atomic readiness polling before writing to sockets; stream and UDP peer activity is driven by runtime tasks on the IO thread.
 - io_uring file-data submit wrappers are now split into basic read/write, timeout, fixed-file, fixed-buffer, vectored, and fsync fragments while staying inline in `AsyncRuntime::Executor`.
+- `include/af/detail/io_uring_support.hpp` is now a small Linux-only umbrella over ABI fallback definitions, opcode constants, support request/types, syscall/setup wrappers, and SQE fill helpers.
 - Native readiness backends now have a platform-dispatch include point: Linux uses an epoll fragment and macOS/BSD uses a kqueue fragment, while public `io_*` helpers continue to expose one API. This keeps OS-specific syscall code out of the generic executor loop and preserves header-only inlining.
 - `include/af/io_common.hpp` is now a small umbrella over focused common fragments: basic socket/error helpers, wait-state helpers, fixed-file vectored helpers, Linux eventfd/timerfd helpers, and deadline state.
 - `io_common_detail_state_fragment.hpp` is now a small implementation umbrella. Target-thread/socket-name helpers, readiness wait arming, readiness wait state, io_uring status normalization, and iovec validation now live in focused `io_common_*_fragment.hpp` files.
@@ -184,6 +185,12 @@ Current file-size snapshot after the pass:
 - `include/af/detail/runtime_executor_io_uring_generic_submit_sqe_filesystem_fragment.hpp`: 56 lines.
 - `include/af/detail/runtime_executor_io_uring_generic_submit_sqe_socket_fragment.hpp`: 49 lines.
 - `include/af/detail/runtime_executor_io_uring_generic_submit_sqe_buffer_fragment.hpp`: 22 lines.
+- `include/af/detail/io_uring_support.hpp`: 21 lines.
+- `include/af/detail/io_uring_support_abi_fragment.hpp`: 63 lines.
+- `include/af/detail/io_uring_support_opcode_fragment.hpp`: 16 lines.
+- `include/af/detail/io_uring_support_types_fragment.hpp`: 59 lines.
+- `include/af/detail/io_uring_support_syscall_fragment.hpp`: 51 lines.
+- `include/af/detail/io_uring_support_sqe_fragment.hpp`: 41 lines.
 - `include/af/detail/basic_task_fragment.hpp`: 20 lines.
 - `include/af/detail/basic_task_public_fragment.hpp`: 29 lines.
 - `include/af/detail/basic_task_protected_fragment.hpp`: 72 lines.
@@ -886,9 +893,33 @@ Additional validation after the provided-buffer resource split:
   - `BM_IoStreamAdapterZeroByteSend` mean: 0.627 ns real.
   - `BM_RuntimeExternalStart/8192` mean: 6.70 ms real, 1.224 M/s.
   - `BM_RuntimeCrossThreadHop/8192` mean: 13.5 ms real, 605.570 k/s.
-  - `BM_RuntimeIoThreadHop/8192` mean: 4.19 ms real, 1.954 M/s.
-  - `BM_RuntimeParallelShards/128` mean: 0.480 ms real, 267.212 k/s.
-  - `BM_RuntimeParallelShards/512` mean: 1.83 ms real, 280.493 k/s.
+- `BM_RuntimeIoThreadHop/8192` mean: 4.19 ms real, 1.954 M/s.
+- `BM_RuntimeParallelShards/128` mean: 0.480 ms real, 267.212 k/s.
+- `BM_RuntimeParallelShards/512` mean: 1.83 ms real, 280.493 k/s.
+
+Additional validation after the io_uring support split:
+
+- `io_uring_support.hpp` is now a 21-line Linux-only umbrella:
+  - `io_uring_support_abi_fragment.hpp`: 63 lines.
+  - `io_uring_support_opcode_fragment.hpp`: 16 lines.
+  - `io_uring_support_types_fragment.hpp`: 59 lines.
+  - `io_uring_support_syscall_fragment.hpp`: 51 lines.
+  - `io_uring_support_sqe_fragment.hpp`: 41 lines.
+- The split is structural: no fallback macro value, opcode constant, request struct layout, syscall argument, setup flag handling, SQE field value, branch, lock, allocation, or memory ordering changed.
+- Local `git diff --check`: passed.
+- Remote clang Debug full runtime test suite: 138 total, 135 passed, 3 skipped, 0 failed.
+- Remote clang TSAN IO/io_uring/stress targeted tests: 96 total, 94 passed, 2 skipped, with no ThreadSanitizer report.
+- Remote clang Release full runtime test suite: 138 total, 135 passed, 3 skipped, 0 failed.
+- Remote clang Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+  - `BM_IoDatagramAdapterZeroByteRecv` mean: 0.646 ns real.
+  - `BM_IoFileAdapterZeroByteRead` mean: 0.628 ns real.
+  - `BM_IoTimeoutInvalidDelay` mean: 0.837 ns real.
+  - `BM_IoStreamAdapterZeroByteSend` mean: 0.627 ns real.
+  - `BM_RuntimeExternalStart/8192` mean: 6.85 ms real, 1.204 M/s.
+  - `BM_RuntimeCrossThreadHop/8192` mean: 12.7 ms real, 650.818 k/s.
+  - `BM_RuntimeIoThreadHop/8192` mean: 4.21 ms real, 1.946 M/s.
+  - `BM_RuntimeParallelShards/128` mean: 0.483 ms real, 265.762 k/s.
+  - `BM_RuntimeParallelShards/512` mean: 1.98 ms real, 259.583 k/s.
 
 ### Latest Test/Example Scan: Long Files Remain Mostly In Fixtures
 
@@ -907,7 +938,7 @@ Recommendation:
 After splitting `IoFile`, the largest remaining files are mostly tests/examples. Runtime-facing candidates worth tracking:
 
 - `include/af/io_timeout.hpp`: now a small public umbrella. The deadline arbitration fragment remains intentionally larger than the status/wait fragments because it preserves the race ordering between IO completion, timeout completion, and cancel completion.
-- `include/af/detail/io_uring_support.hpp`: 216 lines. Mostly Linux ABI wrappers and setup structs; split only if new setup/resource capabilities are added.
+- Resolved after this scan: `include/af/detail/io_uring_support.hpp` is now a small umbrella over Linux io_uring ABI fallback definitions, opcode constants, request/types, syscall/setup wrappers, and SQE fill helpers.
 - `include/af/detail/basic_task_fragment.hpp`: now a small class shell over focused inline fragments. Task lifecycle remains inline and avoids ownership abstractions.
 - Resolved after this scan: `include/af/detail/io_common_detail_state_fragment.hpp` is now a small umbrella over focused IO common helper fragments.
 - Resolved after this scan: `include/af/detail/runtime_executor_io_uring_file_resource_fragment.hpp` is now a small umbrella over fixed-file table register, unregister, and update fragments.

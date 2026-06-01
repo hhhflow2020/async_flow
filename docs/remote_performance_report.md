@@ -905,3 +905,46 @@ Interpretation:
 - This is a modularity split only. The resource lifecycle remains executor-thread-only and the unregister path still flushes pending submissions before checking active operations.
 - The TSAN target covers provided-buffer multishot recv paths plus invalid/unavailable backend boundaries for stream, accept, fixed-buffer, and epoll fallback helpers.
 - The benchmark canary does not show a gross runtime or helper-level fast-path regression from this structural split.
+
+## 2026-06-01 io_uring Support Split Validation
+
+This run validates the structural split of the Linux `io_uring_support.hpp` helper on the requested remote Linux host with `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2`.
+
+Changes under validation:
+
+- `io_uring_support.hpp` is now a 21-line Linux-only umbrella.
+- `io_uring_support_abi_fragment.hpp` owns fallback macro definitions for older kernel headers.
+- `io_uring_support_opcode_fragment.hpp` owns opcode constants not guaranteed by the platform headers.
+- `io_uring_support_types_fragment.hpp` owns setup, message, address, registration, and SQE request structs.
+- `io_uring_support_syscall_fragment.hpp` owns raw `io_uring_*` syscall wrappers and setup parameter configuration.
+- `io_uring_support_sqe_fragment.hpp` owns generic buffer and fixed-file read/write SQE filling.
+- The split keeps all helpers inline; it does not change fallback macro values, opcode constants, struct layout, syscall arguments, setup flags, SQE field values, locks, allocations, branch shape, or memory ordering.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Remote clang Debug full runtime suite: 138 total, 135 passed, 3 skipped, 0 failed.
+- Remote clang TSAN IO/io_uring/stress targeted suite: 96 total, 94 passed, 2 skipped, no ThreadSanitizer report.
+- Remote clang Release full runtime suite: 138 total, 135 passed, 3 skipped, 0 failed.
+
+Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | CPU Mean | Throughput Mean |
+| --- | ---: | ---: | ---: |
+| `BM_IoDatagramAdapterZeroByteRecv` | 0.646 ns | 0.646 ns | n/a |
+| `BM_IoFileAdapterZeroByteRead` | 0.628 ns | 0.627 ns | n/a |
+| `BM_IoTimeoutInvalidDelay` | 0.837 ns | 0.836 ns | n/a |
+| `BM_IoStreamAdapterZeroByteSend` | 0.627 ns | 0.627 ns | n/a |
+| `BM_IoStreamAdapterZeroByteSendZc` | 0.629 ns | 0.629 ns | n/a |
+| `BM_IoFileAdapterZeroByteReadFixedAt` | 0.627 ns | 0.627 ns | n/a |
+| `BM_RuntimeExternalStart/8192` | 6.85 ms | 6.84 ms | 1.204 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 12.7 ms | 4.41 ms | 650.818 k/s |
+| `BM_RuntimeIoThreadHop/8192` | 4.21 ms | 4.20 ms | 1.946 M/s |
+| `BM_RuntimeParallelShards/128` | 0.483 ms | 0.464 ms | 265.762 k/s |
+| `BM_RuntimeParallelShards/512` | 1.98 ms | 1.90 ms | 259.583 k/s |
+
+Interpretation:
+
+- This is a modularity split only. The Linux io_uring ABI support remains platform-gated and header-only, while syscall/setup and SQE fill responsibilities are now independently auditable.
+- The TSAN target covers io_uring setup/config, epoll fallback, socket/file/multishot paths, StopImmediately pending-IO cleanup, above-64 thread scheduling, explicit same-thread local queue routing, and the Running -> Pending wake boundary.
+- The benchmark canary does not show a gross runtime or helper-level fast-path regression from this structural split.
