@@ -1392,3 +1392,36 @@ Interpretation:
 
 - This pass changes only declaration/definition placement. io_uring setup flags, mmap layout, SQ/CQ memory ordering, submission batching, completion result publication, cancel handling, direct-file cleanup, operation ownership, locks, atomics, allocations, and task wake behavior are unchanged.
 - `runtime_executor.hpp` dropped from 4209 lines to 3605 lines. Further executor work should target remaining real operation families, such as native readiness backend wait/cancel or public io_uring submit wrappers.
+
+## 2026-06-01 Executor Epoll Backend Implementation Split
+
+This run validates the follow-up split of Linux native readiness backend setup, wake, polling, wait registration, and cancel into a normal implementation header.
+
+Changes under validation:
+
+- `runtime_executor.hpp` now keeps the Linux epoll native readiness backend as declarations in the executor class body.
+- `runtime_executor_epoll_backend.hpp` owns the class-out-of-line template definitions for `native_io_backend_available()`, `notify_native_io_backend()`, `init_native_io_backend()`, `close_native_io_backend()`, `clear_io_waits()`, `poll_native_io()`, `register_native_io_wait()`, and `cancel_native_io_wait()`.
+- The split keeps executor state/cache fields together in `runtime_executor.hpp`; it does not reintroduce class-body `#include` splicing.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed before this documentation update.
+- Local scan for `#include "af/detail/*fragment.hpp"` inside framework class/struct bodies: no matches.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.0` Debug `asyncflow_runtime_tests` build: passed.
+- Remote clang Debug full runtime suite under `--security-opt seccomp=unconfined`: 143 tests, 140 passed, 3 skipped, 0 failed.
+- Remote clang Release `asyncflow_runtime_tests` and `asyncflow_runtime_benchmarks` build: passed.
+- Remote clang Release full runtime suite under `--security-opt seccomp=unconfined`: 143 tests, 140 passed, 3 skipped, 0 failed.
+
+Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | Throughput Mean |
+| --- | ---: | ---: |
+| `BM_RuntimeExternalStart/8192` | 6.62 ms | 1.242 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 12.5 ms | 656.049 k/s |
+| `BM_RuntimeIoThreadHop/8192` | 4.28 ms | 1.913 M/s |
+| `BM_RuntimeParallelShards/128` | 0.477 ms | 268.526 k/s |
+
+Interpretation:
+
+- This pass changes only declaration/definition placement. epoll fd/eventfd setup, wake coalescing, one-shot wait registration, io_uring poll-wait fallback, cancel behavior, task wake behavior, locks, atomics, allocations, and ownership semantics are unchanged.
+- `runtime_executor.hpp` dropped from 3605 lines to 3356 lines. Further executor work should target remaining real operation families; kqueue should be handled separately on a platform where it can be compiled and tested directly.
