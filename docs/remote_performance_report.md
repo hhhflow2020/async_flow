@@ -670,3 +670,37 @@ Interpretation:
 
 - The change is a modularity split only. Lifecycle and wake behavior are now separately reviewable while preserving header-only inlining and the existing hot-path branch shape.
 - The targeted TSAN run covers the same high-risk wake paths: repeated cross-thread hops, above-64-thread ready-source words, owner resume under parallel shard bursts, the Running-to-Pending wake boundary, self-post local queue routing, shutdown, and epoll wake/cancel/timeout cases.
+
+## 2026-06-01 Public Parallel API Split Validation
+
+This run validates the structural split of `runtime_public_parallel_api_fragment.hpp` into focused public scheduling fragments.
+
+Changes under validation:
+
+- `runtime_public_parallel_api_fragment.hpp` is now a 7-line umbrella.
+- `runtime_public_parallel_shard_fragment.hpp` owns `shard_by()` and `split_by_shard()`.
+- `runtime_public_parallel_shards_fragment.hpp` owns `parallel_shards()` and `parallel_shards_ordered()` overloads.
+- `runtime_public_ordered_start_fragment.hpp` owns `start_ordered_task()` and `ordered_last_applied_batch_id()`.
+- The split keeps all templates inline inside `AsyncRuntime`; it does not move state fields, alter queue topology, change atomics, add locks, add allocations, or change public behavior.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2` Debug parallel/ordered/shutdown/stress targeted tests: 32/32 passed.
+- Remote clang TSAN parallel/ordered/shutdown/stress targeted tests: 32/32 passed, no ThreadSanitizer report.
+- Remote clang Release full runtime suite: 138 total, 135 passed, 3 skipped, 0 failed.
+
+Release runtime benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | CPU Mean | Throughput Mean |
+| --- | ---: | ---: | ---: |
+| `BM_RuntimeExternalStart/8192` | 7.37 ms | 7.36 ms | 1.117 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 13.9 ms | 4.67 ms | 592.463 k/s |
+| `BM_RuntimeIoThreadHop/8192` | 4.27 ms | 4.27 ms | 1.918 M/s |
+| `BM_RuntimeParallelShards/128` | 0.476 ms | 0.458 ms | 268.995 k/s |
+| `BM_RuntimeParallelShards/512` | 1.82 ms | 1.76 ms | 280.922 k/s |
+
+Interpretation:
+
+- The split separates data partitioning APIs from parallel owner-resume orchestration and ordered-start APIs without changing the scheduler state machine.
+- The TSAN target covers ordered batch/start flows, parallel shard owner resume, above-64 ready-source words, self-post local queue routing, shutdown behavior, and the Running-to-Pending wake boundary.

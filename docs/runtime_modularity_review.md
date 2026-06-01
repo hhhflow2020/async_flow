@@ -131,6 +131,7 @@ Resolved items:
 - `runtime_executor_core_state_fragment.hpp` is now the executor field-layout owner only. Queue-drain behavior lives in `runtime_executor_pop_fragment.hpp`, and finish/reschedule behavior lives in `runtime_executor_finish_fragment.hpp`. This keeps declaration order and cache placement in one file while separating behavior that changes scheduling state.
 - `runtime_executor_task_fragment.hpp` is now a 7-line umbrella. Ready-source/wake signaling, local queue push/pop, and execute/result dispatch live in `runtime_executor_ready_signal_fragment.hpp`, `runtime_executor_local_queue_fragment.hpp`, and `runtime_executor_execute_fragment.hpp`.
 - `runtime_executor_control_fragment.hpp` is now a 6-line umbrella over executor lifecycle and notify/wake control fragments. This keeps thread lifecycle and IO/native wake decisions separately auditable without changing executor state layout.
+- `runtime_public_parallel_api_fragment.hpp` is now a 7-line umbrella over shard splitting, parallel shard dispatch overloads, and ordered-start public APIs. The split keeps these public scheduling templates inline while separating data partitioning from owner-resume orchestration.
 - `basic_task_fragment.hpp` is now a 20-line class shell. Public task API, protected task helpers, lifetime reference handling, scheduling/wake state machine, and storage layout live in dedicated class-body fragments. Storage fields remain together in `basic_task_storage_fragment.hpp`.
 - `object_pool.hpp` is now a small shell over storage layout, slot acquire/release, and lifecycle fragments. The split preserves the TLS cache, cache-line slot sizing, MPMC free-list, and atomic block/hot-block fields.
 
@@ -153,6 +154,10 @@ Current file-size snapshot after the pass:
 - `include/af/detail/runtime_executor_control_fragment.hpp`: 6 lines.
 - `include/af/detail/runtime_executor_lifecycle_fragment.hpp`: 33 lines.
 - `include/af/detail/runtime_executor_notify_fragment.hpp`: 27 lines.
+- `include/af/detail/runtime_public_parallel_api_fragment.hpp`: 7 lines.
+- `include/af/detail/runtime_public_parallel_shard_fragment.hpp`: 44 lines.
+- `include/af/detail/runtime_public_parallel_shards_fragment.hpp`: 119 lines.
+- `include/af/detail/runtime_public_ordered_start_fragment.hpp`: 23 lines.
 - `include/af/detail/basic_task_fragment.hpp`: 20 lines.
 - `include/af/detail/basic_task_public_fragment.hpp`: 29 lines.
 - `include/af/detail/basic_task_protected_fragment.hpp`: 72 lines.
@@ -727,6 +732,24 @@ Additional validation after the executor lifecycle/notify split:
   - `BM_RuntimeCrossThreadHop/8192` mean: 12.6 ms real, 655.313 k/s.
   - `BM_RuntimeIoThreadHop/8192` mean: 4.19 ms real, 1.957 M/s.
   - `BM_RuntimeParallelShards/128` mean: 0.525 ms real, 246.320 k/s.
+
+Additional validation after the public parallel API split:
+
+- `runtime_public_parallel_api_fragment.hpp` is now a 7-line umbrella:
+  - `runtime_public_parallel_shard_fragment.hpp`: 44 lines.
+  - `runtime_public_parallel_shards_fragment.hpp`: 119 lines.
+  - `runtime_public_ordered_start_fragment.hpp`: 23 lines.
+- The split is structural: no runtime state fields moved, no queue route changed, no locks or allocations were added, and the existing public templates remain inline inside `AsyncRuntime`.
+- Local `git diff --check`: passed.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2` Debug parallel/ordered/shutdown/stress targeted tests: 32/32 passed.
+- Remote clang TSAN parallel/ordered/shutdown/stress targeted tests: 32/32 passed with no ThreadSanitizer report.
+- Remote clang Release full runtime test suite: 138 total, 135 passed, 3 skipped, 0 failed.
+- Remote clang Release runtime benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+  - `BM_RuntimeExternalStart/8192` mean: 7.37 ms real, 1.117 M/s.
+  - `BM_RuntimeCrossThreadHop/8192` mean: 13.9 ms real, 592.463 k/s.
+  - `BM_RuntimeIoThreadHop/8192` mean: 4.27 ms real, 1.918 M/s.
+  - `BM_RuntimeParallelShards/128` mean: 0.476 ms real, 268.995 k/s.
+  - `BM_RuntimeParallelShards/512` mean: 1.82 ms real, 280.922 k/s.
 
 ### Latest Test/Example Scan: Long Files Remain Mostly In Fixtures
 
