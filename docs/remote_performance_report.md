@@ -948,3 +948,43 @@ Interpretation:
 - This is a modularity split only. The Linux io_uring ABI support remains platform-gated and header-only, while syscall/setup and SQE fill responsibilities are now independently auditable.
 - The TSAN target covers io_uring setup/config, epoll fallback, socket/file/multishot paths, StopImmediately pending-IO cleanup, above-64 thread scheduling, explicit same-thread local queue routing, and the Running -> Pending wake boundary.
 - The benchmark canary does not show a gross runtime or helper-level fast-path regression from this structural split.
+
+## 2026-06-01 Registered Buffer Resource Split Validation
+
+This run validates the structural split of the io_uring registered-buffer resource helper on the requested remote Linux host with `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2`.
+
+Changes under validation:
+
+- `runtime_executor_io_uring_buffer_resource_fragment.hpp` is now an 8-line umbrella.
+- `runtime_executor_io_uring_buffer_register_fragment.hpp` owns registered-buffer registration.
+- `runtime_executor_io_uring_buffer_unregister_fragment.hpp` owns registered-buffer unregistration.
+- The split keeps the helpers inline in `AsyncRuntime::Executor`; it does not change the `_WIN32` guard, syscall arguments, pending-submit flush ordering, busy checks, registered flag/count updates, locks, allocations, memory ordering, or fallback behavior.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Remote clang Debug fixed-buffer/resource targeted tests: 4/4 passed.
+- Remote clang TSAN fixed-buffer/resource plus scheduler-boundary targeted tests: 9/9 passed, no ThreadSanitizer report.
+- Remote clang Release full runtime suite: 138 total, 135 passed, 3 skipped, 0 failed.
+
+Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | CPU Mean | Throughput Mean |
+| --- | ---: | ---: | ---: |
+| `BM_IoDatagramAdapterZeroByteRecv` | 0.641 ns | 0.641 ns | n/a |
+| `BM_IoFileAdapterZeroByteRead` | 0.629 ns | 0.629 ns | n/a |
+| `BM_IoTimeoutInvalidDelay` | 0.837 ns | 0.836 ns | n/a |
+| `BM_IoStreamAdapterZeroByteSend` | 0.627 ns | 0.627 ns | n/a |
+| `BM_IoStreamAdapterZeroByteSendZc` | 0.630 ns | 0.629 ns | n/a |
+| `BM_IoFileAdapterZeroByteReadFixedAt` | 0.629 ns | 0.629 ns | n/a |
+| `BM_RuntimeExternalStart/8192` | 7.07 ms | 7.06 ms | 1.168 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 12.7 ms | 4.44 ms | 649.697 k/s |
+| `BM_RuntimeIoThreadHop/8192` | 4.29 ms | 4.29 ms | 1.908 M/s |
+| `BM_RuntimeParallelShards/128` | 0.496 ms | 0.477 ms | 259.553 k/s |
+| `BM_RuntimeParallelShards/512` | 1.82 ms | 1.77 ms | 283.492 k/s |
+
+Interpretation:
+
+- This is a modularity split only. Registered-buffer lifecycle remains executor-thread-only, and unregistration still flushes pending submissions before rejecting active fixed-buffer operations.
+- The TSAN target covers registered/fixed-buffer IO plus above-64 scheduling, explicit same-thread local queue routing, cross-thread hop pressure, and the Running -> Pending wake boundary.
+- The benchmark canary does not show a gross runtime or helper-level fast-path regression from this structural split.
