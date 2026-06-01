@@ -254,3 +254,21 @@ Interpretation:
 
 - This pass changed only test layout and CMake source registration. It did not change runtime scheduling, IO paths, queue selection, memory ordering, or wake behavior.
 - The split keeps lifecycle shutdown pressure, cross-thread SPSC hop pressure, above-64-thread ready-source coverage, and parallel owner-resume pressure independently addressable.
+
+## 2026-06-01 UDP Datagram Test Helper Split Validation
+
+This run validates the test support split that moved repeated UDP loopback setup out of datagram test bodies and into `tests/support/runtime_io_udp_socket_helpers_fragment.hpp`.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_runtime_tests` build: passed.
+- Local Release datagram-targeted tests: 14/14 passed, all skipped by local platform/backend logic.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2` Debug datagram-targeted tests: 14/14 passed.
+- Remote clang TSAN datagram-targeted tests: 14/14 passed with no ThreadSanitizer report.
+- Remote clang Release full runtime suite: 132/132 passed; 21 platform/io_uring capability tests were skipped by test logic.
+
+Interpretation:
+
+- This pass changed only test fixture setup. Runtime scheduling, IO backend behavior, queue selection, memory ordering, and public APIs were unchanged.
+- The split makes epoll and io_uring datagram tests share one UDP loopback fixture helper, reducing duplicated socket lifecycle setup in the test bodies.

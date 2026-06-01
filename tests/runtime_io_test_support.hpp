@@ -76,6 +76,10 @@ namespace {
 #include "support/runtime_io_socket_lifecycle_tasks_fragment.hpp"
 #undef AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE
 
+#define AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE 1
+#include "support/runtime_io_udp_socket_helpers_fragment.hpp"
+#undef AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE
+
 void close_pair(int fds[2]) {
     if (fds[0] >= 0) {
         ::close(fds[0]);

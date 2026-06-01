@@ -8,40 +8,23 @@ TEST_F(IoRuntimeDatagramFixture, EpollIoThreadResumesUdpRecvFromHelper) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
-    int receiver = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-    ASSERT_GE(receiver, 0);
-    int sender = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-    ASSERT_GE(sender, 0);
-
-    sockaddr_in address{};
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    address.sin_port = 0;
-    ASSERT_EQ(::bind(receiver, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
-
-    socklen_t address_size = sizeof(address);
-    ASSERT_EQ(::getsockname(receiver, reinterpret_cast<sockaddr*>(&address), &address_size), 0);
+    UdpLoopbackSockets sockets;
+    ASSERT_TRUE(create_udp_loopback_sockets(sockets));
 
     std::atomic<int> armed{0};
     std::atomic<int> completed{0};
     std::atomic<char> byte_read{0};
-    ASSERT_TRUE(IoRuntime::start_task<UdpRecvTask>(receiver, &armed, &completed, &byte_read));
+    ASSERT_TRUE(IoRuntime::start_task<UdpRecvTask>(
+        sockets.receiver.get(),
+        &armed,
+        &completed,
+        &byte_read));
     ASSERT_TRUE(wait_until_at_least(armed, 1));
 
     const char value = 'u';
-    ASSERT_EQ(::sendto(
-                  sender,
-                  &value,
-                  sizeof(value),
-                  0,
-                  reinterpret_cast<sockaddr*>(&address),
-                  address_size),
-              1);
+    ASSERT_EQ(send_udp_payload(sockets, &value, sizeof(value)), 1);
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(byte_read.load(std::memory_order_acquire), value);
-
-    close_fd(sender);
-    close_fd(receiver);
 #else
     GTEST_SKIP() << "epoll backend is Linux-only";
 #endif
@@ -53,44 +36,23 @@ TEST_F(IoRuntimeDatagramFixture, EpollIoThreadReceivesVectoredUdpDatagramFromHel
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
-    int receiver = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-    ASSERT_GE(receiver, 0);
-    int sender = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-    ASSERT_GE(sender, 0);
-
-    sockaddr_in address{};
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    address.sin_port = 0;
-    ASSERT_EQ(::bind(receiver, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
-
-    socklen_t address_size = sizeof(address);
-    ASSERT_EQ(::getsockname(receiver, reinterpret_cast<sockaddr*>(&address), &address_size), 0);
+    UdpLoopbackSockets sockets;
+    ASSERT_TRUE(create_udp_loopback_sockets(sockets));
 
     std::atomic<int> armed{0};
     std::atomic<int> completed{0};
     std::atomic<int> payload_seen{0};
     ASSERT_TRUE(IoRuntime::start_task<UdpVectoredRecvTask>(
-        receiver,
+        sockets.receiver.get(),
         &armed,
         &completed,
         &payload_seen));
     ASSERT_TRUE(wait_until_at_least(armed, 1));
 
     const char payload[2]{'u', 'v'};
-    ASSERT_EQ(::sendto(
-                  sender,
-                  payload,
-                  sizeof(payload),
-                  0,
-                  reinterpret_cast<sockaddr*>(&address),
-                  address_size),
-              2);
+    ASSERT_EQ(send_udp_payload(sockets, payload, sizeof(payload)), 2);
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(payload_seen.load(std::memory_order_acquire), ('u' << 8) | 'v');
-
-    close_fd(sender);
-    close_fd(receiver);
 #else
     GTEST_SKIP() << "epoll backend is Linux-only";
 #endif
@@ -102,40 +64,24 @@ TEST_F(IoRuntimeDatagramFixture, EpollIoThreadAcceptsUdpZeroLengthDatagram) {
         GTEST_SKIP() << "epoll backend unavailable";
     }
 
-    int receiver = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-    ASSERT_GE(receiver, 0);
-    int sender = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-    ASSERT_GE(sender, 0);
-
-    sockaddr_in address{};
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    address.sin_port = 0;
-    ASSERT_EQ(::bind(receiver, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
-
-    socklen_t address_size = sizeof(address);
-    ASSERT_EQ(::getsockname(receiver, reinterpret_cast<sockaddr*>(&address), &address_size), 0);
+    UdpLoopbackSockets sockets;
+    ASSERT_TRUE(create_udp_loopback_sockets(sockets));
 
     std::atomic<int> armed{0};
     std::atomic<int> completed{0};
     std::atomic<char> byte_read{'z'};
 
     const char value = 0;
-    ASSERT_EQ(::sendto(
-                  sender,
-                  &value,
-                  0,
-                  0,
-                  reinterpret_cast<sockaddr*>(&address),
-                  address_size),
-              0);
+    ASSERT_EQ(send_udp_payload(sockets, &value, 0), 0);
 
-    ASSERT_TRUE(IoRuntime::start_task<UdpRecvTask>(receiver, &armed, &completed, &byte_read, 0U));
+    ASSERT_TRUE(IoRuntime::start_task<UdpRecvTask>(
+        sockets.receiver.get(),
+        &armed,
+        &completed,
+        &byte_read,
+        0U));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(byte_read.load(std::memory_order_acquire), 'z');
-
-    close_fd(sender);
-    close_fd(receiver);
 #else
     GTEST_SKIP() << "epoll backend is Linux-only";
 #endif

@@ -265,6 +265,19 @@ Additional validation after the runtime stress source split:
 - Remote clang TSAN `RuntimeStressTests`: 4/4 passed with no ThreadSanitizer report.
 - Remote clang Release full runtime test suite: 132/132 passed, with 21 platform/io_uring capability tests skipped by test logic.
 
+Additional validation after the UDP datagram test helper split:
+
+- Added `tests/support/runtime_io_udp_socket_helpers_fragment.hpp` for UDP loopback socket setup and simple send/receive probes.
+- `tests/runtime_io_datagram_tests.cpp` is now 88 lines, `tests/runtime_io_datagram_send_tests.cpp` is 95 lines, and `tests/runtime_io_uring_socket_datagram_tests.cpp` is 151 lines.
+- The shared `tests/runtime_io_test_support.hpp` remains a 225-line umbrella over test support fragments.
+- No runtime scheduling, IO backend, queue, memory-ordering, or public API behavior changed in this pass; only test fixture setup was de-duplicated.
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_runtime_tests` build: passed.
+- Local Release datagram-targeted tests: 14/14 passed, all skipped by local platform/backend logic.
+- Remote clang Debug datagram-targeted tests: 14/14 passed.
+- Remote clang TSAN datagram-targeted tests: 14/14 passed with no ThreadSanitizer report.
+- Remote clang Release full runtime test suite: 132/132 passed, with 21 platform/io_uring capability tests skipped by test logic.
+
 Remaining follow-up:
 
 - Ready-source hints are now correct and bounded, but future benchmarking may justify a rotating ready-word cursor for very large `thread_count` values.
@@ -282,7 +295,7 @@ Current file-size snapshot:
 - Resolved after this scan: `include/af/detail/basic_task_fragment.hpp` is now a small class shell over public, protected-helper, lifetime, scheduling, and storage fragments.
 - Resolved after this scan: `include/af/detail/io_common_detail_state_fragment.hpp` is now a small umbrella over IO target, wait-arm, wait-state, io_uring-status, and iovec helper fragments.
 - Resolved after this scan: the old combined `tests/runtime_stress_tests.cpp` was removed. Runtime stress test cases are split by concern, and reusable stress state machines live in support headers.
-- The largest remaining examples/tests are now fixture/state-machine files, not the runtime shell: `io_rpc_length_prefixed_server.hpp`, `io_uring_fixed_file_task.hpp`, `runtime_io_uring_socket_datagram_tests.cpp`, `runtime_io_stream_transfer_tests.cpp`, and `io_uring_file_lifecycle_task.hpp`.
+- The largest remaining examples/tests are now fixture/state-machine files, not the runtime shell. `runtime_io_uring_socket_datagram_tests.cpp` has been reduced by moving UDP loopback setup into support; the remaining notable files include `io_rpc_length_prefixed_server.hpp`, `io_uring_fixed_file_task.hpp`, `runtime_io_stream_transfer_tests.cpp`, and `io_uring_file_lifecycle_task.hpp`.
 
 Active correctness/performance issues to track:
 
@@ -323,7 +336,7 @@ Issue ledger:
 - Resolved: `basic_task_fragment.hpp` now uses class-body fragments for public/protected task helpers, schedule-state transitions, lifetime/destroy helpers, and one final storage-layout block.
 - Resolved: `io_common_detail_state_fragment.hpp` is split by helper family, and the epoll readiness path no longer depends on a deferred-delete/rearm-hint cleanup path.
 - Resolved: the old combined runtime stress source was removed. Lifecycle, cross-thread hop, and parallel shard stress cases now live in separate test sources; reusable state machines live in support headers.
-- P2: several IO tests and examples remain moderately dense after the first pass. Notable current files are `runtime_io_uring_socket_datagram_tests.cpp`, `runtime_io_stream_transfer_tests.cpp`, `io_rpc_length_prefixed_server.hpp`, `io_uring_fixed_file_task.hpp`, and `io_uring_file_lifecycle_task.hpp`. Future edits should split by protocol role, transfer mode, or operation family instead of appending new states to the existing file.
+- P2: several IO tests and examples remain moderately dense after the first pass. `runtime_io_uring_socket_datagram_tests.cpp` was reduced by extracting UDP socket setup into shared test support. Notable remaining files are `runtime_io_stream_transfer_tests.cpp`, `io_rpc_length_prefixed_server.hpp`, `io_uring_fixed_file_task.hpp`, and `io_uring_file_lifecycle_task.hpp`. Future edits should split by protocol role, transfer mode, or operation family instead of appending new states to the existing file.
 - P2: older examples such as `io_epoll.cpp`, `io_event.cpp`, `io_timer.cpp`, `io_native_readiness.cpp`, and several multishot examples still use explicit atomics to observe readiness/completion from `main`. Prefer task-owned state machines plus `ShutdownPolicy::WaitForTasks` for examples unless the example is specifically demonstrating cross-thread observation.
 
 Performance guardrails:
@@ -461,7 +474,7 @@ Performance constraints for these splits:
 The largest remaining files are now test/support fixtures rather than runtime shell code:
 
 - File IO support fragments for boundary, read/write, open/lifecycle, filesystem boundary, and filesystem ops have been split into smaller operation-family task fragments. Portable accept support and io_uring accept/stream support are now split the same way.
-- A few runtime tests are still moderately large: io_uring socket datagram 257 lines and stream transfer 255 lines.
+- Runtime IO datagram tests now share `runtime_io_udp_socket_helpers_fragment.hpp`; the io_uring socket datagram source is down to 151 lines. Stream transfer remains moderately large at 255 lines.
 - Some examples still use explicit atomics to observe readiness/completion (`io_epoll.cpp`, `io_timer.cpp`, and a few multishot io_uring examples). Those should be converted to task-owned state machines plus `ShutdownPolicy::WaitForTasks` when practical, matching the newer IO adapter/socket lifecycle examples.
 
 Recommendation:
