@@ -132,7 +132,7 @@ Current core-runtime layout:
 - `include/af/detail/runtime_dispatch.hpp`: queue topology, local/SPSC/external enqueue paths, ready-route selection, and external-post admission accounting.
 - `include/af/detail/runtime_task_lifecycle.hpp`: task object pools, handle release, optional StopImmediately registry/cancel, and unfinished-task accounting.
 - `include/af/detail/runtime_parallel.hpp`: ordered-start, ordered-batch guard, shard task/runner, and shard dispatch.
-- `include/af/detail/runtime_executor.hpp`: standalone `detail::Executor<RuntimeT, TraitsT>` component. It remains large because executor scheduler/IO submit/completion paths are tightly coupled for inlining, state layout, and syscall hot paths, but it is no longer a nested class assembled by class-scope fragments.
+- `include/af/detail/runtime_executor.hpp`: standalone `detail::Executor<RuntimeT, TraitsT>` declaration/state-layout component. Lifecycle/notify behavior lives in `runtime_executor_lifecycle.hpp`; io_uring backend status and resource registration lives in `runtime_executor_io_resources.hpp`.
 
 Correctness and performance audit points:
 
@@ -140,6 +140,7 @@ Correctness and performance audit points:
 - Runtime-thread ready enqueue remains explicit: `ReadyQueueRoute::Local` for same-owner posts, `ReadyQueueRoute::Spsc` for cross-owner runtime posts, and external MPSC for external threads.
 - `BasicTask` now explicitly friends `detail::Executor<RuntimeT, TraitsT>` because the executor is no longer nested inside `AsyncRuntime`.
 - Public IO was moved behind a CRTP base to create a real API component boundary without adding virtual dispatch, allocation, `std::function`, or extra queues.
+- Executor lifecycle/resource behavior is now class-out-of-line template code included after the complete class declaration. This keeps private-state access and inlining while avoiding class-body include splicing.
 - The remaining old runtime executor fragment headers are historical implementation fragments and are no longer included by the active `async_runtime.hpp` / `runtime_executor.hpp` path. Do not use them as the model for new core-runtime structure.
 
 Validation after this correction:
@@ -148,11 +149,11 @@ Validation after this correction:
 - Remote clang Debug full runtime suite with `--security-opt seccomp=unconfined`: 143 total, 140 passed, 3 skipped.
 - Remote clang Release build of `asyncflow_runtime_tests` and `asyncflow_runtime_benchmarks`: passed.
 - Remote clang Release full runtime suite with `--security-opt seccomp=unconfined`: 143 total, 140 passed, 3 skipped.
-- Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`: `BM_RuntimeExternalStart/8192` mean 6.99 ms, `BM_RuntimeCrossThreadHop/8192` mean 10.9 ms, `BM_RuntimeIoThreadHop/8192` mean 4.28 ms, `BM_RuntimeParallelShards/128` mean 0.494 ms.
+- Release benchmark canary after the executor lifecycle/resource split, 3 repetitions with `--benchmark_min_time=0.05s`: `BM_RuntimeExternalStart/8192` mean 7.44 ms, `BM_RuntimeCrossThreadHop/8192` mean 11.6 ms, `BM_RuntimeIoThreadHop/8192` mean 4.28 ms, `BM_RuntimeParallelShards/128` mean 0.525 ms.
 
 Remaining follow-up:
 
-- P1: `runtime_executor.hpp` is still very large. Do not re-split it by access sections. The next acceptable split should extract real components such as backend-specific executor helper classes, scheduler-only helper algorithms, or operation-family implementation headers with explicit owner boundaries.
+- P1: `runtime_executor.hpp` is still large. Do not re-split it by access sections. The next acceptable split should continue moving real operation families out as class-out-of-line template definitions or extract backend-specific helper components with explicit owner boundaries.
 - P2: non-core IO headers such as `io_common` and several `io_*` public umbrellas still use fragment includes. They should be cleaned opportunistically when the split can follow real operation-family or class boundaries.
 
 ### 2026-06-01 Scheduler Correctness And Modularity Pass

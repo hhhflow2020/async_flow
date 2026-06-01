@@ -1292,4 +1292,37 @@ Interpretation:
 
 - The cleanup changes structure, not scheduling semantics. No queue type, lock, atomic ordering, IO submit/completion rule, task state transition, or public behavior was intentionally changed.
 - The active runtime path now follows the stricter modularity rule: split real components and operation families, not single class bodies by access section.
-- `runtime_executor.hpp` remains the largest core file and should be the next focus, but only through real ownership boundaries such as backend-specific helper components or scheduler-only helper algorithms. Reintroducing class-scope fragment splicing would repeat the maintainability problem this pass fixed.
+- `runtime_executor.hpp` remains the largest core file and should keep being reduced only through real ownership boundaries such as class-out-of-line operation-family definitions, backend-specific helper components, or scheduler-only helper algorithms. Reintroducing class-scope fragment splicing would repeat the maintainability problem this pass fixed.
+
+## 2026-06-01 Executor Lifecycle And Resource Implementation Split
+
+This run validates the first follow-up split of the large standalone executor file after removing class-body splicing.
+
+Changes under validation:
+
+- `runtime_executor.hpp` now keeps executor lifecycle/notify and io_uring resource APIs as declarations in the class body.
+- `runtime_executor_lifecycle.hpp` owns the class-out-of-line template definitions for constructor/destructor, `start()`, `request_stop()`, `join()`, and `notify()`.
+- `runtime_executor_io_resources.hpp` owns the class-out-of-line template definitions for backend status checks and io_uring buffer/provided-buffer/fixed-file registration operations.
+- The split is not a class-body `#include` splice. The implementation headers are included after the complete `Executor` declaration and define `Executor<RuntimeT, TraitsT>::...` members in namespace scope.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed before this documentation update.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.0` Debug `asyncflow_runtime_tests` build: passed.
+- Remote clang Debug full runtime suite under `--security-opt seccomp=unconfined`: 143 tests, 140 passed, 3 skipped, 0 failed.
+- Remote clang Release `asyncflow_runtime_tests` and `asyncflow_runtime_benchmarks` build: passed.
+- Remote clang Release full runtime suite under `--security-opt seccomp=unconfined`: 143 tests, 140 passed, 3 skipped, 0 failed.
+
+Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | Throughput Mean |
+| --- | ---: | ---: |
+| `BM_RuntimeExternalStart/8192` | 7.44 ms | 1.106 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 11.6 ms | 706.687 k/s |
+| `BM_RuntimeIoThreadHop/8192` | 4.28 ms | 1.916 M/s |
+| `BM_RuntimeParallelShards/128` | 0.525 ms | 244.905 k/s |
+
+Interpretation:
+
+- This pass changes only declaration/definition placement. Queue topology, local/SPSC/MPSC routing, worker notification, native IO wake behavior, io_uring registration syscall arguments, pending-submit flush ordering, locks, atomics, allocations, and task state transitions are unchanged.
+- `runtime_executor.hpp` dropped from 4916 lines to 4435 lines. The next executor split should target a similarly real operation family; splitting by access section or field block remains disallowed.
