@@ -1,6 +1,4 @@
-#if !defined(AF_IO_COMMON_DETAIL_INCLUDE)
-#error "io_common_iovec.hpp is internal to af/io_common.hpp"
-#endif
+#pragma once
 
 #if !defined(_WIN32)
 [[nodiscard]] inline int io_max_iov() noexcept {

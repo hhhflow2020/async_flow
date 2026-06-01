@@ -1,6 +1,4 @@
-#if !defined(AF_IO_BENCHMARK_RUNTIME_DETAIL_INCLUDE)
-#error "io_benchmark_runtime_filesystem.hpp is a FakeRuntime implementation detail"
-#endif
+#pragma once
 
 struct FakeRuntimeFilesystemOps {
     static bool io_submit_openat(

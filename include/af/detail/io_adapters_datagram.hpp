@@ -1,6 +1,4 @@
-#if !defined(AF_IO_ADAPTERS_DETAIL_INCLUDE)
-#error "io_adapters_datagram.hpp is internal to af/io_adapters.hpp"
-#endif
+#pragma once
 
 template <typename ThreadT>
 class IoDatagramSocket : public IoDescriptor<ThreadT> {

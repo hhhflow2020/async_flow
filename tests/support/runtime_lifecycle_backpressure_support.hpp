@@ -1,6 +1,4 @@
-#if !defined(AF_RUNTIME_LIFECYCLE_TEST_SUPPORT_DETAIL_INCLUDE)
-#error "runtime_lifecycle_backpressure_support.hpp is a runtime lifecycle test support detail"
-#endif
+#pragma once
 
 enum class TinyThread : std::int16_t {
     enum_thread_index_start = -1,

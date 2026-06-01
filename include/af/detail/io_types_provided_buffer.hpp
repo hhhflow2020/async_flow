@@ -1,6 +1,4 @@
-#if !defined(AF_IO_TYPES_DETAIL_INCLUDE)
-#error "io_types_provided_buffer.hpp is internal to af/io_types.hpp"
-#endif
+#pragma once
 
 #if defined(__linux__)
 namespace detail {

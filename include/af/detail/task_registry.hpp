@@ -1,6 +1,4 @@
-#if !defined(AF_TASK_DETAIL_INCLUDE)
-#error "task_registry.hpp is internal to af/task.hpp"
-#endif
+#pragma once
 
 namespace detail {
 

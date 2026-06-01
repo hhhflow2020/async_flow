@@ -1,6 +1,4 @@
-#if !defined(AF_IO_FILESYSTEM_DETAIL_INCLUDE)
-#error "io_filesystem_open.hpp is internal to af/io_filesystem.hpp"
-#endif
+#pragma once
 
 template <typename TaskT>
 [[nodiscard]] IoStatus io_openat2(TaskT &task, typename TaskT::Thread thread,

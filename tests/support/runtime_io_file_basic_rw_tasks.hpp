@@ -1,6 +1,4 @@
-#if !defined(AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE)
-#error "runtime_io_file_basic_rw_tasks.hpp is a runtime_io_file_rw_tasks implementation detail"
-#endif
+#pragma once
 
 class UringFileReadWriteTask final : public UringIoTaskBase {
 public:

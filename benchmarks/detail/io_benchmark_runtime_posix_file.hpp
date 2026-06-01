@@ -1,6 +1,4 @@
-#if !defined(AF_IO_BENCHMARK_RUNTIME_DETAIL_INCLUDE)
-#error "io_benchmark_runtime_posix_file.hpp is a FakeRuntime implementation detail"
-#endif
+#pragma once
 
 struct FakeRuntimePosixFileOps {
 #if !defined(_WIN32)

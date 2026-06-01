@@ -1,6 +1,4 @@
-#if !defined(AF_IO_URING_SUPPORT_DETAIL_INCLUDE)
-#error "io_uring_support_abi.hpp is internal to af/detail/io_uring_support.hpp"
-#endif
+#pragma once
 
 #ifndef IORING_CQE_F_MORE
 #define IORING_CQE_F_MORE (1U << 1U)

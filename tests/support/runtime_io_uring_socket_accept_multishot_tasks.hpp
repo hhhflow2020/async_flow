@@ -1,6 +1,4 @@
-#if !defined(AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE)
-#error "runtime_io_uring_socket_accept_multishot_tasks.hpp is a runtime_io_uring_socket_accept_tasks implementation detail"
-#endif
+#pragma once
 
 class UringTcpAcceptMultishotTask final : public UringIoTaskBase {
 public:

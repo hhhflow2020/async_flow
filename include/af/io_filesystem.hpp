@@ -18,13 +18,11 @@ struct open_how;
 
 namespace af {
 
-#define AF_IO_FILESYSTEM_DETAIL_INCLUDE 1
 // clang-format off
 #include "af/detail/io_filesystem_open.hpp"
 #include "af/detail/io_filesystem_namespace.hpp"
 #include "af/detail/io_filesystem_allocation.hpp"
 #include "af/detail/io_filesystem_directory.hpp"
 // clang-format on
-#undef AF_IO_FILESYSTEM_DETAIL_INCLUDE
 
 } // namespace af

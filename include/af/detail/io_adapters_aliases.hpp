@@ -1,6 +1,4 @@
-#if !defined(AF_IO_ADAPTERS_DETAIL_INCLUDE)
-#error "io_adapters_aliases.hpp is internal to af/io_adapters.hpp"
-#endif
+#pragma once
 
 template <typename ThreadT> using TcpStream = IoStream<ThreadT>;
 

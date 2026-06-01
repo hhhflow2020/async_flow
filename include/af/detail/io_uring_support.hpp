@@ -11,7 +11,6 @@
 #include <sys/uio.h>
 #include <unistd.h>
 
-#define AF_IO_URING_SUPPORT_DETAIL_INCLUDE
 // clang-format off
 #include "af/detail/io_uring_support_abi.hpp"
 #include "af/detail/io_uring_support_opcode.hpp"
@@ -19,5 +18,4 @@
 #include "af/detail/io_uring_support_syscall.hpp"
 #include "af/detail/io_uring_support_sqe.hpp"
 // clang-format on
-#undef AF_IO_URING_SUPPORT_DETAIL_INCLUDE
 #endif

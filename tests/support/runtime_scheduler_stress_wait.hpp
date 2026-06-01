@@ -1,6 +1,4 @@
-#if !defined(AF_RUNTIME_SCHEDULER_STRESS_SUPPORT_DETAIL_INCLUDE)
-#error "runtime_scheduler_stress_wait.hpp is a runtime scheduler stress support detail"
-#endif
+#pragma once
 
 inline bool wait_zero_until(
     std::atomic<int>& remaining,

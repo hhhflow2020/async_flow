@@ -1,6 +1,4 @@
-#if !defined(AF_IO_COMMON_DETAIL_INCLUDE)
-#error "io_common_target.hpp is internal to af/io_common.hpp"
-#endif
+#pragma once
 
 template <typename TaskT>
 [[nodiscard]] inline bool

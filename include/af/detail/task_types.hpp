@@ -1,6 +1,4 @@
-#if !defined(AF_TASK_DETAIL_INCLUDE)
-#error "task_types.hpp is internal to af/task.hpp"
-#endif
+#pragma once
 
 template <typename TraitsT> class AsyncRuntime;
 

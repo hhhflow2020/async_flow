@@ -1,6 +1,4 @@
-#if !defined(AF_IO_TYPES_DETAIL_INCLUDE)
-#error "io_types_status.hpp is internal to af/io_types.hpp"
-#endif
+#pragma once
 
 enum class IoStep : std::uint8_t {
   Ready,

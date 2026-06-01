@@ -1,6 +1,4 @@
-#if !defined(AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE)
-#error "runtime_io_file_fixed_file_accept_boundary_tasks.hpp is a runtime_io_file_fixed_file_boundary_tasks implementation detail"
-#endif
+#pragma once
 
 class FixedFileAcceptDirectBoundaryTask final : public IoTaskBase {
 public:

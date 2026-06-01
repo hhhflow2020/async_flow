@@ -1,6 +1,4 @@
-#if !defined(AF_IO_FILE_DETAIL_INCLUDE)
-#error "io_file_registered_buffer.hpp is internal to af/io_file.hpp"
-#endif
+#pragma once
 
 #if !defined(_WIN32)
 template <typename TaskT>

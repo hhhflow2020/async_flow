@@ -1,7 +1,4 @@
-#if !defined(AF_IO_URING_SUPPORT_DETAIL_INCLUDE)
-#error                                                                         \
-    "io_uring_support_opcode.hpp is internal to af/detail/io_uring_support.hpp"
-#endif
+#pragma once
 
 namespace af::detail {
 

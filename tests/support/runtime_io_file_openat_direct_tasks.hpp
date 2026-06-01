@@ -1,6 +1,4 @@
-#if !defined(AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE)
-#error "runtime_io_file_openat_direct_tasks.hpp is a runtime_io_file_tasks implementation detail"
-#endif
+#pragma once
 
 class UringOpenAtDirectFileTask final : public UringIoTaskBase {
 public:

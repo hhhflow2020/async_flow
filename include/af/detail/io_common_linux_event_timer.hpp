@@ -1,6 +1,4 @@
-#if !defined(AF_IO_COMMON_DETAIL_INCLUDE)
-#error "io_common_linux_event_timer.hpp is internal to af/io_common.hpp"
-#endif
+#pragma once
 
 #if defined(__linux__)
 [[nodiscard]] inline UniqueFd

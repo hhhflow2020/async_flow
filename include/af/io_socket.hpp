@@ -4,7 +4,6 @@
 
 namespace af {
 
-#define AF_IO_SOCKET_DETAIL_INCLUDE 1
 // clang-format off
 #include "af/detail/io_socket_lifecycle.hpp"
 #include "af/detail/io_socket_accept_connect.hpp"
@@ -13,6 +12,5 @@ namespace af {
 #include "af/detail/io_socket_transfer.hpp"
 #include "af/detail/io_socket_vectored.hpp"
 // clang-format on
-#undef AF_IO_SOCKET_DETAIL_INCLUDE
 
 } // namespace af

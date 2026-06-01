@@ -33,52 +33,30 @@
 
 namespace {
 
-#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
 #include "support/runtime_io_core.hpp"
-#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
 
-#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
 #include "support/runtime_io_basic_tasks.hpp"
-#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
 
 #if !defined(_WIN32)
-#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
 #include "support/runtime_io_basic_socket_tasks.hpp"
-#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
 
-#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
 #include "support/runtime_io_wait_cancel_tasks.hpp"
-#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
 #endif
 
 #if defined(__linux__)
-#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
 #include "support/runtime_io_accept_tasks.hpp"
-#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
 
-#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
 #include "support/runtime_io_stream_tasks.hpp"
-#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
 
-#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
 #include "support/runtime_io_file_tasks.hpp"
-#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
 
-#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
 #include "support/runtime_io_uring_socket_tasks.hpp"
-#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
 
-#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
 #include "support/runtime_io_timer_event_tasks.hpp"
-#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
 
-#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
 #include "support/runtime_io_socket_lifecycle_tasks.hpp"
-#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
 
-#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
 #include "support/runtime_io_udp_socket_helpers.hpp"
-#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
 
 void close_pair(int fds[2]) {
     if (fds[0] >= 0) {
@@ -221,9 +199,7 @@ void close_fd(int& fd) {
     }
 }
 
-#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
 #include "support/runtime_io_stream_transfer_helpers.hpp"
-#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
 #endif
 
 } // namespace

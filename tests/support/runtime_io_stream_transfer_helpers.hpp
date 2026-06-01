@@ -1,6 +1,4 @@
-#if !defined(AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE)
-#error "runtime_io_stream_transfer_helpers.hpp is a runtime_io_test_support implementation detail"
-#endif
+#pragma once
 
 struct StreamSocketPair {
     af::UniqueFd first{};

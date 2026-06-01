@@ -1,15 +1,7 @@
-#if !defined(AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE)
-#error "runtime_io_accept_tasks.hpp is a runtime_io_test_support implementation detail"
-#endif
+#pragma once
 
-#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
 #include "runtime_io_accept_basic_tasks.hpp"
-#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
 
-#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
 #include "runtime_io_accept_multishot_boundary_tasks.hpp"
-#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
 
-#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
 #include "runtime_io_recv_multishot_boundary_tasks.hpp"
-#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE

@@ -1769,3 +1769,27 @@ Correctness checks:
 Interpretation:
 
 - This completes the removal of active class-body include splicing in source code while keeping benchmark stub responsibilities split by operation family.
+
+## 2026-06-01 Non-Runtime Detail Include Gate Cleanup
+
+This run removes broad detail include gate macros from ordinary task, IO, io_uring support, test, example, and benchmark support headers. Those headers now behave like normal internal headers with `#pragma once`; the remaining gate is limited to runtime template implementation files that depend on being included after complete `AsyncRuntime` / `Executor` declarations.
+
+Changes under validation:
+
+- Removed `DETAIL_INCLUDE` gate blocks from public task, IO, io_uring support, test support, example support, and benchmark support detail headers.
+- Removed matching temporary `#define ... DETAIL_INCLUDE` / `#undef ... DETAIL_INCLUDE` wrappers from their umbrella headers.
+- Added `#pragma once` to the affected detail/support headers where it was previously missing.
+- Kept `AF_ASYNC_RUNTIME_IMPL_INCLUDE` for runtime implementation headers because those class-out-of-line template definitions intentionally require the parent declaration context.
+
+Correctness checks:
+
+- Local scan for `DETAIL_INCLUDE`, `implementation detail`, and `internal to af/` under active source: no matches.
+- Local scan for active `*_fragment.hpp` source files: no matches.
+- Local `git diff --check`: passed.
+- Remote clang Debug build of `asyncflow_runtime_tests` and `asyncflow_runtime_benchmarks`: passed.
+- Remote clang Debug full runtime suite under `--security-opt seccomp=unconfined`: passed; 143 tests, 140 passed, 3 skipped, 0 failed.
+- Remote clang Release build of `asyncflow_runtime_tests` and `asyncflow_runtime_benchmarks`: passed.
+
+Interpretation:
+
+- This reduces preprocessor coupling for normal internal headers. No queue algorithm, IO behavior, task state transition, lock, allocation, memory ordering, cache-line layout, benchmark stub return value, or public API behavior changed.

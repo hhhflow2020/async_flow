@@ -72,7 +72,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - io_uring fixed file/buffer test support is now a small umbrella over fixed-buffer, fixed-file read/write, fixed-file update, and openat-direct task fragments. The fixed-file read/write task is kept as one cohesive state-machine class instead of a class-body include shell.
 - IO benchmark support now keeps the hot benchmark-facing fake task shell small and splits FakeRuntime stubs by Linux socket, POSIX message, POSIX fixed file, accept/connect, and filesystem helpers. Adapter benchmark cases are also split by stream/listener, datagram, and resource/file-like families.
 - Runtime benchmarks are now split into shared runtime benchmark task support, external-start, thread-hop, and parallel-shard benchmark families. This keeps benchmark harness changes separate from the task/state-machine fixtures they measure.
-- Test support and benchmark support detail headers now use normal `*.hpp` names and `DETAIL_INCLUDE` gates instead of `*_fragment.hpp` filenames or `FRAGMENT_INCLUDE` gates. The remaining benchmark `FakeRuntime` class-body include splice was replaced with operation-family base structs.
+- Test support and benchmark support detail headers now use normal `*.hpp` names and no detail include gate macros instead of `*_fragment.hpp` filenames or `FRAGMENT_INCLUDE`/`DETAIL_INCLUDE` gates. The remaining benchmark `FakeRuntime` class-body include splice was replaced with operation-family base structs.
 - The length-prefixed RPC example is now split into runtime traits, server/process task fragments, a cohesive client state-machine task, and a thin executable entry point.
 - The vectored IO example is now split into runtime/common helpers, stream readv/writev tasks, datagram recvmsg/sendmsg tasks, and a thin executable entry point.
 - The io_uring UDP recvmsg multishot example is now split into runtime/wait helpers, UDP socket setup helpers, a cohesive provided-buffer recvmsg multishot task class, and a thin executable entry point.
@@ -145,6 +145,7 @@ Correctness and performance audit points:
 - Public IO was moved behind a CRTP base to create a real API component boundary without adding virtual dispatch, allocation, `std::function`, or extra queues.
 - Executor lifecycle/resource/IO-backend/scheduler behavior is now class-out-of-line template code included after the complete class declaration. This keeps private-state access and inlining while avoiding class-body include splicing.
 - Unreferenced runtime fragment entrypoints and their unreferenced child implementation fragments have been removed from the active framework tree. There are no remaining framework headers under `include/af/detail` named `*_fragment.hpp`; the last orphaned completion-operation fragment was unreachable and semantically duplicate with the active `runtime_executor_io_backend.hpp` implementation. Do not use historical fragment files as the model for new core-runtime structure.
+- Ordinary task, IO, io_uring support, test, example, and benchmark detail headers now rely on normal `#pragma once` headers and directory/API conventions instead of `DETAIL_INCLUDE` gate macros. The only active include gate left is `AF_ASYNC_RUNTIME_IMPL_INCLUDE`, which protects runtime template implementation files that must be included after `AsyncRuntime` and `detail::Executor` declarations are complete.
 
 Validation after this correction:
 
@@ -157,7 +158,7 @@ Validation after this correction:
 Remaining follow-up:
 
 - P1: `runtime_executor.hpp` is still large at 2627 lines after the io_uring submit-core split. Do not re-split it by access sections. The next acceptable split should continue moving real operation families out as class-out-of-line template definitions or extract backend-specific helper components with explicit owner boundaries.
-- P2: future non-core test/example cleanups should be responsibility-driven, using normal support/detail headers and explicit owner boundaries. Do not reintroduce `*_fragment.hpp`, `FRAGMENT_INCLUDE`, or class-body splicing just to reduce line counts.
+- P2: future non-core test/example cleanups should be responsibility-driven, using normal support/detail headers and explicit owner boundaries. Do not reintroduce `*_fragment.hpp`, broad `DETAIL_INCLUDE` gates, `FRAGMENT_INCLUDE`, or class-body splicing just to reduce line counts.
 - Current active source scan found no `#include` directive inside class/struct bodies under `include`, `tests`, `examples`, or `benchmarks`.
 
 ### 2026-06-01 Scheduler Correctness And Modularity Pass

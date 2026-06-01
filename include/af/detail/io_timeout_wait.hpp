@@ -1,6 +1,4 @@
-#if !defined(AF_IO_TIMEOUT_DETAIL_INCLUDE)
-#error "io_timeout_wait.hpp is internal to af/io_timeout.hpp"
-#endif
+#pragma once
 
 template <typename TaskT>
 [[nodiscard]] IoStatus

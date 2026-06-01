@@ -1,6 +1,4 @@
-#if !defined(AF_IO_FILE_DETAIL_INCLUDE)
-#error "io_file_namespace.hpp is internal to af/io_file.hpp"
-#endif
+#pragma once
 
 template <typename TaskT>
 [[nodiscard]] IoStatus

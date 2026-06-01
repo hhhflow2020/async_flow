@@ -1,6 +1,4 @@
-#if !defined(AF_RUNTIME_LIFECYCLE_TEST_SUPPORT_DETAIL_INCLUDE)
-#error "runtime_lifecycle_base_support.hpp is a runtime lifecycle test support detail"
-#endif
+#pragma once
 
 template <typename T>
 bool wait_until_at_least(std::atomic<T>& value, T expected) {

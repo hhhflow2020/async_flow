@@ -1,6 +1,4 @@
-#if !defined(AF_IO_TYPES_DETAIL_INCLUDE)
-#error "io_types_base.hpp is internal to af/io_types.hpp"
-#endif
+#pragma once
 
 #if defined(_WIN32)
 using IoOffset = std::int64_t;

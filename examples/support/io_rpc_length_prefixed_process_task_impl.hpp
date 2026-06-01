@@ -1,6 +1,4 @@
-#if !defined(IO_RPC_LENGTH_PREFIXED_SERVER_DETAIL_INCLUDE)
-#error "io_rpc_length_prefixed_process_task_impl.hpp is an RPC server implementation detail"
-#endif
+#pragma once
 
 inline bool RpcProcessTask::do_it(RpcServerTask* server) {
     server_ = server;

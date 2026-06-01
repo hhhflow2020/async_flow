@@ -1,6 +1,4 @@
-#if !defined(AF_IO_SOCKET_DETAIL_INCLUDE)
-#error "io_socket_vectored.hpp is internal to af/io_socket.hpp"
-#endif
+#pragma once
 
 #if !defined(_WIN32)
 template <typename TaskT>

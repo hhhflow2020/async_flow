@@ -1,24 +1,12 @@
-#if !defined(AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE)
-#error "runtime_io_uring_socket_tasks.hpp is a runtime_io_test_support implementation detail"
-#endif
+#pragma once
 
-#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
 #include "runtime_io_uring_socket_stream_tasks.hpp"
-#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
 
-#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
 #include "runtime_io_uring_socket_datagram_tasks.hpp"
-#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
 
-#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
 #include "runtime_io_uring_socket_accept_tasks.hpp"
-#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
 
-#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
 #include "runtime_io_uring_socket_multishot_tasks.hpp"
-#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
 
-#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
 #include "runtime_io_uring_socket_connect_tasks.hpp"
-#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
 

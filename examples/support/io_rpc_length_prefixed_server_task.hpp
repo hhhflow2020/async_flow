@@ -1,6 +1,4 @@
-#if !defined(IO_RPC_LENGTH_PREFIXED_SERVER_DETAIL_INCLUDE)
-#error "io_rpc_length_prefixed_server_task.hpp is an RPC server implementation detail"
-#endif
+#pragma once
 
 class RpcServerTask final : public RpcTask {
 public:

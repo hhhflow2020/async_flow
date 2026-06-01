@@ -14,13 +14,11 @@ enum class BenchIoThread : std::int16_t {
     IO_0,
 };
 
-#define AF_IO_BENCHMARK_RUNTIME_DETAIL_INCLUDE 1
 #include "detail/io_benchmark_runtime_linux_socket.hpp"
 #include "detail/io_benchmark_runtime_posix_message.hpp"
 #include "detail/io_benchmark_runtime_posix_file.hpp"
 #include "detail/io_benchmark_runtime_posix_accept.hpp"
 #include "detail/io_benchmark_runtime_filesystem.hpp"
-#undef AF_IO_BENCHMARK_RUNTIME_DETAIL_INCLUDE
 
 struct FakeRuntime :
     FakeRuntimeLinuxSocketOps,

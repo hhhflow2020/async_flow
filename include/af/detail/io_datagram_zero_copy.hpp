@@ -1,6 +1,4 @@
-#if !defined(AF_IO_DATAGRAM_DETAIL_INCLUDE)
-#error "io_datagram_zero_copy.hpp is internal to af/io_datagram.hpp"
-#endif
+#pragma once
 
 template <typename TaskT>
 [[nodiscard]] IoStatus

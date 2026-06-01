@@ -1,6 +1,4 @@
-#if !defined(AF_IO_SOCKET_DETAIL_INCLUDE)
-#error "io_socket_lifecycle.hpp is internal to af/io_socket.hpp"
-#endif
+#pragma once
 
 // clang-format off
 #include "af/detail/io_socket_create.hpp"

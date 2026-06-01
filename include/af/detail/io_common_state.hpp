@@ -1,6 +1,4 @@
-#if !defined(AF_IO_COMMON_DETAIL_INCLUDE)
-#error "io_common_state.hpp is internal to af/io_common.hpp"
-#endif
+#pragma once
 
 namespace detail {
 

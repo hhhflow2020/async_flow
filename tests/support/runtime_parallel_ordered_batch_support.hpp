@@ -1,6 +1,4 @@
-#if !defined(AF_RUNTIME_PARALLEL_TEST_SUPPORT_DETAIL_INCLUDE)
-#error "runtime_parallel_ordered_batch_support.hpp is a runtime parallel test support detail"
-#endif
+#pragma once
 
 class OrderedTask final : public Task {
 public:

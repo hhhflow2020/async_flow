@@ -1,6 +1,4 @@
-#if !defined(AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE)
-#error "runtime_io_stream_splice_tasks.hpp is a runtime_io_test_support implementation detail"
-#endif
+#pragma once
 
 class SplicePipeTask final : public IoTaskBase {
 public:

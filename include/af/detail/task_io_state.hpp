@@ -1,6 +1,4 @@
-#if !defined(AF_TASK_DETAIL_INCLUDE)
-#error "task_io_state.hpp is internal to af/task.hpp"
-#endif
+#pragma once
 
 inline constexpr std::uint32_t io_readable = 1U << 0U;
 inline constexpr std::uint32_t io_writable = 1U << 1U;

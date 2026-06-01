@@ -1,6 +1,4 @@
-#if !defined(AF_RUNTIME_PARALLEL_TEST_SUPPORT_DETAIL_INCLUDE)
-#error "runtime_parallel_core_support.hpp is a runtime parallel test support detail"
-#endif
+#pragma once
 
 template <typename T>
 bool wait_until_at_least(std::atomic<T>& value, T expected) {

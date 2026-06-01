@@ -1,6 +1,4 @@
-#if !defined(AF_IO_FILE_DETAIL_INCLUDE)
-#error "io_file_close_fsync.hpp is internal to af/io_file.hpp"
-#endif
+#pragma once
 
 template <typename TaskT>
 [[nodiscard]] IoStatus io_fsync(TaskT &task, typename TaskT::Thread thread,

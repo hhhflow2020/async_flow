@@ -1,6 +1,4 @@
-#if !defined(AF_RUNTIME_SCHEDULER_STRESS_SUPPORT_DETAIL_INCLUDE)
-#error "runtime_scheduler_stress_repeat_hop.hpp is a runtime scheduler stress support detail"
-#endif
+#pragma once
 
 enum class RepeatHopThread : std::int16_t {
     enum_thread_index_start = -1,

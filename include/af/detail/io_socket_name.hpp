@@ -1,6 +1,4 @@
-#if !defined(AF_IO_SOCKET_DETAIL_INCLUDE)
-#error "io_socket_name.hpp is internal to af/io_socket.hpp"
-#endif
+#pragma once
 
 template <typename TaskT>
 [[nodiscard]] IoStatus

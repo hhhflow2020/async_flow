@@ -1,6 +1,4 @@
-#if !defined(AF_IO_DATAGRAM_DETAIL_INCLUDE)
-#error "io_datagram_vectored.hpp is internal to af/io_datagram.hpp"
-#endif
+#pragma once
 
 #if !defined(_WIN32)
 template <typename TaskT>

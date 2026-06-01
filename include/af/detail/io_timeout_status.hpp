@@ -1,6 +1,4 @@
-#if !defined(AF_IO_TIMEOUT_DETAIL_INCLUDE)
-#error "io_timeout_status.hpp is internal to af/io_timeout.hpp"
-#endif
+#pragma once
 
 namespace detail {
 
