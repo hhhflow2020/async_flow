@@ -33,7 +33,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - io_uring file runtime tests are now split by basic file data, fixed resources/direct descriptors, submit batching, and lifecycle/filesystem operation responsibilities.
 - `runtime_executor_io_uring_submit_core_fragment.hpp` is now a small umbrella over poll wait submit, buffer/fast SQE submit, and generic SQE submit fragments. The code still lives inside `AsyncRuntime::Executor` for inline visibility.
 - `runtime_executor_io_uring_socket_submit_fragment.hpp` is now a small umbrella over recv, send, zero-copy, message, multishot, accept/connect, and socket-create submit wrappers.
-- io_uring resource registration is now split by registered buffers, provided buffer rings, and fixed-file table helpers while staying inline inside `AsyncRuntime::Executor`. The fixed-file table helper is now a small umbrella over register, unregister, and update paths.
+- io_uring resource registration is now split by registered buffers, provided buffer rings, and fixed-file table helpers while staying inline inside `AsyncRuntime::Executor`. The provided-buffer ring helper is now a small umbrella over register and unregister paths, and the fixed-file table helper is a small umbrella over register, unregister, and update paths.
 - io_uring executor buffer submit helpers are now split into generic buffer SQE, fast SQE template, socket-create core, and fixed-file read/write fragments while staying inline inside `AsyncRuntime::Executor`.
 - io_uring generic submit is now split into argument classification, validation, operation preparation, SQE filling, and the small core submit flow while staying inline inside `AsyncRuntime::Executor`. The SQE filling stage is further split by dispatcher/common initialization, filesystem/path opcodes, socket/message opcodes, and buffer/data opcodes.
 - Public fd lifecycle submit wrappers and matching io_uring executor submit wrappers are now small umbrellas over open, close/shutdown, filesystem metadata/lifecycle, and splice transfer fragments.
@@ -176,6 +176,9 @@ Current file-size snapshot after the pass:
 - `include/af/detail/runtime_executor_io_uring_file_register_fragment.hpp`: 60 lines.
 - `include/af/detail/runtime_executor_io_uring_file_unregister_fragment.hpp`: 67 lines.
 - `include/af/detail/runtime_executor_io_uring_file_update_fragment.hpp`: 85 lines.
+- `include/af/detail/runtime_executor_io_uring_provided_buffer_resource_fragment.hpp`: 6 lines.
+- `include/af/detail/runtime_executor_io_uring_provided_buffer_register_fragment.hpp`: 75 lines.
+- `include/af/detail/runtime_executor_io_uring_provided_buffer_unregister_fragment.hpp`: 74 lines.
 - `include/af/detail/runtime_executor_io_uring_generic_submit_sqe_fragment.hpp`: 8 lines.
 - `include/af/detail/runtime_executor_io_uring_generic_submit_sqe_dispatch_fragment.hpp`: 67 lines.
 - `include/af/detail/runtime_executor_io_uring_generic_submit_sqe_filesystem_fragment.hpp`: 56 lines.
@@ -866,6 +869,26 @@ Additional validation after the generic io_uring SQE fill split:
   - `BM_RuntimeIoThreadHop/8192` mean: 4.19 ms real, 1.955 M/s.
   - `BM_RuntimeParallelShards/128` mean: 0.515 ms real, 248.834 k/s.
   - `BM_RuntimeParallelShards/512` mean: 1.92 ms real, 266.386 k/s.
+
+Additional validation after the provided-buffer resource split:
+
+- `runtime_executor_io_uring_provided_buffer_resource_fragment.hpp` is now a 6-line umbrella:
+  - `runtime_executor_io_uring_provided_buffer_register_fragment.hpp`: 75 lines.
+  - `runtime_executor_io_uring_provided_buffer_unregister_fragment.hpp`: 74 lines.
+- The split is structural: no registration argument, pending-submit flush ordering, busy check, group tracking, memory ordering, lock, allocation, or fallback behavior changed.
+- Local `git diff --check`: passed.
+- Remote clang Debug provided-buffer targeted tests: 6/6 passed.
+- Remote clang TSAN provided-buffer targeted tests: 6/6 passed, with no ThreadSanitizer report.
+- Remote clang Release full runtime test suite: 138 total, 135 passed, 3 skipped, 0 failed.
+- Remote clang Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+  - `BM_IoDatagramAdapterZeroByteRecv` mean: 0.647 ns real.
+  - `BM_IoFileAdapterZeroByteRead` mean: 0.628 ns real.
+  - `BM_IoStreamAdapterZeroByteSend` mean: 0.627 ns real.
+  - `BM_RuntimeExternalStart/8192` mean: 6.70 ms real, 1.224 M/s.
+  - `BM_RuntimeCrossThreadHop/8192` mean: 13.5 ms real, 605.570 k/s.
+  - `BM_RuntimeIoThreadHop/8192` mean: 4.19 ms real, 1.954 M/s.
+  - `BM_RuntimeParallelShards/128` mean: 0.480 ms real, 267.212 k/s.
+  - `BM_RuntimeParallelShards/512` mean: 1.83 ms real, 280.493 k/s.
 
 ### Latest Test/Example Scan: Long Files Remain Mostly In Fixtures
 

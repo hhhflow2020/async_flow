@@ -866,3 +866,42 @@ Interpretation:
 - This is a modularity split only. SQE field assignment remains grouped by opcode family while preserving the original dispatcher order.
 - The TSAN target covers epoll fallback, io_uring socket/file/multishot paths, timeout/cancel paths, and StopImmediately pending-IO cleanup.
 - The benchmark canary does not show a gross runtime or helper-level fast-path regression from the structural split.
+
+## 2026-06-01 Provided Buffer Resource Split Validation
+
+This run validates the structural split of the io_uring provided-buffer ring resource helper on the requested remote Linux host with `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2`.
+
+Changes under validation:
+
+- `runtime_executor_io_uring_provided_buffer_resource_fragment.hpp` is now a 6-line umbrella.
+- `runtime_executor_io_uring_provided_buffer_register_fragment.hpp` owns provided-buffer ring registration.
+- `runtime_executor_io_uring_provided_buffer_unregister_fragment.hpp` owns provided-buffer ring unregistration.
+- The split keeps the helpers inline in `AsyncRuntime::Executor`; it does not change registration arguments, pending-submit flush ordering, busy checks, group tracking, locks, allocations, memory ordering, or fallback behavior.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Remote clang Debug provided-buffer targeted tests: 6/6 passed.
+- Remote clang TSAN provided-buffer targeted tests: 6/6 passed, no ThreadSanitizer report.
+- Remote clang Release full runtime suite: 138 total, 135 passed, 3 skipped, 0 failed.
+
+Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | CPU Mean | Throughput Mean |
+| --- | ---: | ---: | ---: |
+| `BM_IoDatagramAdapterZeroByteRecv` | 0.647 ns | 0.647 ns | n/a |
+| `BM_IoFileAdapterZeroByteRead` | 0.628 ns | 0.628 ns | n/a |
+| `BM_IoStreamAdapterZeroByteSend` | 0.627 ns | 0.627 ns | n/a |
+| `BM_IoStreamAdapterZeroByteSendZc` | 0.628 ns | 0.627 ns | n/a |
+| `BM_IoFileAdapterZeroByteReadFixedAt` | 0.630 ns | 0.629 ns | n/a |
+| `BM_RuntimeExternalStart/8192` | 6.70 ms | 6.69 ms | 1.224 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 13.5 ms | 4.59 ms | 605.570 k/s |
+| `BM_RuntimeIoThreadHop/8192` | 4.19 ms | 4.19 ms | 1.954 M/s |
+| `BM_RuntimeParallelShards/128` | 0.480 ms | 0.465 ms | 267.212 k/s |
+| `BM_RuntimeParallelShards/512` | 1.83 ms | 1.77 ms | 280.493 k/s |
+
+Interpretation:
+
+- This is a modularity split only. The resource lifecycle remains executor-thread-only and the unregister path still flushes pending submissions before checking active operations.
+- The TSAN target covers provided-buffer multishot recv paths plus invalid/unavailable backend boundaries for stream, accept, fixed-buffer, and epoll fallback helpers.
+- The benchmark canary does not show a gross runtime or helper-level fast-path regression from this structural split.
