@@ -334,6 +334,8 @@ Interpretation:
 
 This run validates the example support split that turned `examples/support/io_uring_fixed_file_task.hpp` into a small task shell over flow, IO-operation, and registration/update fragments.
 
+Status: superseded by the example task de-fragmenting validation later on 2026-06-01. The split validated here was mechanically correct, but the class-body `#include` splice style is no longer the desired modularity pattern.
+
 Correctness and race checks:
 
 - Local `git diff --check`: passed.
@@ -350,6 +352,8 @@ Interpretation:
 ## 2026-06-01 io_uring File-Lifecycle Task Split Validation
 
 This run validates the example support split that turned `examples/support/io_uring_file_lifecycle_task.hpp` into a small task shell over flow, file-operation, and namespace-operation fragments.
+
+Status: superseded by the example task de-fragmenting validation later on 2026-06-01. The split validated here was mechanically correct, but the class-body `#include` splice style is no longer the desired modularity pattern.
 
 Correctness and race checks:
 
@@ -368,6 +372,8 @@ Interpretation:
 
 This run validates the example support split that turned `examples/support/io_uring_udp_recvmsg_multishot_task.hpp` into a small task shell over flow, provided-buffer ring, and recvmsg multishot fragments.
 
+Status: superseded by the example task de-fragmenting validation later on 2026-06-01. The split validated here was mechanically correct, but the class-body `#include` splice style is no longer the desired modularity pattern.
+
 Correctness and race checks:
 
 - Local `git diff --check`: passed.
@@ -384,6 +390,8 @@ Interpretation:
 ## 2026-06-01 Length-Prefixed RPC Client Example Split Validation
 
 This run validates the example support split that turned `examples/support/io_rpc_length_prefixed_client.hpp` into a small task shell over flow, request-send, and response-read fragments.
+
+Status: superseded by the example task de-fragmenting validation later on 2026-06-01. The split validated here was mechanically correct, but the class-body `#include` splice style is no longer the desired modularity pattern.
 
 Correctness and race checks:
 
@@ -403,6 +411,8 @@ Interpretation:
 
 This run validates the example support split that turned `examples/support/io_uring_udp_recv_multishot_task.hpp` into a small task shell over flow, provided-buffer ring, and recv multishot fragments.
 
+Status: superseded by the example task de-fragmenting validation later on 2026-06-01. The split validated here was mechanically correct, but the class-body `#include` splice style is no longer the desired modularity pattern.
+
 Correctness and race checks:
 
 - Local `git diff --check`: passed.
@@ -420,6 +430,8 @@ Interpretation:
 
 This run validates the example support split that turned `examples/support/io_uring_recv_multishot_task.hpp` into a small task shell over flow, provided-buffer ring, and recv multishot fragments.
 
+Status: superseded by the example task de-fragmenting validation later on 2026-06-01. The split validated here was mechanically correct, but the class-body `#include` splice style is no longer the desired modularity pattern.
+
 Correctness and race checks:
 
 - Local `git diff --check`: passed.
@@ -432,6 +444,28 @@ Interpretation:
 
 - This pass changed only example support layout. Runtime scheduling, IO backend behavior, queue selection, memory ordering, and public APIs were unchanged.
 - The remote host/container combination did not expose the io_uring backend path for this example, so this validates build/link/run and TSAN startup/teardown cleanliness rather than the provided-buffer stream recv multishot data path itself.
+
+## 2026-06-01 Example Task De-Fragmenting Validation
+
+This run validates the cleanup that removes class-body `#include` splicing from the example task classes that were previously split into flow/request/response/ring/IO method fragments.
+
+Changes under validation:
+
+- `FixedFileRoundTripTask`, `FileLifecycleTask`, `FilesystemOpsTask`, `RecvMultishotTask`, `UdpRecvMultishotTask`, `UdpRecvmsgMultishotTask`, and `RpcClientTask` now keep each task state machine in one cohesive class definition.
+- Removed 21 fragment headers that existed only to splice private methods into those seven class bodies.
+- `io_rpc_length_prefixed_server.hpp` remains a namespace-level composition of process task declaration, server task, and process task implementation; it is not a class-body splice.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.0` Debug build passed for `asyncflow_io_rpc_length_prefixed_example`, `asyncflow_io_uring_file_lifecycle_example`, `asyncflow_io_uring_filesystem_ops_example`, `asyncflow_io_uring_fixed_file_example`, `asyncflow_io_uring_recv_multishot_example`, `asyncflow_io_uring_udp_recv_multishot_example`, and `asyncflow_io_uring_udp_recvmsg_multishot_example`.
+- Remote clang Debug run under `--security-opt seccomp=unconfined` passed for all seven executables.
+- Runtime outputs confirmed the exercised paths: `rpc response_ok=1`, lifecycle/statx size `1`, fixed-file `byte=F vectored=IO updated=U`, stream recv multishot `MR`, UDP recv multishot `UM`, and UDP recvmsg multishot `RM peers=2`.
+
+Interpretation:
+
+- This pass changed only example support layout. Runtime scheduling, IO backend behavior, queue selection, memory ordering, public APIs, task field layout, and example assertions were unchanged.
+- No Release benchmark was run for this pass because no production runtime path or benchmarked helper path changed.
 
 ## 2026-06-01 io_uring File Lifecycle Test Support Split Validation
 

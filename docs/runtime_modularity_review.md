@@ -72,16 +72,16 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - io_uring fixed file/buffer test support is now a small umbrella over fixed-buffer, fixed-file read/write, fixed-file update, and openat-direct task fragments. The fixed-file read/write task is kept as one cohesive state-machine class instead of a class-body include shell.
 - IO benchmark support now keeps the hot benchmark-facing fake task shell small and splits FakeRuntime stubs by Linux socket, POSIX message, POSIX fixed file, accept/connect, and filesystem helpers. Adapter benchmark cases are also split by stream/listener, datagram, and resource/file-like families.
 - Runtime benchmarks are now split into shared runtime benchmark task support, external-start, thread-hop, and parallel-shard benchmark families. This keeps benchmark harness changes separate from the task/state-machine fixtures they measure.
-- The length-prefixed RPC example is now split into runtime traits, server/process task fragments, client flow/request/response fragments, and a thin executable entry point.
+- The length-prefixed RPC example is now split into runtime traits, server/process task fragments, a cohesive client state-machine task, and a thin executable entry point.
 - The vectored IO example is now split into runtime/common helpers, stream readv/writev tasks, datagram recvmsg/sendmsg tasks, and a thin executable entry point.
-- The io_uring UDP recvmsg multishot example is now split into runtime/wait helpers, UDP socket setup helpers, a small provided-buffer multishot task shell, flow/ring/recv fragments, and a thin executable entry point.
+- The io_uring UDP recvmsg multishot example is now split into runtime/wait helpers, UDP socket setup helpers, a cohesive provided-buffer recvmsg multishot task class, and a thin executable entry point.
 - The io_uring accept-direct example is now split into runtime/wait helpers, socket setup/read-write helpers, the fixed-file accept round-trip task, and a thin executable entry point.
-- The io_uring fixed-file example is now split into runtime traits, temporary file lifecycle helpers, a small registered-file/buffer task shell, flow/IO/registration fragments, and a thin executable entry point.
-- The io_uring filesystem-ops example is now split into runtime/result types, temporary path lifecycle helpers, a small filesystem operation task shell, flow/data/namespace operation fragments, and a thin executable entry point.
-- The io_uring UDP recv multishot example is now split into runtime/wait helpers, UDP socket setup helpers, a small provided-buffer recv task shell, flow/ring/recv fragments, and a thin executable entry point.
-- The io_uring file-lifecycle example is now split into runtime traits, temporary path lifecycle helpers, a small task shell, flow/file-operation/namespace-operation fragments, and a thin executable entry point.
+- The io_uring fixed-file example is now split into runtime traits, temporary file lifecycle helpers, a cohesive registered-file/buffer task class, and a thin executable entry point.
+- The io_uring filesystem-ops example is now split into runtime/result types, temporary path lifecycle helpers, a cohesive filesystem operation task class, and a thin executable entry point.
+- The io_uring UDP recv multishot example is now split into runtime/wait helpers, UDP socket setup helpers, a cohesive provided-buffer recv task class, and a thin executable entry point.
+- The io_uring file-lifecycle example is now split into runtime traits, temporary path lifecycle helpers, a cohesive lifecycle task class, and a thin executable entry point.
 - The pollable-client adapter example is now split into runtime traits, a third-party-style pollable echo client, the AsyncFlow readiness adapter task, peer echo helpers, and a thin executable entry point.
-- The io_uring stream recv multishot example is now split into runtime/wait helpers, socketpair setup helpers, a small provided-buffer recv task shell, flow/ring/recv fragments, and a thin executable entry point.
+- The io_uring stream recv multishot example is now split into runtime/wait helpers, socketpair setup helpers, a cohesive provided-buffer recv task class, and a thin executable entry point.
 - The TCP connect/accept example is now split into runtime traits, portable loopback socket setup, server/client state-machine tasks, and a thin executable entry point. It uses the unified `ThreadKind::Io`/`ThreadKind::IoUring` API so Linux can prefer io_uring while macOS/BSD uses the native kqueue readiness backend.
 - The TCP echo server example demonstrates a fully asynchronous 2-IO-thread/1-compute-thread flow: accept/read on IO threads, uppercase-to-lowercase transform on the compute thread, then send on the owning IO thread. Its runtime traits, socket setup, server acceptor, session state machine, client driver, and executable entry point are split into focused headers.
 - The datagram round-trip example is now split into runtime traits, portable UDP loopback socket setup, server/client state-machine tasks, and a thin executable entry point. It uses the same unified API shape as TCP: Linux prefers io_uring with epoll fallback and macOS/BSD uses kqueue readiness.
@@ -441,10 +441,9 @@ Additional validation after the length-prefixed RPC server example split:
 
 Additional validation after the length-prefixed RPC client example split:
 
-- `examples/support/io_rpc_length_prefixed_client.hpp` is now a 77-line client task shell.
-- `examples/support/io_rpc_length_prefixed_client_flow.hpp` owns the state dispatcher and completion path.
-- `examples/support/io_rpc_length_prefixed_client_request.hpp` owns connect, request frame setup, and request send handlers.
-- `examples/support/io_rpc_length_prefixed_client_response.hpp` owns response header/body parsing and response validation.
+Status: superseded by the example task de-fragmenting pass below. The earlier split was mechanically correct, but it used class-body `#include` splicing and did not create an independent abstraction boundary.
+
+- `examples/support/io_rpc_length_prefixed_client.hpp` was temporarily a client task shell over flow, request-send, and response-read fragments.
 - No runtime scheduling, IO backend, queue, memory-ordering, or public API behavior changed in this pass; only example support ownership changed.
 - Local `git diff --check`: passed.
 - Local Release `asyncflow_io_rpc_length_prefixed_example` build: passed; local run reported `rpc length-prefixed example is Linux-only`.
@@ -455,10 +454,9 @@ Additional validation after the length-prefixed RPC client example split:
 
 Additional validation after the io_uring fixed-file task split:
 
-- `examples/support/io_uring_fixed_file_task.hpp` is now a 77-line task shell.
-- `examples/support/io_uring_fixed_file_task_flow.hpp` owns the state dispatcher and completion path.
-- `examples/support/io_uring_fixed_file_task_io.hpp` owns fixed-buffer, vectored, fsync, and updated-file read state handlers.
-- `examples/support/io_uring_fixed_file_task_registration.hpp` owns fixed-file/buffer register, update, and unregister handlers.
+Status: superseded by the example task de-fragmenting pass below. The earlier split was mechanically correct, but it used class-body `#include` splicing and did not create an independent abstraction boundary.
+
+- `examples/support/io_uring_fixed_file_task.hpp` was temporarily a task shell over flow, IO-operation, and registration/update fragments.
 - No runtime scheduling, IO backend, queue, memory-ordering, or public API behavior changed in this pass; only example support ownership changed.
 - Local `git diff --check`: passed.
 - Local Release `asyncflow_io_uring_fixed_file_example` build: passed; local run reported `io_uring fixed file example is Linux-only`.
@@ -468,10 +466,9 @@ Additional validation after the io_uring fixed-file task split:
 
 Additional validation after the io_uring file-lifecycle task split:
 
-- `examples/support/io_uring_file_lifecycle_task.hpp` is now a 74-line task shell.
-- `examples/support/io_uring_file_lifecycle_task_flow.hpp` owns path copying and the state dispatcher.
-- `examples/support/io_uring_file_lifecycle_task_file_ops.hpp` owns open, fallocate, write, fsync, read, and close handlers.
-- `examples/support/io_uring_file_lifecycle_task_namespace_ops.hpp` owns statx, rename, and unlink handlers.
+Status: superseded by the example task de-fragmenting pass below. The earlier split was mechanically correct, but it used class-body `#include` splicing and did not create an independent abstraction boundary.
+
+- `examples/support/io_uring_file_lifecycle_task.hpp` was temporarily a task shell over flow, file-operation, and namespace-operation fragments.
 - No runtime scheduling, IO backend, queue, memory-ordering, or public API behavior changed in this pass; only example support ownership changed.
 - Local `git diff --check`: passed.
 - Local Release `asyncflow_io_uring_file_lifecycle_example` build: passed; local run reported `io_uring lifecycle example is Linux-only`.
@@ -481,10 +478,9 @@ Additional validation after the io_uring file-lifecycle task split:
 
 Additional validation after the io_uring UDP recvmsg multishot task split:
 
-- `examples/support/io_uring_udp_recvmsg_multishot_task.hpp` is now a 74-line task shell.
-- `examples/support/io_uring_udp_recvmsg_multishot_task_flow.hpp` owns the state dispatcher and completion cleanup.
-- `examples/support/io_uring_udp_recvmsg_multishot_task_ring.hpp` owns provided-buffer ring registration and unregistration.
-- `examples/support/io_uring_udp_recvmsg_multishot_task_recv.hpp` owns recvmsg multishot parsing, buffer recycling, cancel, and stop handling.
+Status: superseded by the example task de-fragmenting pass below. The earlier split was mechanically correct, but it used class-body `#include` splicing and did not create an independent abstraction boundary.
+
+- `examples/support/io_uring_udp_recvmsg_multishot_task.hpp` was temporarily a task shell over flow, provided-buffer ring, and recvmsg multishot fragments.
 - No runtime scheduling, IO backend, queue, memory-ordering, or public API behavior changed in this pass; only example support ownership changed.
 - Local `git diff --check`: passed.
 - Local Release `asyncflow_io_uring_udp_recvmsg_multishot_example` build: passed; local run reported `io_uring UDP recvmsg_multishot example is Linux-only`.
@@ -494,10 +490,9 @@ Additional validation after the io_uring UDP recvmsg multishot task split:
 
 Additional validation after the io_uring UDP recv multishot task split:
 
-- `examples/support/io_uring_udp_recv_multishot_task.hpp` is now a 64-line task shell.
-- `examples/support/io_uring_udp_recv_multishot_task_flow.hpp` owns the state dispatcher and completion cleanup.
-- `examples/support/io_uring_udp_recv_multishot_task_ring.hpp` owns provided-buffer ring registration and unregistration.
-- `examples/support/io_uring_udp_recv_multishot_task_recv.hpp` owns recv multishot completion, buffer recycling, cancel, and stop handling.
+Status: superseded by the example task de-fragmenting pass below. The earlier split was mechanically correct, but it used class-body `#include` splicing and did not create an independent abstraction boundary.
+
+- `examples/support/io_uring_udp_recv_multishot_task.hpp` was temporarily a task shell over flow, provided-buffer ring, and recv multishot fragments.
 - No runtime scheduling, IO backend, queue, memory-ordering, or public API behavior changed in this pass; only example support ownership changed.
 - Local `git diff --check`: passed.
 - Local Release `asyncflow_io_uring_udp_recv_multishot_example` build: passed; local run reported `io_uring UDP recv_multishot example is Linux-only`.
@@ -507,16 +502,25 @@ Additional validation after the io_uring UDP recv multishot task split:
 
 Additional validation after the io_uring stream recv multishot task split:
 
-- `examples/support/io_uring_recv_multishot_task.hpp` is now a 63-line task shell.
-- `examples/support/io_uring_recv_multishot_task_flow.hpp` owns the state dispatcher and completion cleanup.
-- `examples/support/io_uring_recv_multishot_task_ring.hpp` owns provided-buffer ring registration and unregistration.
-- `examples/support/io_uring_recv_multishot_task_recv.hpp` owns recv multishot completion, buffer recycling, cancel, and stop handling.
+Status: superseded by the example task de-fragmenting pass below. The earlier split was mechanically correct, but it used class-body `#include` splicing and did not create an independent abstraction boundary.
+
+- `examples/support/io_uring_recv_multishot_task.hpp` was temporarily a task shell over flow, provided-buffer ring, and recv multishot fragments.
 - No runtime scheduling, IO backend, queue, memory-ordering, or public API behavior changed in this pass; only example support ownership changed.
 - Local `git diff --check`: passed.
 - Local Release `asyncflow_io_uring_recv_multishot_example` build: passed; local run reported `io_uring recv_multishot example is Linux-only`.
 - Remote clang Debug `asyncflow_io_uring_recv_multishot_example` build/run: passed with `io_uring backend unavailable`.
 - Remote clang TSAN `asyncflow_io_uring_recv_multishot_example` build/run: passed with `io_uring backend unavailable` and no ThreadSanitizer report.
 - Remote clang Release `asyncflow_io_uring_recv_multishot_example` build/run: passed with `io_uring backend unavailable`.
+
+Additional validation after the example task de-fragmenting pass:
+
+- `FixedFileRoundTripTask`, `FileLifecycleTask`, `FilesystemOpsTask`, `RecvMultishotTask`, `UdpRecvMultishotTask`, `UdpRecvmsgMultishotTask`, and `RpcClientTask` now keep each state machine in one cohesive class definition.
+- Removed 21 fragment headers that existed only to splice private methods into those seven example task class bodies.
+- `io_rpc_length_prefixed_server.hpp` remains a namespace-level composition of process task declaration, server task, and process task implementation; it is not a class-body splice.
+- No runtime scheduling, IO backend, queue, memory-ordering, public API, task field layout, or example assertion behavior changed in this pass; only over-fragmented example support source layout changed.
+- Local `git diff --check`: passed.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.0` Debug build passed for all seven affected example targets.
+- Remote clang Debug run under `--security-opt seccomp=unconfined` passed for all seven executables, covering RPC, lifecycle/statx, fixed-file, stream recv multishot, UDP recv multishot, and UDP recvmsg multishot paths.
 
 Additional validation after the io_uring file lifecycle test support split:
 
