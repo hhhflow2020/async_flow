@@ -704,3 +704,29 @@ Interpretation:
 
 - The split separates data partitioning APIs from parallel owner-resume orchestration and ordered-start APIs without changing the scheduler state machine.
 - The TSAN target covers ordered batch/start flows, parallel shard owner resume, above-64 ready-source words, self-post local queue routing, shutdown behavior, and the Running-to-Pending wake boundary.
+
+## 2026-06-01 Socket Accept/Connect Submit Split Validation
+
+This run validates the structural split of socket accept/connect submit wrappers on both the public `AsyncRuntime` side and the io_uring executor side.
+
+Changes under validation:
+
+- `runtime_public_io_socket_accept_connect_submit_fragment.hpp` is now a 6-line umbrella over public accept and connect submit fragments.
+- `runtime_public_io_socket_accept_submit_fragment.hpp` owns accept, accept-direct, and accept-multishot validation and executor handoff.
+- `runtime_public_io_socket_connect_submit_fragment.hpp` owns connect validation and executor handoff.
+- `runtime_executor_io_uring_socket_accept_connect_submit_fragment.hpp` is now a 6-line umbrella over executor accept and connect SQE submit fragments.
+- `runtime_executor_io_uring_socket_accept_submit_fragment.hpp` owns accept, accept-direct, and accept-multishot SQE submit wrappers.
+- `runtime_executor_io_uring_socket_connect_submit_fragment.hpp` owns connect SQE submit wrappers.
+- The split keeps all submit wrappers inline in their original class scopes; it does not change queue topology, task state transitions, SQE arguments, atomics, locks, allocations, or fallback behavior.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2` Debug accept/connect targeted tests: 13 total, 12 passed, 1 skipped.
+- Remote clang TSAN accept/connect targeted tests: 13 total, 12 passed, 1 skipped, no ThreadSanitizer report.
+- Remote clang Release full runtime suite: 138 total, 135 passed, 3 skipped, 0 failed.
+
+Interpretation:
+
+- This is a modularity split only. Accept variants stay grouped together because basic accept, direct accept, and multishot accept share the `IORING_OP_ACCEPT` submit family and validation boundary.
+- The TSAN target covers epoll accept/connect helpers, io_uring accept/connect paths, accept-multishot unavailable-backend validation, shutdown wait for accepted tasks, and the direct-accept capability skip path.

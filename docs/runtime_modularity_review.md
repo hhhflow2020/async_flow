@@ -132,6 +132,7 @@ Resolved items:
 - `runtime_executor_task_fragment.hpp` is now a 7-line umbrella. Ready-source/wake signaling, local queue push/pop, and execute/result dispatch live in `runtime_executor_ready_signal_fragment.hpp`, `runtime_executor_local_queue_fragment.hpp`, and `runtime_executor_execute_fragment.hpp`.
 - `runtime_executor_control_fragment.hpp` is now a 6-line umbrella over executor lifecycle and notify/wake control fragments. This keeps thread lifecycle and IO/native wake decisions separately auditable without changing executor state layout.
 - `runtime_public_parallel_api_fragment.hpp` is now a 7-line umbrella over shard splitting, parallel shard dispatch overloads, and ordered-start public APIs. The split keeps these public scheduling templates inline while separating data partitioning from owner-resume orchestration.
+- Public socket accept/connect submit wrappers and matching io_uring executor submit wrappers are now small umbrellas over accept and connect operation families. The accept-direct and accept-multishot paths remain grouped with accept because they share validation and SQE opcode semantics.
 - `basic_task_fragment.hpp` is now a 20-line class shell. Public task API, protected task helpers, lifetime reference handling, scheduling/wake state machine, and storage layout live in dedicated class-body fragments. Storage fields remain together in `basic_task_storage_fragment.hpp`.
 - `object_pool.hpp` is now a small shell over storage layout, slot acquire/release, and lifecycle fragments. The split preserves the TLS cache, cache-line slot sizing, MPMC free-list, and atomic block/hot-block fields.
 
@@ -158,6 +159,12 @@ Current file-size snapshot after the pass:
 - `include/af/detail/runtime_public_parallel_shard_fragment.hpp`: 44 lines.
 - `include/af/detail/runtime_public_parallel_shards_fragment.hpp`: 119 lines.
 - `include/af/detail/runtime_public_ordered_start_fragment.hpp`: 23 lines.
+- `include/af/detail/runtime_public_io_socket_accept_connect_submit_fragment.hpp`: 6 lines.
+- `include/af/detail/runtime_public_io_socket_accept_submit_fragment.hpp`: 148 lines.
+- `include/af/detail/runtime_public_io_socket_connect_submit_fragment.hpp`: 46 lines.
+- `include/af/detail/runtime_executor_io_uring_socket_accept_connect_submit_fragment.hpp`: 6 lines.
+- `include/af/detail/runtime_executor_io_uring_socket_accept_submit_fragment.hpp`: 139 lines.
+- `include/af/detail/runtime_executor_io_uring_socket_connect_submit_fragment.hpp`: 41 lines.
 - `include/af/detail/basic_task_fragment.hpp`: 20 lines.
 - `include/af/detail/basic_task_public_fragment.hpp`: 29 lines.
 - `include/af/detail/basic_task_protected_fragment.hpp`: 72 lines.
@@ -750,6 +757,22 @@ Additional validation after the public parallel API split:
   - `BM_RuntimeIoThreadHop/8192` mean: 4.27 ms real, 1.918 M/s.
   - `BM_RuntimeParallelShards/128` mean: 0.476 ms real, 268.995 k/s.
   - `BM_RuntimeParallelShards/512` mean: 1.82 ms real, 280.922 k/s.
+
+Additional validation after the socket accept/connect submit split:
+
+- Public submit wrappers:
+  - `runtime_public_io_socket_accept_connect_submit_fragment.hpp`: 6 lines.
+  - `runtime_public_io_socket_accept_submit_fragment.hpp`: 148 lines.
+  - `runtime_public_io_socket_connect_submit_fragment.hpp`: 46 lines.
+- Executor submit wrappers:
+  - `runtime_executor_io_uring_socket_accept_connect_submit_fragment.hpp`: 6 lines.
+  - `runtime_executor_io_uring_socket_accept_submit_fragment.hpp`: 139 lines.
+  - `runtime_executor_io_uring_socket_connect_submit_fragment.hpp`: 41 lines.
+- The split is structural: no task state transitions, queue routing, SQE arguments, atomics, locks, allocations, or fallback semantics changed.
+- Local `git diff --check`: passed.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2` Debug accept/connect targeted tests: 13 total, 12 passed, 1 skipped.
+- Remote clang TSAN accept/connect targeted tests: 13 total, 12 passed, 1 skipped, with no ThreadSanitizer report.
+- Remote clang Release full runtime test suite: 138 total, 135 passed, 3 skipped, 0 failed.
 
 ### Latest Test/Example Scan: Long Files Remain Mostly In Fixtures
 
