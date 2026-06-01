@@ -130,6 +130,7 @@ Resolved items:
 - A late owner-resume race was fixed in `BasicTask`. Running wake requests are now tagged with a run epoch, `Executor::execute()` uses a `Queued -> Starting -> Running` transition, and a post that races with `finish_pending()` can either defer to the owner or directly transition `Pending -> Queued` and enqueue the task. This prevents a stale `Running` observation from writing `requested_thread_` after the owner has already checked the slot.
 - The Running -> Pending boundary has direct stress coverage. `RuntimeStressTests.RunningToPendingWakeDoesNotStrandOwner` forces a waker on another runtime thread to post the owner while the owner is still Running and about to return Pending; the owner must resume and complete instead of hanging.
 - Running wake requests are now terminal-state safe. If a wake request arrives while the owner is Running but the owner returns `Done` or `Again` instead of `Pending`, `finish_done()` and `finish_again()` publish the terminal/queued state before consuming the request slot, treating that request as a Pending-only wake instead of a false debug assertion.
+- io_uring completion cancel no longer publishes a user-visible `ECANCELED` result before the kernel CQE arrives. `cancel_io_completion()` now only submits the cancel request, marks the operation as cancel-requested, and treats repeated cancel requests as already accepted; `completed_uring_status()` and `completed_uring_timeout_status()` keep reporting pending while the completion token is still owned by the runtime. This prevents a task from consuming cancel success and finishing while the pending operation still holds its task/result pointers.
 - Scheduler and runtime stress fixtures are no longer concentrated in one source. Reusable scheduler state machines are split by repeat-hop, above-64 wide-hop, parallel owner-resume, and wait-helper fragments; lifecycle stress helpers live in `tests/support/runtime_lifecycle_stress_support.hpp`, and test cases are split by lifecycle, cross-thread, and parallel concerns.
 - `runtime_executor_core_state_fragment.hpp` is now the executor field-layout owner only. Queue-drain behavior lives in `runtime_executor_pop_fragment.hpp`, and finish/reschedule behavior lives in `runtime_executor_finish_fragment.hpp`. This keeps declaration order and cache placement in one file while separating behavior that changes scheduling state.
 - `runtime_executor_task_fragment.hpp` is now a 7-line umbrella. Ready-source/wake signaling, local queue push/pop, and execute/result dispatch live in `runtime_executor_ready_signal_fragment.hpp`, `runtime_executor_local_queue_fragment.hpp`, and `runtime_executor_execute_fragment.hpp`.
@@ -189,6 +190,9 @@ Current file-size snapshot after the pass:
 - `include/af/detail/runtime_executor_io_uring_generic_submit_sqe_filesystem_fragment.hpp`: 56 lines.
 - `include/af/detail/runtime_executor_io_uring_generic_submit_sqe_socket_fragment.hpp`: 49 lines.
 - `include/af/detail/runtime_executor_io_uring_generic_submit_sqe_buffer_fragment.hpp`: 22 lines.
+- `include/af/detail/runtime_executor_io_wait_fragment.hpp`: 102 lines.
+- `include/af/detail/io_common_uring_status_fragment.hpp`: 37 lines.
+- `include/af/detail/io_timeout_status_fragment.hpp`: 37 lines.
 - `include/af/detail/io_uring_support.hpp`: 21 lines.
 - `include/af/detail/io_uring_support_abi_fragment.hpp`: 63 lines.
 - `include/af/detail/io_uring_support_opcode_fragment.hpp`: 16 lines.
@@ -225,6 +229,8 @@ Current file-size snapshot after the pass:
 - `tests/support/runtime_scheduler_stress_running_pending_fragment.hpp`: 160 lines.
 - `tests/support/runtime_scheduler_stress_running_wake_terminal_fragment.hpp`: 149 lines.
 - `tests/support/runtime_scheduler_stress_wait_fragment.hpp`: 15 lines.
+- `tests/runtime_io_uring_socket_stream_tests.cpp`: 199 lines.
+- `tests/support/runtime_io_uring_socket_stream_recv_cancel_tasks_fragment.hpp`: 107 lines.
 
 Validation evidence for the final pass:
 
@@ -968,6 +974,30 @@ Additional validation after the io_uring support split:
   - `BM_RuntimeIoThreadHop/8192` mean: 4.21 ms real, 1.946 M/s.
   - `BM_RuntimeParallelShards/128` mean: 0.483 ms real, 265.762 k/s.
   - `BM_RuntimeParallelShards/512` mean: 1.98 ms real, 259.583 k/s.
+
+Additional validation after the io_uring completion-cancel ownership fix:
+
+- `cancel_io_completion()` no longer writes `ECANCELED` into `IoOpState` before the io_uring CQE is observed. It submits the cancel SQE, marks `operation->cancel_requested`, and treats a repeated cancel request as accepted without emitting another cancel SQE.
+- `completed_uring_status()` and `completed_uring_timeout_status()` now return pending while `completion_token != nullptr` or the wait result is not ready. A task cannot consume the cancel result before the runtime has released CQE ownership.
+- Added `UringIoRuntimeSocketStreamFixture.IoUringCompletionCancelIsNotConsumableBeforeCqe`, backed by `UringSelfCancelRecvCompletionTask`, to cover self-cancel followed by an immediate second status check before the cancel CQE.
+- The fix adds no locks, heap allocations, queue topology changes, virtual dispatch, or cross-thread route changes.
+- Local `git diff --check`: passed.
+- Remote clang Debug targeted IO/io_uring tests: 9/9 passed.
+- Remote clang TSAN targeted IO/io_uring/scheduler-boundary tests: 12/12 passed with no ThreadSanitizer report.
+- Remote clang TSAN full runtime suite: 141 total, 138 passed, 3 skipped, with no ThreadSanitizer report.
+- Remote clang Release full runtime suite: 141 total, 138 passed, 3 skipped, 0 failed.
+- Remote clang Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+  - `BM_IoDatagramAdapterZeroByteRecv` mean: 0.672 ns real.
+  - `BM_IoFileAdapterZeroByteRead` mean: 0.670 ns real.
+  - `BM_IoTimeoutInvalidDelay` mean: 0.971 ns real.
+  - `BM_IoStreamAdapterZeroByteSend` mean: 0.711 ns real.
+  - `BM_IoStreamAdapterZeroByteSendZc` mean: 0.649 ns real.
+  - `BM_IoFileAdapterZeroByteReadFixedAt` mean: 0.664 ns real.
+  - `BM_RuntimeExternalStart/8192` mean: 7.44 ms real, 1.103 M/s.
+  - `BM_RuntimeCrossThreadHop/8192` mean: 12.1 ms real, 677.438 k/s.
+  - `BM_RuntimeIoThreadHop/8192` mean: 4.18 ms real, 1.961 M/s.
+  - `BM_RuntimeParallelShards/128` mean: 0.467 ms real, 274.202 k/s.
+  - `BM_RuntimeParallelShards/512` mean: 2.10 ms real, 246.025 k/s.
 
 ### Latest Test/Example Scan: Long Files Remain Mostly In Fixtures
 

@@ -122,6 +122,50 @@ TEST_F(UringIoRuntimeSocketStreamFixture, IoUringThreadHandlesVectoredStreamOrFa
 #endif
 }
 
+TEST_F(UringIoRuntimeSocketStreamFixture, IoUringCompletionCancelIsNotConsumableBeforeCqe) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {
+        GTEST_SKIP() << "io backend unavailable";
+    }
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+
+    std::atomic<int> wait_kind{-1};
+    std::atomic<int> cancel_result{0};
+    std::atomic<int> immediate_pending{0};
+    std::atomic<int> completed{0};
+    std::atomic<int> error{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringSelfCancelRecvCompletionTask>(
+        fds[0],
+        &wait_kind,
+        &cancel_result,
+        &immediate_pending,
+        &completed,
+        &error));
+
+    if (!wait_until_at_least(completed, 1)) {
+        const char value = 'x';
+        static_cast<void>(::write(fds[1], &value, sizeof(value)));
+        ASSERT_TRUE(wait_until_at_least(completed, 1));
+    }
+
+    if (wait_kind.load(std::memory_order_acquire) !=
+        static_cast<int>(af::IoWaitKind::Completion)) {
+        close_pair(fds);
+        GTEST_SKIP() << "recv did not remain as an io_uring completion operation";
+    }
+
+    EXPECT_EQ(cancel_result.load(std::memory_order_acquire), 1);
+    EXPECT_EQ(immediate_pending.load(std::memory_order_acquire), 1);
+    EXPECT_EQ(error.load(std::memory_order_acquire), ECANCELED);
+
+    close_pair(fds);
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
 TEST_F(UringIoRuntimeSocketStreamFixture, IoUringThreadConnectsTcpStreamOrFallsBackToEpoll) {
 #if defined(__linux__)
     if (!UringIoRuntime::io_backend_available(IoTestThread::IO_0)) {

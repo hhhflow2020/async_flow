@@ -43,6 +43,9 @@
                 state.wait.result = -EOPNOTSUPP;
                 return false;
             }
+            if (operation->cancel_requested) {
+                return true;
+            }
 
             const int submit_error = submit_io_uring_cancel(operation);
             if (submit_error != 0) {
@@ -53,9 +56,6 @@
             }
 
             operation->cancel_requested = true;
-            state.wait.events = io_error;
-            state.wait.error = ECANCELED;
-            state.wait.result = -ECANCELED;
             return true;
         }
 #endif

@@ -1028,3 +1028,44 @@ Interpretation:
 - The previous debug-only failure mode was a false invariant: a Running wake request can be real, but still become redundant if the owner completes or requeues itself instead of returning `Pending`.
 - Publishing the non-Running finish state before consuming the request slot narrows the late-request window and keeps the request slot from leaking into the next run epoch.
 - The benchmark canary stays within the existing noisy range for scheduler paths and does not show a gross regression from the correctness fix.
+
+## 2026-06-01 io_uring Completion Cancel CQE Ownership Fix
+
+This run validates the io_uring completion cancel fix on the requested remote Linux host with `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2`.
+
+Changes under validation:
+
+- `cancel_io_completion()` no longer publishes `ECANCELED` into the task wait state before the kernel CQE arrives. It submits the cancel SQE, marks `operation->cancel_requested`, and treats repeated cancel requests as already accepted.
+- `completed_uring_status()` and `completed_uring_timeout_status()` now continue to report pending while the runtime still owns the completion token or the wait result is not ready.
+- `UringIoRuntimeSocketStreamFixture.IoUringCompletionCancelIsNotConsumableBeforeCqe` covers self-cancel followed by an immediate second status check before the cancel CQE is delivered.
+- The fix adds no locks, allocations, queue topology changes, virtual dispatch, or cross-thread route changes.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Remote clang Debug targeted IO/io_uring tests: 9/9 passed.
+- Remote clang TSAN targeted IO/io_uring/scheduler-boundary tests: 12/12 passed, no ThreadSanitizer report.
+- Remote clang TSAN full runtime suite: 141 total, 138 passed, 3 skipped, no ThreadSanitizer report.
+- Remote clang Release full runtime suite: 141 total, 138 passed, 3 skipped, 0 failed.
+
+Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | CPU Mean | Throughput Mean |
+| --- | ---: | ---: | ---: |
+| `BM_IoDatagramAdapterZeroByteRecv` | 0.672 ns | 0.671 ns | n/a |
+| `BM_IoFileAdapterZeroByteRead` | 0.670 ns | 0.670 ns | n/a |
+| `BM_IoTimeoutInvalidDelay` | 0.971 ns | 0.970 ns | n/a |
+| `BM_IoStreamAdapterZeroByteSend` | 0.711 ns | 0.710 ns | n/a |
+| `BM_IoStreamAdapterZeroByteSendZc` | 0.649 ns | 0.648 ns | n/a |
+| `BM_IoFileAdapterZeroByteReadFixedAt` | 0.664 ns | 0.664 ns | n/a |
+| `BM_RuntimeExternalStart/8192` | 7.44 ms | 7.43 ms | 1.103 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 12.1 ms | 4.36 ms | 677.438 k/s |
+| `BM_RuntimeIoThreadHop/8192` | 4.18 ms | 4.17 ms | 1.961 M/s |
+| `BM_RuntimeParallelShards/128` | 0.467 ms | 0.449 ms | 274.202 k/s |
+| `BM_RuntimeParallelShards/512` | 2.10 ms | 1.99 ms | 246.025 k/s |
+
+Interpretation:
+
+- The previous behavior could let a task observe cancel completion and finish while the pending io_uring operation still held task/result ownership until the CQE path ran.
+- Deferring user-visible `ECANCELED` until CQE completion preserves single-owner lifetime semantics without adding synchronization or changing queue routing.
+- The benchmark canary stays within the existing noisy range for runtime paths and leaves helper-level zero-byte fast paths in the same sub-nanosecond range.

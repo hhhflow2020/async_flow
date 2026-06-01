@@ -4,6 +4,7 @@
 
 #define AF_RUNTIME_IO_URING_SOCKET_STREAM_TASKS_FRAGMENT_INCLUDE 1
 #include "runtime_io_uring_socket_stream_recv_tasks_fragment.hpp"
+#include "runtime_io_uring_socket_stream_recv_cancel_tasks_fragment.hpp"
 #include "runtime_io_uring_socket_stream_send_tasks_fragment.hpp"
 #include "runtime_io_uring_socket_stream_vectored_tasks_fragment.hpp"
 #undef AF_RUNTIME_IO_URING_SOCKET_STREAM_TASKS_FRAGMENT_INCLUDE

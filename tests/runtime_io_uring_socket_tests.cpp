@@ -105,7 +105,7 @@ TEST_F(UringIoRuntimeSocketCoreFixture, IoUringThreadCancelsPendingRecvCompletio
     }
 
     EXPECT_EQ(cancel_result.load(std::memory_order_acquire), 1);
-    EXPECT_EQ(cancel_error.load(std::memory_order_acquire), ECANCELED);
+    EXPECT_EQ(cancel_error.load(std::memory_order_acquire), 0);
     EXPECT_EQ(recv_error.load(std::memory_order_acquire), ECANCELED);
     EXPECT_EQ(recv_bytes.load(std::memory_order_acquire), -1);
 

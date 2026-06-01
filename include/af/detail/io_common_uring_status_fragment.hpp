@@ -20,6 +20,9 @@
 [[nodiscard]] inline IoStatus completed_uring_status(
     IoOpState& state,
     bool zero_is_closed = false) noexcept {
+    if (state.wait.completion_token != nullptr || !io_wait_result_ready(state)) {
+        return IoStatus::make_pending();
+    }
     clear_waiting(state);
     if (state.wait.error != 0) {
         return IoStatus::failed(state.wait.error);
