@@ -4,10 +4,12 @@
 
 namespace af {
 
-#define AF_IO_TIMEOUT_FRAGMENT_INCLUDE 1
-#include "af/detail/io_timeout_status_fragment.hpp"
-#include "af/detail/io_timeout_wait_fragment.hpp"
-#include "af/detail/io_timeout_deadline_fragment.hpp"
-#undef AF_IO_TIMEOUT_FRAGMENT_INCLUDE
+#define AF_IO_TIMEOUT_DETAIL_INCLUDE 1
+// clang-format off
+#include "af/detail/io_timeout_status.hpp"
+#include "af/detail/io_timeout_wait.hpp"
+#include "af/detail/io_timeout_deadline.hpp"
+// clang-format on
+#undef AF_IO_TIMEOUT_DETAIL_INCLUDE
 
 } // namespace af

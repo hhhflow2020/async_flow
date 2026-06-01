@@ -1504,3 +1504,25 @@ Correctness checks:
 Interpretation:
 
 - This is a naming/include-structure cleanup, not a performance-sensitive code change. A new benchmark run was not collected for this pass because the generated IO type logic is unchanged.
+
+## 2026-06-01 Timeout And Datagram Header Fragment Rename
+
+This run validates removal of active `*_fragment.hpp` naming from the public timeout and datagram IO entry points.
+
+Changes under validation:
+
+- `include/af/io_timeout.hpp` now includes `io_timeout_status.hpp`, `io_timeout_wait.hpp`, and `io_timeout_deadline.hpp`.
+- `include/af/io_datagram.hpp` now includes `io_datagram_recv.hpp`, `io_datagram_send.hpp`, `io_datagram_vectored.hpp`, and `io_datagram_zero_copy.hpp`.
+- The old `AF_IO_TIMEOUT_FRAGMENT_INCLUDE` and `AF_IO_DATAGRAM_FRAGMENT_INCLUDE` guards were replaced with `AF_IO_TIMEOUT_DETAIL_INCLUDE` and `AF_IO_DATAGRAM_DETAIL_INCLUDE`.
+- No timeout arbitration logic, datagram send/receive behavior, zero-copy path, wait/cancel ordering, or public API changed.
+
+Correctness checks:
+
+- Local `git diff --check`: passed before this documentation update.
+- Local scan for `#include "af/detail/*fragment.hpp"` inside framework class/struct bodies: no matches.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.0` Debug `asyncflow_runtime_tests` build and full runtime suite under `--security-opt seccomp=unconfined`: passed; 143 tests, 140 passed, 3 skipped, 0 failed.
+- Remote clang Release `asyncflow_runtime_tests` build and full runtime suite under `--security-opt seccomp=unconfined`: passed; 143 tests, 140 passed, 3 skipped, 0 failed.
+
+Interpretation:
+
+- This is a naming/include-structure cleanup, not a performance-sensitive code change. A new benchmark run was not collected for this pass because the generated timeout/datagram logic is unchanged.
