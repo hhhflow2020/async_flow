@@ -447,3 +447,20 @@ Interpretation:
 
 - This pass changed only test support layout. Runtime scheduling, IO backend behavior, queue selection, memory ordering, public APIs, and test assertions were unchanged.
 - The remote host/container combination did not expose the io_uring backend path for this test, so this validates build/link/run and TSAN startup/teardown cleanliness rather than the open/fallocate/read/write/stat/rename/unlink data path itself.
+
+## 2026-06-01 io_uring Fixed-File Read/Write Test Support Split Validation
+
+This run validates the test support split that turned `tests/support/runtime_io_file_fixed_file_rw_tasks_fragment.hpp` into a 53-line task shell over flow, registration, and IO-operation fragments.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_runtime_tests` build: passed; the targeted local run reported `io_uring backend is Linux-only`.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2` Debug `asyncflow_runtime_tests` targeted run: skipped by test logic with `io_uring backend unavailable`.
+- Remote clang TSAN `asyncflow_runtime_tests` targeted run: skipped by test logic with `io_uring backend unavailable` and no ThreadSanitizer report.
+- Remote clang Release `asyncflow_runtime_tests` targeted run: skipped by test logic with `io_uring backend unavailable`.
+
+Interpretation:
+
+- This pass changed only test support layout. Runtime scheduling, IO backend behavior, queue selection, memory ordering, public APIs, task field layout, and test assertions were unchanged.
+- The remote host/container combination did not expose the io_uring backend path for this test, so this validates build/link/run and TSAN startup/teardown cleanliness rather than the registered fixed-file fixed-buffer/vectored read-write data path itself.

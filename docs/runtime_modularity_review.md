@@ -68,7 +68,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - io_uring CQ completion is now split by CQ polling, operation completion, poll-wait completion, and fd/direct-file cancel cleanup, with `runtime_executor_io_uring_backend_completion_fragment.hpp` kept as a small inline umbrella.
 - io_uring backend setup is now split by init flow, mmap/pointer binding, feature probing, close/reset, and storage reservation, with `runtime_executor_io_uring_backend_setup_fragment.hpp` kept as a small inline umbrella.
 - kqueue timeout internals are now split by timer-unit conversion, registration tracking, submit, and cancel/complete paths, with `runtime_executor_kqueue_timeout_fragment.hpp` kept as a small inline umbrella inside `AsyncRuntime::Executor`.
-- io_uring fixed file/buffer test support is now a small umbrella over fixed-buffer, fixed-file read/write, fixed-file update, and openat-direct task fragments.
+- io_uring fixed file/buffer test support is now a small umbrella over fixed-buffer, fixed-file read/write, fixed-file update, and openat-direct task fragments. The fixed-file read/write task is a 53-line shell over flow, registration, and IO-operation fragments.
 - IO benchmark support now keeps the hot benchmark-facing fake task shell small and splits FakeRuntime stubs by Linux socket, POSIX message, POSIX fixed file, accept/connect, and filesystem helpers. Adapter benchmark cases are also split by stream/listener, datagram, and resource/file-like families.
 - Runtime benchmarks are now split into shared runtime benchmark task support, external-start, thread-hop, and parallel-shard benchmark families. This keeps benchmark harness changes separate from the task/state-machine fixtures they measure.
 - The length-prefixed RPC example is now split into runtime traits, server/process task fragments, client flow/request/response fragments, and a thin executable entry point.
@@ -417,6 +417,19 @@ Additional validation after the io_uring file lifecycle test support split:
 - Remote clang TSAN `asyncflow_runtime_tests` targeted run: skipped by test logic with `io_uring backend unavailable` and no ThreadSanitizer report.
 - Remote clang Release `asyncflow_runtime_tests` targeted run: skipped by test logic with `io_uring backend unavailable`.
 
+Additional validation after the io_uring fixed-file read/write test support split:
+
+- `tests/support/runtime_io_file_fixed_file_rw_tasks_fragment.hpp` is now a 53-line task shell.
+- `tests/support/runtime_io_file_fixed_file_rw_task_flow_fragment.hpp` owns the state dispatcher.
+- `tests/support/runtime_io_file_fixed_file_rw_task_registration_fragment.hpp` owns missing-table checks, file/buffer registration, duplicate registration validation, and unregister completion.
+- `tests/support/runtime_io_file_fixed_file_rw_task_io_fragment.hpp` owns fixed-buffer write/read, vectored write/read, and fsync handling.
+- No runtime scheduling, IO backend, queue, memory-ordering, public API, task field layout, or test assertion behavior changed in this pass; only test support ownership changed.
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_runtime_tests` build: passed; local targeted run reported `io_uring backend is Linux-only`.
+- Remote clang Debug `asyncflow_runtime_tests` targeted run: skipped by test logic with `io_uring backend unavailable`.
+- Remote clang TSAN `asyncflow_runtime_tests` targeted run: skipped by test logic with `io_uring backend unavailable` and no ThreadSanitizer report.
+- Remote clang Release `asyncflow_runtime_tests` targeted run: skipped by test logic with `io_uring backend unavailable`.
+
 Remaining follow-up:
 
 - Ready-source hints are now correct and bounded, but future benchmarking may justify a rotating ready-word cursor for very large `thread_count` values.
@@ -538,7 +551,7 @@ Current issue ledger:
 - P1: keep `runtime_executor_core_state_fragment.hpp` as the single executor state-layout owner unless a split explicitly preserves declaration order, alignment, and cache-line placement. Splitting state for aesthetics can silently introduce false sharing or make queue/cache layout audits harder.
 - P1: future changes must not append new operation families directly into `async_runtime.hpp`. New public methods should enter through the existing public IO/resource/lifecycle/parallel umbrellas, and new executor operations should enter through the matching backend submit/completion fragments.
 - P2: `include/af/detail/bounded_queues.hpp` still contains SPSC, MPSC, and MPMC bounded queues in one file. The implementation is performance-sensitive and cache-line aligned, so a split is acceptable only as a mechanical separation into queue-family headers with no layout or memory-order changes, followed by queue benchmarks.
-- P2: several test support files remain dense state-machine collections: stream sendfile/splice support, fixed-file read/write support, and io_uring multishot recv/recvmsg support. File lifecycle support has been reduced to a small shell over flow/file-operation/namespace-operation fragments. Remaining dense support files should continue moving toward operation-family task fragments when touched.
+- P2: several test support files remain dense state-machine collections: stream sendfile/splice support and io_uring multishot recv/recvmsg support. File lifecycle support and fixed-file read/write support have been reduced to small shells over operation-family fragments. Remaining dense support files should continue moving toward operation-family task fragments when touched.
 - P2: several examples remain long because they combine protocol framing, socket IO, task state machines, and result reporting. The fixed-file round trip, file lifecycle, UDP recvmsg multishot, UDP recv multishot, stream recv multishot, and length-prefixed RPC client/server paths have been reduced to focused fragments; the biggest current examples are now older readiness examples and remaining setup-heavy example entry points. Prefer protocol/helper headers plus small task headers for future edits.
 - P2: `tests/utility_tests.cpp` is now one of the largest standalone tests. It should be split by utility domain if new utility coverage is added.
 
