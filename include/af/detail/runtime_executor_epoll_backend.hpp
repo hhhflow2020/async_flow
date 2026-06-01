@@ -7,6 +7,23 @@
 namespace af::detail {
 
 #if AF_DETAIL_HAS_EPOLL
+[[nodiscard]] inline bool write_epoll_wake_eventfd(int fd) noexcept {
+  const std::uint64_t value = 1;
+  for (;;) {
+    const ssize_t written = ::write(fd, &value, sizeof(value));
+    if (written == static_cast<ssize_t>(sizeof(value))) {
+      return true;
+    }
+    if (written < 0 && errno == EINTR) {
+      continue;
+    }
+    if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+      return true;
+    }
+    return false;
+  }
+}
+
 template <typename RuntimeT, typename TraitsT>
 [[nodiscard]] bool
 Executor<RuntimeT, TraitsT>::native_io_backend_available() const noexcept {
@@ -23,9 +40,10 @@ Executor<RuntimeT, TraitsT>::notify_native_io_backend() noexcept {
   if (io_wake_pending_.compare_exchange_strong(expected, true,
                                                std::memory_order_acq_rel,
                                                std::memory_order_acquire)) {
-    const std::uint64_t value = 1;
-    const auto written = ::write(io_wake_fd_, &value, sizeof(value));
-    static_cast<void>(written);
+    if (!detail::write_epoll_wake_eventfd(io_wake_fd_)) {
+      io_wake_pending_.store(false, std::memory_order_release);
+      return false;
+    }
   }
   return true;
 }
@@ -189,7 +207,8 @@ template <typename RuntimeT, typename TraitsT>
     return false;
   }
   if (poll_result == IoUringPollSubmitResult::BackendClosed) {
-    return false;
+    registration->poll_operation = nullptr;
+    *result = IoResult{fd, 0, 0};
   }
 
   std::uint32_t native_events = EPOLLERR | EPOLLHUP | EPOLLONESHOT;

@@ -63,6 +63,39 @@ The pressure run covered concurrent init/shutdown/start_task, StopImmediately pe
 - Keep CI baseline checks focused on runtime key paths, but keep IO benchmarks out of strict CI regression gates unless the runner provides stable IO characteristics.
 - For future performance commits, collect both fixed-iteration perf counters and normal benchmark regression output. The former catches microarchitectural surprises; the latter catches user-visible throughput regressions.
 
+## 2026-06-02 Async IO Support Audit And Epoll Wake Fix
+
+This run validates the async IO audit fixes on the requested remote Linux host
+with `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.0`.
+
+Changes under validation:
+
+- `runtime_executor_epoll_backend.hpp` now retries eventfd wake writes on
+  `EINTR` and clears the pending-wake marker if the write truly fails.
+- `ThreadKind::IoUring` readiness waits now fall back to epoll if io_uring poll
+  submission closes/fails the ring after a wait registration has been created.
+- `docs/async_io_support_audit.md` records the supported async IO surface,
+  remaining gaps, and validation results.
+
+Correctness checks:
+
+- Local `git diff --check`: passed.
+- Remote GCC Release `asyncflow_runtime_tests` build: passed.
+- Remote GCC Release targeted IO suite:
+  `ctest -R "Io|Uring|Epoll|Kqueue|RuntimeIo"` passed 89/89 selected tests; 3
+  platform/capability tests were skipped by test logic.
+- Remote GCC Release full runtime suite: 161/161 passed; the same 3
+  platform/capability tests were skipped by test logic.
+
+Interpretation:
+
+- The epoll wake path no longer depends on a best-effort eventfd write after
+  publishing `io_wake_pending_`.
+- The io_uring poll-readiness fast path no longer leaves a stale fd-only wait
+  registration if the ring backend fails during submission.
+- kqueue and direct fixed-file capability skips remain expected for this Linux
+  host/container validation lane.
+
 ## 2026-06-01 Scheduler Correctness Pass
 
 This run validates the scheduler modularity/correctness pass on the requested remote Linux host with `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2`.
