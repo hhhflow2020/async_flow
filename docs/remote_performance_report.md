@@ -826,3 +826,43 @@ Interpretation:
 - The Running -> Pending wake boundary is now isolated in `basic_task_running_wake_fragment.hpp`, making the epoch/request-slot logic easier to audit without changing it.
 - The TSAN target covers Running wake resolution, self-post local FIFO behavior, cross-thread SPSC hops, above-64 ready-source words, shutdown behavior, and parallel owner resume.
 - The benchmark canary remains within the same noisy remote range as recent scheduler-structure splits and does not show a gross regression from this mechanical split.
+
+## 2026-06-01 Generic io_uring SQE Fill Split Validation
+
+This run validates the structural split of the generic io_uring SQE fill helper on the requested remote Linux host with `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2`.
+
+Changes under validation:
+
+- `runtime_executor_io_uring_generic_submit_sqe_fragment.hpp` is now an 8-line umbrella.
+- `runtime_executor_io_uring_generic_submit_sqe_dispatch_fragment.hpp` owns common SQE initialization and opcode-family dispatch.
+- `runtime_executor_io_uring_generic_submit_sqe_filesystem_fragment.hpp` owns fallocate, splice, openat, statx, renameat, and unlinkat SQE fields.
+- `runtime_executor_io_uring_generic_submit_sqe_socket_fragment.hpp` owns message, accept, connect, and socket data SQE fields.
+- `runtime_executor_io_uring_generic_submit_sqe_buffer_fragment.hpp` owns fixed-buffer and generic buffer SQE fields.
+- The split keeps all helpers inline in `AsyncRuntime::Executor`; it does not change opcode classification, SQE field values, operation lifetime, pending-submit flush ordering, locks, allocations, or fallback behavior.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Remote clang Debug IO/io_uring targeted tests: 83 total, 81 passed, 2 skipped.
+- Remote clang TSAN IO/io_uring targeted tests: 83 total, 81 passed, 2 skipped, no ThreadSanitizer report.
+- Remote clang Release full runtime suite: 138 total, 135 passed, 3 skipped, 0 failed.
+
+Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | CPU Mean | Throughput Mean |
+| --- | ---: | ---: | ---: |
+| `BM_IoDatagramAdapterZeroByteRecv` | 0.653 ns | 0.652 ns | n/a |
+| `BM_IoFileAdapterZeroByteRead` | 0.627 ns | 0.627 ns | n/a |
+| `BM_IoTimeoutInvalidDelay` | 0.836 ns | 0.836 ns | n/a |
+| `BM_IoStreamAdapterZeroByteSend` | 0.627 ns | 0.627 ns | n/a |
+| `BM_RuntimeExternalStart/8192` | 6.95 ms | 6.95 ms | 1.201 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 12.0 ms | 4.30 ms | 688.852 k/s |
+| `BM_RuntimeIoThreadHop/8192` | 4.19 ms | 4.19 ms | 1.955 M/s |
+| `BM_RuntimeParallelShards/128` | 0.515 ms | 0.497 ms | 248.834 k/s |
+| `BM_RuntimeParallelShards/512` | 1.92 ms | 1.86 ms | 266.386 k/s |
+
+Interpretation:
+
+- This is a modularity split only. SQE field assignment remains grouped by opcode family while preserving the original dispatcher order.
+- The TSAN target covers epoll fallback, io_uring socket/file/multishot paths, timeout/cancel paths, and StopImmediately pending-IO cleanup.
+- The benchmark canary does not show a gross runtime or helper-level fast-path regression from the structural split.

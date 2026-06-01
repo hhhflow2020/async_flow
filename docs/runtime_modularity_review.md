@@ -35,7 +35,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - `runtime_executor_io_uring_socket_submit_fragment.hpp` is now a small umbrella over recv, send, zero-copy, message, multishot, accept/connect, and socket-create submit wrappers.
 - io_uring resource registration is now split by registered buffers, provided buffer rings, and fixed-file table helpers while staying inline inside `AsyncRuntime::Executor`. The fixed-file table helper is now a small umbrella over register, unregister, and update paths.
 - io_uring executor buffer submit helpers are now split into generic buffer SQE, fast SQE template, socket-create core, and fixed-file read/write fragments while staying inline inside `AsyncRuntime::Executor`.
-- io_uring generic submit is now split into argument classification, validation, operation preparation, SQE filling, and the small core submit flow while staying inline inside `AsyncRuntime::Executor`.
+- io_uring generic submit is now split into argument classification, validation, operation preparation, SQE filling, and the small core submit flow while staying inline inside `AsyncRuntime::Executor`. The SQE filling stage is further split by dispatcher/common initialization, filesystem/path opcodes, socket/message opcodes, and buffer/data opcodes.
 - Public fd lifecycle submit wrappers and matching io_uring executor submit wrappers are now small umbrellas over open, close/shutdown, filesystem metadata/lifecycle, and splice transfer fragments.
 - Public filesystem submit wrappers and matching io_uring executor SQE submit wrappers are now split by metadata, allocation/truncate, and namespace operation families, with small umbrellas preserving inline visibility.
 - io_uring socket message executor submit wrappers are now split into recvmsg and sendmsg operation families, with `runtime_executor_io_uring_socket_msg_submit_fragment.hpp` kept as a small inline umbrella.
@@ -136,6 +136,7 @@ Resolved items:
 - Public socket accept/connect submit wrappers and matching io_uring executor submit wrappers are now small umbrellas over accept and connect operation families. The accept-direct and accept-multishot paths remain grouped with accept because they share validation and SQE opcode semantics.
 - `basic_task_fragment.hpp` is now a 20-line class shell. Public task API, protected task helpers, lifetime reference handling, scheduling/wake state machine, and storage layout live in dedicated class-body fragments. Storage fields remain together in `basic_task_storage_fragment.hpp`.
 - `basic_task_schedule_fragment.hpp` is now an 8-line umbrella over schedule constants, Created/Pending schedule admission, Running wake resolution, and requested-thread encoding helpers. The Running -> Pending wake boundary remains separately auditable in the Running wake fragment.
+- `runtime_executor_io_uring_generic_submit_sqe_fragment.hpp` is now an 8-line umbrella over SQE dispatch/common initialization, filesystem/path SQE fields, socket/message SQE fields, and buffer/data SQE fields.
 - `object_pool.hpp` is now a small shell over storage layout, slot acquire/release, and lifecycle fragments. The split preserves the TLS cache, cache-line slot sizing, MPMC free-list, and atomic block/hot-block fields.
 
 Current file-size snapshot after the pass:
@@ -175,6 +176,11 @@ Current file-size snapshot after the pass:
 - `include/af/detail/runtime_executor_io_uring_file_register_fragment.hpp`: 60 lines.
 - `include/af/detail/runtime_executor_io_uring_file_unregister_fragment.hpp`: 67 lines.
 - `include/af/detail/runtime_executor_io_uring_file_update_fragment.hpp`: 85 lines.
+- `include/af/detail/runtime_executor_io_uring_generic_submit_sqe_fragment.hpp`: 8 lines.
+- `include/af/detail/runtime_executor_io_uring_generic_submit_sqe_dispatch_fragment.hpp`: 67 lines.
+- `include/af/detail/runtime_executor_io_uring_generic_submit_sqe_filesystem_fragment.hpp`: 56 lines.
+- `include/af/detail/runtime_executor_io_uring_generic_submit_sqe_socket_fragment.hpp`: 49 lines.
+- `include/af/detail/runtime_executor_io_uring_generic_submit_sqe_buffer_fragment.hpp`: 22 lines.
 - `include/af/detail/basic_task_fragment.hpp`: 20 lines.
 - `include/af/detail/basic_task_public_fragment.hpp`: 29 lines.
 - `include/af/detail/basic_task_protected_fragment.hpp`: 72 lines.
@@ -837,6 +843,29 @@ Additional validation after the `BasicTask` schedule split:
   - `BM_RuntimeIoThreadHop/8192` mean: 4.25 ms real, 1.930 M/s.
   - `BM_RuntimeParallelShards/128` mean: 0.503 ms real, 256.183 k/s.
   - `BM_RuntimeParallelShards/512` mean: 1.98 ms real, 260.199 k/s.
+
+Additional validation after the generic io_uring SQE fill split:
+
+- `runtime_executor_io_uring_generic_submit_sqe_fragment.hpp` is now an 8-line umbrella:
+  - `runtime_executor_io_uring_generic_submit_sqe_dispatch_fragment.hpp`: 67 lines.
+  - `runtime_executor_io_uring_generic_submit_sqe_filesystem_fragment.hpp`: 56 lines.
+  - `runtime_executor_io_uring_generic_submit_sqe_socket_fragment.hpp`: 49 lines.
+  - `runtime_executor_io_uring_generic_submit_sqe_buffer_fragment.hpp`: 22 lines.
+- The split is structural: no opcode classification, SQE field value, operation lifetime, pending-submit flush ordering, memory ordering, lock, allocation, or fallback behavior changed.
+- Local `git diff --check`: passed.
+- Remote clang Debug IO/io_uring targeted tests: 83 total, 81 passed, 2 skipped.
+- Remote clang TSAN IO/io_uring targeted tests: 83 total, 81 passed, 2 skipped, with no ThreadSanitizer report.
+- Remote clang Release full runtime test suite: 138 total, 135 passed, 3 skipped, 0 failed.
+- Remote clang Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+  - `BM_IoDatagramAdapterZeroByteRecv` mean: 0.653 ns real.
+  - `BM_IoFileAdapterZeroByteRead` mean: 0.627 ns real.
+  - `BM_IoTimeoutInvalidDelay` mean: 0.836 ns real.
+  - `BM_IoStreamAdapterZeroByteSend` mean: 0.627 ns real.
+  - `BM_RuntimeExternalStart/8192` mean: 6.95 ms real, 1.201 M/s.
+  - `BM_RuntimeCrossThreadHop/8192` mean: 12.0 ms real, 688.852 k/s.
+  - `BM_RuntimeIoThreadHop/8192` mean: 4.19 ms real, 1.955 M/s.
+  - `BM_RuntimeParallelShards/128` mean: 0.515 ms real, 248.834 k/s.
+  - `BM_RuntimeParallelShards/512` mean: 1.92 ms real, 266.386 k/s.
 
 ### Latest Test/Example Scan: Long Files Remain Mostly In Fixtures
 
