@@ -1722,3 +1722,29 @@ Correctness checks:
 Interpretation:
 
 - This is dead internal-header cleanup. A new build or benchmark run was not collected for this pass because the deleted orphan header was unreachable and its behavior was already present in the active implementation.
+
+## 2026-06-01 Test And Benchmark Support Fragment Rename
+
+This run removes the remaining active `fragment` naming from test, example, and benchmark support code. The code still uses small support/detail headers where they represent real task families, fixture helpers, or benchmark stub families; only the misleading fragment terminology was removed.
+
+Changes under validation:
+
+- Renamed the remaining `tests/support/*_fragment.hpp` headers to normal `tests/support/*.hpp` names.
+- Renamed the remaining `benchmarks/detail/*_fragment.hpp` headers to normal `benchmarks/detail/*.hpp` names.
+- Replaced test/benchmark include gates such as `AF_RUNTIME_IO_TEST_SUPPORT_FRAGMENT_INCLUDE` with `*_DETAIL_INCLUDE`.
+- Replaced the RPC example include gate `IO_RPC_LENGTH_PREFIXED_SERVER_FRAGMENT_INCLUDE` with `IO_RPC_LENGTH_PREFIXED_SERVER_DETAIL_INCLUDE`.
+- Adopted the pending io_uring multishot cancel-drain test coverage before the rename so behavior tests and file-name churn remain separable in history.
+
+Correctness checks:
+
+- Local scan for `*.mjs`: no matches.
+- Local scan for active `*_fragment.hpp` source files: no matches.
+- Local scan for `FRAGMENT_INCLUDE`, `_fragment.hpp`, or active source text saying `implementation fragment`: no matches outside documentation.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.0` Debug full build, including examples, tests, and benchmarks: passed.
+- Remote clang Debug full runtime suite under `--security-opt seccomp=unconfined`: passed; 143 tests, 140 passed, 3 skipped, 0 failed.
+- Remote clang Release full build, including examples, tests, and benchmarks: passed.
+- Remote clang Release full runtime suite under `--security-opt seccomp=unconfined`: passed; 143 tests, 140 passed, 3 skipped, 0 failed.
+
+Interpretation:
+
+- This is a source-organization and naming cleanup. It does not change queue algorithms, task state transitions, IO submit/completion behavior, locks, allocations, memory ordering, cache-line layout, or public API semantics.

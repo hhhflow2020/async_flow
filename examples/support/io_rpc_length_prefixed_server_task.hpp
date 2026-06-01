@@ -1,5 +1,5 @@
-#if !defined(IO_RPC_LENGTH_PREFIXED_SERVER_FRAGMENT_INCLUDE)
-#error "io_rpc_length_prefixed_server_task.hpp is an RPC server implementation fragment"
+#if !defined(IO_RPC_LENGTH_PREFIXED_SERVER_DETAIL_INCLUDE)
+#error "io_rpc_length_prefixed_server_task.hpp is an RPC server implementation detail"
 #endif
 
 class RpcServerTask final : public RpcTask {

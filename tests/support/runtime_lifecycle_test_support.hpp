@@ -13,16 +13,16 @@
 
 namespace af::test::runtime_lifecycle {
 
-#define AF_RUNTIME_LIFECYCLE_TEST_SUPPORT_FRAGMENT_INCLUDE 1
-#include "runtime_lifecycle_base_support_fragment.hpp"
-#undef AF_RUNTIME_LIFECYCLE_TEST_SUPPORT_FRAGMENT_INCLUDE
+#define AF_RUNTIME_LIFECYCLE_TEST_SUPPORT_DETAIL_INCLUDE 1
+#include "runtime_lifecycle_base_support.hpp"
+#undef AF_RUNTIME_LIFECYCLE_TEST_SUPPORT_DETAIL_INCLUDE
 
-#define AF_RUNTIME_LIFECYCLE_TEST_SUPPORT_FRAGMENT_INCLUDE 1
-#include "runtime_lifecycle_backpressure_support_fragment.hpp"
-#undef AF_RUNTIME_LIFECYCLE_TEST_SUPPORT_FRAGMENT_INCLUDE
+#define AF_RUNTIME_LIFECYCLE_TEST_SUPPORT_DETAIL_INCLUDE 1
+#include "runtime_lifecycle_backpressure_support.hpp"
+#undef AF_RUNTIME_LIFECYCLE_TEST_SUPPORT_DETAIL_INCLUDE
 
-#define AF_RUNTIME_LIFECYCLE_TEST_SUPPORT_FRAGMENT_INCLUDE 1
-#include "runtime_lifecycle_shutdown_support_fragment.hpp"
-#undef AF_RUNTIME_LIFECYCLE_TEST_SUPPORT_FRAGMENT_INCLUDE
+#define AF_RUNTIME_LIFECYCLE_TEST_SUPPORT_DETAIL_INCLUDE 1
+#include "runtime_lifecycle_shutdown_support.hpp"
+#undef AF_RUNTIME_LIFECYCLE_TEST_SUPPORT_DETAIL_INCLUDE
 
 } // namespace af::test::runtime_lifecycle

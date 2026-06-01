@@ -1,0 +1,15 @@
+#if !defined(AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE)
+#error "runtime_io_file_rw_tasks.hpp is a runtime_io_file_tasks implementation detail"
+#endif
+
+#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
+#include "runtime_io_file_basic_rw_tasks.hpp"
+#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
+
+#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
+#include "runtime_io_file_vectored_rw_tasks.hpp"
+#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
+
+#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
+#include "runtime_io_file_current_offset_tasks.hpp"
+#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE

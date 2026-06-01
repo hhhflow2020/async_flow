@@ -1,0 +1,24 @@
+#if !defined(AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE)
+#error "runtime_io_file_tasks.hpp is a runtime_io_test_support implementation detail"
+#endif
+
+#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
+#include "runtime_io_file_boundary_tasks.hpp"
+#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
+
+#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
+#include "runtime_io_file_rw_tasks.hpp"
+#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
+
+#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
+#include "runtime_io_file_fixed_resource_tasks.hpp"
+#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
+
+#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
+#include "runtime_io_file_open_lifecycle_tasks.hpp"
+#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
+
+#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
+#include "runtime_io_file_filesystem_ops_tasks.hpp"
+#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
+

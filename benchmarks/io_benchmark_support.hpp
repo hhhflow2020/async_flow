@@ -132,13 +132,13 @@ struct FakeRuntime {
         return false;
     }
 
-#define AF_IO_BENCHMARK_RUNTIME_FRAGMENT_INCLUDE 1
-#include "detail/io_benchmark_runtime_linux_socket_fragment.hpp"
-#include "detail/io_benchmark_runtime_posix_message_fragment.hpp"
-#include "detail/io_benchmark_runtime_posix_file_fragment.hpp"
-#include "detail/io_benchmark_runtime_posix_accept_fragment.hpp"
-#include "detail/io_benchmark_runtime_filesystem_fragment.hpp"
-#undef AF_IO_BENCHMARK_RUNTIME_FRAGMENT_INCLUDE
+#define AF_IO_BENCHMARK_RUNTIME_DETAIL_INCLUDE 1
+#include "detail/io_benchmark_runtime_linux_socket.hpp"
+#include "detail/io_benchmark_runtime_posix_message.hpp"
+#include "detail/io_benchmark_runtime_posix_file.hpp"
+#include "detail/io_benchmark_runtime_posix_accept.hpp"
+#include "detail/io_benchmark_runtime_filesystem.hpp"
+#undef AF_IO_BENCHMARK_RUNTIME_DETAIL_INCLUDE
 };
 
 struct FakeTask {

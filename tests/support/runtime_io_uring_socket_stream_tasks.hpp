@@ -1,0 +1,10 @@
+#if !defined(AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE)
+#error "runtime_io_uring_socket_stream_tasks.hpp is a runtime_io_uring_socket_tasks implementation detail"
+#endif
+
+#define AF_RUNTIME_IO_URING_SOCKET_STREAM_TASKS_DETAIL_INCLUDE 1
+#include "runtime_io_uring_socket_stream_recv_tasks.hpp"
+#include "runtime_io_uring_socket_stream_recv_cancel_tasks.hpp"
+#include "runtime_io_uring_socket_stream_send_tasks.hpp"
+#include "runtime_io_uring_socket_stream_vectored_tasks.hpp"
+#undef AF_RUNTIME_IO_URING_SOCKET_STREAM_TASKS_DETAIL_INCLUDE

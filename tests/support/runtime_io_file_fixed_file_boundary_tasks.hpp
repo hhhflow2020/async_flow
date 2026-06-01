@@ -1,0 +1,15 @@
+#if !defined(AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE)
+#error "runtime_io_file_fixed_file_boundary_tasks.hpp is a runtime_io_file_boundary_tasks implementation detail"
+#endif
+
+#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
+#include "runtime_io_file_fixed_file_resource_boundary_tasks.hpp"
+#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
+
+#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
+#include "runtime_io_file_fixed_file_accept_boundary_tasks.hpp"
+#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
+
+#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
+#include "runtime_io_file_fixed_file_data_boundary_tasks.hpp"
+#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE

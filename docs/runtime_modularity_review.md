@@ -72,6 +72,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - io_uring fixed file/buffer test support is now a small umbrella over fixed-buffer, fixed-file read/write, fixed-file update, and openat-direct task fragments. The fixed-file read/write task is kept as one cohesive state-machine class instead of a class-body include shell.
 - IO benchmark support now keeps the hot benchmark-facing fake task shell small and splits FakeRuntime stubs by Linux socket, POSIX message, POSIX fixed file, accept/connect, and filesystem helpers. Adapter benchmark cases are also split by stream/listener, datagram, and resource/file-like families.
 - Runtime benchmarks are now split into shared runtime benchmark task support, external-start, thread-hop, and parallel-shard benchmark families. This keeps benchmark harness changes separate from the task/state-machine fixtures they measure.
+- Test support and benchmark support detail headers now use normal `*.hpp` names and `DETAIL_INCLUDE` gates instead of `*_fragment.hpp` filenames or `FRAGMENT_INCLUDE` gates.
 - The length-prefixed RPC example is now split into runtime traits, server/process task fragments, a cohesive client state-machine task, and a thin executable entry point.
 - The vectored IO example is now split into runtime/common helpers, stream readv/writev tasks, datagram recvmsg/sendmsg tasks, and a thin executable entry point.
 - The io_uring UDP recvmsg multishot example is now split into runtime/wait helpers, UDP socket setup helpers, a cohesive provided-buffer recvmsg multishot task class, and a thin executable entry point.
@@ -156,7 +157,7 @@ Validation after this correction:
 Remaining follow-up:
 
 - P1: `runtime_executor.hpp` is still large at 2627 lines after the io_uring submit-core split. Do not re-split it by access sections. The next acceptable split should continue moving real operation families out as class-out-of-line template definitions or extract backend-specific helper components with explicit owner boundaries.
-- P2: non-core IO headers such as `io_common` and several `io_*` public umbrellas still use fragment includes. They should be cleaned opportunistically when the split can follow real operation-family or class boundaries.
+- P2: future non-core test/example cleanups should be responsibility-driven, using normal support/detail headers and explicit owner boundaries. Do not reintroduce `*_fragment.hpp`, `FRAGMENT_INCLUDE`, or class-body splicing just to reduce line counts.
 
 ### 2026-06-01 Scheduler Correctness And Modularity Pass
 

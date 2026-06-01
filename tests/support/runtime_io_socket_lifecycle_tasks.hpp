@@ -1,0 +1,19 @@
+#if !defined(AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE)
+#error "runtime_io_socket_lifecycle_tasks.hpp is a runtime_io_test_support implementation detail"
+#endif
+
+#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
+#include "runtime_io_socket_lifecycle_setup_tasks.hpp"
+#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
+
+#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
+#include "runtime_io_socket_lifecycle_boundary_tasks.hpp"
+#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
+
+#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
+#include "runtime_io_socket_lifecycle_uring_tasks.hpp"
+#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
+
+#define AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE 1
+#include "runtime_io_socket_lifecycle_fast_tasks.hpp"
+#undef AF_RUNTIME_IO_TEST_SUPPORT_DETAIL_INCLUDE
