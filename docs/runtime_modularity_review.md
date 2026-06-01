@@ -145,6 +145,7 @@ Validation:
 - Local `git diff --check`: passed.
 - Remote GCC Release default build of runtime tests and benchmarks: passed.
 - Remote GCC Release full runtime suite: 161/161 passed; three platform/capability tests were skipped by test logic.
+- Local macOS Debug kqueue suite on Darwin 25.5.0 arm64: 5/5 passed.
 
 ### 2026-06-01 Runtime Core De-Fragmenting Correction
 

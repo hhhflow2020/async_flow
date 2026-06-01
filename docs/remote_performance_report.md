@@ -117,6 +117,9 @@ Correctness checks:
 - Remote GCC Release default build of runtime tests and benchmarks: passed.
 - Remote GCC Release full runtime suite: 161/161 passed; 3 platform/capability
   tests were skipped by test logic.
+- Local macOS Debug kqueue suite on Darwin 25.5.0 arm64:
+  `ctest --test-dir build-local/build/Debug -R Kqueue --output-on-failure`
+  passed 5/5.
 
 Interpretation:
 
@@ -124,6 +127,8 @@ Interpretation:
   behavior, queue algorithms, IO semantics, or public umbrella headers.
 - The validation build covered both runtime tests and benchmark translation
   units after the include-path move.
+- The Linux kqueue placeholder skip is covered by the local macOS kqueue lane;
+  the two remaining Linux skips are io_uring direct descriptor capability probes.
 
 ## 2026-06-01 Scheduler Correctness Pass
 

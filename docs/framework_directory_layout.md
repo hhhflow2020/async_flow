@@ -69,3 +69,6 @@ responsibility directories.
   and benchmarks.
 - Remote GCC Release full runtime suite: 161/161 passed; three
   platform/capability tests were skipped by test logic.
+- Local macOS Debug kqueue suite on Darwin 25.5.0 arm64:
+  `ctest --test-dir build-local/build/Debug -R Kqueue --output-on-failure`
+  passed 5/5.
