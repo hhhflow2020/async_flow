@@ -754,3 +754,39 @@ Interpretation:
 
 - This is a modularity split only. The registration, unregister, and update paths are now separately auditable while preserving the executor-thread-only ownership model.
 - The TSAN target covers fixed-file read/write/fsync, fixed-file table update, registered-buffer IO, unavailable-backend fixed-file boundary handling, and direct descriptor capability skip paths.
+
+## 2026-06-01 Ready Enqueue Split Validation
+
+This run validates the structural split of the scheduler ready-enqueue hot path on the requested remote Linux host with `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2`.
+
+Changes under validation:
+
+- `runtime_ready_enqueue_fragment.hpp` is now an 8-line umbrella.
+- `runtime_ready_route_fragment.hpp` owns `ReadyQueueRoute` and same-thread-vs-cross-thread route selection.
+- `runtime_ready_try_enqueue_fragment.hpp` owns non-blocking local/SPSC/MPSC enqueue paths.
+- `runtime_ready_blocking_enqueue_fragment.hpp` owns yield-policy enqueue loops and local-queue drain behavior.
+- `runtime_ready_post_fragment.hpp` owns `post_blocking()`, enqueue policy selection, and `Pending -> Queued` admission.
+- The split keeps all helpers inline in `AsyncRuntime`; it does not change queue topology, task state transitions, memory ordering, wake ordering, locks, atomics, or allocation behavior.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Remote clang Debug scheduler/runtime targeted tests: 46/46 passed.
+- Remote clang TSAN scheduler/runtime targeted tests: 46/46 passed, no ThreadSanitizer report.
+- Remote clang Release full runtime suite: 138 total, 135 passed, 3 skipped, 0 failed.
+
+Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | CPU Mean | Throughput Mean |
+| --- | ---: | ---: | ---: |
+| `BM_RuntimeExternalStart/8192` | 7.00 ms | 7.00 ms | 1.179 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 13.6 ms | 4.60 ms | 603.070 k/s |
+| `BM_RuntimeIoThreadHop/8192` | 4.28 ms | 4.27 ms | 1.917 M/s |
+| `BM_RuntimeParallelShards/128` | 0.505 ms | 0.491 ms | 253.635 k/s |
+| `BM_RuntimeParallelShards/512` | 1.83 ms | 1.77 ms | 280.185 k/s |
+
+Interpretation:
+
+- Same-thread runtime posts remain an explicit local-queue route, while cross-thread runtime posts remain an explicit per-source SPSC route.
+- The TSAN target covers self-post local FIFO behavior, cross-thread SPSC hops, above-64 ready-source words, shutdown behavior, parallel owner resume, and the Running-to-Pending wake boundary.
+- The benchmark canary is within the existing noisy remote range for these scheduler cases and does not show a gross regression from this structural split.

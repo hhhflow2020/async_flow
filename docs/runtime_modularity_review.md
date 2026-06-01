@@ -107,6 +107,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Public file read helpers are now split into current-offset read/readv and positioned read/readv fragments, with `io_file_read_fragment.hpp` kept as a compatibility umbrella.
 - Public timeout helpers are now split into timeout completion status normalization, single timeout wait submission, and deadline arbitration fragments. `io_timeout.hpp` remains a small public umbrella while preserving inline/template visibility for timeout and cancel race handling.
 - `runtime_common_fragment.hpp` is now a 9-line umbrella over runtime status, cache-line atomic wrapper, ordered-batch state, parallel-group state, and external-post counter fragments. This keeps common state families separate while preserving class-scope inline visibility.
+- `runtime_ready_enqueue_fragment.hpp` is now an 8-line umbrella over explicit ready-route selection, non-blocking enqueue, blocking enqueue, and post/pending admission fragments. The same-thread local queue path and cross-thread SPSC path are now separate named helpers while preserving the original queue topology and inline visibility.
 - Each split so far preserved header-only/template visibility, passed `git diff --check`, Docker GCC Debug runtime tests, and, for core runtime header changes, Release runtime benchmark baseline regression.
 
 ## Current Findings
@@ -119,7 +120,7 @@ Resolved items:
 
 - `runtime_dispatch_fragment.hpp` is now a 7-line umbrella. Queue topology, ready enqueue paths, and external-post admission accounting live in separate inline fragments:
   - `runtime_queue_topology_fragment.hpp`: SPSC/external queue aliases, queue initialization, and queue lookup.
-  - `runtime_ready_enqueue_fragment.hpp`: explicit local-queue, cross-thread SPSC, external MPSC, blocking enqueue, and ready-source marking paths.
+  - `runtime_ready_enqueue_fragment.hpp`: small umbrella over route selection, try-enqueue, blocking enqueue, and post/pending admission.
   - `runtime_external_post_gate_fragment.hpp`: external post admission, active-post release, and shutdown drain wait.
 - Runtime-thread self-post is now explicit. `ReadyQueueRoute` names the local-queue and SPSC enqueue routes, and `enqueue_ready_blocking_from_runtime_thread(source, target, task)` dispatches to `enqueue_local_from_runtime_thread_blocking()` when `source == target`, instead of hiding the local queue behind a generic enqueue helper.
 - The previous `thread_count <= 64` ready-source hint limit is gone. `ReadySourceSet<ThreadCount>` stores ready sources across cache-line-aligned 64-bit words and supports runtimes above 64 threads.
@@ -142,7 +143,11 @@ Current file-size snapshot after the pass:
 - `include/af/detail/runtime_public_config_fragment.hpp`: 67 lines.
 - `include/af/detail/runtime_dispatch_fragment.hpp`: 7 lines.
 - `include/af/detail/runtime_queue_topology_fragment.hpp`: 30 lines.
-- `include/af/detail/runtime_ready_enqueue_fragment.hpp`: 165 lines.
+- `include/af/detail/runtime_ready_enqueue_fragment.hpp`: 8 lines.
+- `include/af/detail/runtime_ready_route_fragment.hpp`: 14 lines.
+- `include/af/detail/runtime_ready_try_enqueue_fragment.hpp`: 54 lines.
+- `include/af/detail/runtime_ready_blocking_enqueue_fragment.hpp`: 57 lines.
+- `include/af/detail/runtime_ready_post_fragment.hpp`: 48 lines.
 - `include/af/detail/runtime_external_post_gate_fragment.hpp`: 53 lines.
 - `include/af/detail/runtime_ready_source_set.hpp`: 70 lines.
 - `include/af/detail/runtime_executor_core_state_fragment.hpp`: 70 lines.
@@ -789,6 +794,25 @@ Additional validation after the fixed-file resource split:
 - Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.2` Debug fixed-file/resource targeted tests: 6 total, 4 passed, 2 skipped.
 - Remote clang TSAN fixed-file/resource targeted tests: 6 total, 4 passed, 2 skipped, with no ThreadSanitizer report.
 - Remote clang Release full runtime test suite: 138 total, 135 passed, 3 skipped, 0 failed.
+
+Additional validation after the ready enqueue route split:
+
+- `runtime_ready_enqueue_fragment.hpp` is now an 8-line umbrella:
+  - `runtime_ready_route_fragment.hpp`: 14 lines.
+  - `runtime_ready_try_enqueue_fragment.hpp`: 54 lines.
+  - `runtime_ready_blocking_enqueue_fragment.hpp`: 57 lines.
+  - `runtime_ready_post_fragment.hpp`: 48 lines.
+- The split is structural: same-thread runtime posts still route to the executor local queue, cross-thread runtime posts still route to the per-source SPSC queue, external posts still route to the per-target MPSC queue, and no locks, atomics, queue storage, or wake ordering were changed.
+- Local `git diff --check`: passed.
+- Remote clang Debug scheduler/runtime targeted tests: 46/46 passed.
+- Remote clang TSAN scheduler/runtime targeted tests: 46/46 passed, with no ThreadSanitizer report.
+- Remote clang Release full runtime test suite: 138 total, 135 passed, 3 skipped, 0 failed.
+- Remote clang Release runtime benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+  - `BM_RuntimeExternalStart/8192` mean: 7.00 ms real, 1.179 M/s.
+  - `BM_RuntimeCrossThreadHop/8192` mean: 13.6 ms real, 603.070 k/s.
+  - `BM_RuntimeIoThreadHop/8192` mean: 4.28 ms real, 1.917 M/s.
+  - `BM_RuntimeParallelShards/128` mean: 0.505 ms real, 253.635 k/s.
+  - `BM_RuntimeParallelShards/512` mean: 1.83 ms real, 280.185 k/s.
 
 ### Latest Test/Example Scan: Long Files Remain Mostly In Fixtures
 
