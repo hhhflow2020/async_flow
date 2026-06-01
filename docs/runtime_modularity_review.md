@@ -132,7 +132,7 @@ Current core-runtime layout:
 - `include/af/detail/runtime_dispatch.hpp`: queue topology, local/SPSC/external enqueue paths, ready-route selection, and external-post admission accounting.
 - `include/af/detail/runtime_task_lifecycle.hpp`: task object pools, handle release, optional StopImmediately registry/cancel, and unfinished-task accounting.
 - `include/af/detail/runtime_parallel.hpp`: ordered-start, ordered-batch guard, shard task/runner, and shard dispatch.
-- `include/af/detail/runtime_executor.hpp`: standalone `detail::Executor<RuntimeT, TraitsT>` declaration/state-layout component. Lifecycle/notify behavior lives in `runtime_executor_lifecycle.hpp`; io_uring backend status and resource registration lives in `runtime_executor_io_resources.hpp`.
+- `include/af/detail/runtime_executor.hpp`: standalone `detail::Executor<RuntimeT, TraitsT>` declaration/state-layout component. Lifecycle/notify behavior lives in `runtime_executor_lifecycle.hpp`; io_uring backend status and resource registration lives in `runtime_executor_io_resources.hpp`; ready/local-queue execution and run-loop scheduling live in `runtime_executor_scheduler.hpp`.
 
 Correctness and performance audit points:
 
@@ -140,7 +140,7 @@ Correctness and performance audit points:
 - Runtime-thread ready enqueue remains explicit: `ReadyQueueRoute::Local` for same-owner posts, `ReadyQueueRoute::Spsc` for cross-owner runtime posts, and external MPSC for external threads.
 - `BasicTask` now explicitly friends `detail::Executor<RuntimeT, TraitsT>` because the executor is no longer nested inside `AsyncRuntime`.
 - Public IO was moved behind a CRTP base to create a real API component boundary without adding virtual dispatch, allocation, `std::function`, or extra queues.
-- Executor lifecycle/resource behavior is now class-out-of-line template code included after the complete class declaration. This keeps private-state access and inlining while avoiding class-body include splicing.
+- Executor lifecycle/resource/scheduler behavior is now class-out-of-line template code included after the complete class declaration. This keeps private-state access and inlining while avoiding class-body include splicing.
 - The remaining old runtime executor fragment headers are historical implementation fragments and are no longer included by the active `async_runtime.hpp` / `runtime_executor.hpp` path. Do not use them as the model for new core-runtime structure.
 
 Validation after this correction:
@@ -149,7 +149,7 @@ Validation after this correction:
 - Remote clang Debug full runtime suite with `--security-opt seccomp=unconfined`: 143 total, 140 passed, 3 skipped.
 - Remote clang Release build of `asyncflow_runtime_tests` and `asyncflow_runtime_benchmarks`: passed.
 - Remote clang Release full runtime suite with `--security-opt seccomp=unconfined`: 143 total, 140 passed, 3 skipped.
-- Release benchmark canary after the executor lifecycle/resource split, 3 repetitions with `--benchmark_min_time=0.05s`: `BM_RuntimeExternalStart/8192` mean 7.44 ms, `BM_RuntimeCrossThreadHop/8192` mean 11.6 ms, `BM_RuntimeIoThreadHop/8192` mean 4.28 ms, `BM_RuntimeParallelShards/128` mean 0.525 ms.
+- Release benchmark canary after the executor scheduler split, 3 repetitions with `--benchmark_min_time=0.05s`: `BM_RuntimeExternalStart/8192` mean 6.85 ms, `BM_RuntimeCrossThreadHop/8192` mean 12.4 ms, `BM_RuntimeIoThreadHop/8192` mean 4.17 ms, `BM_RuntimeParallelShards/128` mean 0.460 ms.
 
 Remaining follow-up:
 

@@ -1326,3 +1326,36 @@ Interpretation:
 
 - This pass changes only declaration/definition placement. Queue topology, local/SPSC/MPSC routing, worker notification, native IO wake behavior, io_uring registration syscall arguments, pending-submit flush ordering, locks, atomics, allocations, and task state transitions are unchanged.
 - `runtime_executor.hpp` dropped from 4916 lines to 4435 lines. The next executor split should target a similarly real operation family; splitting by access section or field block remains disallowed.
+
+## 2026-06-01 Executor Scheduler Implementation Split
+
+This run validates the follow-up split of executor ready/local-queue execution and run-loop scheduling into a normal implementation header.
+
+Changes under validation:
+
+- `runtime_executor.hpp` now keeps ready-source, local queue, task execution, run-loop, pop, and finish APIs as class declarations.
+- `runtime_executor_scheduler.hpp` owns the class-out-of-line template definitions for `mark_ready()`, `notify_external_ready()`, local queue push/pop, `execute()`, `notify_force()`, `run_loop()`, ready-source scan cursor advance, `pop_one()`, and task finish paths.
+- The split keeps executor field layout together in `runtime_executor.hpp`; it does not move queue/cache state fields or reintroduce class-body `#include` splicing.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed before this documentation update.
+- Local scan for `#include "af/detail/*fragment.hpp"` inside framework class/struct bodies: no matches.
+- Remote clang image `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.0` Debug `asyncflow_runtime_tests` build: passed.
+- Remote clang Debug full runtime suite under `--security-opt seccomp=unconfined`: 143 tests, 140 passed, 3 skipped, 0 failed.
+- Remote clang Release `asyncflow_runtime_tests` and `asyncflow_runtime_benchmarks` build: passed.
+- Remote clang Release full runtime suite under `--security-opt seccomp=unconfined`: 143 tests, 140 passed, 3 skipped, 0 failed.
+
+Release benchmark canary, 3 repetitions with `--benchmark_min_time=0.05s`:
+
+| Case | Real-Time Mean | Throughput Mean |
+| --- | ---: | ---: |
+| `BM_RuntimeExternalStart/8192` | 6.85 ms | 1.206 M/s |
+| `BM_RuntimeCrossThreadHop/8192` | 12.4 ms | 662.395 k/s |
+| `BM_RuntimeIoThreadHop/8192` | 4.17 ms | 1.964 M/s |
+| `BM_RuntimeParallelShards/128` | 0.460 ms | 278.731 k/s |
+
+Interpretation:
+
+- This pass changes only declaration/definition placement. Same-thread local queue routing, cross-thread SPSC routing, external MPSC routing, ready-source hint handling, worker wait/notify behavior, task state transitions, locks, atomics, and allocations are unchanged.
+- `runtime_executor.hpp` dropped from 4435 lines to 4209 lines. Further executor splits should keep following operation-family boundaries and leave state/cache layout auditable in the main executor declaration.
