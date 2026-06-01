@@ -35,6 +35,7 @@
             }
 
             io_uring_fd_ = -1;
+            io_uring_backend_error_ = 0;
             io_uring_sq_ring_ = nullptr;
             io_uring_cq_ring_ = nullptr;
             io_uring_sqes_ = nullptr;

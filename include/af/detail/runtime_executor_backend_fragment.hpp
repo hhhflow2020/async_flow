@@ -69,6 +69,11 @@
                 return;
             }
             if (!init_native_io_backend()) {
+#if defined(__linux__)
+                if (io_uring_thread()) {
+                    io_uring_backend_error_ = ENODEV;
+                }
+#endif
                 return;
             }
 #if defined(__linux__)

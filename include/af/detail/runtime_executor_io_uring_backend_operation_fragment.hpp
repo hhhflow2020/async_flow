@@ -39,8 +39,10 @@
         }
 
         void fail_io_uring_backend(int error, IoUringOperation* running_operation) noexcept {
+            const int backend_error = error == 0 ? EIO : error;
             clear_or_fail_io_uring_operations(error, running_operation);
             close_io_uring_backend();
+            io_uring_backend_error_ = backend_error;
         }
 
         void clear_or_fail_io_uring_operations(

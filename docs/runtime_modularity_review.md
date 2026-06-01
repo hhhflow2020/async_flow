@@ -45,6 +45,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Public socket lifecycle helpers are now split into create, socket options, socket name lookup, and listener bind/listen fragments, with `io_socket_lifecycle_fragment.hpp` kept as a small inline umbrella.
 - Public file-data submit wrappers are now split into basic read/write/fsync, fixed-file, registered-buffer, and vectored fragments, with a small umbrella preserving inline visibility in `AsyncRuntime`.
 - Public IO resource wrappers are now split into backend availability, buffer resources, file resources, and wait/cancel/timeout fragments, with `runtime_public_io_resource_fragment.hpp` kept as a small inline umbrella.
+- Public io_uring availability now exposes setup/runtime failure diagnostics through `io_uring_backend_error(thread)`, so tests can distinguish a missing backend from `EPERM`/`ENOSYS`/mapping failures instead of relying on a silent boolean.
 - Public socket receive helpers are now split into basic recv/fixed-file recv, recv multishot, and recvmsg multishot parser/submit fragments, with `io_socket_recv_fragment.hpp` kept as a small inline umbrella.
 - Public socket send helpers are now split into basic send, fixed-file send, zero-copy send, and vectored zero-copy send fragments, with `io_socket_send_fragment.hpp` kept as a small inline umbrella.
 - Public file fixed-resource helpers are now split into fixed-file read/write/fsync, registered-buffer read/write, and vectored file write fragments, with `io_file_fixed_buffer_fragment.hpp` kept as a small inline umbrella.
@@ -61,7 +62,7 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Datagram IO runtime tests are split by readiness/hangup, UDP receive, and UDP send/zero-copy coverage.
 - Timer/event IO test support is now a small umbrella over timer/timeout tasks, eventfd tasks, timer/event boundary tasks, and filesystem boundary tasks.
 - Wait/cancel IO test support is now a small umbrella over basic wait/bad-fd tasks, cancel state-machine tasks, deadline timeout tasks, and zero-byte/vectored boundary tasks.
-- io_uring socket multishot test support is now split between recv/provided-buffer and recvmsg/peer-address task fragments, with the original multishot header kept as a small compatibility umbrella.
+- io_uring socket multishot test support is now split between recv/provided-buffer and recvmsg/peer-address task fragments, with the original multishot header kept as a small compatibility umbrella. The recv/provided-buffer task is now a small shell over flow, provided-buffer ring, and recv/cancel fragments.
 - Epoll runtime tests are split by setup, readiness, cancel/timeout, boundary, socket lifecycle, and event/timer adapter coverage.
 - The Linux epoll executor backend is now a small platform umbrella over setup/wake, storage, poll, wait registration, and cancel fragments. This mirrors the kqueue split while keeping all syscall paths inline inside `AsyncRuntime::Executor`.
 - io_uring backend executor internals are now split into setup/close, SQ submit/poll, CQ completion, and operation lifecycle fragments while remaining inline in `AsyncRuntime::Executor`.
@@ -131,7 +132,7 @@ Resolved items:
 
 Current file-size snapshot after the pass:
 
-- `include/af/async_runtime.hpp`: 232 lines.
+- `include/af/async_runtime.hpp`: 239 lines.
 - `include/af/detail/runtime_dispatch_fragment.hpp`: 7 lines.
 - `include/af/detail/runtime_queue_topology_fragment.hpp`: 30 lines.
 - `include/af/detail/runtime_ready_enqueue_fragment.hpp`: 149 lines.
@@ -430,6 +431,20 @@ Additional validation after the io_uring fixed-file read/write test support spli
 - Remote clang TSAN `asyncflow_runtime_tests` targeted run: skipped by test logic with `io_uring backend unavailable` and no ThreadSanitizer report.
 - Remote clang Release `asyncflow_runtime_tests` targeted run: skipped by test logic with `io_uring backend unavailable`.
 
+Additional validation after the io_uring stream/UDP recv multishot test support split and backend diagnosis:
+
+- `tests/support/runtime_io_uring_socket_recv_multishot_tasks_fragment.hpp` is now an 84-line task shell.
+- `tests/support/runtime_io_uring_socket_recv_multishot_task_flow_fragment.hpp` owns the state dispatcher.
+- `tests/support/runtime_io_uring_socket_recv_multishot_task_ring_fragment.hpp` owns provided-buffer ring register/unregister and completion publishing.
+- `tests/support/runtime_io_uring_socket_recv_multishot_task_recv_fragment.hpp` owns stream/UDP recv multishot completion, buffer recycling, stop, and cancel handling.
+- `AsyncRuntime::io_uring_backend_error(thread)` now exposes io_uring setup/runtime failure errno without changing the hot submit/completion path when the backend is available.
+- Initial remote host evidence: `CONFIG_IO_URING=y`, `kernel.io_uring_disabled=2`, `kernel.io_uring_group=-1`, and host-root direct `io_uring_setup` returned `EPERM`.
+- After temporary host enablement, `kernel.io_uring_disabled=0`, host-root direct `io_uring_setup` succeeded, `seccomp=unconfined` and `--privileged` containers succeeded, and only the default Docker seccomp profile still returned `EPERM`.
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_runtime_tests` build: passed; local targeted run reported Linux-only skips.
+- Remote clang Debug/TSAN/Release `asyncflow_runtime_tests --gtest_filter=*Uring*.*` under `--security-opt seccomp=unconfined`: 35/37 passed, 2 direct-descriptor capability tests skipped, 0 failed, and TSAN reported no races.
+- The first broad Debug run exposed two failing io_uring poll-readiness sendfile tests. The test fixture used a full AF_UNIX socketpair for `sendfile`; switching it to the same full TCP connection shape used by the epoll sendfile wait test made both poll-resume and cancel cases pass in Debug, TSAN, and Release.
+
 Remaining follow-up:
 
 - Ready-source hints are now correct and bounded, but future benchmarking may justify a rotating ready-word cursor for very large `thread_count` values.
@@ -551,7 +566,7 @@ Current issue ledger:
 - P1: keep `runtime_executor_core_state_fragment.hpp` as the single executor state-layout owner unless a split explicitly preserves declaration order, alignment, and cache-line placement. Splitting state for aesthetics can silently introduce false sharing or make queue/cache layout audits harder.
 - P1: future changes must not append new operation families directly into `async_runtime.hpp`. New public methods should enter through the existing public IO/resource/lifecycle/parallel umbrellas, and new executor operations should enter through the matching backend submit/completion fragments.
 - P2: `include/af/detail/bounded_queues.hpp` still contains SPSC, MPSC, and MPMC bounded queues in one file. The implementation is performance-sensitive and cache-line aligned, so a split is acceptable only as a mechanical separation into queue-family headers with no layout or memory-order changes, followed by queue benchmarks.
-- P2: several test support files remain dense state-machine collections: stream sendfile/splice support and io_uring multishot recv/recvmsg support. File lifecycle support and fixed-file read/write support have been reduced to small shells over operation-family fragments. Remaining dense support files should continue moving toward operation-family task fragments when touched.
+- P2: several test support files remain dense state-machine collections: stream sendfile/splice support and io_uring recvmsg multishot support. File lifecycle, fixed-file read/write, and recv multishot support have been reduced to small shells over operation-family fragments. Remaining dense support files should continue moving toward operation-family task fragments when touched.
 - P2: several examples remain long because they combine protocol framing, socket IO, task state machines, and result reporting. The fixed-file round trip, file lifecycle, UDP recvmsg multishot, UDP recv multishot, stream recv multishot, and length-prefixed RPC client/server paths have been reduced to focused fragments; the biggest current examples are now older readiness examples and remaining setup-heavy example entry points. Prefer protocol/helper headers plus small task headers for future edits.
 - P2: `tests/utility_tests.cpp` is now one of the largest standalone tests. It should be split by utility domain if new utility coverage is added.
 

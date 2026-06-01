@@ -28,6 +28,24 @@ TEST(IoUringSetupConfig, PopulatesRequestedSetupParams) {
 #endif
 }
 
+TEST_F(UringIoRuntimeFixture, IoUringBackendAvailabilityReportsSetupError) {
+    const bool available = UringIoRuntime::io_uring_backend_available(IoTestThread::IO_0);
+    const int error = UringIoRuntime::io_uring_backend_error(IoTestThread::IO_0);
+#if defined(__linux__)
+    if (available) {
+        EXPECT_EQ(error, 0);
+        return;
+    }
+    ASSERT_NE(error, 0);
+    GTEST_SKIP() << "io_uring backend unavailable, error=" << error << " ("
+                 << std::strerror(error) << ")";
+#else
+    EXPECT_FALSE(available);
+    EXPECT_EQ(error, ENOSYS);
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}
+
 TEST(IoAdapterTraits, AdaptersAreThinTriviallyCopyableViews) {
     EXPECT_TRUE(std::is_trivially_copyable_v<af::IoFile<IoTestThread>>);
     EXPECT_TRUE(std::is_trivially_copyable_v<af::IoFixedFile<IoTestThread>>);

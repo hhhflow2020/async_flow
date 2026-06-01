@@ -18,6 +18,14 @@
         return executors_[index]->io_uring_backend_available();
     }
 
+    [[nodiscard]] static int io_uring_backend_error(Thread thread) noexcept {
+        const std::uint16_t index = thread_index(thread);
+        if (index >= executors_.size()) {
+            return EINVAL;
+        }
+        return executors_[index]->io_uring_backend_error();
+    }
+
     [[nodiscard]] static bool io_uring_poll_available(Thread thread) noexcept {
         const std::uint16_t index = thread_index(thread);
         if (index >= executors_.size()) {

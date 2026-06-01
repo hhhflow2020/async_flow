@@ -95,8 +95,8 @@ TEST_F(UringIoRuntimePollFixture, IoUringPollReadinessResumesSendfileWhenSocketW
         &payload,
         sizeof(payload)));
 
-    StreamSocketPair sockets;
-    ASSERT_TRUE(create_blocked_stream_socket_pair(sockets));
+    BlockingTcpConnection connection;
+    ASSERT_TRUE(create_blocked_tcp_connection(connection));
 
     std::atomic<af::IoOpState*> state{nullptr};
     std::atomic<int> wait_kind{-1};
@@ -105,7 +105,7 @@ TEST_F(UringIoRuntimePollFixture, IoUringPollReadinessResumesSendfileWhenSocketW
     std::atomic<int> error{-1};
     std::atomic<std::size_t> bytes_sent{0};
     ASSERT_TRUE(UringIoRuntime::start_task<UringPendingSendfilePollTask>(
-        sockets.first.get(),
+        connection.server.get(),
         file.get(),
         &state,
         &wait_kind,
@@ -118,7 +118,7 @@ TEST_F(UringIoRuntimePollFixture, IoUringPollReadinessResumesSendfileWhenSocketW
         wait_kind.load(std::memory_order_acquire),
         static_cast<int>(af::IoWaitKind::Readiness));
 
-    drain_available(sockets.second.get());
+    drain_available(connection.client.get());
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(error.load(std::memory_order_acquire), 0);
     EXPECT_EQ(bytes_sent.load(std::memory_order_acquire), 1U);
@@ -141,8 +141,8 @@ TEST_F(UringIoRuntimePollFixture, IoUringPollReadinessCancelPendingSendfileWait)
         &payload,
         sizeof(payload)));
 
-    StreamSocketPair sockets;
-    ASSERT_TRUE(create_blocked_stream_socket_pair(sockets));
+    BlockingTcpConnection connection;
+    ASSERT_TRUE(create_blocked_tcp_connection(connection));
 
     std::atomic<af::IoOpState*> state{nullptr};
     std::atomic<int> wait_kind{-1};
@@ -151,7 +151,7 @@ TEST_F(UringIoRuntimePollFixture, IoUringPollReadinessCancelPendingSendfileWait)
     std::atomic<int> error{-1};
     std::atomic<std::size_t> bytes_sent{0};
     ASSERT_TRUE(UringIoRuntime::start_task<UringPendingSendfilePollTask>(
-        sockets.first.get(),
+        connection.server.get(),
         file.get(),
         &state,
         &wait_kind,

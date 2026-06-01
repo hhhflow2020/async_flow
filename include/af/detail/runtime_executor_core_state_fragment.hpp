@@ -32,6 +32,7 @@
 #endif
 #if defined(__linux__)
         int io_uring_fd_{-1};
+        int io_uring_backend_error_{0};
         std::byte* io_uring_sq_ring_{nullptr};
         std::byte* io_uring_cq_ring_{nullptr};
         io_uring_sqe* io_uring_sqes_{nullptr};

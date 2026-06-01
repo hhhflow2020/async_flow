@@ -153,6 +153,16 @@ private:
 #endif
         }
 
+        [[nodiscard]] int io_uring_backend_error() const noexcept {
+#if defined(__linux__)
+            return io_uring_fd_ >= 0
+                ? 0
+                : (io_uring_backend_error_ == 0 ? ENODEV : io_uring_backend_error_);
+#else
+            return ENOSYS;
+#endif
+        }
+
         [[nodiscard]] bool io_uring_poll_available() const noexcept {
 #if defined(__linux__)
             return io_uring_fd_ >= 0 && io_uring_poll_add_available_;

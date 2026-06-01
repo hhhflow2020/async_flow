@@ -4,10 +4,15 @@
 
 #if defined(__linux__)
         void init_io_uring_backend() noexcept {
-            if (io_uring_fd_ >= 0 || io_wake_fd_ < 0) {
+            if (io_uring_fd_ >= 0) {
+                return;
+            }
+            if (io_wake_fd_ < 0) {
+                io_uring_backend_error_ = ENODEV;
                 return;
             }
 
+            io_uring_backend_error_ = 0;
             io_uring_params params{};
             detail::configure_io_uring_params(
                 params,
@@ -18,11 +23,14 @@
                     io_uring_sqpoll_cpu});
             io_uring_fd_ = detail::sys_io_uring_setup(io_uring_entries, &params);
             if (io_uring_fd_ < 0) {
+                io_uring_backend_error_ = errno == 0 ? EIO : errno;
                 return;
             }
 
             if (!map_io_uring_rings(params)) {
+                const int map_error = errno == 0 ? EIO : errno;
                 close_io_uring_backend();
+                io_uring_backend_error_ = map_error;
                 return;
             }
 
@@ -30,7 +38,9 @@
             detect_io_uring_features();
 
             if (!register_io_uring_wake_fd()) {
+                const int register_error = errno == 0 ? EIO : errno;
                 close_io_uring_backend();
+                io_uring_backend_error_ = register_error;
             }
         }
 #endif

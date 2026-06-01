@@ -464,3 +464,41 @@ Interpretation:
 
 - This pass changed only test support layout. Runtime scheduling, IO backend behavior, queue selection, memory ordering, public APIs, task field layout, and test assertions were unchanged.
 - The remote host/container combination did not expose the io_uring backend path for this test, so this validates build/link/run and TSAN startup/teardown cleanliness rather than the registered fixed-file fixed-buffer/vectored read-write data path itself.
+
+## 2026-06-01 io_uring Recv Multishot Test Support Split And Backend Diagnosis
+
+This run validates the test support split that turned `tests/support/runtime_io_uring_socket_recv_multishot_tasks_fragment.hpp` into an 84-line task shell over flow, provided-buffer ring, and recv/cancel fragments. It also investigates why the remote io_uring-only tests skip.
+
+Correctness and race checks:
+
+- Local `git diff --check`: passed.
+- Local Release `asyncflow_runtime_tests` build: passed; the targeted local run reported Linux-only skips.
+- Initial remote diagnosis with host `kernel.io_uring_disabled = 2`: `IoUringBackendAvailabilityReportsSetupError` reported `error=1 (Operation not permitted)`, and direct `io_uring_setup` probes returned `EPERM`.
+- After temporarily enabling the host with `kernel.io_uring_disabled = 0`, host-root direct `io_uring_setup` succeeded.
+- The default Docker seccomp profile still denied `io_uring_setup` with `EPERM`.
+- `--security-opt seccomp=unconfined` allowed direct `io_uring_setup` and allowed runtime io_uring tests to execute the actual backend path.
+- Remote clang Debug `asyncflow_runtime_tests --gtest_filter=*Uring*.*` with `seccomp=unconfined`: 35/37 passed, 2 skipped for unsupported direct-descriptor capabilities, 0 failed.
+- Remote clang TSAN `asyncflow_runtime_tests --gtest_filter=*Uring*.*` with `seccomp=unconfined`: 35/37 passed, 2 skipped, no ThreadSanitizer report.
+- Remote clang Release `asyncflow_runtime_tests --gtest_filter=*Uring*.*` with `seccomp=unconfined`: 35/37 passed, 2 skipped, 0 failed.
+- The first broad Debug run exposed two failing io_uring poll-readiness sendfile tests. The tests were using a full AF_UNIX socketpair for `sendfile`; after switching them to the same full TCP connection shape used by the epoll sendfile wait test, both poll-readiness and cancel cases passed in Debug, TSAN, and Release.
+
+Remote io_uring diagnosis:
+
+- The remote kernel has io_uring compiled in: `CONFIG_IO_URING=y`.
+- Before temporary host enablement, host sysctl reported `kernel.io_uring_disabled = 2` and `kernel.io_uring_group = -1`; host root, default container, `seccomp=unconfined` container, and `--privileged` container direct `io_uring_setup` probes all returned `EPERM`.
+- After temporary host enablement, host sysctl reported `kernel.io_uring_disabled = 0`, host-root direct `io_uring_setup` succeeded, `seccomp=unconfined` and `--privileged` containers succeeded, and only the default Docker seccomp profile continued to return `EPERM`.
+- The remaining container requirement is therefore Docker seccomp policy, not kernel support and not runtime skip logic.
+
+How to enable the remote io_uring path:
+
+- Temporary host enablement: `sysctl -w kernel.io_uring_disabled=0`.
+- Persistent host enablement: write `kernel.io_uring_disabled = 0` to a file under `/etc/sysctl.d/`, then reload with `sysctl --system`.
+- Verification order after enabling: first run a host-root direct `io_uring_setup` probe, then run the same probe in the default container, then run the runtime target tests.
+- If the host probe succeeds but the default container probe still returns `EPERM`, run the container with `--security-opt seccomp=unconfined` or a custom seccomp profile that allows `io_uring_setup`, `io_uring_enter`, and `io_uring_register`.
+- Restore the current restricted host behavior with `sysctl -w kernel.io_uring_disabled=2` if the remote should remain locked down.
+
+Interpretation:
+
+- The earlier skip was not caused by the runtime silently choosing to skip a usable backend. `AsyncRuntime::io_uring_backend_error(thread)` exposed the setup errno as `EPERM`, which matched direct syscall probes.
+- To run actual remote io_uring data paths now that the host is enabled, use Docker with `--security-opt seccomp=unconfined` or an equivalent custom seccomp profile that allows `io_uring_setup`, `io_uring_enter`, and `io_uring_register`.
+- This pass changed diagnostics, test support layout, and the sendfile poll-readiness test fixture shape. It does not add locks, alter queue selection, change task field order, or affect the available-backend fast path.
