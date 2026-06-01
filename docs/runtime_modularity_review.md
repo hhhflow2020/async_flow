@@ -443,6 +443,9 @@ Additional validation after the io_uring stream/UDP recv multishot test support 
 - Local `git diff --check`: passed.
 - Local Release `asyncflow_runtime_tests` build: passed; local targeted run reported Linux-only skips.
 - Remote clang Debug/TSAN/Release `asyncflow_runtime_tests --gtest_filter=*Uring*.*` under `--security-opt seccomp=unconfined`: 35/37 passed, 2 direct-descriptor capability tests skipped, 0 failed, and TSAN reported no races.
+- Remote clang Debug full `asyncflow_runtime_tests` under `--security-opt seccomp=unconfined`: 130/133 passed, 3 skipped, 0 failed.
+- Remote clang TSAN full `asyncflow_runtime_tests` under `--security-opt seccomp=unconfined`: 130/133 passed, 3 skipped, no ThreadSanitizer report.
+- Remote clang Release full `asyncflow_runtime_tests` under `--security-opt seccomp=unconfined`: 130/133 passed, 3 skipped, 0 failed.
 - The first broad Debug run exposed two failing io_uring poll-readiness sendfile tests. The test fixture used a full AF_UNIX socketpair for `sendfile`; switching it to the same full TCP connection shape used by the epoll sendfile wait test made both poll-resume and cancel cases pass in Debug, TSAN, and Release.
 
 Remaining follow-up:

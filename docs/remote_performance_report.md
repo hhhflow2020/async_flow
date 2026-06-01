@@ -502,3 +502,24 @@ Interpretation:
 - The earlier skip was not caused by the runtime silently choosing to skip a usable backend. `AsyncRuntime::io_uring_backend_error(thread)` exposed the setup errno as `EPERM`, which matched direct syscall probes.
 - To run actual remote io_uring data paths now that the host is enabled, use Docker with `--security-opt seccomp=unconfined` or an equivalent custom seccomp profile that allows `io_uring_setup`, `io_uring_enter`, and `io_uring_register`.
 - This pass changed diagnostics, test support layout, and the sendfile poll-readiness test fixture shape. It does not add locks, alter queue selection, change task field order, or affect the available-backend fast path.
+
+## 2026-06-01 Full Runtime Matrix With io_uring Enabled
+
+After the host was temporarily enabled with `kernel.io_uring_disabled = 0`, the full runtime test binary was rerun in the clang container with `--security-opt seccomp=unconfined`.
+
+Results:
+
+- Remote clang Debug `asyncflow_runtime_tests`: 130/133 passed, 3 skipped, 0 failed.
+- Remote clang TSAN `asyncflow_runtime_tests`: 130/133 passed, 3 skipped, no ThreadSanitizer report.
+- Remote clang Release `asyncflow_runtime_tests`: 130/133 passed, 3 skipped, 0 failed.
+
+Skipped tests:
+
+- `IoRuntimeKqueue.KqueueBackendIsPlatformSpecific`: expected Linux skip.
+- `UringIoRuntimeSocketAcceptFixture.IoUringAcceptDirectReceivesThroughFixedFile`: direct accept unsupported by the current kernel/runtime capability check.
+- `UringIoRuntimeFileFixture.IoUringOpenAtDirectInstallsFixedFileSlot`: direct descriptor open unsupported with error 22.
+
+Interpretation:
+
+- This is the strongest current remote correctness signal: scheduler, epoll fallback, actual io_uring socket/file/multishot paths, runtime stress tests, above-64-thread ready-source coverage, and shutdown/restart cases all passed under Debug, TSAN, and Release.
+- The default container profile still blocks io_uring; `--security-opt seccomp=unconfined` remains required unless a custom seccomp profile allows the three io_uring syscalls.
