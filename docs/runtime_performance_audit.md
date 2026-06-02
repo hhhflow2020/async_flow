@@ -36,6 +36,9 @@ was run against Boost.Asio, libuv, Seastar, or Go in this pass.
 - `AsyncLogger` keeps the separate `ready_` and `pending_` counters for correct
   publication/flush semantics, but its producer-side pending increment and
   consumer-side counter decrements now avoid unnecessary acquire fences.
+- Runtime-bound file/TCP/UDP log backend batch counters keep acquire loads for
+  flush waiters, but their enqueue/complete RMW operations now avoid unnecessary
+  acquire fences.
 - `ReadySourceSet` stores each 64-bit ready-source word on its own cache line.
   The executor also rotates multi-word scans, so thread counts above 64 do not
   permanently bias ready-source word zero.

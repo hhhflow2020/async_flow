@@ -89,7 +89,7 @@ public:
             }
 
             const std::uint32_t queued_count = runtime_log_batch_record_count(*batch);
-            pending_batches.fetch_add(1U, std::memory_order_acq_rel);
+            pending_batches.fetch_add(1U, std::memory_order_relaxed);
             if (!ready_batches.try_push(batch)) [[unlikely]] {
                 abandon_pending_batch();
                 dropped_records.fetch_add(queued_count, std::memory_order_relaxed);
@@ -172,7 +172,7 @@ private:
     }
 
     void abandon_pending_batch() noexcept {
-        if (pending_batches.fetch_sub(1U, std::memory_order_acq_rel) == 1U) {
+        if (pending_batches.fetch_sub(1U, std::memory_order_release) == 1U) {
             pending_batches.notify_all();
             pending_cv_.notify_all();
         }
