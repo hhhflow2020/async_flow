@@ -28,17 +28,23 @@ namespace af {
 namespace detail {
 
 template <typename TaskId>
-[[nodiscard]] std::string task_id_prefixed_log_message(std::string_view message, TaskId task_id) {
+[[nodiscard]] std::string task_id_tagged_log_message(std::string_view message,
+                                                     std::string_view user_message,
+                                                     TaskId task_id) {
+    AF_ASSERT(user_message.size() <= message.size());
+
+    const std::size_t prefix_size = message.size() - user_message.size();
     std::array<char, 32> digits{};
     const auto converted = std::to_chars(digits.data(), digits.data() + digits.size(), task_id);
     AF_ASSERT(converted.ec == std::errc{});
 
     std::string tagged;
     tagged.reserve(message.size() + static_cast<std::size_t>(converted.ptr - digits.data()) + 8U);
+    tagged.append(message.data(), prefix_size);
     tagged.append("[task=");
     tagged.append(digits.data(), converted.ptr);
     tagged.append("] ");
-    tagged.append(message.data(), message.size());
+    tagged.append(user_message.data(), user_message.size());
     return tagged;
 }
 
@@ -101,8 +107,8 @@ public:
                 accepted =
                     logger_->try_log_from_runtime_thread(RuntimeT::current_thread_index(), message);
             } else {
-                const std::string tagged_message =
-                    detail::task_id_prefixed_log_message(message, task_id);
+                const std::string tagged_message = detail::task_id_tagged_log_message(
+                    message, entry.text_message_with_newline(), task_id);
                 accepted = logger_->try_log_from_runtime_thread(RuntimeT::current_thread_index(),
                                                                 tagged_message);
             }

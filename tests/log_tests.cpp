@@ -153,14 +153,13 @@ template <typename T> bool wait_until_at_least(std::atomic<T> &value, T expected
     return true;
 }
 
-[[nodiscard]] std::string extract_absl_prefix_thread_id(std::string_view line,
-                                                        std::string_view marker) {
-    const std::size_t marker_pos = line.find(marker);
-    if (marker_pos == std::string_view::npos) {
+[[nodiscard]] std::string extract_absl_prefix_thread_id(std::string_view line) {
+    const std::size_t prefix_end = line.find(']');
+    if (prefix_end == std::string_view::npos) {
         return {};
     }
 
-    std::istringstream tokens(std::string(line.substr(0, marker_pos)));
+    std::istringstream tokens(std::string(line.substr(0, prefix_end)));
     std::string previous;
     std::string current;
     for (std::string token; tokens >> token;) {
@@ -793,10 +792,10 @@ TEST(LogTests, RuntimeAwareSinkKeepsProducerThreadIdInAbslPrefix) {
     std::string runtime_one_tid;
     for (const std::string &message : capturing_backend->messages()) {
         if (message.find("producer-runtime-zero") != std::string::npos) {
-            runtime_zero_tid = extract_absl_prefix_thread_id(message, "producer-runtime-zero");
+            runtime_zero_tid = extract_absl_prefix_thread_id(message);
         }
         if (message.find("producer-runtime-one") != std::string::npos) {
-            runtime_one_tid = extract_absl_prefix_thread_id(message, "producer-runtime-one");
+            runtime_one_tid = extract_absl_prefix_thread_id(message);
         }
     }
 
@@ -1069,8 +1068,13 @@ TEST(LogTests, RuntimeAwareSinkPrefixesRuntimeTaskId) {
     EXPECT_EQ(observed_current_task_id.load(std::memory_order_acquire), task_id);
 
     const std::string contents = read_file(path);
-    EXPECT_NE(contents.find("[task=" + std::to_string(task_id) + "] "), std::string::npos);
-    EXPECT_NE(contents.find("runtime task id log"), std::string::npos);
+    const std::string task_tag = "[task=" + std::to_string(task_id) + "] ";
+    const std::size_t prefix_end = contents.find("] ");
+    const std::size_t task_tag_pos = contents.find(task_tag);
+    ASSERT_NE(prefix_end, std::string::npos);
+    ASSERT_NE(task_tag_pos, std::string::npos);
+    EXPECT_EQ(task_tag_pos, prefix_end + 2U);
+    EXPECT_NE(contents.find(task_tag + "runtime task id log"), std::string::npos);
 }
 
 TEST(LogTests, BlockOverflowWaitsForQueueCapacity) {
