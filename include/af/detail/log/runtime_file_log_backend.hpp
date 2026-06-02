@@ -475,7 +475,7 @@ public:
     [[nodiscard]] bool flush(std::chrono::milliseconds timeout) noexcept override {
         State &state = binding_.state();
         const std::uint64_t target = state.request_flush();
-        if (!binding_.wake(true)) {
+        if (!binding_.wake(false)) {
             return false;
         }
         return state.flush_until(target, std::chrono::steady_clock::now() + timeout);
@@ -489,7 +489,7 @@ public:
         }
 
         static_cast<void>(flush(std::chrono::seconds(5)));
-        binding_.stop_and_wait(std::chrono::steady_clock::now() + std::chrono::seconds(5), true);
+        binding_.stop_and_wait(std::chrono::steady_clock::now() + std::chrono::seconds(5), false);
     }
 
     [[nodiscard]] RuntimeFileLogBackendStats stats() const noexcept {

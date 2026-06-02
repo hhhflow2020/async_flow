@@ -459,7 +459,7 @@ public:
         if (state.pending_batches.load(std::memory_order_acquire) == 0U) {
             return true;
         }
-        if (!binding_.wake(true)) {
+        if (!binding_.wake(false)) {
             return false;
         }
         return state.flush_until(std::chrono::steady_clock::now() + timeout);
@@ -473,7 +473,7 @@ public:
         }
 
         static_cast<void>(flush(std::chrono::seconds(5)));
-        binding_.stop_and_wait(std::chrono::steady_clock::now() + std::chrono::seconds(5), true);
+        binding_.stop_and_wait(std::chrono::steady_clock::now() + std::chrono::seconds(5), false);
     }
 
     [[nodiscard]] RuntimeTcpLogBackendStats stats() const noexcept {

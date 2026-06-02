@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <vector>
@@ -31,6 +32,37 @@ public:
         buffer_[tail & mask_] = value;
         tail_.store(next, std::memory_order_release);
         return true;
+    }
+
+    [[nodiscard]] std::size_t try_push_many(T *const *values, std::size_t count) noexcept {
+        if (count == 0U) {
+            return 0;
+        }
+
+        const std::size_t tail = tail_.load(std::memory_order_relaxed);
+        const std::size_t used = tail - head_cache_;
+        std::size_t available = used < capacity_ ? capacity_ - used : 0U;
+        if (count > available) {
+            head_cache_ = head_.load(std::memory_order_acquire);
+            const std::size_t refreshed_used = tail - head_cache_;
+            if (refreshed_used >= capacity_) {
+                return 0;
+            }
+            available = capacity_ - refreshed_used;
+            count = std::min(count, available);
+        }
+
+        const std::size_t first = tail & mask_;
+        const std::size_t first_count = std::min(count, capacity_ - first);
+        for (std::size_t i = 0; i < first_count; ++i) {
+            buffer_[first + i] = values[i];
+        }
+        for (std::size_t i = first_count; i < count; ++i) {
+            buffer_[i - first_count] = values[i];
+        }
+
+        tail_.store(tail + count, std::memory_order_release);
+        return count;
     }
 
     [[nodiscard]] T *try_pop() noexcept {

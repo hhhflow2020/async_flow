@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -213,8 +215,24 @@ public:
     }
 
     void release_records(std::span<LogRecord *const> records) noexcept {
-        for (LogRecord *record : records) {
-            release(static_cast<Slot *>(record->pool_slot()));
+        constexpr std::size_t release_chunk_size = 64;
+        std::array<Slot *, release_chunk_size> slots{};
+
+        std::size_t index = 0;
+        while (index < records.size()) {
+            const std::size_t count = std::min(release_chunk_size, records.size() - index);
+            for (std::size_t i = 0; i < count; ++i) {
+                slots[i] = static_cast<Slot *>(records[index + i]->pool_slot());
+            }
+
+            const std::size_t pushed = free_slots_.try_push_many(slots.data(), count);
+            AF_ASSERT(pushed == count);
+            if (pushed != count) [[unlikely]] {
+                for (std::size_t i = pushed; i < count; ++i) {
+                    release(slots[i]);
+                }
+            }
+            index += count;
         }
     }
 

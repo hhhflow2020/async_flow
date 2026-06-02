@@ -46,6 +46,40 @@ TEST(QueueTests, BoundedSpscPopsManyInFifoOrder) {
     EXPECT_EQ(queue.try_pop_many(popped.data(), popped.size()), 0U);
 }
 
+TEST(QueueTests, BoundedSpscPushesManyInFifoOrder) {
+    af::detail::BoundedSpscQueue<int> queue(4);
+    int a = 1;
+    int b = 2;
+    int c = 3;
+    int d = 4;
+    std::array<int *, 3> first_push{&a, &b, &c};
+    std::array<int *, 2> second_push{&d, &a};
+
+    EXPECT_EQ(queue.try_push_many(first_push.data(), first_push.size()), first_push.size());
+    EXPECT_EQ(queue.try_pop(), &a);
+    EXPECT_EQ(queue.try_pop(), &b);
+
+    EXPECT_EQ(queue.try_push_many(second_push.data(), second_push.size()), second_push.size());
+    EXPECT_EQ(queue.try_pop(), &c);
+    EXPECT_EQ(queue.try_pop(), &d);
+    EXPECT_EQ(queue.try_pop(), &a);
+    EXPECT_EQ(queue.try_pop(), nullptr);
+}
+
+TEST(QueueTests, BoundedSpscPushManyStopsWhenFull) {
+    af::detail::BoundedSpscQueue<int> queue(2);
+    int a = 1;
+    int b = 2;
+    int c = 3;
+    std::array<int *, 3> values{&a, &b, &c};
+
+    EXPECT_EQ(queue.try_push_many(values.data(), values.size()), 2U);
+    EXPECT_FALSE(queue.try_push(&c));
+    EXPECT_EQ(queue.try_pop(), &a);
+    EXPECT_EQ(queue.try_pop(), &b);
+    EXPECT_EQ(queue.try_pop(), nullptr);
+}
+
 TEST(QueueTests, BoundedMpscRejectsWhenFull) {
     af::detail::BoundedMpscQueue<int> queue(2);
     int a = 1;

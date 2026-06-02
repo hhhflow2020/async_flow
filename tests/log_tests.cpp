@@ -1212,7 +1212,12 @@ TEST(LogTests, RuntimeTcpBackendSendsBatchesOnIoThread) {
     close_fd(listener);
     backend.shutdown();
 
-    EXPECT_TRUE(flushed);
+    EXPECT_TRUE(flushed) << "queued=" << stats.queued_records << " sent=" << stats.sent_records
+                         << " dropped=" << stats.dropped_records
+                         << " last_error=" << stats.last_error
+                         << " stage=" << stats.last_error_stage
+                         << " server_done=" << server_done.load(std::memory_order_acquire)
+                         << " received_size=" << received.size();
     EXPECT_EQ(stats.queued_records, record_ptrs.size());
     EXPECT_EQ(stats.sent_records, record_ptrs.size())
         << "last_error=" << stats.last_error << " stage=" << stats.last_error_stage;
@@ -1281,7 +1286,12 @@ TEST(LogTests, RuntimeTcpAsyncLoggerBackendSendsOnIoThread) {
     server.join();
     close_fd(listener);
 
-    EXPECT_TRUE(flushed);
+    EXPECT_TRUE(flushed) << "queued=" << stats.queued_records << " sent=" << stats.sent_records
+                         << " dropped=" << stats.dropped_records
+                         << " last_error=" << stats.last_error
+                         << " stage=" << stats.last_error_stage
+                         << " server_done=" << server_done.load(std::memory_order_acquire)
+                         << " received_size=" << received.size();
     EXPECT_EQ(stats.queued_records, 4U);
     EXPECT_EQ(stats.sent_records, 4U)
         << "last_error=" << stats.last_error << " stage=" << stats.last_error_stage;

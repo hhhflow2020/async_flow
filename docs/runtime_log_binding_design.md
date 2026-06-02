@@ -99,7 +99,9 @@ by the same runtime-bound drain task.
   finished.
 - A backend waiting for IO readiness must not be woken by ordinary producer
   notifications as if the IO had completed. This is now enforced consistently
-  for file, UDP, and TCP runtime-bound backends.
+  for file, UDP, and TCP runtime-bound backends. Flush and shutdown waits still
+  force a runtime-task wake so a synchronous waiter is not stranded behind a
+  stale IO-wait wake bit.
 
 ## Performance constraints
 
@@ -117,10 +119,16 @@ by the same runtime-bound drain task.
   again, or parked on IO; it is cleared only at the no-work idle boundary and
   then immediately rechecks queued batches, flush requests, and stop requests
   before returning `pending()`.
+- Runtime backend flush and shutdown paths should not use the ordinary
+  producer-wakeup skip while a backend task is parked on IO. A waiter may need to
+  prod the bound task to observe a completed IO result, a flush request, or a
+  stop request.
 - The consumer releases drained log records in contiguous owner/kind groups.
   External shard records from the same shared pool can therefore return to the
   record free-list with one tagged-stack CAS per drained group instead of one
-  CAS per record; runtime SPSC lane records keep their queue-local return path.
+  CAS per record; runtime SPSC lane records return to their queue-local pool in
+  fixed-size chunks so a release group publishes the free queue with far fewer
+  tail updates than one push per record.
 - Record pool changes should stay isolated from the consumer drain loop so the
   shared MPSC pool and runtime SPSC pool can be tuned independently.
 - Lane topology changes should stay isolated from consumer lifecycle code so

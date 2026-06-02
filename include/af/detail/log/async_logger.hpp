@@ -524,11 +524,10 @@ private:
     flush_backends_until(std::chrono::steady_clock::time_point deadline) noexcept {
         for (auto &backend : backends_) {
             const auto now = std::chrono::steady_clock::now();
-            if (now >= deadline) {
-                return false;
-            }
             const auto remaining =
-                std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+                now >= deadline
+                    ? std::chrono::milliseconds(0)
+                    : std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
             if (!backend->flush(remaining)) {
                 return false;
             }

@@ -233,7 +233,7 @@ public:
     }
 
 private:
-    [[nodiscard]] static consteval auto make_entry_table() {
+    [[nodiscard]] static constexpr auto make_entry_table() {
         std::array<detail::ThreadLayoutEntry, thread_count> result{};
         std::uint16_t index = 0;
         (([&] {
