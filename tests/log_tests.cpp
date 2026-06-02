@@ -581,6 +581,50 @@ TEST(LogTests, RuntimeFileBackendWritesBatchesOnIoThread) {
     EXPECT_NE(contents.find("runtime file backend four\n"), std::string::npos);
 }
 
+TEST(LogTests, RuntimeFileBackendSkipsEmptyRecordsWithoutLeakingBatch) {
+    const auto path =
+        std::filesystem::path(::testing::TempDir()) / "asyncflow-runtime-log-empty.log";
+    std::filesystem::remove(path);
+
+    LogUdpIoRuntimeGuard runtime_guard;
+    af::RuntimeFileLogBackend<LogUdpIoRuntime> backend({
+        .thread = LogUdpIoThreads::IO_0,
+        .path = path,
+        .append = false,
+        .batch_queue_capacity = 1,
+        .max_batch_records = 1,
+        .max_batches_per_run = 1,
+    });
+
+    af::detail::LogRecord empty_record;
+    empty_record.reset("");
+    std::array<af::detail::LogRecord *, 1> empty_ptrs{&empty_record};
+
+    backend.write_batch(
+        std::span<af::detail::LogRecord *const>(empty_ptrs.data(), empty_ptrs.size()));
+    ASSERT_TRUE(backend.flush(std::chrono::seconds(2)));
+
+    af::RuntimeFileLogBackendStats stats = backend.stats();
+    EXPECT_EQ(stats.queued_records, 0U);
+    EXPECT_EQ(stats.written_records, 0U);
+    EXPECT_EQ(stats.dropped_records, 0U);
+
+    af::detail::LogRecord record;
+    record.reset("runtime file backend after empty\n");
+    std::array<af::detail::LogRecord *, 1> record_ptrs{&record};
+
+    backend.write_batch(
+        std::span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
+    ASSERT_TRUE(backend.flush(std::chrono::seconds(2)));
+    backend.shutdown();
+
+    stats = backend.stats();
+    EXPECT_EQ(stats.queued_records, 1U);
+    EXPECT_EQ(stats.written_records, 1U);
+    EXPECT_EQ(stats.dropped_records, 0U);
+    EXPECT_NE(read_file(path).find("runtime file backend after empty\n"), std::string::npos);
+}
+
 TEST(LogTests, RuntimeFileAsyncLoggerBackendWritesOnIoThread) {
     const auto path =
         std::filesystem::path(::testing::TempDir()) / "asyncflow-runtime-async-log-file.log";

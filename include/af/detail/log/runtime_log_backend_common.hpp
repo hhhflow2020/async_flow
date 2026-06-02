@@ -48,9 +48,17 @@ public:
         bool enqueued_any = false;
         std::size_t index = 0;
         while (index < records.size()) {
-            Batch *batch = free_batches.try_pop();
+            while (index < records.size() && records[index]->message().empty()) {
+                ++index;
+            }
+            if (index == records.size()) {
+                return enqueued_any;
+            }
+
+            Batch *batch = acquire_producer_batch();
             if (batch == nullptr) {
-                dropped_records.fetch_add(records.size() - index, std::memory_order_relaxed);
+                dropped_records.fetch_add(count_non_empty_records(records.subspan(index)),
+                                          std::memory_order_relaxed);
                 return enqueued_any;
             }
 
@@ -58,6 +66,10 @@ public:
             const std::size_t begin = index;
             while (index < records.size()) {
                 const std::string_view message = records[index]->message();
+                if (message.empty()) {
+                    ++index;
+                    continue;
+                }
                 if (!batch->append(message, max_batch_records)) {
                     break;
                 }
@@ -68,21 +80,22 @@ public:
             }
 
             if (batch->empty()) {
-                recycle_batch(batch);
+                stash_producer_batch(batch);
                 if (index == begin) {
                     ++index;
                 }
                 continue;
             }
 
-            queued_records.fetch_add(runtime_log_batch_record_count(*batch),
-                                     std::memory_order_relaxed);
+            const std::uint32_t queued_count = runtime_log_batch_record_count(*batch);
             pending_batches.fetch_add(1U, std::memory_order_acq_rel);
             if (!ready_batches.try_push(batch)) [[unlikely]] {
-                complete_batch(batch);
-                dropped_records.fetch_add(index - begin, std::memory_order_relaxed);
+                abandon_pending_batch();
+                dropped_records.fetch_add(queued_count, std::memory_order_relaxed);
+                stash_producer_batch(batch);
                 return enqueued_any;
             }
+            queued_records.fetch_add(queued_count, std::memory_order_relaxed);
             enqueued_any = true;
         }
         return enqueued_any;
@@ -104,10 +117,7 @@ public:
             return;
         }
         recycle_batch(batch);
-        if (pending_batches.fetch_sub(1U, std::memory_order_acq_rel) == 1U) {
-            pending_batches.notify_all();
-            pending_cv_.notify_all();
-        }
+        abandon_pending_batch();
     }
 
     void recycle_batch(Batch *batch) noexcept {
@@ -146,6 +156,38 @@ public:
     CacheLineAtomic<bool> finished{false};
 
 private:
+    [[nodiscard]] Batch *acquire_producer_batch() noexcept {
+        if (producer_spare_batch_ != nullptr) {
+            Batch *batch = producer_spare_batch_;
+            producer_spare_batch_ = nullptr;
+            return batch;
+        }
+        return free_batches.try_pop();
+    }
+
+    void stash_producer_batch(Batch *batch) noexcept {
+        AF_ASSERT(producer_spare_batch_ == nullptr);
+        producer_spare_batch_ = batch;
+    }
+
+    void abandon_pending_batch() noexcept {
+        if (pending_batches.fetch_sub(1U, std::memory_order_acq_rel) == 1U) {
+            pending_batches.notify_all();
+            pending_cv_.notify_all();
+        }
+    }
+
+    [[nodiscard]] static std::size_t
+    count_non_empty_records(std::span<LogRecord *const> records) noexcept {
+        std::size_t count = 0;
+        for (const LogRecord *record : records) {
+            if (record != nullptr && !record->message().empty()) {
+                ++count;
+            }
+        }
+        return count;
+    }
+
     template <typename... BatchArgs>
     void reserve_batches(std::size_t queue_capacity, BatchArgs &&...batch_args) {
         const std::size_t capacity = queue_capacity == 0U ? 1U : queue_capacity;
@@ -163,6 +205,7 @@ private:
     std::condition_variable pending_cv_;
     std::mutex finished_mutex_;
     std::condition_variable finished_cv_;
+    Batch *producer_spare_batch_{nullptr};
 };
 
 template <typename StateT, typename TaskHandleT>
