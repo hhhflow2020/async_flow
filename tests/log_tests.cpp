@@ -625,6 +625,22 @@ TEST(LogTests, RuntimeFileBackendSkipsEmptyRecordsWithoutLeakingBatch) {
     EXPECT_NE(read_file(path).find("runtime file backend after empty\n"), std::string::npos);
 }
 
+TEST(LogTests, RuntimeLogBackendRejectsInvalidRuntimeThread) {
+    LogUdpIoRuntimeGuard runtime_guard;
+
+    EXPECT_THROW(
+        {
+            const auto path = std::filesystem::path(::testing::TempDir()) /
+                              "asyncflow-runtime-log-invalid-thread.log";
+            af::RuntimeFileLogBackend<LogUdpIoRuntime> backend({
+                .thread = LogUdpIoRuntime::thread_from_index(LogUdpIoRuntime::invalid_thread_index),
+                .path = path,
+            });
+            static_cast<void>(backend);
+        },
+        std::runtime_error);
+}
+
 TEST(LogTests, RuntimeFileAsyncLoggerBackendWritesOnIoThread) {
     const auto path =
         std::filesystem::path(::testing::TempDir()) / "asyncflow-runtime-async-log-file.log";

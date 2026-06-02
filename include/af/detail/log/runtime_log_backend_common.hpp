@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <span>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 
@@ -252,6 +253,10 @@ public:
     explicit RuntimeLogTaskBinding(std::unique_ptr<StateT> state)
         : state_(std::move(state)), task_(RuntimeT::template make_task<TaskT>()) {
         AF_ASSERT(state_ != nullptr);
+        if (state_ == nullptr || RuntimeT::thread_index(state_->thread) >= RuntimeT::thread_count)
+            [[unlikely]] {
+            throw std::runtime_error("invalid runtime log backend thread");
+        }
     }
 
     RuntimeLogTaskBinding(const RuntimeLogTaskBinding &) = delete;
