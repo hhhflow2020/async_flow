@@ -119,11 +119,13 @@ template <typename TraitsT>
 void AsyncRuntime<TraitsT>::enqueue_local_from_runtime_thread_blocking(std::uint16_t target,
                                                                        Task *task) noexcept {
     Executor &executor = *executors_[target];
+    detail::QueueFullBackoff backoff(queue_full_spin_count);
     while (!executor.try_push_local(task)) {
         if (Task *ready = executor.try_pop_local()) {
             executor.execute(ready);
+            backoff.reset();
         } else {
-            std::this_thread::yield();
+            backoff.wait();
         }
     }
 }
@@ -132,8 +134,9 @@ template <typename TraitsT>
 void AsyncRuntime<TraitsT>::enqueue_cross_thread_spsc_blocking(std::uint16_t source,
                                                                std::uint16_t target,
                                                                Task *task) noexcept {
+    detail::QueueFullBackoff backoff(queue_full_spin_count);
     while (!spsc_queue(source, target).try_push(task)) {
-        std::this_thread::yield();
+        backoff.wait();
     }
     mark_source_ready(source, target);
     executors_[target]->notify();
@@ -142,8 +145,9 @@ void AsyncRuntime<TraitsT>::enqueue_cross_thread_spsc_blocking(std::uint16_t sou
 template <typename TraitsT>
 void AsyncRuntime<TraitsT>::enqueue_external_mpsc_blocking(std::uint16_t target,
                                                            Task *task) noexcept {
+    detail::QueueFullBackoff backoff(queue_full_spin_count);
     while (!external_queues_[target]->try_push(task)) {
-        std::this_thread::yield();
+        backoff.wait();
     }
     executors_[target]->notify_external_ready();
 }

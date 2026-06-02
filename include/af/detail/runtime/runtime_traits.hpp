@@ -32,6 +32,14 @@ template <typename TraitsT> struct RuntimeTraitsConfig {
         }
     }();
 
+    static constexpr std::size_t queue_full_spin_count = [] {
+        if constexpr (requires { TraitsT::queue_full_spin_count; }) {
+            return static_cast<std::size_t>(TraitsT::queue_full_spin_count);
+        } else {
+            return static_cast<std::size_t>(64);
+        }
+    }();
+
     static constexpr ShutdownPolicy shutdown_policy = [] {
         if constexpr (requires { TraitsT::shutdown_policy; }) {
             return TraitsT::shutdown_policy;

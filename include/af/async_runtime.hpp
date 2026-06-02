@@ -26,6 +26,7 @@
 #include "af/detail/runtime/runtime_common_state.hpp"
 #include "af/detail/runtime/runtime_config.hpp"
 #include "af/detail/runtime/runtime_public_io.hpp"
+#include "af/detail/runtime/runtime_queue_backoff.hpp"
 #include "af/detail/runtime/runtime_ready_source_set.hpp"
 #include "af/detail/runtime/runtime_task_handle.hpp"
 #include "af/task.hpp"
@@ -116,6 +117,7 @@ public:
     static constexpr std::size_t spsc_queue_capacity = Config::spsc_queue_capacity;
     static constexpr std::size_t external_queue_capacity = Config::external_queue_capacity;
     static constexpr QueueFullPolicy queue_full_policy = Config::queue_full_policy;
+    static constexpr std::size_t queue_full_spin_count = Config::queue_full_spin_count;
     static constexpr ShutdownPolicy shutdown_policy = Config::shutdown_policy;
     static constexpr bool task_registry_enabled = Config::task_registry_enabled;
     static constexpr unsigned io_uring_entries = Config::io_uring_entries;
