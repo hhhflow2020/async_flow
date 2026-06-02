@@ -6,9 +6,10 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <mutex>
-#include <new>
+#include <stdexcept>
 #include <string_view>
 #include <thread>
 #include <utility>
@@ -47,8 +48,9 @@ public:
         : queue_shard_count_(normalize_queue_shard_count(config.queue_shard_count)),
           queue_shard_mask_(queue_shard_count_ - 1U),
           queue_shards_(
-              make_queue_shards(queue_shard_count_, queue_capacity_per_shard(config.queue_capacity,
-                                                                             queue_shard_count_))),
+              make_queue_shards(queue_shard_count_,
+                                queue_capacity_per_shard(config.queue_capacity, queue_shard_count_),
+                                config.max_batch_size)),
           max_batch_size_(config.max_batch_size == 0U ? 1U : config.max_batch_size),
           overflow_policy_(config.overflow_policy),
           flush_poll_interval_(config.flush_poll_interval),
@@ -77,15 +79,16 @@ public:
             return false;
         }
 
-        auto *record = allocate_record(message);
+        QueueShard &shard = producer_shard();
+        detail::LogRecord *record = acquire_record(shard, message);
         if (record == nullptr) {
             dropped_.fetch_add(1U, std::memory_order_relaxed);
             return false;
         }
 
         const auto previous_pending = pending_.fetch_add(1U, std::memory_order_release);
-        if (!push_record(record)) {
-            delete record;
+        if (!push_record(shard, record)) {
+            release_record(record);
             abandon_pending_record();
             dropped_.fetch_add(1U, std::memory_order_relaxed);
             return false;
@@ -136,10 +139,124 @@ public:
     }
 
 private:
+    class LogRecordPool {
+        static constexpr std::uint32_t null_slot = std::numeric_limits<std::uint32_t>::max();
+        static constexpr std::size_t slot_index_bits = sizeof(std::uint32_t) * 8U;
+        static constexpr std::uint64_t slot_index_mask = (std::uint64_t{1} << slot_index_bits) - 1U;
+
+        struct Slot {
+            LogRecordPool *owner{nullptr};
+            std::atomic<std::uint32_t> next{null_slot};
+            detail::LogRecord record;
+        };
+
+    public:
+        explicit LogRecordPool(std::size_t capacity)
+            : capacity_(validate_capacity(capacity)), slots_(new Slot[capacity_]) {
+            for (std::size_t i = 0; i < capacity_; ++i) {
+                Slot &slot = slots_[i];
+                slot.owner = this;
+                slot.next.store(i + 1U < capacity_ ? static_cast<std::uint32_t>(i + 1U) : null_slot,
+                                std::memory_order_relaxed);
+                slot.record.set_pool_slot(&slot);
+            }
+            free_head_.store(pack_head(0U, 0U), std::memory_order_relaxed);
+        }
+
+        LogRecordPool(const LogRecordPool &) = delete;
+        LogRecordPool &operator=(const LogRecordPool &) = delete;
+
+        [[nodiscard]] detail::LogRecord *try_acquire(std::string_view message) noexcept {
+            Slot *slot = try_pop();
+            if (slot == nullptr) {
+                return nullptr;
+            }
+
+            try {
+                slot->record.reset(message);
+            } catch (...) {
+                release(slot);
+                return nullptr;
+            }
+            return &slot->record;
+        }
+
+        static void release(detail::LogRecord *record) noexcept {
+            auto *slot = static_cast<Slot *>(record->pool_slot());
+            AF_ASSERT(slot != nullptr);
+            slot->owner->release(slot);
+        }
+
+    private:
+        [[nodiscard]] static std::size_t validate_capacity(std::size_t capacity) {
+            if (capacity == 0U || capacity >= null_slot) {
+                throw std::length_error("async log record pool capacity is out of range");
+            }
+            return capacity;
+        }
+
+        [[nodiscard]] static constexpr std::uint64_t pack_head(std::uint32_t index,
+                                                               std::uint64_t version) noexcept {
+            return (version << slot_index_bits) | static_cast<std::uint64_t>(index);
+        }
+
+        [[nodiscard]] static constexpr std::uint32_t head_index(std::uint64_t head) noexcept {
+            return static_cast<std::uint32_t>(head & slot_index_mask);
+        }
+
+        [[nodiscard]] static constexpr std::uint64_t head_version(std::uint64_t head) noexcept {
+            return head >> slot_index_bits;
+        }
+
+        [[nodiscard]] std::uint32_t slot_index(const Slot *slot) const noexcept {
+            const auto index = static_cast<std::size_t>(slot - slots_.get());
+            AF_ASSERT(index < capacity_);
+            return static_cast<std::uint32_t>(index);
+        }
+
+        [[nodiscard]] Slot *try_pop() noexcept {
+            std::uint64_t head = free_head_.load(std::memory_order_acquire);
+            for (;;) {
+                const std::uint32_t index = head_index(head);
+                if (index == null_slot) {
+                    return nullptr;
+                }
+
+                Slot &slot = slots_[index];
+                const std::uint32_t next = slot.next.load(std::memory_order_relaxed);
+                const std::uint64_t desired = pack_head(next, head_version(head) + 1U);
+                if (free_head_.compare_exchange_weak(head, desired, std::memory_order_acquire,
+                                                     std::memory_order_acquire)) {
+                    return &slot;
+                }
+            }
+        }
+
+        void release(Slot *slot) noexcept {
+            const std::uint32_t index = slot_index(slot);
+            std::uint64_t head = free_head_.load(std::memory_order_relaxed);
+            for (;;) {
+                slot->next.store(head_index(head), std::memory_order_relaxed);
+                const std::uint64_t desired = pack_head(index, head_version(head) + 1U);
+                if (free_head_.compare_exchange_weak(head, desired, std::memory_order_release,
+                                                     std::memory_order_relaxed)) {
+                    return;
+                }
+            }
+        }
+
+        const std::size_t capacity_;
+        std::unique_ptr<Slot[]> slots_;
+        alignas(detail::hardware_cache_line_size) std::atomic<std::uint64_t> free_head_{
+            pack_head(null_slot, 0U)};
+    };
+
     struct alignas(detail::hardware_cache_line_size) QueueShard {
-        explicit QueueShard(std::size_t capacity) : queue(capacity) {}
+        QueueShard(std::size_t queue_capacity, std::size_t record_capacity)
+            : queue(queue_capacity), records(record_capacity) {}
 
         detail::BoundedMpscQueue<detail::LogRecord> queue;
+        LogRecordPool records;
     };
 
     struct ProducerShardCache {
@@ -165,22 +282,26 @@ private:
         return std::max<std::size_t>(2U, (capacity + shard_count - 1U) / shard_count);
     }
 
-    [[nodiscard]] static std::vector<std::unique_ptr<QueueShard>>
-    make_queue_shards(std::size_t shard_count, std::size_t capacity_per_shard) {
-        std::vector<std::unique_ptr<QueueShard>> shards;
-        shards.reserve(shard_count);
-        for (std::size_t i = 0; i < shard_count; ++i) {
-            shards.push_back(std::make_unique<QueueShard>(capacity_per_shard));
+    [[nodiscard]] static std::size_t record_capacity_per_shard(std::size_t queue_capacity,
+                                                               std::size_t max_batch_size) {
+        const std::size_t batch_capacity = max_batch_size == 0U ? 1U : max_batch_size;
+        if (queue_capacity > std::numeric_limits<std::size_t>::max() - batch_capacity) {
+            throw std::length_error("async log record pool capacity overflow");
         }
-        return shards;
+        return queue_capacity + batch_capacity;
     }
 
-    [[nodiscard]] detail::LogRecord *allocate_record(std::string_view message) noexcept {
-        try {
-            return new detail::LogRecord(message);
-        } catch (...) {
-            return nullptr;
+    [[nodiscard]] static std::vector<std::unique_ptr<QueueShard>>
+    make_queue_shards(std::size_t shard_count, std::size_t capacity_per_shard,
+                      std::size_t max_batch_size) {
+        std::vector<std::unique_ptr<QueueShard>> shards;
+        shards.reserve(shard_count);
+        const std::size_t record_capacity =
+            record_capacity_per_shard(capacity_per_shard, max_batch_size);
+        for (std::size_t i = 0; i < shard_count; ++i) {
+            shards.push_back(std::make_unique<QueueShard>(capacity_per_shard, record_capacity));
         }
+        return shards;
     }
 
     [[nodiscard]] QueueShard &producer_shard() noexcept {
@@ -193,8 +314,22 @@ private:
         return *queue_shards_[cache.shard_index];
     }
 
-    [[nodiscard]] bool push_record(detail::LogRecord *record) noexcept {
-        QueueShard &shard = producer_shard();
+    [[nodiscard]] detail::LogRecord *acquire_record(QueueShard &shard,
+                                                    std::string_view message) noexcept {
+        if (overflow_policy_ == LogOverflowPolicy::DropNewest) {
+            return shard.records.try_acquire(message);
+        }
+
+        while (accepting_.load(std::memory_order_acquire)) {
+            if (detail::LogRecord *record = shard.records.try_acquire(message); record != nullptr) {
+                return record;
+            }
+            std::this_thread::yield();
+        }
+        return nullptr;
+    }
+
+    [[nodiscard]] bool push_record(QueueShard &shard, detail::LogRecord *record) noexcept {
         if (overflow_policy_ == LogOverflowPolicy::DropNewest) {
             return accepting_.load(std::memory_order_acquire) && shard.queue.try_push(record);
         }
@@ -206,6 +341,10 @@ private:
             std::this_thread::yield();
         }
         return false;
+    }
+
+    static void release_record(detail::LogRecord *record) noexcept {
+        LogRecordPool::release(record);
     }
 
     void abandon_pending_record() noexcept {
@@ -253,7 +392,7 @@ private:
             }
 
             for (detail::LogRecord *record : batch) {
-                delete record;
+                release_record(record);
             }
 
             const auto drained = batch.size();

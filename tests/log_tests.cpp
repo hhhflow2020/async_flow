@@ -106,6 +106,52 @@ TEST(LogTests, QueueOverflowDropsNewestWithoutBlockingProducer) {
     ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
 }
 
+TEST(LogTests, BlockOverflowWaitsForQueueCapacity) {
+    auto backend = std::make_unique<BlockingLogBackend>();
+    auto *blocking_backend = backend.get();
+
+    af::AsyncLogConfig config;
+    config.queue_capacity = 1;
+    config.queue_shard_count = 1;
+    config.max_batch_size = 1;
+    config.overflow_policy = af::LogOverflowPolicy::Block;
+    config.backends.push_back(std::move(backend));
+
+    af::AsyncLogger logger(std::move(config));
+    logger.start();
+
+    ASSERT_TRUE(logger.try_log("block log worker\n"));
+    ASSERT_TRUE(blocking_backend->wait_until_entered(std::chrono::seconds(2)));
+    ASSERT_TRUE(logger.try_log("queued log one\n"));
+    ASSERT_TRUE(logger.try_log("queued log two\n"));
+
+    std::atomic<bool> accepted{false};
+    std::atomic<bool> finished{false};
+    std::thread producer([&] {
+        accepted.store(logger.try_log("wait for queue capacity\n"), std::memory_order_release);
+        finished.store(true, std::memory_order_release);
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_FALSE(finished.load(std::memory_order_acquire));
+
+    blocking_backend->release();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!finished.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (!finished.load(std::memory_order_acquire)) {
+        logger.shutdown();
+    }
+    producer.join();
+
+    EXPECT_TRUE(finished.load(std::memory_order_acquire));
+    EXPECT_TRUE(accepted.load(std::memory_order_acquire));
+    ASSERT_TRUE(logger.flush(std::chrono::seconds(2)));
+    logger.shutdown();
+}
+
 TEST(LogTests, ShardedQueuesAvoidSingleQueueProducerContention) {
     auto backend = std::make_unique<BlockingLogBackend>();
     auto *blocking_backend = backend.get();
@@ -185,5 +231,32 @@ TEST(LogTests, ShardedQueuesDrainConcurrentProducers) {
     EXPECT_EQ(stats.accepted, static_cast<std::uint64_t>(expected_records));
     EXPECT_EQ(stats.dropped, 0U);
     EXPECT_EQ(counting_backend->record_count(), static_cast<std::size_t>(expected_records));
+    logger.shutdown();
+}
+
+TEST(LogTests, RecordPoolReusesSlotsAcrossFlushes) {
+    auto backend = std::make_unique<CountingLogBackend>();
+    auto *counting_backend = backend.get();
+
+    af::AsyncLogConfig config;
+    config.queue_capacity = 1;
+    config.queue_shard_count = 1;
+    config.max_batch_size = 1;
+    config.overflow_policy = af::LogOverflowPolicy::DropNewest;
+    config.backends.push_back(std::move(backend));
+
+    af::AsyncLogger logger(std::move(config));
+    logger.start();
+
+    constexpr int record_count = 32;
+    for (int i = 0; i < record_count; ++i) {
+        ASSERT_TRUE(logger.try_log("reused pooled log record\n"));
+        ASSERT_TRUE(logger.flush(std::chrono::seconds(2)));
+    }
+
+    const af::AsyncLogStats stats = logger.stats();
+    EXPECT_EQ(stats.accepted, static_cast<std::uint64_t>(record_count));
+    EXPECT_EQ(stats.dropped, 0U);
+    EXPECT_EQ(counting_backend->record_count(), static_cast<std::size_t>(record_count));
     logger.shutdown();
 }
