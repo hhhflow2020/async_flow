@@ -25,7 +25,7 @@ struct EchoRuntimeTraits {
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
-    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::StopImmediately;
 };
 
 using echo_async = af::AsyncRuntime<EchoRuntimeTraits>;
@@ -39,16 +39,10 @@ struct EchoThreads {
         echo_async::thread_group<EchoComputeThreadTag>().template at<0>();
 };
 
+inline constexpr std::size_t echo_session_buffer_size = 4096;
 inline constexpr std::size_t echo_payload_size = 8;
-inline constexpr std::size_t echo_client_count = 2;
+inline constexpr std::size_t echo_self_test_client_count = 2;
 using EchoPayload = std::array<char, echo_payload_size>;
-
-struct EchoSessionResult {
-    std::atomic<bool> completed{false};
-    bool ok{false};
-    int error{0};
-    EchoThread io_thread{EchoThreads::IO_0};
-};
 
 struct EchoClientResult {
     std::atomic<bool> completed{false};
@@ -72,14 +66,6 @@ struct EchoClientResult {
 #else
     return "native-readiness";
 #endif
-}
-
-inline void lowercase_ascii(EchoPayload &payload) noexcept {
-    for (char &ch : payload) {
-        if (ch >= 'A' && ch <= 'Z') {
-            ch = static_cast<char>(ch - 'A' + 'a');
-        }
-    }
 }
 
 } // namespace io_tcp_echo_example

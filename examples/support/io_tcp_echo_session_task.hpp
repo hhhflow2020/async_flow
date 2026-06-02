@@ -1,11 +1,12 @@
 #pragma once
 
+#include <array>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <utility>
 
-#include "io_tcp_echo_runtime.hpp"
+#include "io_tcp_echo_server_state.hpp"
 
 #if !defined(_WIN32)
 
@@ -15,108 +16,112 @@ class EchoSessionTask final : public EchoTask {
 public:
     explicit EchoSessionTask(EchoTask::FactoryToken token) : EchoTask(token) {}
 
-    bool do_it(af::UniqueFd fd, EchoThread io_thread, EchoSessionResult *result) {
+    bool do_it(af::UniqueFd fd, EchoThread io_thread, EchoServerState *state) {
         fd_ = std::move(fd);
-        if (!fd_ || result == nullptr) {
+        if (!fd_ || state == nullptr) {
             return false;
         }
 
         io_thread_ = io_thread;
-        result_ = result;
-        result_->io_thread = io_thread_;
+        server_state_ = state;
         stream_.reset(io_thread_, fd_.get());
-        return schedule(io_thread_);
+        server_state_->active_sessions.fetch_add(1, std::memory_order_acq_rel);
+        if (!schedule(io_thread_)) {
+            server_state_->active_sessions.fetch_sub(1, std::memory_order_acq_rel);
+            return false;
+        }
+        return true;
     }
 
 private:
     enum class State : std::uint8_t {
         Receive,
-        Compute,
         Send,
     };
 
     af::TaskResult run() override {
-        switch (state_) {
+        switch (phase_) {
         case State::Receive:
-            return receive_request();
-        case State::Compute:
-            return compute_response();
+            return receive();
         case State::Send:
-            return send_response();
+            return send();
         }
         return finish(EIO);
     }
 
-    af::TaskResult receive_request() {
-        const af::IoStatus status = stream_.recv_some(*this, payload_.data() + received_,
-                                                      payload_.size() - received_, read_);
+    af::TaskResult receive() {
+        const af::IoStatus status = stream_.recv_some(*this, buffer_.data(), buffer_.size(), read_);
         if (status.pending()) {
             return pending();
         }
-        if (!status.ready() || status.bytes == 0U) {
+        if (status.closed()) {
+            return finish(0);
+        }
+        if (!status.ready()) {
             return finish(status.failed() ? status.error : EIO);
         }
 
-        received_ += status.bytes;
-        if (received_ < payload_.size()) {
-            return again();
-        }
-
-        LOG(INFO) << "tcp echo session received bytes=" << received_
-                  << " io_thread=" << echo_async::current_thread_index();
-        state_ = State::Compute;
-        return pending_on(EchoThreads::Compute_0);
+        available_ = status.bytes;
+        sent_ = 0;
+        session_bytes_received_ += status.bytes;
+        phase_ = State::Send;
+        return again();
     }
 
-    af::TaskResult compute_response() {
-        lowercase_ascii(payload_);
-        LOG(INFO) << "tcp echo session computed response thread="
-                  << echo_async::current_thread_index();
-        state_ = State::Send;
-        return pending_on(io_thread_);
-    }
-
-    af::TaskResult send_response() {
+    af::TaskResult send() {
         const af::IoStatus status =
-            stream_.send_some(*this, payload_.data() + sent_, payload_.size() - sent_, write_);
+            stream_.send_some(*this, buffer_.data() + sent_, available_ - sent_, write_);
         if (status.pending()) {
             return pending();
+        }
+        if (status.closed()) {
+            return finish(EPIPE);
         }
         if (!status.ready() || status.bytes == 0U) {
             return finish(status.failed() ? status.error : EIO);
         }
 
         sent_ += status.bytes;
-        if (sent_ < payload_.size()) {
+        session_bytes_sent_ += status.bytes;
+        if (sent_ < available_) {
             return again();
         }
 
-        result_->ok = true;
-        result_->error = 0;
-        result_->completed.store(true, std::memory_order_release);
-        LOG(INFO) << "tcp echo session sent response bytes=" << sent_
-                  << " io_thread=" << echo_async::current_thread_index();
-        return done();
+        phase_ = State::Receive;
+        return again();
     }
 
     af::TaskResult finish(int error) {
-        result_->ok = false;
-        result_->error = error == 0 ? EIO : error;
-        result_->completed.store(true, std::memory_order_release);
-        LOG(ERROR) << "tcp echo session failed error=" << result_->error;
+        server_state_->bytes_received.fetch_add(session_bytes_received_, std::memory_order_relaxed);
+        server_state_->bytes_sent.fetch_add(session_bytes_sent_, std::memory_order_relaxed);
+        server_state_->active_sessions.fetch_sub(1, std::memory_order_acq_rel);
+
+        if (error == 0) {
+            server_state_->completed_sessions.fetch_add(1, std::memory_order_acq_rel);
+            LOG(INFO) << "tcp echo session closed bytes_in=" << session_bytes_received_
+                      << " bytes_out=" << session_bytes_sent_;
+            return done();
+        }
+
+        server_state_->failed_sessions.fetch_add(1, std::memory_order_acq_rel);
+        LOG(ERROR) << "tcp echo session failed error=" << error
+                   << " bytes_in=" << session_bytes_received_
+                   << " bytes_out=" << session_bytes_sent_;
         return failed();
     }
 
-    State state_{State::Receive};
+    State phase_{State::Receive};
     EchoThread io_thread_{EchoThreads::IO_0};
     af::UniqueFd fd_{};
     af::TcpStream<EchoThread> stream_{};
-    EchoPayload payload_{};
-    std::size_t received_{0};
+    std::array<char, echo_session_buffer_size> buffer_{};
+    std::size_t available_{0};
     std::size_t sent_{0};
+    std::uint64_t session_bytes_received_{0};
+    std::uint64_t session_bytes_sent_{0};
     af::IoOpState read_{};
     af::IoOpState write_{};
-    EchoSessionResult *result_{nullptr};
+    EchoServerState *server_state_{nullptr};
 };
 
 } // namespace io_tcp_echo_example

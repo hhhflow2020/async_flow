@@ -4,8 +4,10 @@
 
 #if !defined(_WIN32)
 #include <arpa/inet.h>
+#include <cerrno>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -50,30 +52,76 @@ inline bool echo_set_reuse_addr(int fd) noexcept {
                         static_cast<socklen_t>(sizeof(enabled))) == 0;
 }
 
-struct EchoLoopbackListener {
+inline bool echo_set_tcp_nodelay(int fd) noexcept {
+    const int enabled = 1;
+    return ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &enabled,
+                        static_cast<socklen_t>(sizeof(enabled))) == 0;
+}
+
+inline bool echo_set_keepalive(int fd) noexcept {
+    const int enabled = 1;
+    return ::setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &enabled,
+                        static_cast<socklen_t>(sizeof(enabled))) == 0;
+}
+
+struct EchoTcpListener {
     af::UniqueFd fd{};
     sockaddr_in address{};
     socklen_t address_size{sizeof(address)};
+    int error{0};
 
-    bool create() noexcept {
+    bool create(const char *bind_address, std::uint16_t port, int backlog) noexcept {
+        error = 0;
         fd = echo_make_tcp_socket();
         if (!fd || !echo_set_reuse_addr(fd.get())) {
+            error = errno == 0 ? EIO : errno;
             return false;
         }
 
         address = sockaddr_in{};
         address.sin_family = AF_INET;
-        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        address.sin_port = 0;
+        address.sin_port = htons(port);
+        if (::inet_pton(AF_INET, bind_address, &address.sin_addr) != 1) {
+            error = EINVAL;
+            return false;
+        }
+
         if (::bind(fd.get(), reinterpret_cast<sockaddr *>(&address), sizeof(address)) != 0 ||
-            ::listen(fd.get(), 64) != 0) {
+            ::listen(fd.get(), backlog) != 0) {
+            error = errno == 0 ? EIO : errno;
             return false;
         }
 
         address_size = sizeof(address);
-        return ::getsockname(fd.get(), reinterpret_cast<sockaddr *>(&address), &address_size) == 0;
+        if (::getsockname(fd.get(), reinterpret_cast<sockaddr *>(&address), &address_size) != 0) {
+            error = errno == 0 ? EIO : errno;
+            return false;
+        }
+        return true;
     }
 };
+
+[[nodiscard]] inline sockaddr_in echo_loopback_target(sockaddr_in address) noexcept {
+    if (address.sin_addr.s_addr == htonl(INADDR_ANY)) {
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    }
+    return address;
+}
+
+inline bool echo_wake_listener(sockaddr_in address) noexcept {
+    af::UniqueFd fd = echo_make_tcp_socket();
+    if (!fd) {
+        return false;
+    }
+
+    const sockaddr_in target = echo_loopback_target(address);
+    if (::connect(fd.get(), reinterpret_cast<const sockaddr *>(&target), sizeof(target)) == 0) {
+        return true;
+    }
+
+    const int error = errno;
+    return error == EINPROGRESS || error == EALREADY || error == EWOULDBLOCK;
+}
 
 } // namespace io_tcp_echo_example
 
