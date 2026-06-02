@@ -10,9 +10,11 @@
 #include <mutex>
 #include <new>
 #include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -83,6 +85,25 @@ private:
     std::atomic<std::size_t> record_count_{0};
 };
 
+class CapturingLogBackend final : public af::LogBackend {
+public:
+    void write_batch(std::span<af::detail::LogRecord *const> records) noexcept override {
+        std::lock_guard lock(mutex_);
+        for (af::detail::LogRecord *record : records) {
+            messages_.emplace_back(record->message());
+        }
+    }
+
+    [[nodiscard]] std::vector<std::string> messages() const {
+        std::lock_guard lock(mutex_);
+        return messages_;
+    }
+
+private:
+    mutable std::mutex mutex_;
+    std::vector<std::string> messages_;
+};
+
 template <typename RuntimeT> class RuntimeThreadObservingLogBackend final : public af::LogBackend {
 public:
     explicit RuntimeThreadObservingLogBackend(typename RuntimeT::Thread expected_thread)
@@ -130,6 +151,23 @@ template <typename T> bool wait_until_at_least(std::atomic<T> &value, T expected
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     return true;
+}
+
+[[nodiscard]] std::string extract_absl_prefix_thread_id(std::string_view line,
+                                                        std::string_view marker) {
+    const std::size_t marker_pos = line.find(marker);
+    if (marker_pos == std::string_view::npos) {
+        return {};
+    }
+
+    std::istringstream tokens(std::string(line.substr(0, marker_pos)));
+    std::string previous;
+    std::string current;
+    for (std::string token; tokens >> token;) {
+        previous = std::move(current);
+        current = std::move(token);
+    }
+    return previous;
 }
 
 #if defined(__linux__) || defined(__APPLE__)
@@ -236,6 +274,28 @@ private:
     }
 
     std::atomic<int> *completed_{nullptr};
+};
+
+class RuntimeThreadIdProbeLogTask final : public LogTestTaskBase {
+public:
+    explicit RuntimeThreadIdProbeLogTask(LogTestTaskBase::FactoryToken token)
+        : LogTestTaskBase(token) {}
+
+    bool do_it(LogTestRuntime::Thread target, std::atomic<int> *completed, const char *marker) {
+        completed_ = completed;
+        marker_ = marker;
+        return schedule(target);
+    }
+
+private:
+    af::TaskResult run() override {
+        LOG(INFO) << marker_;
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int> *completed_{nullptr};
+    const char *marker_{nullptr};
 };
 
 class RuntimeTaskIdLogTask final : public LogTestTaskBase {
@@ -708,6 +768,42 @@ TEST(LogTests, RuntimeAwareSinkUsesConfiguredRuntimeThreadName) {
     EXPECT_EQ(thread_name_backend->thread_name(), "af-log-src-1");
 }
 #endif
+
+TEST(LogTests, RuntimeAwareSinkKeepsProducerThreadIdInAbslPrefix) {
+    auto backend = std::make_unique<CapturingLogBackend>();
+    auto *capturing_backend = backend.get();
+
+    af::AsyncLogConfig config;
+    config.backends.push_back(std::move(backend));
+
+    LogTestRuntimeGuard runtime_guard;
+    auto logging = af::start_async_logging_for_runtime<LogTestRuntime>(std::move(config),
+                                                                       LogTestThreads::Runtime_1);
+
+    std::atomic<int> completed{0};
+    ASSERT_TRUE(LogTestRuntime::start_task<RuntimeThreadIdProbeLogTask>(
+        LogTestThreads::Runtime_0, &completed, "producer-runtime-zero"));
+    ASSERT_TRUE(LogTestRuntime::start_task<RuntimeThreadIdProbeLogTask>(
+        LogTestThreads::Runtime_1, &completed, "producer-runtime-one"));
+    ASSERT_TRUE(wait_until_at_least(completed, 2));
+    ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
+    logging->stop();
+
+    std::string runtime_zero_tid;
+    std::string runtime_one_tid;
+    for (const std::string &message : capturing_backend->messages()) {
+        if (message.find("producer-runtime-zero") != std::string::npos) {
+            runtime_zero_tid = extract_absl_prefix_thread_id(message, "producer-runtime-zero");
+        }
+        if (message.find("producer-runtime-one") != std::string::npos) {
+            runtime_one_tid = extract_absl_prefix_thread_id(message, "producer-runtime-one");
+        }
+    }
+
+    ASSERT_FALSE(runtime_zero_tid.empty());
+    ASSERT_FALSE(runtime_one_tid.empty());
+    EXPECT_NE(runtime_zero_tid, runtime_one_tid);
+}
 
 TEST(LogTests, ProducerShardCacheRefreshesWhenLoggerReusesAddress) {
     alignas(af::AsyncLogger) unsigned char storage[sizeof(af::AsyncLogger)];
