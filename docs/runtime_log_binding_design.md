@@ -2,16 +2,16 @@
 
 ## Current state
 
-- `AsyncLogger` still supports a dedicated consumer thread for the non-runtime
-  `start_async_logging()` entry point. The runtime-aware
-  `start_async_logging_for_runtime<RuntimeT>()` entry point now binds the
-  consumer drain loop to a configured `RuntimeT::Thread` instead of creating an
-  extra logging thread.
+- The public async logging entry point is runtime-bound:
+  `start_async_logging_for_runtime<RuntimeT>()` binds the consumer drain loop to
+  a configured `RuntimeT::Thread` instead of creating an extra logging thread.
+- `AsyncLogger` no longer owns a private consumer thread. Its consumer lifecycle
+  is driven by `RuntimeAsyncLogConsumerController`, so production logging stays
+  inside the framework thread layout.
 - Runtime threads use per-thread SPSC lanes, and external threads use sharded
   MPSC queues.
 - `FileLogBackend`, `UdpLogBackend`, and `TcpLogBackend` execute synchronously on
-  whichever consumer placement is selected: the compatibility dedicated thread
-  or the runtime-bound consumer task.
+  the runtime-bound consumer task when used directly as async logger backends.
 - `RuntimeFileLogBackend`, `RuntimeUdpLogBackend`, and `RuntimeTcpLogBackend`
   bind their backend IO task to a configured runtime thread. When they are used
   with `start_async_logging_for_runtime<RuntimeT>()`, batching and backend
@@ -46,11 +46,17 @@
 - Producer lane ownership is now split into `async_log_lanes.hpp`. External
   producer shards, runtime SPSC lanes, and their cache-line-isolated counters are
   grouped with the queue and record-pool topology they protect.
+- Flush drain waiting is now split into `async_log_drain_waiter.hpp`.
+  `AsyncLogger` no longer directly includes `<thread>`, `<mutex>`, or
+  `<condition_variable>` and keeps the timed blocking wait out of the producer
+  and consumer hot-path implementation.
+- Hardware thread discovery for default shard sizing is isolated in
+  `hardware_threads.hpp`, so the logger does not mix runtime lifecycle code with
+  platform thread queries.
 
 This keeps runtime log producers on SPSC submission, external producers on MPSC
 admission, and network backends without private IO threads. Runtime deployments
-should keep the log consumer inside the framework thread layout; non-runtime
-deployments can still use the compatibility dedicated thread.
+should keep the log consumer inside the framework thread layout.
 
 `start_async_logging_for_runtime<RuntimeT>(config)` now selects a default
 consumer thread from the runtime layout instead of blindly using index 0. The
@@ -61,14 +67,10 @@ when they want a different placement.
 
 ## Recommended direction
 
-Keep two explicit consumer placements:
+Keep a single explicit consumer placement:
 
-- Runtime-bound consumer task: the preferred mode for AF runtime applications.
-  The drain loop runs on a configured `RuntimeT::Thread`, so logging does not
-  add another framework-external thread.
-- Dedicated consumer thread: compatibility mode for applications that use the
-  logger before runtime startup, after runtime shutdown, or without an AF
-  runtime.
+- Runtime-bound consumer task: the drain loop runs on a configured
+  `RuntimeT::Thread`, so logging does not add another framework-external thread.
 
 The runtime-bound mode is a consumer placement choice, not a property of each
 backend. File, UDP, and TCP backends stay batch IO strategies that can be driven
@@ -147,6 +149,10 @@ by the same runtime-bound drain task.
 - Lane topology changes should stay isolated from consumer lifecycle code so
   cache layout and false-sharing tuning can be done without touching backend
   flush/shutdown behavior.
+- Timed flush waiting should stay isolated from `AsyncLogger` hot-path logic.
+  The wait path may use blocking primitives because it is called by explicit
+  flush/shutdown callers, but producer enqueue and runtime consumer drain must
+  remain lock-free.
 - Backend batches should be preallocated and recycled through SPSC free/ready
   queues or a shared runtime drain pool.
 - Runtime backend batch pools should keep batch headers contiguous so the
@@ -159,7 +165,9 @@ by the same runtime-bound drain task.
 
 ## Migration plan
 
-1. Keep the dedicated consumer thread for the non-runtime compatibility mode.
+1. Remove the dedicated consumer thread and the non-runtime async logging entry
+   point so public async logging cannot create framework-external consumer
+   threads.
 2. Bind `start_async_logging_for_runtime<RuntimeT>()` to a runtime consumer task
    by default, selecting a `Log` or IO-capable layout thread when available,
    with an overload for explicitly selecting the consumer thread.

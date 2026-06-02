@@ -63,6 +63,7 @@ private:
             return finish(status.failed() ? status.error : EIO);
         }
 
+        LOG(INFO) << "tcp echo client connected io_thread=" << echo_async::current_thread_index();
         state_ = State::Send;
         return again();
     }
@@ -82,6 +83,8 @@ private:
             return again();
         }
 
+        LOG(INFO) << "tcp echo client sent request bytes=" << sent_
+                  << " io_thread=" << echo_async::current_thread_index();
         state_ = State::Receive;
         return again();
     }
@@ -104,12 +107,17 @@ private:
 
         result_->ok = true;
         result_->error = 0;
+        result_->completed.store(true, std::memory_order_release);
+        LOG(INFO) << "tcp echo client received response bytes=" << result_->received
+                  << " io_thread=" << echo_async::current_thread_index();
         return done();
     }
 
     af::TaskResult finish(int error) {
         result_->ok = false;
         result_->error = error == 0 ? EIO : error;
+        result_->completed.store(true, std::memory_order_release);
+        LOG(ERROR) << "tcp echo client failed error=" << result_->error;
         return failed();
     }
 

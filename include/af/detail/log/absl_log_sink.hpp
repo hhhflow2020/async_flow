@@ -87,25 +87,6 @@ template <typename RuntimeT>
     return detail::select_default_async_log_consumer_thread<RuntimeT>();
 }
 
-class AbslAsyncLogSink final : public absl::LogSink {
-public:
-    explicit AbslAsyncLogSink(std::shared_ptr<AsyncLogger> logger) : logger_(std::move(logger)) {}
-
-    void Send(const absl::LogEntry &entry) override {
-        const bool accepted = logger_->try_log(entry.text_message_with_prefix_and_newline());
-        if (accepted && entry.log_severity() == absl::LogSeverity::kFatal) {
-            static_cast<void>(logger_->flush(logger_->fatal_flush_timeout()));
-        }
-    }
-
-    void Flush() override {
-        static_cast<void>(logger_->flush(std::chrono::seconds(5)));
-    }
-
-private:
-    std::shared_ptr<AsyncLogger> logger_;
-};
-
 template <typename RuntimeT> class RuntimeAbslAsyncLogSink final : public absl::LogSink {
 public:
     explicit RuntimeAbslAsyncLogSink(std::shared_ptr<AsyncLogger> logger)
@@ -143,12 +124,12 @@ private:
 
 class AsyncLogHandle {
 public:
-    AsyncLogHandle(
-        std::shared_ptr<AsyncLogger> logger, std::unique_ptr<absl::LogSink> sink,
-        std::unique_ptr<detail::AsyncLogConsumerController> consumer_controller = nullptr)
+    AsyncLogHandle(std::shared_ptr<AsyncLogger> logger, std::unique_ptr<absl::LogSink> sink,
+                   std::unique_ptr<detail::AsyncLogConsumerController> consumer_controller)
         : logger_(std::move(logger)), sink_(std::move(sink)),
           consumer_controller_(std::move(consumer_controller)) {
         AF_ASSERT(sink_ != nullptr);
+        AF_ASSERT(consumer_controller_ != nullptr);
     }
 
     AsyncLogHandle(const AsyncLogHandle &) = delete;
@@ -173,16 +154,10 @@ public:
             return;
         }
         absl::RemoveLogSink(sink_.get());
-        if (consumer_controller_ != nullptr) {
-            consumer_controller_->shutdown();
-        } else {
-            logger_->shutdown();
-        }
+        consumer_controller_->shutdown();
     }
 
 private:
-    friend std::unique_ptr<AsyncLogHandle> start_async_logging(AsyncLogConfig config);
-
     template <typename RuntimeT>
     friend std::unique_ptr<AsyncLogHandle> start_async_logging_for_runtime(AsyncLogConfig config);
 
@@ -213,20 +188,6 @@ inline void initialize_absl_log_once() {
             absl::InitializeLog();
         }
     });
-}
-
-[[nodiscard]] inline std::unique_ptr<AsyncLogHandle> start_async_logging(AsyncLogConfig config) {
-    const bool initialize_absl_log = config.initialize_absl_log;
-    auto logger = std::make_shared<AsyncLogger>(std::move(config));
-    logger->start();
-    if (initialize_absl_log) {
-        initialize_absl_log_once();
-    }
-
-    auto handle =
-        std::make_unique<AsyncLogHandle>(logger, std::make_unique<AbslAsyncLogSink>(logger));
-    handle->register_sink();
-    return handle;
 }
 
 template <typename RuntimeT>

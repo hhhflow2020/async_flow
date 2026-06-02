@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -43,12 +44,14 @@ inline constexpr std::size_t echo_client_count = 2;
 using EchoPayload = std::array<char, echo_payload_size>;
 
 struct EchoSessionResult {
+    std::atomic<bool> completed{false};
     bool ok{false};
     int error{0};
     EchoThread io_thread{EchoThreads::IO_0};
 };
 
 struct EchoClientResult {
+    std::atomic<bool> completed{false};
     bool ok{false};
     int error{0};
     EchoThread io_thread{EchoThreads::IO_0};

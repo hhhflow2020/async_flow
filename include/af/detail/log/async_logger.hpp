@@ -4,25 +4,22 @@
 #include <array>
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <memory>
-#include <mutex>
 #include <stdexcept>
-#include <string>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
 
 #include "af/detail/config.hpp"
+#include "af/detail/log/async_log_drain_waiter.hpp"
 #include "af/detail/log/async_log_lanes.hpp"
 #include "af/detail/log/async_log_record_pool.hpp"
 #include "af/detail/log/log_backend.hpp"
 #include "af/detail/queue/queue_backoff.hpp"
-#include "af/detail/thread/thread_name.hpp"
+#include "af/detail/thread/hardware_threads.hpp"
 
 namespace af {
 
@@ -68,7 +65,6 @@ struct AsyncLogConfig {
     LogOverflowPolicy overflow_policy{LogOverflowPolicy::DropNewest};
     std::chrono::milliseconds flush_poll_interval{std::chrono::milliseconds(1)};
     std::chrono::milliseconds fatal_flush_timeout{std::chrono::milliseconds(200)};
-    std::string consumer_thread_name{"log"};
     bool initialize_absl_log{true};
     std::vector<std::unique_ptr<LogBackend>> backends;
 };
@@ -100,28 +96,13 @@ public:
           overflow_spin_count_(config.overflow_spin_count),
           overflow_policy_(config.overflow_policy),
           flush_poll_interval_(config.flush_poll_interval),
-          fatal_flush_timeout_(config.fatal_flush_timeout),
-          consumer_thread_name_(std::move(config.consumer_thread_name)),
-          backends_(std::move(config.backends)) {}
+          fatal_flush_timeout_(config.fatal_flush_timeout), backends_(std::move(config.backends)) {}
 
     AsyncLogger(const AsyncLogger &) = delete;
     AsyncLogger &operator=(const AsyncLogger &) = delete;
 
     ~AsyncLogger() {
         shutdown();
-    }
-
-    void start() {
-        bool expected = false;
-        if (!started_.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
-                                              std::memory_order_acquire)) {
-            return;
-        }
-        accepting_.store(true, std::memory_order_release);
-        worker_ = std::thread([this] {
-            detail::set_current_thread_name(consumer_thread_name_, 0U);
-            worker_main();
-        });
     }
 
     [[nodiscard]] bool try_log(std::string_view message) noexcept {
@@ -141,35 +122,11 @@ public:
 
     [[nodiscard]] bool flush(std::chrono::milliseconds timeout) noexcept {
         const auto deadline = std::chrono::steady_clock::now() + timeout;
-        std::unique_lock lock(wait_mutex_);
-        while (pending_.load(std::memory_order_acquire) != 0U) {
-            notify_consumer();
-            auto retry_deadline = std::chrono::steady_clock::now() + flush_poll_interval_;
-            if (retry_deadline > deadline) {
-                retry_deadline = deadline;
-            }
-            if (!drained_cv_.wait_until(
-                    lock, retry_deadline,
-                    [this] { return pending_.load(std::memory_order_acquire) == 0U; }) &&
-                std::chrono::steady_clock::now() >= deadline &&
-                pending_.load(std::memory_order_acquire) != 0U) {
-                return false;
-            }
+        if (!drain_waiter_.wait_until_drained(pending_, deadline, flush_poll_interval_,
+                                              [this] { notify_consumer(); })) {
+            return false;
         }
-        lock.unlock();
         return flush_backends_until(deadline);
-    }
-
-    void shutdown() noexcept {
-        const bool was_accepting = accepting_.exchange(false, std::memory_order_acq_rel);
-        stopping_.store(true, std::memory_order_release);
-        notify_consumer();
-        if (worker_.joinable()) {
-            worker_.join();
-        }
-        if (was_accepting || started_.load(std::memory_order_acquire)) {
-            shutdown_backends();
-        }
     }
 
     [[nodiscard]] AsyncLogStats stats() const noexcept {
@@ -229,6 +186,7 @@ private:
         }
 
         consumer_wake_target_.store(&target, std::memory_order_release);
+        stopping_.store(false, std::memory_order_release);
         accepting_.store(true, std::memory_order_release);
         return true;
     }
@@ -241,6 +199,7 @@ private:
     void finish_bound_consumer_shutdown() noexcept {
         consumer_wake_target_.store(nullptr, std::memory_order_release);
         shutdown_backends();
+        started_.store(false, std::memory_order_release);
     }
 
     [[nodiscard]] bool consumer_stop_requested() const noexcept {
@@ -266,7 +225,7 @@ private:
     };
 
     [[nodiscard]] static std::size_t default_queue_shard_count() noexcept {
-        const unsigned int hardware_threads = std::thread::hardware_concurrency();
+        const std::size_t hardware_threads = detail::hardware_thread_count();
         return hardware_threads == 0U
                    ? 1U
                    : detail::next_power_of_two(static_cast<std::size_t>(hardware_threads));
@@ -396,40 +355,22 @@ private:
         detail::release_async_log_record(record);
     }
 
+    void shutdown() noexcept {
+        const bool was_started = started_.exchange(false, std::memory_order_acq_rel);
+        accepting_.store(false, std::memory_order_release);
+        stopping_.store(true, std::memory_order_release);
+        notify_consumer();
+        if (was_started) {
+            shutdown_backends();
+        }
+    }
+
     void abandon_pending_record() noexcept {
         const auto previous = pending_.fetch_sub(1U, std::memory_order_acq_rel);
         AF_ASSERT(previous != 0U);
         if (previous == 1U) {
-            drained_cv_.notify_all();
+            drain_waiter_.notify_drained();
             notify_consumer();
-        }
-    }
-
-    void worker_main() noexcept {
-        std::vector<detail::LogRecord *> batch;
-        batch.reserve(max_batch_size_);
-
-        for (;;) {
-            drain_until_idle(batch);
-            if (stopping_.load(std::memory_order_acquire) &&
-                pending_.load(std::memory_order_acquire) == 0U) {
-                break;
-            }
-
-            std::unique_lock lock(wait_mutex_);
-            wake_cv_.wait_for(lock, flush_poll_interval_, [this] {
-                return ready_.load(std::memory_order_acquire) != 0U ||
-                       (stopping_.load(std::memory_order_acquire) &&
-                        pending_.load(std::memory_order_acquire) == 0U);
-            });
-        }
-
-        drain_until_idle(batch);
-        flush_backends();
-    }
-
-    void drain_until_idle(std::vector<detail::LogRecord *> &batch) noexcept {
-        while (drain_some(batch, std::numeric_limits<std::size_t>::max())) {
         }
     }
 
@@ -468,7 +409,7 @@ private:
             const auto previous = pending_.fetch_sub(drained, std::memory_order_acq_rel);
             AF_ASSERT(previous >= drained);
             if (previous == drained) {
-                drained_cv_.notify_all();
+                drain_waiter_.notify_drained();
             }
 
             drained_any = true;
@@ -568,9 +509,7 @@ private:
             consumer_wake_target_.load(std::memory_order_acquire);
         if (target != nullptr) {
             static_cast<void>(target->wake_async_log_consumer());
-            return;
         }
-        wake_cv_.notify_one();
     }
 
     static inline std::atomic<std::uint64_t> next_cache_token_{1};
@@ -586,7 +525,6 @@ private:
     const LogOverflowPolicy overflow_policy_;
     const std::chrono::milliseconds flush_poll_interval_;
     const std::chrono::milliseconds fatal_flush_timeout_;
-    const std::string consumer_thread_name_;
     std::vector<std::unique_ptr<LogBackend>> backends_;
 
     alignas(detail::hardware_cache_line_size) std::atomic<bool> started_{false};
@@ -601,10 +539,7 @@ private:
     std::size_t next_drain_shard_{0};
     std::size_t next_runtime_drain_thread_{0};
     bool prefer_runtime_drain_{true};
-    std::mutex wait_mutex_;
-    std::condition_variable wake_cv_;
-    std::condition_variable drained_cv_;
-    std::thread worker_;
+    detail::AsyncLogDrainWaiter drain_waiter_;
 };
 
 } // namespace af

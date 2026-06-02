@@ -62,12 +62,16 @@ private:
             return again();
         }
 
+        LOG(INFO) << "tcp echo session received bytes=" << received_
+                  << " io_thread=" << echo_async::current_thread_index();
         state_ = State::Compute;
         return pending_on(EchoThreads::Compute_0);
     }
 
     af::TaskResult compute_response() {
         lowercase_ascii(payload_);
+        LOG(INFO) << "tcp echo session computed response thread="
+                  << echo_async::current_thread_index();
         state_ = State::Send;
         return pending_on(io_thread_);
     }
@@ -89,12 +93,17 @@ private:
 
         result_->ok = true;
         result_->error = 0;
+        result_->completed.store(true, std::memory_order_release);
+        LOG(INFO) << "tcp echo session sent response bytes=" << sent_
+                  << " io_thread=" << echo_async::current_thread_index();
         return done();
     }
 
     af::TaskResult finish(int error) {
         result_->ok = false;
         result_->error = error == 0 ? EIO : error;
+        result_->completed.store(true, std::memory_order_release);
+        LOG(ERROR) << "tcp echo session failed error=" << result_->error;
         return failed();
     }
 

@@ -51,9 +51,6 @@ if(ASYNCFLOW_BUILD_EXAMPLES)
     add_executable(asyncflow_crud_apply_example examples/crud_apply.cpp)
     target_link_libraries(asyncflow_crud_apply_example PRIVATE AsyncFlow::AsyncFlow)
 
-    add_executable(asyncflow_async_logging_example examples/async_logging.cpp)
-    target_link_libraries(asyncflow_async_logging_example PRIVATE AsyncFlow::AsyncFlow)
-
     add_executable(asyncflow_runtime_async_logging_example examples/runtime_async_logging.cpp)
     target_link_libraries(asyncflow_runtime_async_logging_example PRIVATE AsyncFlow::AsyncFlow)
 

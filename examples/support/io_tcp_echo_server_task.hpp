@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -18,9 +19,9 @@ public:
     explicit EchoServerTask(EchoTask::FactoryToken token) : EchoTask(token) {}
 
     bool do_it(int listener_fd, EchoSessionResult *sessions, std::size_t session_count, bool *ok,
-               int *error) {
+               int *error, std::atomic<bool> *completed) {
         if (listener_fd < 0 || sessions == nullptr || session_count == 0U || ok == nullptr ||
-            error == nullptr) {
+            error == nullptr || completed == nullptr) {
             return false;
         }
 
@@ -29,6 +30,7 @@ public:
         session_count_ = session_count;
         ok_ = ok;
         error_ = error;
+        completed_ = completed;
         return schedule(EchoThreads::IO_0);
     }
 
@@ -47,6 +49,8 @@ private:
 
         af::UniqueFd accepted(accepted_fd);
         const EchoThread io_thread = echo_io_thread(accepted_count_);
+        LOG(INFO) << "tcp echo server accepted session=" << accepted_count_
+                  << " io_thread=" << echo_async::thread_index(io_thread);
         if (!echo_async::start_task<EchoSessionTask>(std::move(accepted), io_thread,
                                                      &sessions_[accepted_count_])) {
             return finish(EAGAIN);
@@ -59,12 +63,16 @@ private:
 
         *ok_ = true;
         *error_ = 0;
+        completed_->store(true, std::memory_order_release);
+        LOG(INFO) << "tcp echo server accepted all sessions count=" << accepted_count_;
         return done();
     }
 
     af::TaskResult finish(int error) {
         *ok_ = false;
         *error_ = error == 0 ? EIO : error;
+        completed_->store(true, std::memory_order_release);
+        LOG(ERROR) << "tcp echo server failed error=" << *error_;
         return failed();
     }
 
@@ -77,6 +85,7 @@ private:
     std::size_t accepted_count_{0};
     bool *ok_{nullptr};
     int *error_{nullptr};
+    std::atomic<bool> *completed_{nullptr};
 };
 
 } // namespace io_tcp_echo_example
