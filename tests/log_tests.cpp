@@ -693,6 +693,50 @@ TEST(LogTests, RuntimeLaneRecordPoolReusesSlotsAcrossFlushes) {
     logger.shutdown();
 }
 
+TEST(LogTests, SharedRecordPoolBatchReleaseReusesSlots) {
+    af::detail::AsyncLogRecordPool pool(4);
+    std::array<af::detail::LogRecord *, 4> records{};
+
+    for (std::size_t i = 0; i < records.size(); ++i) {
+        records[i] = pool.try_acquire("shared batch release log record\n");
+        ASSERT_NE(records[i], nullptr);
+    }
+    EXPECT_EQ(pool.try_acquire("shared pool should be full\n"), nullptr);
+
+    af::detail::release_async_log_records(
+        std::span<af::detail::LogRecord *const>(records.data(), records.size()));
+
+    for (std::size_t i = 0; i < records.size(); ++i) {
+        records[i] = pool.try_acquire("shared batch release reused log record\n");
+        ASSERT_NE(records[i], nullptr);
+    }
+
+    af::detail::release_async_log_records(
+        std::span<af::detail::LogRecord *const>(records.data(), records.size()));
+}
+
+TEST(LogTests, SpscRecordPoolBatchReleaseReusesSlots) {
+    af::detail::AsyncLogSpscRecordPool pool(4);
+    std::array<af::detail::LogRecord *, 4> records{};
+
+    for (std::size_t i = 0; i < records.size(); ++i) {
+        records[i] = pool.try_acquire("spsc batch release log record\n");
+        ASSERT_NE(records[i], nullptr);
+    }
+    EXPECT_EQ(pool.try_acquire("spsc pool should be full\n"), nullptr);
+
+    af::detail::release_async_log_records(
+        std::span<af::detail::LogRecord *const>(records.data(), records.size()));
+
+    for (std::size_t i = 0; i < records.size(); ++i) {
+        records[i] = pool.try_acquire("spsc batch release reused log record\n");
+        ASSERT_NE(records[i], nullptr);
+    }
+
+    af::detail::release_async_log_records(
+        std::span<af::detail::LogRecord *const>(records.data(), records.size()));
+}
+
 TEST(LogTests, RuntimeAwareSinkPrefixesRuntimeTaskId) {
     const auto path = std::filesystem::temp_directory_path() / "async_flow_task_id_log.txt";
     std::filesystem::remove(path);

@@ -107,6 +107,10 @@ by the same runtime-bound drain task.
   again, or parked on IO; it is cleared only at the no-work idle boundary and
   then immediately rechecks queued batches, flush requests, and stop requests
   before returning `pending()`.
+- The consumer releases drained log records in contiguous owner/kind groups.
+  External shard records from the same shared pool can therefore return to the
+  record free-list with one tagged-stack CAS per drained group instead of one
+  CAS per record; runtime SPSC lane records keep their queue-local return path.
 - Record pool changes should stay isolated from the consumer drain loop so the
   shared MPSC pool and runtime SPSC pool can be tuned independently.
 - Lane topology changes should stay isolated from consumer lifecycle code so

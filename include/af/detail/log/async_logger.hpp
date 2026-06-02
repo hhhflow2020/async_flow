@@ -442,11 +442,9 @@ private:
                     std::span<detail::LogRecord *const>(batch.data(), batch.size()));
             }
 
-            for (detail::LogRecord *record : batch) {
-                release_record(record);
-            }
-
             const auto drained = batch.size();
+            detail::release_async_log_records(
+                std::span<detail::LogRecord *const>(batch.data(), drained));
             const auto previous = pending_.fetch_sub(drained, std::memory_order_acq_rel);
             AF_ASSERT(previous >= drained);
             if (previous == drained) {

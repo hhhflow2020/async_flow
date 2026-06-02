@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <string_view>
 
@@ -70,6 +71,37 @@ public:
         auto *slot = static_cast<Slot *>(header);
         AF_ASSERT(slot != nullptr && slot->owner != nullptr);
         static_cast<AsyncLogRecordPool *>(slot->owner)->release(slot);
+    }
+
+    void release_records(std::span<LogRecord *const> records) noexcept {
+        if (records.empty()) {
+            return;
+        }
+        if (records.size() == 1U) {
+            release(static_cast<Slot *>(records.front()->pool_slot()));
+            return;
+        }
+
+        Slot *first = static_cast<Slot *>(records.front()->pool_slot());
+        AF_ASSERT(first != nullptr && first->owner == this);
+        Slot *previous = first;
+        for (std::size_t i = 1; i < records.size(); ++i) {
+            auto *slot = static_cast<Slot *>(records[i]->pool_slot());
+            AF_ASSERT(slot != nullptr && slot->owner == this);
+            previous->next.store(slot_index(slot), std::memory_order_relaxed);
+            previous = slot;
+        }
+
+        const std::uint32_t first_index = slot_index(first);
+        std::uint64_t head = free_head_.load(std::memory_order_relaxed);
+        for (;;) {
+            previous->next.store(head_index(head), std::memory_order_relaxed);
+            const std::uint64_t desired = pack_head(first_index, head_version(head) + 1U);
+            if (free_head_.compare_exchange_weak(head, desired, std::memory_order_release,
+                                                 std::memory_order_relaxed)) {
+                return;
+            }
+        }
     }
 
 private:
@@ -180,6 +212,12 @@ public:
         static_cast<AsyncLogSpscRecordPool *>(slot->owner)->release(slot);
     }
 
+    void release_records(std::span<LogRecord *const> records) noexcept {
+        for (LogRecord *record : records) {
+            release(static_cast<Slot *>(record->pool_slot()));
+        }
+    }
+
 private:
     [[nodiscard]] static std::size_t validate_capacity(std::size_t capacity) {
         if (capacity == 0U || capacity >= std::numeric_limits<std::uint32_t>::max()) {
@@ -211,6 +249,37 @@ inline void release_async_log_record(LogRecord *record) noexcept {
         return;
     }
     AF_ASSERT(false);
+}
+
+inline void release_async_log_records(std::span<LogRecord *const> records) noexcept {
+    std::size_t begin = 0;
+    while (begin < records.size()) {
+        auto *first_slot = static_cast<AsyncLogRecordPoolSlot *>(records[begin]->pool_slot());
+        AF_ASSERT(first_slot != nullptr && first_slot->owner != nullptr);
+        const AsyncLogRecordPoolKind kind = first_slot->kind;
+        void *const owner = first_slot->owner;
+
+        std::size_t end = begin + 1U;
+        while (end < records.size()) {
+            auto *slot = static_cast<AsyncLogRecordPoolSlot *>(records[end]->pool_slot());
+            AF_ASSERT(slot != nullptr && slot->owner != nullptr);
+            if (slot->kind != kind || slot->owner != owner) {
+                break;
+            }
+            ++end;
+        }
+
+        const auto group = records.subspan(begin, end - begin);
+        switch (kind) {
+        case AsyncLogRecordPoolKind::Shared:
+            static_cast<AsyncLogRecordPool *>(owner)->release_records(group);
+            break;
+        case AsyncLogRecordPoolKind::Spsc:
+            static_cast<AsyncLogSpscRecordPool *>(owner)->release_records(group);
+            break;
+        }
+        begin = end;
+    }
 }
 
 } // namespace af::detail

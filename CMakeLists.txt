@@ -205,13 +205,15 @@ if(ASYNCFLOW_BUILD_TESTS)
         tests/runtime_parallel_shards_tests.cpp
         tests/runtime_ordered_start_tests.cpp
         tests/runtime_ordered_batch_tests.cpp
-        tests/log_tests.cpp
         tests/queue_tests.cpp
         tests/pool_tests.cpp
         tests/io_state_utility_tests.cpp
         tests/batch_utility_tests.cpp
     )
     target_link_libraries(asyncflow_runtime_tests PRIVATE AsyncFlow::AsyncFlow GTest::gtest_main)
+
+    add_executable(asyncflow_log_tests tests/log_tests.cpp)
+    target_link_libraries(asyncflow_log_tests PRIVATE AsyncFlow::AsyncFlow GTest::gtest_main)
 
     add_executable(
         asyncflow_runtime_stress_tests
@@ -224,6 +226,12 @@ if(ASYNCFLOW_BUILD_TESTS)
     target_link_libraries(asyncflow_runtime_stress_tests PRIVATE AsyncFlow::AsyncFlow GTest::gtest_main)
 
     gtest_discover_tests(asyncflow_runtime_tests DISCOVERY_TIMEOUT 30)
+    gtest_discover_tests(
+        asyncflow_log_tests
+        DISCOVERY_TIMEOUT 30
+        PROPERTIES
+            RESOURCE_LOCK asyncflow_log_tests
+    )
     gtest_discover_tests(
         asyncflow_runtime_stress_tests
         DISCOVERY_TIMEOUT 30
