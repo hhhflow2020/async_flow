@@ -71,6 +71,11 @@ void Executor<RuntimeT, TraitsT>::set_current_thread_name() noexcept {
 
 template <typename RuntimeT, typename TraitsT> void Executor<RuntimeT, TraitsT>::notify() noexcept {
     wake_epoch_.fetch_add(1, std::memory_order_release);
+    if (!io_thread() || !io_backend_available()) {
+        wake_epoch_.notify_one();
+        return;
+    }
+
     if (!sleeping_.load(std::memory_order_acquire)) {
         return;
     }
@@ -78,10 +83,6 @@ template <typename RuntimeT, typename TraitsT> void Executor<RuntimeT, TraitsT>:
     bool expected = true;
     if (sleeping_.compare_exchange_strong(expected, false, std::memory_order_acq_rel,
                                           std::memory_order_acquire)) {
-        if (!io_thread() || !io_backend_available()) {
-            wake_epoch_.notify_one();
-            return;
-        }
         if (notify_native_io_backend()) {
             return;
         }

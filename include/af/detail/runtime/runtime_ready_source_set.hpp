@@ -29,9 +29,7 @@ public:
     void mark(std::uint16_t source) noexcept {
         const std::size_t word = word_index(source);
         const std::uint64_t bit = source_bit(source);
-        if ((words_[word].bits.load(std::memory_order_relaxed) & bit) == 0U) {
-            words_[word].bits.fetch_or(bit, std::memory_order_release);
-        }
+        words_[word].bits.fetch_or(bit, std::memory_order_release);
     }
 
     void clear(std::uint16_t source) noexcept {
