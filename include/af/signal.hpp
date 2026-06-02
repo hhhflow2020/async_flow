@@ -43,12 +43,12 @@ public:
             error_ = EINVAL;
             return;
         }
-        if (::sigemptyset(&set_) != 0) {
+        if (sigemptyset(&set_) != 0) {
             error_ = errno == 0 ? EINVAL : errno;
             return;
         }
         for (const int signal : signals) {
-            if (::sigaddset(&set_, signal) != 0) {
+            if (sigaddset(&set_, signal) != 0) {
                 error_ = errno == 0 ? EINVAL : errno;
                 return;
             }
@@ -119,7 +119,7 @@ private:
 #else
     struct sigaction action{};
     action.sa_handler = SIG_IGN;
-    if (::sigemptyset(&action.sa_mask) != 0) {
+    if (sigemptyset(&action.sa_mask) != 0) {
         return false;
     }
     return ::sigaction(signal, &action, nullptr) == 0;
