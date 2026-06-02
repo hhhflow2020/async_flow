@@ -123,8 +123,7 @@ public:
             }
         }
         lock.unlock();
-        flush_backends();
-        return true;
+        return flush_backends_until(deadline);
     }
 
     void shutdown() noexcept {
@@ -135,7 +134,7 @@ public:
             worker_.join();
         }
         if (was_accepting || started_.load(std::memory_order_acquire)) {
-            flush_backends();
+            shutdown_backends();
         }
     }
 
@@ -587,6 +586,28 @@ private:
     void flush_backends() noexcept {
         for (auto &backend : backends_) {
             backend->flush();
+        }
+    }
+
+    [[nodiscard]] bool
+    flush_backends_until(std::chrono::steady_clock::time_point deadline) noexcept {
+        for (auto &backend : backends_) {
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= deadline) {
+                return false;
+            }
+            const auto remaining =
+                std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+            if (!backend->flush(remaining)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void shutdown_backends() noexcept {
+        for (auto &backend : backends_) {
+            backend->shutdown();
         }
     }
 

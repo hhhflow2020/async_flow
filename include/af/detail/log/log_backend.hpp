@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <span>
 
 #include "af/detail/log/log_record.hpp"
@@ -15,6 +16,14 @@ public:
 
     virtual void write_batch(std::span<detail::LogRecord *const> records) noexcept = 0;
     virtual void flush() noexcept {}
+    [[nodiscard]] virtual bool flush(std::chrono::milliseconds timeout) noexcept {
+        static_cast<void>(timeout);
+        flush();
+        return true;
+    }
+    virtual void shutdown() noexcept {
+        flush();
+    }
 };
 
 } // namespace af

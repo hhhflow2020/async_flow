@@ -150,6 +150,41 @@ private:
     std::atomic<int> *completed_{nullptr};
 };
 
+struct LogUdpIoThreadTag;
+
+#if defined(__linux__)
+inline constexpr af::ThreadKind log_udp_io_thread_kind = af::ThreadKind::IoUring;
+#else
+inline constexpr af::ThreadKind log_udp_io_thread_kind = af::ThreadKind::Io;
+#endif
+
+struct LogUdpIoRuntimeTraits {
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<LogUdpIoThreadTag, 1, log_udp_io_thread_kind, "log-udp-io">());
+    static constexpr std::size_t spsc_queue_capacity = 1024;
+    static constexpr std::size_t external_queue_capacity = 1024;
+    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
+};
+
+using LogUdpIoRuntime = af::AsyncRuntime<LogUdpIoRuntimeTraits>;
+
+struct LogUdpIoThreads {
+    static constexpr auto IO_0 =
+        LogUdpIoRuntime::thread_group<LogUdpIoThreadTag>().template at<0>();
+};
+
+class LogUdpIoRuntimeGuard {
+public:
+    LogUdpIoRuntimeGuard() {
+        LogUdpIoRuntime::init();
+    }
+
+    ~LogUdpIoRuntimeGuard() {
+        LogUdpIoRuntime::shutdown();
+    }
+};
+
 #if !defined(_WIN32)
 void close_fd(int &fd) noexcept {
     if (fd >= 0) {
@@ -678,5 +713,62 @@ TEST(LogTests, UdpBackendWritesBatchedRecordsToLoopbackDatagrams) {
     EXPECT_NE(combined.find("udp backend two\n"), std::string::npos);
     EXPECT_NE(combined.find("udp backend three\n"), std::string::npos);
     EXPECT_NE(combined.find("udp backend four\n"), std::string::npos);
+#endif
+}
+
+TEST(LogTests, RuntimeUdpBackendSendsBatchesOnIoThread) {
+#if defined(_WIN32)
+    GTEST_SKIP() << "runtime udp log backend loopback test is POSIX-only";
+#else
+    std::uint16_t port = 0;
+    int socket_fd = make_loopback_udp_socket(port);
+    ASSERT_GE(socket_fd, 0) << std::strerror(errno);
+
+    LogUdpIoRuntimeGuard runtime_guard;
+    af::RuntimeUdpLogBackend<LogUdpIoRuntime> backend({
+        .thread = LogUdpIoThreads::IO_0,
+        .host = "127.0.0.1",
+        .port = port,
+        .batch_queue_capacity = 8,
+        .max_batch_records = 4,
+        .max_datagram_size = 1400,
+        .max_batches_per_run = 8,
+    });
+
+    std::array<af::detail::LogRecord, 4> records;
+    records[0].reset("runtime udp backend one\n");
+    records[1].reset("runtime udp backend two\n");
+    records[2].reset("runtime udp backend three\n");
+    records[3].reset("runtime udp backend four\n");
+    std::array<af::detail::LogRecord *, 4> record_ptrs{
+        &records[0],
+        &records[1],
+        &records[2],
+        &records[3],
+    };
+
+    backend.write_batch(
+        std::span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
+    ASSERT_TRUE(backend.flush(std::chrono::seconds(2)));
+    const af::RuntimeUdpLogBackendStats stats = backend.stats();
+    EXPECT_EQ(stats.queued_records, record_ptrs.size());
+    EXPECT_EQ(stats.sent_records, record_ptrs.size());
+    EXPECT_EQ(stats.dropped_records, 0U);
+
+    std::array<std::string, 4> received{};
+    const std::size_t received_count = recv_datagrams_until(
+        socket_fd, received, std::chrono::steady_clock::now() + std::chrono::seconds(2));
+    close_fd(socket_fd);
+    backend.shutdown();
+
+    std::string combined;
+    for (const std::string &message : received) {
+        combined.append(message);
+    }
+    EXPECT_EQ(received_count, record_ptrs.size());
+    EXPECT_NE(combined.find("runtime udp backend one\n"), std::string::npos);
+    EXPECT_NE(combined.find("runtime udp backend two\n"), std::string::npos);
+    EXPECT_NE(combined.find("runtime udp backend three\n"), std::string::npos);
+    EXPECT_NE(combined.find("runtime udp backend four\n"), std::string::npos);
 #endif
 }
