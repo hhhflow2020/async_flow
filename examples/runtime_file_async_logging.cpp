@@ -114,7 +114,6 @@ int main(int argc, char **argv) {
     config.max_batch_size = 512;
     config.overflow_policy = af::LogOverflowPolicy::DropNewest;
     config.flush_poll_interval = 1ms;
-    config.consumer_thread_name = "log";
     config.backends.push_back(std::move(backend));
 
     auto logging = af::start_async_logging_for_runtime<runtime_file_async>(

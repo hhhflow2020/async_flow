@@ -175,7 +175,6 @@ int main() {
     config.max_batch_size = 512;
     config.overflow_policy = af::LogOverflowPolicy::DropNewest;
     config.flush_poll_interval = 1ms;
-    config.consumer_thread_name = "log";
     config.backends.push_back(af::make_runtime_udp_log_backend<runtime_udp_async>({
         .thread = RuntimeUdpThreads::IO_0,
         .host = "127.0.0.1",

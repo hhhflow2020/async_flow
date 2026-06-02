@@ -54,7 +54,7 @@ private:
             return this->done();
         }
 
-        if (controller_->pending_record_count() != 0U) {
+        if (controller_->ready_record_count() != 0U) {
             return this->again();
         }
         if (controller_->mark_idle_or_continue()) {
@@ -139,9 +139,16 @@ public:
             return;
         }
 
-        static_cast<void>(wake_async_log_consumer());
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-        static_cast<void>(wait_until_finished(deadline));
+        while (!finished_.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < deadline) {
+            static_cast<void>(wake_async_log_consumer());
+            auto retry_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1);
+            if (retry_deadline > deadline) {
+                retry_deadline = deadline;
+            }
+            static_cast<void>(wait_until_finished(retry_deadline));
+        }
         task_.reset();
         logger_->finish_bound_consumer_shutdown();
     }
@@ -162,6 +169,10 @@ public:
         return logger_->pending_record_count();
     }
 
+    [[nodiscard]] std::size_t ready_record_count() const noexcept {
+        return logger_->ready_record_count();
+    }
+
     [[nodiscard]] bool stop_requested() const noexcept {
         return logger_->consumer_stop_requested();
     }
@@ -172,7 +183,7 @@ public:
 
     [[nodiscard]] bool mark_idle_or_continue() noexcept {
         wake_queued_.store(false, std::memory_order_release);
-        if (pending_record_count() == 0U && !stop_requested()) {
+        if (ready_record_count() == 0U && !(stop_requested() && pending_record_count() == 0U)) {
             return false;
         }
         wake_queued_.store(true, std::memory_order_release);

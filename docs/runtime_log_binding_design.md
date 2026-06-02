@@ -49,7 +49,7 @@
 
 This keeps runtime log producers on SPSC submission, external producers on MPSC
 admission, and network backends without private IO threads. Runtime deployments
-can now keep the log consumer inside the framework thread layout; non-runtime
+should keep the log consumer inside the framework thread layout; non-runtime
 deployments can still use the compatibility dedicated thread.
 
 `start_async_logging_for_runtime<RuntimeT>(config)` now selects a default
@@ -63,10 +63,12 @@ when they want a different placement.
 
 Keep two explicit consumer placements:
 
-- Dedicated consumer thread: the current default, best for applications that log
-  before runtime startup, after runtime shutdown, or from many external threads.
-- Runtime-bound consumer task: an opt-in mode where the drain loop runs on a
-  configured `RuntimeT::Thread`.
+- Runtime-bound consumer task: the preferred mode for AF runtime applications.
+  The drain loop runs on a configured `RuntimeT::Thread`, so logging does not
+  add another framework-external thread.
+- Dedicated consumer thread: compatibility mode for applications that use the
+  logger before runtime startup, after runtime shutdown, or without an AF
+  runtime.
 
 The runtime-bound mode is a consumer placement choice, not a property of each
 backend. File, UDP, and TCP backends stay batch IO strategies that can be driven
@@ -89,9 +91,13 @@ by the same runtime-bound drain task.
 - Runtime-thread log submission must stay explicit: runtime producers use their
   own SPSC lane, external producers use MPSC shards.
 - Flush must wait for both the producer-to-consumer queues and backend IO
-  completion counters.
+  completion counters. The pending-record wait must use a predicate and bounded
+  retry wakeups so a notify that races with the waiter going to sleep cannot
+  turn into a full-timeout flush.
 - Shutdown must stop admission before draining, then wake the bound consumer
-  task, then shut down backends after all pending records are released.
+  task, then shut down backends after all pending records are released. The
+  runtime-bound shutdown path retries the consumer wake while waiting so a
+  running-to-pending race cannot strand the consumer task until the timeout.
 - Runtime-bound consumer tasks must not call backend flush/shutdown from the
   bound runtime thread, because file/TCP/UDP runtime backends may need that same
   thread to complete their own IO tasks. Backend shutdown is driven by the
@@ -113,6 +119,13 @@ by the same runtime-bound drain task.
   ordinary logging does not schedule a framework task for every record.
 - Runtime-bound consumers should cap drain batches per run so one logging burst
   does not monopolize the bound runtime thread.
+- AsyncLogger keeps separate `pending` and `ready` counters. `pending` tracks
+  accepted records that are not fully drained yet, including producer
+  reservations that have not reached a queue cell. `ready` tracks records that
+  were successfully published into a queue and may be consumed; consumers drain
+  only against the ready budget. This keeps flush/shutdown accounting exact
+  without making a runtime-bound consumer spin when a producer is preempted
+  between reservation and queue publication.
 - Runtime backend flush and shutdown waits should block on completion
   notifications instead of spinning/yielding while bound IO tasks make progress.
 - The runtime-bound log task wake bit stays set while a task is queued, running

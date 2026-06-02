@@ -144,7 +144,14 @@ public:
         std::unique_lock lock(wait_mutex_);
         while (pending_.load(std::memory_order_acquire) != 0U) {
             notify_consumer();
-            if (drained_cv_.wait_until(lock, deadline) == std::cv_status::timeout &&
+            auto retry_deadline = std::chrono::steady_clock::now() + flush_poll_interval_;
+            if (retry_deadline > deadline) {
+                retry_deadline = deadline;
+            }
+            if (!drained_cv_.wait_until(
+                    lock, retry_deadline,
+                    [this] { return pending_.load(std::memory_order_acquire) == 0U; }) &&
+                std::chrono::steady_clock::now() >= deadline &&
                 pending_.load(std::memory_order_acquire) != 0U) {
                 return false;
             }
@@ -198,7 +205,7 @@ private:
             return false;
         }
 
-        const auto previous_pending = pending_.fetch_add(1U, std::memory_order_release);
+        pending_.fetch_add(1U, std::memory_order_release);
         if (!push_record(lane, record)) {
             release_record(record);
             abandon_pending_record();
@@ -207,7 +214,8 @@ private:
         }
 
         record_accepted(lane);
-        if (previous_pending == 0U) {
+        const auto previous_ready = ready_.fetch_add(1U, std::memory_order_release);
+        if (previous_ready == 0U) {
             notify_consumer();
         }
         return true;
@@ -241,6 +249,10 @@ private:
 
     [[nodiscard]] std::size_t pending_record_count() const noexcept {
         return pending_.load(std::memory_order_acquire);
+    }
+
+    [[nodiscard]] std::size_t ready_record_count() const noexcept {
+        return ready_.load(std::memory_order_acquire);
     }
 
     [[nodiscard]] std::size_t max_batch_size() const noexcept {
@@ -389,6 +401,7 @@ private:
         AF_ASSERT(previous != 0U);
         if (previous == 1U) {
             drained_cv_.notify_all();
+            notify_consumer();
         }
     }
 
@@ -405,8 +418,9 @@ private:
 
             std::unique_lock lock(wait_mutex_);
             wake_cv_.wait_for(lock, flush_poll_interval_, [this] {
-                return stopping_.load(std::memory_order_acquire) ||
-                       pending_.load(std::memory_order_acquire) != 0U;
+                return ready_.load(std::memory_order_acquire) != 0U ||
+                       (stopping_.load(std::memory_order_acquire) &&
+                        pending_.load(std::memory_order_acquire) == 0U);
             });
         }
 
@@ -430,8 +444,12 @@ private:
             if (max_write_batches == 0U) {
                 return drained_any;
             }
+            const std::size_t ready_records = ready_.load(std::memory_order_acquire);
+            if (ready_records == 0U) {
+                return drained_any;
+            }
             batch.clear();
-            collect_batch(batch);
+            collect_batch(batch, std::min(max_batch_size_, ready_records));
 
             if (batch.empty()) {
                 return drained_any;
@@ -445,6 +463,8 @@ private:
             const auto drained = batch.size();
             detail::release_async_log_records(
                 std::span<detail::LogRecord *const>(batch.data(), drained));
+            const auto previous_ready = ready_.fetch_sub(drained, std::memory_order_acq_rel);
+            AF_ASSERT(previous_ready >= drained);
             const auto previous = pending_.fetch_sub(drained, std::memory_order_acq_rel);
             AF_ASSERT(previous >= drained);
             if (previous == drained) {
@@ -456,27 +476,28 @@ private:
         }
     }
 
-    void collect_batch(std::vector<detail::LogRecord *> &batch) noexcept {
+    void collect_batch(std::vector<detail::LogRecord *> &batch, std::size_t max_records) noexcept {
         if (prefer_runtime_drain_) {
-            collect_runtime_batch(batch);
-            collect_shard_batch(batch);
+            collect_runtime_batch(batch, max_records);
+            collect_shard_batch(batch, max_records);
         } else {
-            collect_shard_batch(batch);
-            collect_runtime_batch(batch);
+            collect_shard_batch(batch, max_records);
+            collect_runtime_batch(batch, max_records);
         }
         prefer_runtime_drain_ = !prefer_runtime_drain_;
     }
 
-    void collect_shard_batch(std::vector<detail::LogRecord *> &batch) noexcept {
+    void collect_shard_batch(std::vector<detail::LogRecord *> &batch,
+                             std::size_t max_records) noexcept {
         constexpr std::size_t max_queue_drain_count = 64;
         std::array<detail::LogRecord *, max_queue_drain_count> drained;
         std::size_t empty_visits = 0;
-        while (batch.size() < max_batch_size_ && empty_visits < queue_shard_count_) {
+        while (batch.size() < max_records && empty_visits < queue_shard_count_) {
             detail::AsyncLogQueueShard &shard = *queue_shards_[next_drain_shard_];
             next_drain_shard_ = (next_drain_shard_ + 1U) & queue_shard_mask_;
 
             const std::size_t count = shard.queue.try_pop_many(
-                drained.data(), std::min(drained.size(), max_batch_size_ - batch.size()));
+                drained.data(), std::min(drained.size(), max_records - batch.size()));
             if (count == 0U) {
                 ++empty_visits;
                 continue;
@@ -487,7 +508,8 @@ private:
         }
     }
 
-    void collect_runtime_batch(std::vector<detail::LogRecord *> &batch) noexcept {
+    void collect_runtime_batch(std::vector<detail::LogRecord *> &batch,
+                               std::size_t max_records) noexcept {
         if (runtime_thread_count_ == 0U) {
             return;
         }
@@ -495,7 +517,7 @@ private:
         constexpr std::size_t max_queue_drain_count = 64;
         std::array<detail::LogRecord *, max_queue_drain_count> drained;
         std::size_t empty_visits = 0;
-        while (batch.size() < max_batch_size_ && empty_visits < runtime_thread_count_) {
+        while (batch.size() < max_records && empty_visits < runtime_thread_count_) {
             detail::AsyncLogRuntimeLane &lane = *runtime_lanes_[next_runtime_drain_thread_];
             ++next_runtime_drain_thread_;
             if (next_runtime_drain_thread_ == runtime_thread_count_) {
@@ -503,7 +525,7 @@ private:
             }
 
             const std::size_t count = lane.queue.try_pop_many(
-                drained.data(), std::min(drained.size(), max_batch_size_ - batch.size()));
+                drained.data(), std::min(drained.size(), max_records - batch.size()));
             if (count == 0U) {
                 ++empty_visits;
                 continue;
@@ -574,6 +596,7 @@ private:
         std::atomic<detail::AsyncLogConsumerWakeTarget *> consumer_wake_target_{nullptr};
     alignas(detail::hardware_cache_line_size) std::atomic<std::size_t> next_producer_shard_{0};
     alignas(detail::hardware_cache_line_size) std::atomic<std::size_t> pending_{0};
+    alignas(detail::hardware_cache_line_size) std::atomic<std::size_t> ready_{0};
 
     std::size_t next_drain_shard_{0};
     std::size_t next_runtime_drain_thread_{0};
