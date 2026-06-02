@@ -27,7 +27,13 @@ public:
         listener_.reset(EchoThreads::IO_0, listener_fd);
         state_ = state;
         max_accepts_ = max_accepts;
-        return schedule(EchoThreads::IO_0);
+        const bool scheduled = schedule(EchoThreads::IO_0);
+        if (scheduled) {
+            LOG(INFO) << "tcp echo accept task started io_thread="
+                      << echo_async::thread_index(EchoThreads::IO_0)
+                      << " max_accepts=" << max_accepts_;
+        }
+        return scheduled;
     }
 
 private:
@@ -58,21 +64,28 @@ private:
         echo_set_tcp_nodelay(accepted.get());
         echo_set_keepalive(accepted.get());
 
-        const std::uint64_t sequence = state_->accepted.fetch_add(1, std::memory_order_acq_rel);
-        const EchoThread io_thread = echo_io_thread(static_cast<std::size_t>(sequence));
-        LOG(INFO) << "tcp echo server accepted session=" << sequence
+        const std::uint64_t accepted_index =
+            state_->accepted.fetch_add(1, std::memory_order_acq_rel);
+        const std::uint64_t session_id = accepted_index + 1U;
+        const EchoThread io_thread = echo_io_thread(static_cast<std::size_t>(accepted_index));
+        LOG(INFO) << "tcp echo server accepted connection session=" << session_id
+                  << " fd=" << accepted.get()
                   << " io_thread=" << echo_async::thread_index(io_thread);
-        if (!echo_async::start_task<EchoSessionTask>(std::move(accepted), io_thread, state_)) {
+        LOG(INFO) << "tcp echo session task starting session=" << session_id
+                  << " io_thread=" << echo_async::thread_index(io_thread);
+        if (!echo_async::start_task<EchoSessionTask>(std::move(accepted), io_thread, state_,
+                                                     session_id)) {
             state_->rejected.fetch_add(1, std::memory_order_acq_rel);
-            LOG(ERROR) << "tcp echo server rejected session=" << sequence;
-            if (max_accepts_ != 0 && sequence + 1U >= max_accepts_) {
+            LOG(ERROR) << "tcp echo server rejected session task session=" << session_id;
+            if (max_accepts_ != 0 && session_id >= max_accepts_) {
                 state_->stop_requested.store(true, std::memory_order_release);
                 return finish(0);
             }
             return again();
         }
+        LOG(INFO) << "tcp echo session task started session=" << session_id;
 
-        if (max_accepts_ != 0 && sequence + 1U >= max_accepts_) {
+        if (max_accepts_ != 0 && session_id >= max_accepts_) {
             state_->stop_requested.store(true, std::memory_order_release);
             return finish(0);
         }
@@ -83,12 +96,12 @@ private:
         state_->accept_error.store(error, std::memory_order_release);
         state_->accept_stopped.store(true, std::memory_order_release);
         if (error == 0) {
-            LOG(INFO) << "tcp echo server accept loop stopped accepted="
+            LOG(INFO) << "tcp echo accept task ended accepted="
                       << state_->accepted.load(std::memory_order_acquire)
                       << " rejected=" << state_->rejected.load(std::memory_order_acquire);
             return done();
         }
-        LOG(ERROR) << "tcp echo server accept loop failed error=" << error;
+        LOG(ERROR) << "tcp echo accept task ended error=" << error;
         return failed();
     }
 

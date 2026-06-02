@@ -16,7 +16,8 @@ class EchoSessionTask final : public EchoTask {
 public:
     explicit EchoSessionTask(EchoTask::FactoryToken token) : EchoTask(token) {}
 
-    bool do_it(af::UniqueFd fd, EchoThread io_thread, EchoServerState *state) {
+    bool do_it(af::UniqueFd fd, EchoThread io_thread, EchoServerState *state,
+               std::uint64_t session_id) {
         fd_ = std::move(fd);
         if (!fd_ || state == nullptr) {
             return false;
@@ -24,12 +25,18 @@ public:
 
         io_thread_ = io_thread;
         server_state_ = state;
+        session_id_ = session_id;
         stream_.reset(io_thread_, fd_.get());
-        server_state_->active_sessions.fetch_add(1, std::memory_order_acq_rel);
+        const std::uint64_t active_sessions =
+            server_state_->active_sessions.fetch_add(1, std::memory_order_acq_rel) + 1U;
         if (!schedule(io_thread_)) {
             server_state_->active_sessions.fetch_sub(1, std::memory_order_acq_rel);
+            LOG(ERROR) << "tcp echo session task start failed session=" << session_id_;
             return false;
         }
+        LOG(INFO) << "tcp echo session task started session=" << session_id_ << " fd=" << fd_.get()
+                  << " io_thread=" << echo_async::thread_index(io_thread_)
+                  << " active_sessions=" << active_sessions;
         return true;
     }
 
@@ -70,12 +77,20 @@ private:
         available_ = status.bytes;
         sent_ = 0;
         session_bytes_received_ += status.bytes;
+        LOG(INFO) << "tcp echo session received session=" << session_id_
+                  << " bytes=" << status.bytes << " total_in=" << session_bytes_received_
+                  << " io_thread=" << echo_async::current_thread_index()
+                  << " compute_thread=" << echo_async::thread_index(EchoThreads::Compute_0);
         phase_ = State::Compute;
         return pending_on(EchoThreads::Compute_0);
     }
 
     af::TaskResult compute() {
-        echo_lowercase_ascii(buffer_.data(), available_);
+        const std::size_t converted = echo_lowercase_ascii(buffer_.data(), available_);
+        LOG(INFO) << "tcp echo session lowercase converted session=" << session_id_
+                  << " bytes=" << available_ << " uppercase_converted=" << converted
+                  << " compute_thread=" << echo_async::current_thread_index()
+                  << " io_thread=" << echo_async::thread_index(io_thread_);
         phase_ = State::Send;
         return pending_on(io_thread_);
     }
@@ -95,6 +110,9 @@ private:
 
         sent_ += status.bytes;
         session_bytes_sent_ += status.bytes;
+        LOG(INFO) << "tcp echo session sent session=" << session_id_ << " bytes=" << status.bytes
+                  << " total_out=" << session_bytes_sent_
+                  << " io_thread=" << echo_async::current_thread_index();
         if (sent_ < available_) {
             return again();
         }
@@ -110,13 +128,15 @@ private:
 
         if (error == 0) {
             server_state_->completed_sessions.fetch_add(1, std::memory_order_acq_rel);
-            LOG(INFO) << "tcp echo session closed bytes_in=" << session_bytes_received_
+            LOG(INFO) << "tcp echo session disconnected session=" << session_id_
+                      << " bytes_in=" << session_bytes_received_
                       << " bytes_out=" << session_bytes_sent_;
+            LOG(INFO) << "tcp echo session task ended session=" << session_id_ << " error=0";
             return done();
         }
 
         server_state_->failed_sessions.fetch_add(1, std::memory_order_acq_rel);
-        LOG(ERROR) << "tcp echo session failed error=" << error
+        LOG(ERROR) << "tcp echo session task ended session=" << session_id_ << " error=" << error
                    << " bytes_in=" << session_bytes_received_
                    << " bytes_out=" << session_bytes_sent_;
         return failed();
@@ -131,6 +151,7 @@ private:
     std::size_t sent_{0};
     std::uint64_t session_bytes_received_{0};
     std::uint64_t session_bytes_sent_{0};
+    std::uint64_t session_id_{0};
     af::IoOpState read_{};
     af::IoOpState write_{};
     EchoServerState *server_state_{nullptr};

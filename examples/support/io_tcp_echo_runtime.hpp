@@ -68,17 +68,20 @@ struct EchoClientResult {
 #endif
 }
 
-inline void echo_lowercase_ascii(char *data, std::size_t size) noexcept {
+[[nodiscard]] inline std::size_t echo_lowercase_ascii(char *data, std::size_t size) noexcept {
     if (data == nullptr) {
-        return;
+        return 0;
     }
 
+    std::size_t converted = 0;
     for (std::size_t index = 0; index < size; ++index) {
         char &ch = data[index];
         if (ch >= 'A' && ch <= 'Z') {
             ch = static_cast<char>(ch - 'A' + 'a');
+            ++converted;
         }
     }
+    return converted;
 }
 
 } // namespace io_tcp_echo_example

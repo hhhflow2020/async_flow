@@ -89,6 +89,8 @@ int main(int argc, char **argv) {
 
     EchoServerState server_state{};
     const std::uint64_t max_accepts = options.self_test ? echo_self_test_client_count : 0U;
+    LOG(INFO) << "tcp echo accept task starting io_thread="
+              << echo_async::thread_index(EchoThreads::IO_0) << " max_accepts=" << max_accepts;
     const bool server_started =
         echo_async::start_task<EchoServerTask>(listener.fd.get(), &server_state, max_accepts);
     if (!server_started) {
@@ -134,10 +136,14 @@ int main(int argc, char **argv) {
             clients_started = clients_started && static_cast<bool>(client);
             if (client) {
                 echo_set_tcp_nodelay(client.get());
-                clients_started = clients_started &&
-                                  echo_async::start_task<EchoClientTask>(
-                                      std::move(client), echo_io_thread(index), listener.address,
-                                      listener.address_size, requests[index], &clients[index]);
+                const std::uint64_t client_id = index + 1U;
+                LOG(INFO) << "tcp echo self-test client task starting client=" << client_id
+                          << " io_thread=" << echo_async::thread_index(echo_io_thread(index));
+                clients_started =
+                    clients_started &&
+                    echo_async::start_task<EchoClientTask>(
+                        std::move(client), echo_io_thread(index), listener.address,
+                        listener.address_size, requests[index], &clients[index], client_id);
             }
         }
 
