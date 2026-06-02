@@ -204,6 +204,7 @@ if(ASYNCFLOW_BUILD_TESTS)
         tests/runtime_ordered_batch_tests.cpp
         tests/queue_tests.cpp
         tests/pool_tests.cpp
+        tests/signal_tests.cpp
         tests/io_state_utility_tests.cpp
         tests/batch_utility_tests.cpp
     )

@@ -1,6 +1,5 @@
 #include <array>
 #include <chrono>
-#include <csignal>
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
@@ -13,26 +12,17 @@
 #include "support/io_tcp_echo_server_task.hpp"
 #include "support/io_tcp_echo_sockets.hpp"
 
-#if !defined(_WIN32)
-namespace {
-
-volatile std::sig_atomic_t g_tcp_echo_stop_signal = 0;
-
-void handle_tcp_echo_stop_signal(int signal) noexcept {
-    g_tcp_echo_stop_signal = signal;
-}
-
-} // namespace
-#endif
-
 int main(int argc, char **argv) {
 #if !defined(_WIN32)
     using namespace std::chrono_literals;
     using namespace io_tcp_echo_example;
 
-    ::signal(SIGINT, handle_tcp_echo_stop_signal);
-    ::signal(SIGTERM, handle_tcp_echo_stop_signal);
-    ::signal(SIGPIPE, SIG_IGN);
+    af::SignalSet stop_signals({SIGINT, SIGTERM});
+    if (!stop_signals.valid()) {
+        std::cerr << "failed to configure signal wait set error=" << stop_signals.error() << '\n';
+        return 2;
+    }
+    static_cast<void>(af::ignore_process_signal(SIGPIPE));
 
     EchoServerOptions options;
     if (!echo_parse_server_options(argc, argv, &options, std::cerr)) {
@@ -219,11 +209,13 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    while (g_tcp_echo_stop_signal == 0) {
-        std::this_thread::sleep_for(200ms);
+    const af::SignalWaitResult stop_signal = stop_signals.wait();
+    if (!stop_signal.ok()) {
+        LOG(ERROR) << "tcp echo signal wait failed error=" << stop_signal.error;
     }
 
-    LOG(INFO) << "tcp echo server received signal=" << g_tcp_echo_stop_signal;
+    LOG(INFO) << "tcp echo server received signal=" << stop_signal.signal
+              << " error=" << stop_signal.error;
     server_state.stop_requested.store(true, std::memory_order_release);
     echo_wake_listener(listener.address);
     const bool drained =
@@ -235,7 +227,7 @@ int main(int argc, char **argv) {
     }
 
     const bool logs_ok = stop_runtime();
-    std::cout << "tcp echo server stopped signal=" << g_tcp_echo_stop_signal
+    std::cout << "tcp echo server stopped signal=" << stop_signal.signal
               << " accepted=" << snapshot.accepted << " rejected=" << snapshot.rejected
               << " active=" << snapshot.active_sessions
               << " completed_sessions=" << snapshot.completed_sessions
