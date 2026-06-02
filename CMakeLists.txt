@@ -61,6 +61,10 @@ if(ASYNCFLOW_BUILD_EXAMPLES)
                    examples/runtime_udp_async_logging.cpp)
     target_link_libraries(asyncflow_runtime_udp_async_logging_example PRIVATE AsyncFlow::AsyncFlow)
 
+    add_executable(asyncflow_runtime_tcp_async_logging_example
+                   examples/runtime_tcp_async_logging.cpp)
+    target_link_libraries(asyncflow_runtime_tcp_async_logging_example PRIVATE AsyncFlow::AsyncFlow)
+
     add_executable(asyncflow_io_epoll_example examples/io_epoll.cpp)
     target_link_libraries(asyncflow_io_epoll_example PRIVATE AsyncFlow::AsyncFlow)
 

@@ -830,3 +830,140 @@ TEST(LogTests, RuntimeUdpBackendSendsBatchesOnIoThread) {
     EXPECT_NE(combined.find("runtime udp backend four\n"), std::string::npos);
 #endif
 }
+
+TEST(LogTests, RuntimeTcpBackendSendsBatchesOnIoThread) {
+#if defined(_WIN32)
+    GTEST_SKIP() << "runtime tcp log backend loopback test is POSIX-only";
+#else
+    std::uint16_t port = 0;
+    int listener = make_loopback_tcp_listener(port);
+    ASSERT_GE(listener, 0) << std::strerror(errno);
+
+    std::string received;
+    std::atomic<bool> server_done{false};
+    std::thread server([&] {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        int accepted = accept_until(listener, deadline);
+        if (accepted < 0) {
+            server_done.store(true, std::memory_order_release);
+            return;
+        }
+        received = recv_until(accepted, "runtime tcp backend four\n", deadline);
+        close_fd(accepted);
+        server_done.store(true, std::memory_order_release);
+    });
+
+    LogUdpIoRuntimeGuard runtime_guard;
+    af::RuntimeTcpLogBackend<LogUdpIoRuntime> backend({
+        .thread = LogUdpIoThreads::IO_0,
+        .host = "127.0.0.1",
+        .port = port,
+        .reconnect_interval = std::chrono::milliseconds(1),
+        .batch_queue_capacity = 8,
+        .max_batch_records = 4,
+        .max_batches_per_run = 8,
+    });
+
+    std::array<af::detail::LogRecord, 4> records;
+    records[0].reset("runtime tcp backend one\n");
+    records[1].reset("runtime tcp backend two\n");
+    records[2].reset("runtime tcp backend three\n");
+    records[3].reset("runtime tcp backend four\n");
+    std::array<af::detail::LogRecord *, 4> record_ptrs{
+        &records[0],
+        &records[1],
+        &records[2],
+        &records[3],
+    };
+
+    backend.write_batch(
+        std::span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
+    const bool flushed = backend.flush(std::chrono::seconds(2));
+    const af::RuntimeTcpLogBackendStats stats = backend.stats();
+
+    server.join();
+    close_fd(listener);
+    backend.shutdown();
+
+    EXPECT_TRUE(flushed);
+    EXPECT_EQ(stats.queued_records, record_ptrs.size());
+    EXPECT_EQ(stats.sent_records, record_ptrs.size())
+        << "last_error=" << stats.last_error << " stage=" << stats.last_error_stage;
+    EXPECT_EQ(stats.dropped_records, 0U)
+        << "last_error=" << stats.last_error << " stage=" << stats.last_error_stage;
+    EXPECT_TRUE(server_done.load(std::memory_order_acquire));
+    EXPECT_NE(received.find("runtime tcp backend one\n"), std::string::npos);
+    EXPECT_NE(received.find("runtime tcp backend two\n"), std::string::npos);
+    EXPECT_NE(received.find("runtime tcp backend three\n"), std::string::npos);
+    EXPECT_NE(received.find("runtime tcp backend four\n"), std::string::npos);
+#endif
+}
+
+TEST(LogTests, RuntimeTcpAsyncLoggerBackendSendsOnIoThread) {
+#if defined(_WIN32)
+    GTEST_SKIP() << "runtime tcp async logger backend loopback test is POSIX-only";
+#else
+    std::uint16_t port = 0;
+    int listener = make_loopback_tcp_listener(port);
+    ASSERT_GE(listener, 0) << std::strerror(errno);
+
+    std::string received;
+    std::atomic<bool> server_done{false};
+    std::thread server([&] {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        int accepted = accept_until(listener, deadline);
+        if (accepted < 0) {
+            server_done.store(true, std::memory_order_release);
+            return;
+        }
+        received = recv_until(accepted, "runtime tcp async logger four", deadline);
+        close_fd(accepted);
+        server_done.store(true, std::memory_order_release);
+    });
+
+    LogUdpIoRuntimeGuard runtime_guard;
+    auto backend = std::make_unique<af::RuntimeTcpLogBackend<LogUdpIoRuntime>>(
+        af::RuntimeTcpLogBackendConfig<LogUdpIoRuntime>{
+            .thread = LogUdpIoThreads::IO_0,
+            .host = "127.0.0.1",
+            .port = port,
+            .reconnect_interval = std::chrono::milliseconds(1),
+            .batch_queue_capacity = 8,
+            .max_batch_records = 8,
+            .max_batches_per_run = 8,
+        });
+    auto *runtime_tcp_backend = backend.get();
+
+    af::AsyncLogConfig config;
+    config.queue_capacity = 64;
+    config.runtime_queue_capacity = 64;
+    config.max_batch_size = 8;
+    config.flush_poll_interval = std::chrono::milliseconds(1);
+    config.backends.push_back(std::move(backend));
+    auto logging = af::start_async_logging_for_runtime<LogUdpIoRuntime>(std::move(config));
+
+    LOG(INFO) << "runtime tcp async logger one";
+    LOG(INFO) << "runtime tcp async logger two";
+    LOG(INFO) << "runtime tcp async logger three";
+    LOG(INFO) << "runtime tcp async logger four";
+
+    const bool flushed = logging->flush(std::chrono::seconds(2));
+    const af::RuntimeTcpLogBackendStats stats = runtime_tcp_backend->stats();
+    logging->stop();
+
+    server.join();
+    close_fd(listener);
+
+    EXPECT_TRUE(flushed);
+    EXPECT_EQ(stats.queued_records, 4U);
+    EXPECT_EQ(stats.sent_records, 4U)
+        << "last_error=" << stats.last_error << " stage=" << stats.last_error_stage;
+    EXPECT_EQ(stats.dropped_records, 0U)
+        << "last_error=" << stats.last_error << " stage=" << stats.last_error_stage;
+    EXPECT_TRUE(server_done.load(std::memory_order_acquire));
+    EXPECT_NE(received.find("runtime tcp async logger one"), std::string::npos);
+    EXPECT_NE(received.find("runtime tcp async logger two"), std::string::npos);
+    EXPECT_NE(received.find("runtime tcp async logger three"), std::string::npos);
+    EXPECT_NE(received.find("runtime tcp async logger four"), std::string::npos);
+#endif
+}
