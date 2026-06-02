@@ -518,6 +518,21 @@ TEST(LogTests, AsyncFileBackendWritesAbslFormattedMessages) {
     EXPECT_NE(contents.find("af async file backend test"), std::string::npos);
 }
 
+TEST(LogTests, RuntimeAsyncLoggingRejectsInvalidConsumerThread) {
+    LogTestRuntimeGuard runtime_guard;
+
+    EXPECT_THROW(
+        {
+            af::AsyncLogConfig config;
+            config.backends.push_back(std::make_unique<CountingLogBackend>());
+            auto logging = af::start_async_logging_for_runtime<LogTestRuntime>(
+                std::move(config),
+                LogTestRuntime::thread_from_index(LogTestRuntime::invalid_thread_index));
+            static_cast<void>(logging);
+        },
+        std::runtime_error);
+}
+
 TEST(LogTests, RuntimeFileBackendWritesBatchesOnIoThread) {
     const auto path =
         std::filesystem::path(::testing::TempDir()) / "asyncflow-runtime-log-file.log";

@@ -91,6 +91,9 @@ public:
     }
 
     [[nodiscard]] bool start() noexcept {
+        if (RuntimeT::thread_index(thread_) >= RuntimeT::thread_count) [[unlikely]] {
+            return false;
+        }
         return logger_->start_bound_consumer(*this);
     }
 
