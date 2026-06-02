@@ -133,6 +133,10 @@ int main(int argc, char **argv) {
             EchoPayload{{'H', 'E', 'L', 'L', 'O', 'I', 'O', 'A'}},
             EchoPayload{{'A', 'S', 'Y', 'N', 'C', 'I', 'O', 'B'}},
         };
+        constexpr std::array<EchoPayload, echo_self_test_client_count> expected{
+            EchoPayload{{'h', 'e', 'l', 'l', 'o', 'i', 'o', 'a'}},
+            EchoPayload{{'a', 's', 'y', 'n', 'c', 'i', 'o', 'b'}},
+        };
 
         bool clients_started = true;
         for (std::size_t index = 0; index < clients.size(); ++index) {
@@ -193,7 +197,7 @@ int main(int argc, char **argv) {
         bool clients_ok = true;
         for (std::size_t index = 0; index < clients.size(); ++index) {
             clients_ok = clients_ok && clients[index].ok && clients[index].error == 0 &&
-                         clients[index].response == requests[index];
+                         clients[index].response == expected[index];
         }
         const bool ok = completed && clients_ok && snapshot.accepted == clients.size() &&
                         snapshot.active_sessions == 0U && snapshot.failed_sessions == 0U &&

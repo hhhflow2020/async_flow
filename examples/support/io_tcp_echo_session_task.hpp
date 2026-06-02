@@ -36,6 +36,7 @@ public:
 private:
     enum class State : std::uint8_t {
         Receive,
+        Compute,
         Send,
     };
 
@@ -43,6 +44,8 @@ private:
         switch (phase_) {
         case State::Receive:
             return receive();
+        case State::Compute:
+            return compute();
         case State::Send:
             return send();
         }
@@ -60,12 +63,21 @@ private:
         if (!status.ready()) {
             return finish(status.failed() ? status.error : EIO);
         }
+        if (status.bytes == 0U) {
+            return finish(0);
+        }
 
         available_ = status.bytes;
         sent_ = 0;
         session_bytes_received_ += status.bytes;
+        phase_ = State::Compute;
+        return pending_on(EchoThreads::Compute_0);
+    }
+
+    af::TaskResult compute() {
+        echo_lowercase_ascii(buffer_.data(), available_);
         phase_ = State::Send;
-        return again();
+        return pending_on(io_thread_);
     }
 
     af::TaskResult send() {
