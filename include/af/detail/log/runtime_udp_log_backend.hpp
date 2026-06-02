@@ -236,7 +236,6 @@ private:
             return this->done();
         }
 
-        state_->wake_queued.store(false, std::memory_order_release);
         if (state_->stopping.load(std::memory_order_acquire)) {
             drop_current();
             drop_ready_batches();
@@ -244,13 +243,11 @@ private:
             state_->io_waiting.store(false, std::memory_order_release);
             state_->close_socket();
 #endif
-            state_->finished.store(true, std::memory_order_release);
-            state_->finished.notify_all();
-            return this->done();
+            return finish();
         }
 #if !defined(_WIN32)
         if (state_->io_waiting.load(std::memory_order_acquire) && !io_wait_ready()) {
-            return this->pending();
+            return idle();
         }
         state_->io_waiting.store(false, std::memory_order_release);
 #endif
@@ -261,17 +258,15 @@ private:
                 current_message_ = 0;
                 if (current_ == nullptr) {
                     if (state_->stopping.load(std::memory_order_acquire)) {
-                        state_->finished.store(true, std::memory_order_release);
-                        state_->finished.notify_all();
-                        return this->done();
+                        return finish();
                     }
-                    return this->pending();
+                    return idle();
                 }
             }
 
             const SendResult result = send_current();
             if (result == SendResult::Pending) {
-                return this->pending();
+                return idle();
             }
 
             state_->complete_batch(current_);
@@ -281,6 +276,18 @@ private:
                 return this->again();
             }
         }
+    }
+
+    TaskResult idle() noexcept {
+        state_->wake_queued.store(false, std::memory_order_release);
+        return this->pending();
+    }
+
+    TaskResult finish() noexcept {
+        state_->wake_queued.store(false, std::memory_order_release);
+        state_->finished.store(true, std::memory_order_release);
+        state_->finished.notify_all();
+        return this->done();
     }
 
     enum class SendResult : std::uint8_t {

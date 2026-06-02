@@ -221,7 +221,8 @@ int main() {
         .max_batches_per_run = 64,
     }));
 
-    auto logging = af::start_async_logging_for_runtime<runtime_tcp_async>(std::move(config));
+    auto logging = af::start_async_logging_for_runtime<runtime_tcp_async>(std::move(config),
+                                                                          RuntimeTcpThreads::IO_0);
 
     std::atomic<int> completed{0};
     bool started = true;

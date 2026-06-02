@@ -9,10 +9,10 @@
 #include <string_view>
 #include <thread>
 #include <utility>
-#include <vector>
 
 #include "af/detail/config.hpp"
 #include "af/detail/log/log_record.hpp"
+#include "af/detail/memory/contiguous_object_storage.hpp"
 #include "af/detail/queue/bounded_spsc_queue.hpp"
 #include "af/detail/runtime/runtime_common_state.hpp"
 
@@ -117,7 +117,7 @@ public:
     const std::size_t max_batches_per_run;
     BoundedSpscQueue<Batch> ready_batches;
     BoundedSpscQueue<Batch> free_batches;
-    std::vector<std::unique_ptr<Batch>> storage;
+    ContiguousObjectStorage<Batch> storage;
     CacheLineAtomic<std::uint64_t> queued_records{0};
     CacheLineAtomic<std::uint64_t> dropped_records{0};
     CacheLineAtomic<std::size_t> pending_batches{0};
@@ -129,12 +129,10 @@ private:
     template <typename... BatchArgs>
     void reserve_batches(std::size_t queue_capacity, BatchArgs &&...batch_args) {
         const std::size_t capacity = queue_capacity == 0U ? 1U : queue_capacity;
-        storage.reserve(capacity);
+        storage.reserve_exact(capacity);
         for (std::size_t i = 0; i < capacity; ++i) {
-            auto batch =
-                std::make_unique<Batch>(max_batch_records, std::forward<BatchArgs>(batch_args)...);
-            Batch *ptr = batch.get();
-            storage.push_back(std::move(batch));
+            Batch *ptr =
+                &storage.emplace_back(max_batch_records, std::forward<BatchArgs>(batch_args)...);
             const bool ok = free_batches.try_push(ptr);
             AF_ASSERT(ok);
             static_cast<void>(ok);

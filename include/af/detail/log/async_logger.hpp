@@ -26,6 +26,32 @@
 
 namespace af {
 
+namespace detail {
+
+class AsyncLogConsumerWakeTarget {
+public:
+    AsyncLogConsumerWakeTarget() = default;
+    AsyncLogConsumerWakeTarget(const AsyncLogConsumerWakeTarget &) = delete;
+    AsyncLogConsumerWakeTarget &operator=(const AsyncLogConsumerWakeTarget &) = delete;
+    virtual ~AsyncLogConsumerWakeTarget() = default;
+
+    [[nodiscard]] virtual bool wake_async_log_consumer() noexcept = 0;
+};
+
+class AsyncLogConsumerController {
+public:
+    AsyncLogConsumerController() = default;
+    AsyncLogConsumerController(const AsyncLogConsumerController &) = delete;
+    AsyncLogConsumerController &operator=(const AsyncLogConsumerController &) = delete;
+    virtual ~AsyncLogConsumerController() = default;
+
+    virtual void shutdown() noexcept = 0;
+};
+
+template <typename RuntimeT> class RuntimeAsyncLogConsumerController;
+
+} // namespace detail
+
 enum class LogOverflowPolicy : std::uint8_t {
     DropNewest,
     Block,
@@ -37,6 +63,7 @@ struct AsyncLogConfig {
     std::size_t runtime_thread_count{0};
     std::size_t runtime_queue_capacity{0};
     std::size_t max_batch_size{256};
+    std::size_t max_consumer_batches_per_run{64};
     std::size_t overflow_spin_count{64};
     LogOverflowPolicy overflow_policy{LogOverflowPolicy::DropNewest};
     std::chrono::milliseconds flush_poll_interval{std::chrono::milliseconds(1)};
@@ -116,6 +143,7 @@ public:
         const auto deadline = std::chrono::steady_clock::now() + timeout;
         std::unique_lock lock(wait_mutex_);
         while (pending_.load(std::memory_order_acquire) != 0U) {
+            notify_consumer();
             if (drained_cv_.wait_until(lock, deadline) == std::cv_status::timeout &&
                 pending_.load(std::memory_order_acquire) != 0U) {
                 return false;
@@ -128,7 +156,7 @@ public:
     void shutdown() noexcept {
         const bool was_accepting = accepting_.exchange(false, std::memory_order_acq_rel);
         stopping_.store(true, std::memory_order_release);
-        wake_cv_.notify_one();
+        notify_consumer();
         if (worker_.joinable()) {
             worker_.join();
         }
@@ -155,6 +183,8 @@ public:
     }
 
 private:
+    template <typename RuntimeT> friend class detail::RuntimeAsyncLogConsumerController;
+
     template <typename Lane>
     [[nodiscard]] bool try_log_on_lane(Lane &lane, std::string_view message) noexcept {
         if (!accepting_.load(std::memory_order_acquire)) {
@@ -178,9 +208,43 @@ private:
 
         record_accepted(lane);
         if (previous_pending == 0U) {
-            wake_cv_.notify_one();
+            notify_consumer();
         }
         return true;
+    }
+
+    [[nodiscard]] bool start_bound_consumer(detail::AsyncLogConsumerWakeTarget &target) noexcept {
+        bool expected = false;
+        if (!started_.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
+                                              std::memory_order_acquire)) {
+            return false;
+        }
+
+        consumer_wake_target_.store(&target, std::memory_order_release);
+        accepting_.store(true, std::memory_order_release);
+        return true;
+    }
+
+    void stop_bound_consumer_admission() noexcept {
+        accepting_.store(false, std::memory_order_release);
+        stopping_.store(true, std::memory_order_release);
+    }
+
+    void finish_bound_consumer_shutdown() noexcept {
+        consumer_wake_target_.store(nullptr, std::memory_order_release);
+        shutdown_backends();
+    }
+
+    [[nodiscard]] bool consumer_stop_requested() const noexcept {
+        return stopping_.load(std::memory_order_acquire);
+    }
+
+    [[nodiscard]] std::size_t pending_record_count() const noexcept {
+        return pending_.load(std::memory_order_acquire);
+    }
+
+    [[nodiscard]] std::size_t max_batch_size() const noexcept {
+        return max_batch_size_;
     }
 
     struct ProducerShardCache {
@@ -333,7 +397,7 @@ private:
         batch.reserve(max_batch_size_);
 
         for (;;) {
-            drain_available(batch);
+            drain_until_idle(batch);
             if (stopping_.load(std::memory_order_acquire) &&
                 pending_.load(std::memory_order_acquire) == 0U) {
                 break;
@@ -346,17 +410,31 @@ private:
             });
         }
 
-        drain_available(batch);
+        drain_until_idle(batch);
         flush_backends();
     }
 
-    void drain_available(std::vector<detail::LogRecord *> &batch) noexcept {
+    void drain_until_idle(std::vector<detail::LogRecord *> &batch) noexcept {
+        while (drain_some(batch, std::numeric_limits<std::size_t>::max())) {
+        }
+    }
+
+    [[nodiscard]] bool drain_some(std::vector<detail::LogRecord *> &batch,
+                                  std::size_t max_write_batches) noexcept {
+        if (max_write_batches == 0U) {
+            max_write_batches = 1U;
+        }
+
+        bool drained_any = false;
         for (;;) {
+            if (max_write_batches == 0U) {
+                return drained_any;
+            }
             batch.clear();
             collect_batch(batch);
 
             if (batch.empty()) {
-                return;
+                return drained_any;
             }
 
             for (auto &backend : backends_) {
@@ -374,6 +452,9 @@ private:
             if (previous == drained) {
                 drained_cv_.notify_all();
             }
+
+            drained_any = true;
+            --max_write_batches;
         }
     }
 
@@ -463,6 +544,16 @@ private:
         }
     }
 
+    void notify_consumer() noexcept {
+        detail::AsyncLogConsumerWakeTarget *target =
+            consumer_wake_target_.load(std::memory_order_acquire);
+        if (target != nullptr) {
+            static_cast<void>(target->wake_async_log_consumer());
+            return;
+        }
+        wake_cv_.notify_one();
+    }
+
     static inline std::atomic<std::uint64_t> next_cache_token_{1};
 
     const std::uint64_t cache_token_;
@@ -482,6 +573,8 @@ private:
     alignas(detail::hardware_cache_line_size) std::atomic<bool> started_{false};
     alignas(detail::hardware_cache_line_size) std::atomic<bool> accepting_{false};
     alignas(detail::hardware_cache_line_size) std::atomic<bool> stopping_{false};
+    alignas(detail::hardware_cache_line_size)
+        std::atomic<detail::AsyncLogConsumerWakeTarget *> consumer_wake_target_{nullptr};
     alignas(detail::hardware_cache_line_size) std::atomic<std::size_t> next_producer_shard_{0};
     alignas(detail::hardware_cache_line_size) std::atomic<std::size_t> pending_{0};
 

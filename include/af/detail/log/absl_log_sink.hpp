@@ -6,6 +6,7 @@
 #include <chrono>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -19,6 +20,7 @@
 
 #include "af/detail/config.hpp"
 #include "af/detail/log/async_logger.hpp"
+#include "af/detail/log/runtime_async_log_consumer.hpp"
 
 namespace af {
 
@@ -97,8 +99,11 @@ private:
 
 class AsyncLogHandle {
 public:
-    AsyncLogHandle(std::shared_ptr<AsyncLogger> logger, std::unique_ptr<absl::LogSink> sink)
-        : logger_(std::move(logger)), sink_(std::move(sink)) {
+    AsyncLogHandle(
+        std::shared_ptr<AsyncLogger> logger, std::unique_ptr<absl::LogSink> sink,
+        std::unique_ptr<detail::AsyncLogConsumerController> consumer_controller = nullptr)
+        : logger_(std::move(logger)), sink_(std::move(sink)),
+          consumer_controller_(std::move(consumer_controller)) {
         AF_ASSERT(sink_ != nullptr);
     }
 
@@ -124,7 +129,11 @@ public:
             return;
         }
         absl::RemoveLogSink(sink_.get());
-        logger_->shutdown();
+        if (consumer_controller_ != nullptr) {
+            consumer_controller_->shutdown();
+        } else {
+            logger_->shutdown();
+        }
     }
 
 private:
@@ -133,6 +142,11 @@ private:
     template <typename RuntimeT>
     friend std::unique_ptr<AsyncLogHandle> start_async_logging_for_runtime(AsyncLogConfig config);
 
+    template <typename RuntimeT>
+    friend std::unique_ptr<AsyncLogHandle>
+    start_async_logging_for_runtime(AsyncLogConfig config,
+                                    typename RuntimeT::Thread consumer_thread);
+
     void register_sink() {
         absl::AddLogSink(sink_.get());
         registered_.store(true, std::memory_order_release);
@@ -140,6 +154,7 @@ private:
 
     std::shared_ptr<AsyncLogger> logger_;
     std::unique_ptr<absl::LogSink> sink_;
+    std::unique_ptr<detail::AsyncLogConsumerController> consumer_controller_;
     std::atomic<bool> registered_{false};
 };
 
@@ -172,22 +187,36 @@ inline void initialize_absl_log_once() {
 
 template <typename RuntimeT>
 [[nodiscard]] inline std::unique_ptr<AsyncLogHandle>
-start_async_logging_for_runtime(AsyncLogConfig config) {
+start_async_logging_for_runtime(AsyncLogConfig config, typename RuntimeT::Thread consumer_thread) {
     const bool initialize_absl_log = config.initialize_absl_log;
     if (config.runtime_thread_count == 0U) {
         config.runtime_thread_count = RuntimeT::thread_count;
     }
+    const std::size_t max_consumer_batches_per_run = config.max_consumer_batches_per_run;
 
     auto logger = std::make_shared<AsyncLogger>(std::move(config));
-    logger->start();
+    auto consumer_controller =
+        std::make_unique<detail::RuntimeAsyncLogConsumerController<RuntimeT>>(
+            logger, consumer_thread, max_consumer_batches_per_run);
+    if (!consumer_controller->start()) {
+        throw std::runtime_error("failed to start runtime async log consumer");
+    }
     if (initialize_absl_log) {
         initialize_absl_log_once();
     }
 
     auto handle = std::make_unique<AsyncLogHandle>(
-        logger, std::make_unique<RuntimeAbslAsyncLogSink<RuntimeT>>(logger));
+        logger, std::make_unique<RuntimeAbslAsyncLogSink<RuntimeT>>(logger),
+        std::move(consumer_controller));
     handle->register_sink();
     return handle;
+}
+
+template <typename RuntimeT>
+[[nodiscard]] inline std::unique_ptr<AsyncLogHandle>
+start_async_logging_for_runtime(AsyncLogConfig config) {
+    return start_async_logging_for_runtime<RuntimeT>(std::move(config),
+                                                     RuntimeT::thread_from_index(0));
 }
 
 } // namespace af

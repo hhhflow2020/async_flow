@@ -77,6 +77,44 @@ private:
     std::atomic<std::size_t> record_count_{0};
 };
 
+template <typename RuntimeT> class RuntimeThreadObservingLogBackend final : public af::LogBackend {
+public:
+    explicit RuntimeThreadObservingLogBackend(typename RuntimeT::Thread expected_thread)
+        : expected_thread_index_(RuntimeT::thread_index(expected_thread)) {}
+
+    void write_batch(std::span<af::detail::LogRecord *const> records) noexcept override {
+        record_count_.fetch_add(records.size(), std::memory_order_relaxed);
+        const bool on_runtime_thread = RuntimeT::is_runtime_thread();
+        ran_on_runtime_thread_.store(on_runtime_thread, std::memory_order_release);
+        if (on_runtime_thread) {
+            observed_thread_index_.store(RuntimeT::current_thread_index(),
+                                         std::memory_order_release);
+        }
+    }
+
+    [[nodiscard]] std::size_t record_count() const noexcept {
+        return record_count_.load(std::memory_order_acquire);
+    }
+
+    [[nodiscard]] bool ran_on_runtime_thread() const noexcept {
+        return ran_on_runtime_thread_.load(std::memory_order_acquire);
+    }
+
+    [[nodiscard]] std::uint16_t observed_thread_index() const noexcept {
+        return observed_thread_index_.load(std::memory_order_acquire);
+    }
+
+    [[nodiscard]] std::uint16_t expected_thread_index() const noexcept {
+        return expected_thread_index_;
+    }
+
+private:
+    const std::uint16_t expected_thread_index_;
+    std::atomic<std::size_t> record_count_{0};
+    std::atomic<bool> ran_on_runtime_thread_{false};
+    std::atomic<std::uint16_t> observed_thread_index_{RuntimeT::invalid_thread_index};
+};
+
 template <typename T> bool wait_until_at_least(std::atomic<T> &value, T expected) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (value.load(std::memory_order_acquire) < expected) {
@@ -117,7 +155,7 @@ struct LogTestRuntimeThreadTag;
 
 struct LogTestRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
-        af::thread_group<LogTestRuntimeThreadTag, 1, af::ThreadKind::Worker, "log-src">());
+        af::thread_group<LogTestRuntimeThreadTag, 2, af::ThreadKind::Worker, "log-src">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
@@ -129,6 +167,19 @@ using LogTestTaskBase = LogTestRuntime::Task;
 struct LogTestThreads {
     static constexpr auto Runtime_0 =
         LogTestRuntime::thread_group<LogTestRuntimeThreadTag>().template at<0>();
+    static constexpr auto Runtime_1 =
+        LogTestRuntime::thread_group<LogTestRuntimeThreadTag>().template at<1>();
+};
+
+class LogTestRuntimeGuard {
+public:
+    LogTestRuntimeGuard() {
+        LogTestRuntime::init();
+    }
+
+    ~LogTestRuntimeGuard() {
+        LogTestRuntime::shutdown();
+    }
 };
 
 class RuntimeLogTask final : public LogTestTaskBase {
@@ -549,6 +600,8 @@ TEST(LogTests, QueueOverflowDropsNewestWithoutBlockingProducer) {
 }
 
 TEST(LogTests, RuntimeAwareSinkUsesSpscLaneWhenExternalMpscIsFull) {
+    LogTestRuntimeGuard runtime_guard;
+
     auto backend = std::make_unique<BlockingLogBackend>();
     auto *blocking_backend = backend.get();
 
@@ -559,7 +612,8 @@ TEST(LogTests, RuntimeAwareSinkUsesSpscLaneWhenExternalMpscIsFull) {
     config.max_batch_size = 1;
     config.overflow_policy = af::LogOverflowPolicy::DropNewest;
     config.backends.push_back(std::move(backend));
-    auto logging = af::start_async_logging_for_runtime<LogTestRuntime>(std::move(config));
+    auto logging = af::start_async_logging_for_runtime<LogTestRuntime>(std::move(config),
+                                                                       LogTestThreads::Runtime_1);
 
     LOG(INFO) << "block log worker";
     ASSERT_TRUE(blocking_backend->wait_until_entered(std::chrono::seconds(2)));
@@ -572,17 +626,42 @@ TEST(LogTests, RuntimeAwareSinkUsesSpscLaneWhenExternalMpscIsFull) {
     const af::AsyncLogStats overflowed = logging->stats();
     ASSERT_GT(overflowed.dropped, filled.dropped);
 
-    LogTestRuntime::init();
     std::atomic<int> runtime_completed{0};
     ASSERT_TRUE(LogTestRuntime::start_task<RuntimeLogTask>(&runtime_completed));
     ASSERT_TRUE(wait_until_at_least(runtime_completed, 1));
-    LogTestRuntime::shutdown();
 
     const af::AsyncLogStats after_runtime = logging->stats();
     EXPECT_EQ(after_runtime.accepted, overflowed.accepted + 1U);
 
     blocking_backend->release();
     ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
+    logging->stop();
+}
+
+TEST(LogTests, RuntimeAwareSinkDrainsOnConfiguredRuntimeThread) {
+    LogTestRuntimeGuard runtime_guard;
+
+    auto backend = std::make_unique<RuntimeThreadObservingLogBackend<LogTestRuntime>>(
+        LogTestThreads::Runtime_1);
+    auto *observing_backend = backend.get();
+
+    af::AsyncLogConfig config;
+    config.queue_capacity = 16;
+    config.runtime_queue_capacity = 16;
+    config.max_batch_size = 4;
+    config.backends.push_back(std::move(backend));
+    auto logging = af::start_async_logging_for_runtime<LogTestRuntime>(std::move(config),
+                                                                       LogTestThreads::Runtime_1);
+
+    LOG(INFO) << "runtime-bound consumer external log";
+
+    ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
+    logging->stop();
+
+    EXPECT_EQ(observing_backend->record_count(), 1U);
+    EXPECT_TRUE(observing_backend->ran_on_runtime_thread());
+    EXPECT_EQ(observing_backend->observed_thread_index(),
+              observing_backend->expected_thread_index());
 }
 
 TEST(LogTests, RuntimeLaneRecordPoolReusesSlotsAcrossFlushes) {
@@ -622,16 +701,15 @@ TEST(LogTests, RuntimeAwareSinkPrefixesRuntimeTaskId) {
     config.queue_capacity = 16;
     config.runtime_queue_capacity = 16;
     config.backends.push_back(af::make_file_log_backend({.path = path, .append = false}));
-    auto logging = af::start_async_logging_for_runtime<LogTestRuntime>(std::move(config));
-
-    LogTestRuntime::init();
+    LogTestRuntimeGuard runtime_guard;
+    auto logging = af::start_async_logging_for_runtime<LogTestRuntime>(std::move(config),
+                                                                       LogTestThreads::Runtime_0);
     std::atomic<int> runtime_completed{0};
     std::atomic<LogTestTaskBase::TaskId> observed_task_id{LogTestTaskBase::invalid_task_id};
     std::atomic<LogTestTaskBase::TaskId> observed_current_task_id{LogTestTaskBase::invalid_task_id};
     ASSERT_TRUE(LogTestRuntime::start_task<RuntimeTaskIdLogTask>(
         &runtime_completed, &observed_task_id, &observed_current_task_id));
     ASSERT_TRUE(wait_until_at_least(runtime_completed, 1));
-    LogTestRuntime::shutdown();
 
     ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
     logging->stop();

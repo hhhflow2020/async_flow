@@ -83,8 +83,9 @@ int main(int argc, char **argv) {
         argc > 1 ? argv[1] : "asyncflow-runtime-logging-example.log";
     config.backends.push_back(af::make_file_log_backend({.path = log_path, .append = false}));
 
-    auto logging = af::start_async_logging_for_runtime<runtime_async>(std::move(config));
     runtime_async::init();
+    auto logging = af::start_async_logging_for_runtime<runtime_async>(
+        std::move(config), RuntimeLogThreads::logic.at<0>());
 
     constexpr int task_count = 4;
     std::atomic<int> completed{0};
@@ -94,13 +95,12 @@ int main(int argc, char **argv) {
     }
 
     const bool completed_all = wait_for_completion(completed, task_count);
-    runtime_async::shutdown();
-
-    LOG(INFO) << "external log after runtime shutdown";
+    LOG(INFO) << "external log before runtime shutdown";
 
     const bool flushed = logging->flush(5s);
     const af::AsyncLogStats stats = logging->stats();
     logging->stop();
+    runtime_async::shutdown();
 
     std::cout << "started=" << started << " completed=" << completed.load(std::memory_order_acquire)
               << " accepted=" << stats.accepted << " dropped=" << stats.dropped

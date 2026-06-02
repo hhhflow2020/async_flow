@@ -117,7 +117,8 @@ int main(int argc, char **argv) {
     config.consumer_thread_name = "log";
     config.backends.push_back(std::move(backend));
 
-    auto logging = af::start_async_logging_for_runtime<runtime_file_async>(std::move(config));
+    auto logging = af::start_async_logging_for_runtime<runtime_file_async>(
+        std::move(config), RuntimeFileThreads::IO_0);
 
     constexpr int task_count = 4;
     constexpr int expected_records =
