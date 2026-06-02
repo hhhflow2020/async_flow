@@ -496,39 +496,7 @@ public:
 
 private:
     [[nodiscard]] bool wake_writer() noexcept {
-        if (!writer_) {
-            return false;
-        }
-        if (state_->finished.load(std::memory_order_acquire)) {
-            return true;
-        }
-        if (state_->io_waiting.load(std::memory_order_acquire) &&
-            !state_->stopping.load(std::memory_order_acquire)) {
-            return true;
-        }
-
-        bool wake_expected = false;
-        if (!state_->wake_queued.compare_exchange_strong(
-                wake_expected, true, std::memory_order_acq_rel, std::memory_order_acquire)) {
-            return true;
-        }
-
-        bool expected = false;
-        if (writer_started_.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
-                                                    std::memory_order_acquire)) {
-            if (writer_->start(state_.get())) {
-                return true;
-            }
-            writer_started_.store(false, std::memory_order_release);
-            state_->wake_queued.store(false, std::memory_order_release);
-            return false;
-        }
-
-        if (writer_->wake()) {
-            return true;
-        }
-        state_->wake_queued.store(false, std::memory_order_release);
-        return false;
+        return detail::wake_runtime_log_task(state_.get(), writer_, writer_started_, true);
     }
 
     std::unique_ptr<State> state_;

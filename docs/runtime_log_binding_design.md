@@ -13,6 +13,10 @@
   for batch pooling, ready/free SPSC queues, pending counters, wake flags, and
   bounded flush waits. File, UDP, and TCP keep only their backend-specific IO
   strategy state.
+- Runtime backend wakeup is now shared through a small template helper. File,
+  UDP, and TCP all skip ordinary producer wakeups while their bound task is
+  waiting on runtime IO readiness, so producer notifications do not masquerade as
+  IO completions.
 
 This is a useful intermediate shape: runtime log producers still get SPSC
 submission, external producers still have MPSC admission, and network backends do
@@ -53,7 +57,8 @@ can be driven by the same runtime-bound drain task.
 - Shutdown must stop admission before draining, then wake the bound consumer
   task, then shut down backends after all pending records are released.
 - A backend waiting for IO readiness must not be woken by ordinary producer
-  notifications as if the IO had completed.
+  notifications as if the IO had completed. This is now enforced consistently
+  for file, UDP, and TCP runtime-bound backends.
 
 ## Performance constraints
 

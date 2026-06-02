@@ -106,7 +106,7 @@ public:
         : QueueState(
               config.batch_queue_capacity, normalize_max_batch_records(config.max_batch_records),
               config.max_batches_per_run, normalize_max_datagram_size(config.max_datagram_size)),
-          thread(config.thread), sent_records(0) {
+          thread(config.thread), sent_records(0), io_waiting(false) {
         resolve(config.host, config.port);
     }
 
@@ -156,6 +156,7 @@ public:
 
     Thread thread;
     CacheLineAtomic<std::uint64_t> sent_records;
+    CacheLineAtomic<bool> io_waiting;
 
 #if !defined(_WIN32)
     sockaddr_storage address{};
@@ -236,6 +237,23 @@ private:
         }
 
         state_->wake_queued.store(false, std::memory_order_release);
+        if (state_->stopping.load(std::memory_order_acquire)) {
+            drop_current();
+            drop_ready_batches();
+#if !defined(_WIN32)
+            state_->io_waiting.store(false, std::memory_order_release);
+            state_->close_socket();
+#endif
+            state_->finished.store(true, std::memory_order_release);
+            state_->finished.notify_all();
+            return this->done();
+        }
+#if !defined(_WIN32)
+        if (state_->io_waiting.load(std::memory_order_acquire) && !io_wait_ready()) {
+            return this->pending();
+        }
+        state_->io_waiting.store(false, std::memory_order_release);
+#endif
         std::size_t drained_batches = 0;
         for (;;) {
             if (current_ == nullptr) {
@@ -301,15 +319,21 @@ private:
 #if !defined(_WIN32)
     [[nodiscard]] SendResult arm_writable_wait() noexcept {
         wait_result_ = IoResult{};
+        state_->io_waiting.store(true, std::memory_order_release);
         if (this->wait_io(state_->thread, state_->fd, io_writable, &wait_result_)) {
             return SendResult::Pending;
         }
 
+        state_->io_waiting.store(false, std::memory_order_release);
         state_->close_socket();
         state_->dropped_records.fetch_add(current_->messages.size() - current_message_,
                                           std::memory_order_relaxed);
         current_message_ = current_->messages.size();
         return SendResult::Complete;
+    }
+
+    [[nodiscard]] bool io_wait_ready() const noexcept {
+        return wait_result_.events != 0U || wait_result_.error != 0 || wait_result_.result != 0;
     }
 
     [[nodiscard]] SendResult send_current_one() noexcept {
@@ -386,6 +410,29 @@ private:
     IoResult wait_result_{};
 #endif
 
+    void drop_current() noexcept {
+        if (current_ == nullptr) {
+            return;
+        }
+#if !defined(_WIN32)
+        state_->io_waiting.store(false, std::memory_order_release);
+        wait_result_ = IoResult{};
+        state_->close_socket();
+#endif
+        state_->dropped_records.fetch_add(current_->messages.size() - current_message_,
+                                          std::memory_order_relaxed);
+        state_->complete_batch(current_);
+        current_ = nullptr;
+        current_message_ = 0;
+    }
+
+    void drop_ready_batches() noexcept {
+        while (RuntimeUdpLogBatch *batch = state_->ready_batches.try_pop()) {
+            state_->dropped_records.fetch_add(batch->messages.size(), std::memory_order_relaxed);
+            state_->complete_batch(batch);
+        }
+    }
+
     State *state_{nullptr};
     RuntimeUdpLogBatch *current_{nullptr};
     std::size_t current_message_{0};
@@ -458,35 +505,7 @@ public:
 
 private:
     [[nodiscard]] bool wake_sender() noexcept {
-        if (!sender_) {
-            return false;
-        }
-        if (state_->finished.load(std::memory_order_acquire)) {
-            return true;
-        }
-
-        bool wake_expected = false;
-        if (!state_->wake_queued.compare_exchange_strong(
-                wake_expected, true, std::memory_order_acq_rel, std::memory_order_acquire)) {
-            return true;
-        }
-
-        bool expected = false;
-        if (sender_started_.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
-                                                    std::memory_order_acquire)) {
-            if (sender_->start(state_.get())) {
-                return true;
-            }
-            sender_started_.store(false, std::memory_order_release);
-            state_->wake_queued.store(false, std::memory_order_release);
-            return false;
-        }
-
-        if (sender_->wake()) {
-            return true;
-        }
-        state_->wake_queued.store(false, std::memory_order_release);
-        return false;
+        return detail::wake_runtime_log_task(state_.get(), sender_, sender_started_, true);
     }
 
     std::unique_ptr<State> state_;

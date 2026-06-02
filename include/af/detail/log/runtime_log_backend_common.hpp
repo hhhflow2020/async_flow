@@ -142,4 +142,43 @@ private:
     }
 };
 
+template <typename StateT, typename TaskHandleT>
+[[nodiscard]] bool wake_runtime_log_task(StateT *state, TaskHandleT &task,
+                                         std::atomic<bool> &task_started,
+                                         bool skip_when_io_waiting) noexcept {
+    if (!task) {
+        return false;
+    }
+    if (state->finished.load(std::memory_order_acquire)) {
+        return true;
+    }
+    if (skip_when_io_waiting && state->io_waiting.load(std::memory_order_acquire) &&
+        !state->stopping.load(std::memory_order_acquire)) {
+        return true;
+    }
+
+    bool wake_expected = false;
+    if (!state->wake_queued.compare_exchange_strong(wake_expected, true, std::memory_order_acq_rel,
+                                                    std::memory_order_acquire)) {
+        return true;
+    }
+
+    bool expected = false;
+    if (task_started.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
+                                             std::memory_order_acquire)) {
+        if (task->start(state)) {
+            return true;
+        }
+        task_started.store(false, std::memory_order_release);
+        state->wake_queued.store(false, std::memory_order_release);
+        return false;
+    }
+
+    if (task->wake()) {
+        return true;
+    }
+    state->wake_queued.store(false, std::memory_order_release);
+    return false;
+}
+
 } // namespace af::detail
