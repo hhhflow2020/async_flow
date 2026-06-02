@@ -22,6 +22,7 @@
 #include "af/detail/queue/bounded_queues.hpp"
 #include "af/detail/config.hpp"
 #include "af/detail/io/uring/io_uring_support.hpp"
+#include "af/detail/memory/contiguous_object_storage.hpp"
 #include "af/detail/memory/object_pool.hpp"
 #include "af/detail/runtime/runtime_common_state.hpp"
 #include "af/detail/runtime/runtime_config.hpp"
@@ -343,8 +344,8 @@ private:
     static inline CacheLineAtomic<std::uint32_t> unfinished_tasks_{0};
     static inline CacheLineAtomic<std::uint64_t> generation_{0};
     static inline std::vector<std::unique_ptr<Executor>> executors_;
-    static inline std::vector<std::unique_ptr<SpscQueue>> spsc_queues_;
-    static inline std::vector<std::unique_ptr<ExternalQueue>> external_queues_;
+    static inline detail::ContiguousObjectStorage<SpscQueue> spsc_queues_;
+    static inline detail::ContiguousObjectStorage<ExternalQueue> external_queues_;
     static inline std::vector<OrderedBatchState> ordered_batch_state_;
     static inline std::mutex task_registry_mutex_;
     static inline Task *task_registry_head_{nullptr};

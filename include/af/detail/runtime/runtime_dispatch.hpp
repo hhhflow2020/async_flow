@@ -8,19 +8,19 @@ namespace af {
 
 template <typename TraitsT> void AsyncRuntime<TraitsT>::init_queues() {
     spsc_queues_.clear();
-    spsc_queues_.reserve(static_cast<std::size_t>(thread_count) * thread_count);
+    spsc_queues_.reserve_exact(static_cast<std::size_t>(thread_count) * thread_count);
     for (std::uint16_t source = 0; source < thread_count; ++source) {
         for (std::uint16_t target = 0; target < thread_count; ++target) {
             static_cast<void>(target);
-            spsc_queues_.push_back(std::make_unique<SpscQueue>(spsc_queue_capacity));
+            spsc_queues_.emplace_back(spsc_queue_capacity);
         }
     }
 
     external_queues_.clear();
-    external_queues_.reserve(thread_count);
+    external_queues_.reserve_exact(thread_count);
     for (std::uint16_t target = 0; target < thread_count; ++target) {
         static_cast<void>(target);
-        external_queues_.push_back(std::make_unique<ExternalQueue>(external_queue_capacity));
+        external_queues_.emplace_back(external_queue_capacity);
     }
 }
 
