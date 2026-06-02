@@ -80,15 +80,15 @@ public:
     }
 
     [[nodiscard]] bool try_log(std::string_view message) noexcept {
+        QueueShard &shard = producer_shard();
         if (!accepting_.load(std::memory_order_acquire)) {
-            dropped_.fetch_add(1U, std::memory_order_relaxed);
+            record_dropped(shard);
             return false;
         }
 
-        QueueShard &shard = producer_shard();
         detail::LogRecord *record = acquire_record(shard, message);
         if (record == nullptr) {
-            dropped_.fetch_add(1U, std::memory_order_relaxed);
+            record_dropped(shard);
             return false;
         }
 
@@ -96,11 +96,11 @@ public:
         if (!push_record(shard, record)) {
             release_record(record);
             abandon_pending_record();
-            dropped_.fetch_add(1U, std::memory_order_relaxed);
+            record_dropped(shard);
             return false;
         }
 
-        accepted_.fetch_add(1U, std::memory_order_relaxed);
+        record_accepted(shard);
         if (previous_pending == 0U) {
             wake_cv_.notify_one();
         }
@@ -134,10 +134,12 @@ public:
     }
 
     [[nodiscard]] AsyncLogStats stats() const noexcept {
-        return {
-            accepted_.load(std::memory_order_acquire),
-            dropped_.load(std::memory_order_acquire),
-        };
+        AsyncLogStats result;
+        for (const QueueShard &shard : queue_shards_) {
+            result.accepted += shard.accepted.load();
+            result.dropped += shard.dropped.load();
+        }
+        return result;
     }
 
     [[nodiscard]] std::chrono::milliseconds fatal_flush_timeout() const noexcept {
@@ -257,10 +259,24 @@ private:
             pack_head(null_slot, 0U)};
     };
 
+    struct alignas(detail::hardware_cache_line_size) LogStatCounter {
+        void add(std::uint64_t value) noexcept {
+            count.fetch_add(value, std::memory_order_relaxed);
+        }
+
+        [[nodiscard]] std::uint64_t load() const noexcept {
+            return count.load(std::memory_order_acquire);
+        }
+
+        std::atomic<std::uint64_t> count{0};
+    };
+
     struct alignas(detail::hardware_cache_line_size) QueueShard {
         QueueShard(std::size_t queue_capacity, std::size_t record_capacity)
             : queue(queue_capacity), records(record_capacity) {}
 
+        LogStatCounter accepted;
+        LogStatCounter dropped;
         detail::BoundedMpscQueue<detail::LogRecord> queue;
         LogRecordPool records;
     };
@@ -324,6 +340,14 @@ private:
         }
         AF_ASSERT(cache.shard != nullptr);
         return *cache.shard;
+    }
+
+    static void record_accepted(QueueShard &shard) noexcept {
+        shard.accepted.add(1U);
+    }
+
+    static void record_dropped(QueueShard &shard) noexcept {
+        shard.dropped.add(1U);
     }
 
     [[nodiscard]] detail::LogRecord *acquire_record(QueueShard &shard,
@@ -461,8 +485,6 @@ private:
     alignas(detail::hardware_cache_line_size) std::atomic<bool> accepting_{false};
     alignas(detail::hardware_cache_line_size) std::atomic<bool> stopping_{false};
     alignas(detail::hardware_cache_line_size) std::atomic<std::size_t> next_producer_shard_{0};
-    alignas(detail::hardware_cache_line_size) std::atomic<std::uint64_t> accepted_{0};
-    alignas(detail::hardware_cache_line_size) std::atomic<std::uint64_t> dropped_{0};
     alignas(detail::hardware_cache_line_size) std::atomic<std::size_t> pending_{0};
 
     std::size_t next_drain_shard_{0};
