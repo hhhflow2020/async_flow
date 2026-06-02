@@ -18,11 +18,9 @@
 #include <vector>
 
 #include "af/detail/config.hpp"
+#include "af/detail/log/async_log_lanes.hpp"
 #include "af/detail/log/async_log_record_pool.hpp"
 #include "af/detail/log/log_backend.hpp"
-#include "af/detail/memory/contiguous_object_storage.hpp"
-#include "af/detail/queue/bounded_mpsc_queue.hpp"
-#include "af/detail/queue/bounded_spsc_queue.hpp"
 #include "af/detail/queue/queue_backoff.hpp"
 #include "af/detail/thread/thread_name.hpp"
 
@@ -100,7 +98,7 @@ public:
     }
 
     [[nodiscard]] bool try_log(std::string_view message) noexcept {
-        QueueShard &shard = producer_shard();
+        detail::AsyncLogQueueShard &shard = producer_shard();
         return try_log_on_lane(shard, message);
     }
 
@@ -110,7 +108,7 @@ public:
             return try_log(message);
         }
 
-        RuntimeLane &lane = *runtime_lanes_[thread_index];
+        detail::AsyncLogRuntimeLane &lane = *runtime_lanes_[thread_index];
         return try_log_on_lane(lane, message);
     }
 
@@ -141,11 +139,11 @@ public:
 
     [[nodiscard]] AsyncLogStats stats() const noexcept {
         AsyncLogStats result;
-        for (const QueueShard &shard : queue_shards_) {
+        for (const detail::AsyncLogQueueShard &shard : queue_shards_) {
             result.accepted += shard.accepted.load();
             result.dropped += shard.dropped.load();
         }
-        for (const RuntimeLane &lane : runtime_lanes_) {
+        for (const detail::AsyncLogRuntimeLane &lane : runtime_lanes_) {
             result.accepted += lane.accepted.load();
             result.dropped += lane.dropped.load();
         }
@@ -185,46 +183,11 @@ private:
         return true;
     }
 
-    struct alignas(detail::hardware_cache_line_size) LogStatCounter {
-        void add(std::uint64_t value) noexcept {
-            count.fetch_add(value, std::memory_order_relaxed);
-        }
-
-        [[nodiscard]] std::uint64_t load() const noexcept {
-            return count.load(std::memory_order_acquire);
-        }
-
-        std::atomic<std::uint64_t> count{0};
-    };
-
-    struct alignas(detail::hardware_cache_line_size) QueueShard {
-        QueueShard(std::size_t queue_capacity, std::size_t record_capacity)
-            : queue(queue_capacity), records(record_capacity) {}
-
-        LogStatCounter accepted;
-        LogStatCounter dropped;
-        detail::BoundedMpscQueue<detail::LogRecord> queue;
-        detail::AsyncLogRecordPool records;
-    };
-
-    struct alignas(detail::hardware_cache_line_size) RuntimeLane {
-        RuntimeLane(std::size_t queue_capacity, std::size_t record_capacity)
-            : queue(queue_capacity), records(record_capacity) {}
-
-        LogStatCounter accepted;
-        LogStatCounter dropped;
-        detail::BoundedSpscQueue<detail::LogRecord> queue;
-        detail::AsyncLogSpscRecordPool records;
-    };
-
     struct ProducerShardCache {
         const AsyncLogger *logger{nullptr};
         std::uint64_t token{0};
-        QueueShard *shard{nullptr};
+        detail::AsyncLogQueueShard *shard{nullptr};
     };
-
-    using QueueShardStorage = detail::ContiguousObjectStorage<QueueShard>;
-    using RuntimeLaneStorage = detail::ContiguousObjectStorage<RuntimeLane>;
 
     [[nodiscard]] static std::size_t default_queue_shard_count() noexcept {
         const unsigned int hardware_threads = std::thread::hardware_concurrency();
@@ -270,10 +233,10 @@ private:
         return queue_capacity + batch_capacity;
     }
 
-    [[nodiscard]] static QueueShardStorage make_queue_shards(std::size_t shard_count,
-                                                             std::size_t capacity_per_shard,
-                                                             std::size_t max_batch_size) {
-        QueueShardStorage shards;
+    [[nodiscard]] static detail::AsyncLogQueueShardStorage
+    make_queue_shards(std::size_t shard_count, std::size_t capacity_per_shard,
+                      std::size_t max_batch_size) {
+        detail::AsyncLogQueueShardStorage shards;
         shards.reserve_exact(shard_count);
         const std::size_t record_capacity =
             record_capacity_per_shard(capacity_per_shard, max_batch_size);
@@ -283,10 +246,10 @@ private:
         return shards;
     }
 
-    [[nodiscard]] static RuntimeLaneStorage make_runtime_lanes(std::size_t thread_count,
-                                                               std::size_t capacity_per_thread,
-                                                               std::size_t max_batch_size) {
-        RuntimeLaneStorage lanes;
+    [[nodiscard]] static detail::AsyncLogRuntimeLaneStorage
+    make_runtime_lanes(std::size_t thread_count, std::size_t capacity_per_thread,
+                       std::size_t max_batch_size) {
+        detail::AsyncLogRuntimeLaneStorage lanes;
         if (thread_count == 0U) {
             return lanes;
         }
@@ -300,7 +263,7 @@ private:
         return lanes;
     }
 
-    [[nodiscard]] QueueShard &producer_shard() noexcept {
+    [[nodiscard]] detail::AsyncLogQueueShard &producer_shard() noexcept {
         thread_local ProducerShardCache cache;
         if (cache.logger != this || cache.token != cache_token_) [[unlikely]] {
             const std::size_t shard_index =
@@ -430,7 +393,7 @@ private:
         std::array<detail::LogRecord *, max_queue_drain_count> drained;
         std::size_t empty_visits = 0;
         while (batch.size() < max_batch_size_ && empty_visits < queue_shard_count_) {
-            QueueShard &shard = *queue_shards_[next_drain_shard_];
+            detail::AsyncLogQueueShard &shard = *queue_shards_[next_drain_shard_];
             next_drain_shard_ = (next_drain_shard_ + 1U) & queue_shard_mask_;
 
             const std::size_t count = shard.queue.try_pop_many(
@@ -454,7 +417,7 @@ private:
         std::array<detail::LogRecord *, max_queue_drain_count> drained;
         std::size_t empty_visits = 0;
         while (batch.size() < max_batch_size_ && empty_visits < runtime_thread_count_) {
-            RuntimeLane &lane = *runtime_lanes_[next_runtime_drain_thread_];
+            detail::AsyncLogRuntimeLane &lane = *runtime_lanes_[next_runtime_drain_thread_];
             ++next_runtime_drain_thread_;
             if (next_runtime_drain_thread_ == runtime_thread_count_) {
                 next_runtime_drain_thread_ = 0U;
@@ -506,8 +469,8 @@ private:
     const std::size_t queue_shard_count_;
     const std::size_t queue_shard_mask_;
     const std::size_t runtime_thread_count_;
-    QueueShardStorage queue_shards_;
-    RuntimeLaneStorage runtime_lanes_;
+    detail::AsyncLogQueueShardStorage queue_shards_;
+    detail::AsyncLogRuntimeLaneStorage runtime_lanes_;
     const std::size_t max_batch_size_;
     const std::size_t overflow_spin_count_;
     const LogOverflowPolicy overflow_policy_;

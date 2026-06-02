@@ -28,6 +28,9 @@
   `AsyncLogger` wires queues, counters, and consumer draining, while the shared
   MPSC record pool and runtime SPSC record pool live in a focused internal
   module.
+- Producer lane ownership is now split into `async_log_lanes.hpp`. External
+  producer shards, runtime SPSC lanes, and their cache-line-isolated counters are
+  grouped with the queue and record-pool topology they protect.
 
 This is a useful intermediate shape: runtime log producers still get SPSC
 submission, external producers still have MPSC admission, and network backends do
@@ -79,6 +82,9 @@ can be driven by the same runtime-bound drain task.
   shared free-list CAS pair used by external producer shards.
 - Record pool changes should stay isolated from the consumer drain loop so the
   shared MPSC pool and runtime SPSC pool can be tuned independently.
+- Lane topology changes should stay isolated from consumer lifecycle code so
+  cache layout and false-sharing tuning can be done without touching backend
+  flush/shutdown behavior.
 - Backend batches should be preallocated and recycled through SPSC free/ready
   queues or a shared runtime drain pool.
 - Counters and queue cursors that are touched by different threads should stay
