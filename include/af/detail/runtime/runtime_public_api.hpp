@@ -167,6 +167,11 @@ template <typename TraitsT> std::uint16_t AsyncRuntime<TraitsT>::current_thread_
 }
 
 template <typename TraitsT>
+auto AsyncRuntime<TraitsT>::current_task_id() noexcept -> typename AsyncRuntime<TraitsT>::TaskId {
+    return current_task_id_;
+}
+
+template <typename TraitsT>
 template <typename Op, typename KeyFn>
 ShardedOps<Op> AsyncRuntime<TraitsT>::split_by_shard(std::vector<Op> &&ops,
                                                      std::uint16_t shard_count, KeyFn &&key_fn) {

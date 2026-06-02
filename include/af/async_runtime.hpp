@@ -99,6 +99,7 @@ class AsyncRuntime : public detail::RuntimePublicIo<AsyncRuntime<TraitsT>, Trait
 public:
     using Traits = TraitsT;
     using Task = BasicTask<AsyncRuntime<Traits>>;
+    using TaskId = typename Task::TaskId;
     using Config = detail::RuntimeConfig<Traits>;
     using ThreadLayout = typename Config::ThreadLayout;
     using Thread = typename Config::Thread;
@@ -115,6 +116,7 @@ public:
 
     static constexpr std::uint16_t thread_count = Config::thread_count;
     static constexpr std::uint16_t invalid_thread_index = Config::invalid_thread_index;
+    static constexpr TaskId invalid_task_id = Task::invalid_task_id;
     static constexpr std::size_t spsc_queue_capacity = Config::spsc_queue_capacity;
     static constexpr std::size_t external_queue_capacity = Config::external_queue_capacity;
     static constexpr QueueFullPolicy queue_full_policy = Config::queue_full_policy;
@@ -178,6 +180,7 @@ public:
     [[nodiscard]] static bool is_runtime_thread() noexcept;
     [[nodiscard]] static bool is_stopping() noexcept;
     [[nodiscard]] static std::uint16_t current_thread_index() noexcept;
+    [[nodiscard]] static TaskId current_task_id() noexcept;
     [[nodiscard]] static constexpr std::uint16_t thread_index(Thread thread) noexcept {
         return thread.index();
     }
@@ -350,6 +353,7 @@ private:
     static inline std::mutex task_registry_mutex_;
     static inline Task *task_registry_head_{nullptr};
     static inline thread_local std::uint16_t current_thread_index_ = invalid_thread_index;
+    static inline thread_local TaskId current_task_id_ = invalid_task_id;
 };
 
 } // namespace af

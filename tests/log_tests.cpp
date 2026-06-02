@@ -150,6 +150,33 @@ private:
     std::atomic<int> *completed_{nullptr};
 };
 
+class RuntimeTaskIdLogTask final : public LogTestTaskBase {
+public:
+    explicit RuntimeTaskIdLogTask(LogTestTaskBase::FactoryToken token) : LogTestTaskBase(token) {}
+
+    bool do_it(std::atomic<int> *completed, std::atomic<LogTestTaskBase::TaskId> *observed_task_id,
+               std::atomic<LogTestTaskBase::TaskId> *observed_current_task_id) {
+        completed_ = completed;
+        observed_task_id_ = observed_task_id;
+        observed_current_task_id_ = observed_current_task_id;
+        return schedule(LogTestThreads::Runtime_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        observed_task_id_->store(task_id(), std::memory_order_release);
+        observed_current_task_id_->store(LogTestRuntime::current_task_id(),
+                                         std::memory_order_release);
+        LOG(INFO) << "runtime task id log";
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<LogTestTaskBase::TaskId> *observed_task_id_{nullptr};
+    std::atomic<LogTestTaskBase::TaskId> *observed_current_task_id_{nullptr};
+};
+
 struct LogUdpIoThreadTag;
 
 #if defined(__linux__)
@@ -459,6 +486,37 @@ TEST(LogTests, RuntimeAwareSinkUsesSpscLaneWhenExternalMpscIsFull) {
 
     blocking_backend->release();
     ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
+}
+
+TEST(LogTests, RuntimeAwareSinkPrefixesRuntimeTaskId) {
+    const auto path = std::filesystem::temp_directory_path() / "async_flow_task_id_log.txt";
+    std::filesystem::remove(path);
+
+    af::AsyncLogConfig config;
+    config.queue_capacity = 16;
+    config.runtime_queue_capacity = 16;
+    config.backends.push_back(af::make_file_log_backend({.path = path, .append = false}));
+    auto logging = af::start_async_logging_for_runtime<LogTestRuntime>(std::move(config));
+
+    LogTestRuntime::init();
+    std::atomic<int> runtime_completed{0};
+    std::atomic<LogTestTaskBase::TaskId> observed_task_id{LogTestTaskBase::invalid_task_id};
+    std::atomic<LogTestTaskBase::TaskId> observed_current_task_id{LogTestTaskBase::invalid_task_id};
+    ASSERT_TRUE(LogTestRuntime::start_task<RuntimeTaskIdLogTask>(
+        &runtime_completed, &observed_task_id, &observed_current_task_id));
+    ASSERT_TRUE(wait_until_at_least(runtime_completed, 1));
+    LogTestRuntime::shutdown();
+
+    ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
+    logging->stop();
+
+    const auto task_id = observed_task_id.load(std::memory_order_acquire);
+    ASSERT_NE(task_id, LogTestTaskBase::invalid_task_id);
+    EXPECT_EQ(observed_current_task_id.load(std::memory_order_acquire), task_id);
+
+    const std::string contents = read_file(path);
+    EXPECT_NE(contents.find("[task=" + std::to_string(task_id) + "] "), std::string::npos);
+    EXPECT_NE(contents.find("runtime task id log"), std::string::npos);
 }
 
 TEST(LogTests, BlockOverflowWaitsForQueueCapacity) {

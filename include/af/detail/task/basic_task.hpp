@@ -4,7 +4,10 @@ template <typename RuntimeT> class BasicTask {
 public:
     using Runtime = RuntimeT;
     using Thread = typename Runtime::Thread;
+    using TaskId = std::uint64_t;
     using DestroyFn = void (*)(BasicTask *) noexcept;
+
+    static constexpr TaskId invalid_task_id = 0;
 
     class FactoryToken {
     public:
@@ -27,8 +30,12 @@ public:
     static void *operator new(std::size_t, std::align_val_t) = delete;
     static void *operator new[](std::size_t, std::align_val_t) = delete;
 
+    [[nodiscard]] TaskId task_id() const noexcept {
+        return task_id_;
+    }
+
 protected:
-    explicit BasicTask(FactoryToken) noexcept {}
+    explicit BasicTask(FactoryToken) noexcept : task_id_(allocate_task_id()) {}
 
     static void operator delete(void *ptr) noexcept {
         ::operator delete(ptr);
@@ -276,10 +283,24 @@ private:
         return static_cast<std::uint16_t>((request & requested_thread_mask) - 1U);
     }
 
+    static TaskId allocate_task_id() noexcept {
+        thread_local TaskId next_local_task_id = invalid_task_id;
+        thread_local TaskId local_task_id_limit = invalid_task_id;
+        if (next_local_task_id == local_task_id_limit) [[unlikely]] {
+            next_local_task_id =
+                next_task_id_.fetch_add(task_id_block_size, std::memory_order_relaxed);
+            local_task_id_limit = next_local_task_id + task_id_block_size;
+        }
+        return next_local_task_id++;
+    }
+
     std::atomic<TaskState> state_{TaskState::Created};
     std::atomic<std::uint64_t> requested_thread_{detail::no_requested_thread};
     std::atomic<std::uint64_t> run_epoch_{0};
     std::atomic<std::uint32_t> lifetime_refs_{1};
+    static constexpr TaskId task_id_block_size = 1024;
+    alignas(detail::hardware_cache_line_size) static inline std::atomic<TaskId> next_task_id_{1};
+    const TaskId task_id_;
     std::uint32_t last_parallel_failures_{0};
     DestroyFn destroy_fn_{nullptr};
     [[no_unique_address]] std::conditional_t<detail::task_registry_enabled_v<Runtime>,

@@ -59,7 +59,9 @@ void Executor<RuntimeT, TraitsT>::execute(Task *task) noexcept {
 
     TaskResult result = TaskResult::Done;
     Task *previous_running_task = running_task_;
+    const auto previous_task_id = RuntimeT::current_task_id_;
     running_task_ = task;
+    RuntimeT::current_task_id_ = task->task_id();
     try {
         result = task->run();
     } catch (...) {
@@ -85,6 +87,7 @@ void Executor<RuntimeT, TraitsT>::execute(Task *task) noexcept {
         finish_done(task);
         break;
     }
+    RuntimeT::current_task_id_ = previous_task_id;
 }
 
 template <typename RuntimeT, typename TraitsT>
@@ -99,6 +102,7 @@ void Executor<RuntimeT, TraitsT>::notify_force() noexcept {
 template <typename RuntimeT, typename TraitsT>
 void Executor<RuntimeT, TraitsT>::run_loop() noexcept {
     RuntimeT::current_thread_index_ = index_;
+    RuntimeT::current_task_id_ = RuntimeT::invalid_task_id;
 
     for (;;) {
         bool did_work = false;
@@ -149,6 +153,7 @@ void Executor<RuntimeT, TraitsT>::run_loop() noexcept {
     }
 
     RuntimeT::current_thread_index_ = invalid_thread_index;
+    RuntimeT::current_task_id_ = RuntimeT::invalid_task_id;
 }
 
 template <typename RuntimeT, typename TraitsT>

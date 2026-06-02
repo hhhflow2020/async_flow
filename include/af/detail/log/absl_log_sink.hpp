@@ -1,10 +1,14 @@
 #pragma once
 
+#include <array>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <string_view>
+#include <system_error>
 
 #include "absl/base/log_severity.h"
 #include "absl/log/initialize.h"
@@ -17,6 +21,25 @@
 #include "af/detail/log/async_logger.hpp"
 
 namespace af {
+
+namespace detail {
+
+template <typename TaskId>
+[[nodiscard]] std::string task_id_prefixed_log_message(std::string_view message, TaskId task_id) {
+    std::array<char, 32> digits{};
+    const auto converted = std::to_chars(digits.data(), digits.data() + digits.size(), task_id);
+    AF_ASSERT(converted.ec == std::errc{});
+
+    std::string tagged;
+    tagged.reserve(message.size() + static_cast<std::size_t>(converted.ptr - digits.data()) + 8U);
+    tagged.append("[task=");
+    tagged.append(digits.data(), converted.ptr);
+    tagged.append("] ");
+    tagged.append(message.data(), message.size());
+    return tagged;
+}
+
+} // namespace detail
 
 class AbslAsyncLogSink final : public absl::LogSink {
 public:
@@ -44,10 +67,21 @@ public:
 
     void Send(const absl::LogEntry &entry) override {
         const auto message = entry.text_message_with_prefix_and_newline();
-        const bool accepted =
-            RuntimeT::is_runtime_thread()
-                ? logger_->try_log_from_runtime_thread(RuntimeT::current_thread_index(), message)
-                : logger_->try_log(message);
+        bool accepted = false;
+        if (RuntimeT::is_runtime_thread()) {
+            const auto task_id = RuntimeT::current_task_id();
+            if (task_id == RuntimeT::invalid_task_id) {
+                accepted =
+                    logger_->try_log_from_runtime_thread(RuntimeT::current_thread_index(), message);
+            } else {
+                const std::string tagged_message =
+                    detail::task_id_prefixed_log_message(message, task_id);
+                accepted = logger_->try_log_from_runtime_thread(RuntimeT::current_thread_index(),
+                                                                tagged_message);
+            }
+        } else {
+            accepted = logger_->try_log(message);
+        }
         if (accepted && entry.log_severity() == absl::LogSeverity::kFatal) {
             static_cast<void>(logger_->flush(logger_->fatal_flush_timeout()));
         }
