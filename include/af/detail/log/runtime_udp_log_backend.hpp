@@ -447,17 +447,14 @@ public:
     using SenderTask = detail::RuntimeUdpLogSenderTask<RuntimeT>;
 
     explicit RuntimeUdpLogBackend(Config config)
-        : state_(std::make_unique<State>(std::move(config))),
-          sender_(RuntimeT::template make_task<SenderTask>()) {}
+        : binding_(std::make_unique<State>(std::move(config))) {}
 
     ~RuntimeUdpLogBackend() override {
         shutdown();
     }
 
     void write_batch(std::span<detail::LogRecord *const> records) noexcept override {
-        if (state_->enqueue(records)) {
-            static_cast<void>(wake_sender());
-        }
+        static_cast<void>(binding_.enqueue_and_wake(records, true));
     }
 
     void flush() noexcept override {
@@ -465,13 +462,14 @@ public:
     }
 
     [[nodiscard]] bool flush(std::chrono::milliseconds timeout) noexcept override {
-        if (state_->pending_batches.load(std::memory_order_acquire) == 0U) {
+        State &state = binding_.state();
+        if (state.pending_batches.load(std::memory_order_acquire) == 0U) {
             return true;
         }
-        if (!wake_sender()) {
+        if (!binding_.wake(true)) {
             return false;
         }
-        return state_->flush_until(std::chrono::steady_clock::now() + timeout);
+        return state.flush_until(std::chrono::steady_clock::now() + timeout);
     }
 
     void shutdown() noexcept override {
@@ -482,35 +480,15 @@ public:
         }
 
         static_cast<void>(flush(std::chrono::seconds(5)));
-        state_->stopping.store(true, std::memory_order_release);
-        if (!sender_started_.load(std::memory_order_acquire) &&
-            state_->pending_batches.load(std::memory_order_acquire) == 0U) {
-            state_->finished.store(true, std::memory_order_release);
-            sender_.reset();
-            return;
-        }
-        if (wake_sender()) {
-            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-            while (!state_->finished.load(std::memory_order_acquire) &&
-                   std::chrono::steady_clock::now() < deadline) {
-                std::this_thread::yield();
-            }
-        }
-        sender_.reset();
+        binding_.stop_and_wait(std::chrono::steady_clock::now() + std::chrono::seconds(5), true);
     }
 
     [[nodiscard]] RuntimeUdpLogBackendStats stats() const noexcept {
-        return state_->stats();
+        return binding_.state().stats();
     }
 
 private:
-    [[nodiscard]] bool wake_sender() noexcept {
-        return detail::wake_runtime_log_task(state_.get(), sender_, sender_started_, true);
-    }
-
-    std::unique_ptr<State> state_;
-    typename RuntimeT::template TaskHandle<SenderTask> sender_;
-    std::atomic<bool> sender_started_{false};
+    detail::RuntimeLogTaskBinding<RuntimeT, State, SenderTask> binding_;
     std::atomic<bool> shutdown_started_{false};
 };
 

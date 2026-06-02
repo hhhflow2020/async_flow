@@ -440,17 +440,14 @@ public:
     using WriterTask = detail::RuntimeFileLogWriterTask<RuntimeT>;
 
     explicit RuntimeFileLogBackend(Config config)
-        : state_(std::make_unique<State>(std::move(config))),
-          writer_(RuntimeT::template make_task<WriterTask>()) {}
+        : binding_(std::make_unique<State>(std::move(config))) {}
 
     ~RuntimeFileLogBackend() override {
         shutdown();
     }
 
     void write_batch(std::span<detail::LogRecord *const> records) noexcept override {
-        if (state_->enqueue(records)) {
-            static_cast<void>(wake_writer());
-        }
+        static_cast<void>(binding_.enqueue_and_wake(records, true));
     }
 
     void flush() noexcept override {
@@ -458,11 +455,12 @@ public:
     }
 
     [[nodiscard]] bool flush(std::chrono::milliseconds timeout) noexcept override {
-        const std::uint64_t target = state_->request_flush();
-        if (!wake_writer()) {
+        State &state = binding_.state();
+        const std::uint64_t target = state.request_flush();
+        if (!binding_.wake(true)) {
             return false;
         }
-        return state_->flush_until(target, std::chrono::steady_clock::now() + timeout);
+        return state.flush_until(target, std::chrono::steady_clock::now() + timeout);
     }
 
     void shutdown() noexcept override {
@@ -473,35 +471,15 @@ public:
         }
 
         static_cast<void>(flush(std::chrono::seconds(5)));
-        state_->stopping.store(true, std::memory_order_release);
-        if (!writer_started_.load(std::memory_order_acquire) &&
-            state_->pending_batches.load(std::memory_order_acquire) == 0U) {
-            state_->finished.store(true, std::memory_order_release);
-            writer_.reset();
-            return;
-        }
-        if (wake_writer()) {
-            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-            while (!state_->finished.load(std::memory_order_acquire) &&
-                   std::chrono::steady_clock::now() < deadline) {
-                std::this_thread::yield();
-            }
-        }
-        writer_.reset();
+        binding_.stop_and_wait(std::chrono::steady_clock::now() + std::chrono::seconds(5), true);
     }
 
     [[nodiscard]] RuntimeFileLogBackendStats stats() const noexcept {
-        return state_->stats();
+        return binding_.state().stats();
     }
 
 private:
-    [[nodiscard]] bool wake_writer() noexcept {
-        return detail::wake_runtime_log_task(state_.get(), writer_, writer_started_, true);
-    }
-
-    std::unique_ptr<State> state_;
-    typename RuntimeT::template TaskHandle<WriterTask> writer_;
-    std::atomic<bool> writer_started_{false};
+    detail::RuntimeLogTaskBinding<RuntimeT, State, WriterTask> binding_;
     std::atomic<bool> shutdown_started_{false};
 };
 

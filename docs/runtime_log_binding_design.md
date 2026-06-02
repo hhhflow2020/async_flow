@@ -13,8 +13,12 @@
   for batch pooling, ready/free SPSC queues, pending counters, wake flags, and
   bounded flush waits. File, UDP, and TCP keep only their backend-specific IO
   strategy state.
-- Runtime backend wakeup is now shared through a small template helper. File,
-  UDP, and TCP all skip ordinary producer wakeups while their bound task is
+- Runtime backend task binding is now shared through `RuntimeLogTaskBinding`.
+  File, UDP, and TCP no longer each own duplicate task-handle, first-start,
+  wake, and shutdown-wait logic. They keep backend-specific IO state machines,
+  while framework-thread binding stays centralized in the common runtime log
+  component.
+- File, UDP, and TCP all skip ordinary producer wakeups while their bound task is
   waiting on runtime IO readiness, so producer notifications do not masquerade as
   IO completions.
 - Runtime-thread log lanes now use an SPSC record pool matching their SPSC
@@ -84,7 +88,8 @@ can be driven by the same runtime-bound drain task.
    threads.
 4. Factor the duplicate file/UDP/TCP runtime backend queue, wake, flush, and
    shutdown state into a common runtime log drain component. The queue, batch
-   pool, pending, and wake state are now shared; full shutdown/task placement
-   sharing is still a follow-up.
+   pool, pending, wake state, task binding, and shutdown wait are now shared;
+   backend-specific flush semantics and IO state machines remain local to each
+   backend.
 5. Add an opt-in runtime consumer placement API once file/UDP/TCP can all be
    driven by the common drain component.

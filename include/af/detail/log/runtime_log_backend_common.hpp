@@ -181,4 +181,56 @@ template <typename StateT, typename TaskHandleT>
     return false;
 }
 
+template <typename RuntimeT, typename StateT, typename TaskT> class RuntimeLogTaskBinding {
+public:
+    explicit RuntimeLogTaskBinding(std::unique_ptr<StateT> state)
+        : state_(std::move(state)), task_(RuntimeT::template make_task<TaskT>()) {
+        AF_ASSERT(state_ != nullptr);
+    }
+
+    RuntimeLogTaskBinding(const RuntimeLogTaskBinding &) = delete;
+    RuntimeLogTaskBinding &operator=(const RuntimeLogTaskBinding &) = delete;
+
+    [[nodiscard]] StateT &state() noexcept {
+        return *state_;
+    }
+
+    [[nodiscard]] const StateT &state() const noexcept {
+        return *state_;
+    }
+
+    [[nodiscard]] bool enqueue_and_wake(std::span<LogRecord *const> records,
+                                        bool skip_when_io_waiting) noexcept {
+        return state_->enqueue(records) && wake(skip_when_io_waiting);
+    }
+
+    [[nodiscard]] bool wake(bool skip_when_io_waiting) noexcept {
+        return wake_runtime_log_task(state_.get(), task_, task_started_, skip_when_io_waiting);
+    }
+
+    void stop_and_wait(std::chrono::steady_clock::time_point deadline,
+                       bool skip_when_io_waiting) noexcept {
+        state_->stopping.store(true, std::memory_order_release);
+        if (!task_started_.load(std::memory_order_acquire) &&
+            state_->pending_batches.load(std::memory_order_acquire) == 0U) {
+            state_->finished.store(true, std::memory_order_release);
+            task_.reset();
+            return;
+        }
+
+        if (wake(skip_when_io_waiting)) {
+            while (!state_->finished.load(std::memory_order_acquire) &&
+                   std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::yield();
+            }
+        }
+        task_.reset();
+    }
+
+private:
+    std::unique_ptr<StateT> state_;
+    typename RuntimeT::template TaskHandle<TaskT> task_;
+    std::atomic<bool> task_started_{false};
+};
+
 } // namespace af::detail
