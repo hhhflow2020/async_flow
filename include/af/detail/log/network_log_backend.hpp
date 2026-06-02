@@ -17,6 +17,9 @@
 #include <netdb.h>
 #include <poll.h>
 #include <sys/socket.h>
+#if defined(__linux__)
+#include <sys/syscall.h>
+#endif
 #include <sys/uio.h>
 #include <unistd.h>
 #endif
@@ -63,6 +66,18 @@ inline void set_log_socket_nonblocking(int fd) noexcept {
 [[nodiscard]] inline std::string log_port_string(std::uint16_t port) {
     return std::to_string(static_cast<unsigned>(port));
 }
+
+#if defined(__linux__)
+struct LogMmsgHeader {
+    msghdr msg_hdr{};
+    unsigned int msg_len{0};
+};
+
+[[nodiscard]] inline int log_sendmmsg(int fd, LogMmsgHeader *messages, unsigned int count,
+                                      int flags) noexcept {
+    return static_cast<int>(::syscall(SYS_sendmmsg, fd, messages, count, flags));
+}
+#endif
 #endif
 
 } // namespace detail
@@ -84,11 +99,15 @@ public:
         if (records.empty() || !ensure_socket()) {
             return;
         }
+#if defined(__linux__)
+        send_batch_best_effort(records);
+#else
         for (detail::LogRecord *record : records) {
             std::string_view message = record->message();
             const std::size_t size = std::min(message.size(), config_.max_datagram_size);
             send_best_effort(message.data(), size);
         }
+#endif
 #endif
     }
 
@@ -141,6 +160,65 @@ private:
             return;
         }
     }
+
+#if defined(__linux__)
+    void send_batch_best_effort(std::span<detail::LogRecord *const> records) noexcept {
+        constexpr std::size_t max_message_count = 64;
+        std::array<iovec, max_message_count> iovecs{};
+        std::array<detail::LogMmsgHeader, max_message_count> messages{};
+
+        std::size_t index = 0;
+        while (index < records.size() && fd_ >= 0) {
+            std::size_t count = 0;
+            while (index < records.size() && count < messages.size()) {
+                std::string_view message = records[index]->message();
+                ++index;
+                const std::size_t size = std::min(message.size(), config_.max_datagram_size);
+                if (size == 0U) {
+                    continue;
+                }
+
+                iovecs[count].iov_base = const_cast<char *>(message.data());
+                iovecs[count].iov_len = size;
+                messages[count] = {};
+                messages[count].msg_hdr.msg_iov = &iovecs[count];
+                messages[count].msg_hdr.msg_iovlen = 1;
+                ++count;
+            }
+            if (count == 0U || !sendmmsg_best_effort(messages.data(), count)) {
+                return;
+            }
+        }
+    }
+
+    [[nodiscard]] bool sendmmsg_best_effort(detail::LogMmsgHeader *messages,
+                                            std::size_t count) noexcept {
+        while (count != 0U && fd_ >= 0) {
+            const int sent = detail::log_sendmmsg(fd_, messages, static_cast<unsigned int>(count),
+                                                  detail::log_send_flags());
+            if (sent > 0) {
+                const auto sent_count = static_cast<std::size_t>(sent);
+                if (sent_count >= count) {
+                    return true;
+                }
+                messages += sent_count;
+                count -= sent_count;
+                continue;
+            }
+            if (sent == 0) {
+                return false;
+            }
+            if (errno == EINTR) {
+                continue;
+            }
+            if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                detail::close_log_socket(fd_);
+            }
+            return false;
+        }
+        return count == 0U;
+    }
+#endif
 #endif
 
     UdpLogBackendConfig config_;

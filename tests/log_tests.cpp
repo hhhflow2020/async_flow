@@ -123,6 +123,31 @@ void set_fd_nonblocking(int fd) noexcept {
     return listener;
 }
 
+[[nodiscard]] int make_loopback_udp_socket(std::uint16_t &port) noexcept {
+    int socket_fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+    if (socket_fd < 0) {
+        return -1;
+    }
+
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = 0;
+    if (::bind(socket_fd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) != 0) {
+        close_fd(socket_fd);
+        return -1;
+    }
+
+    socklen_t address_size = sizeof(address);
+    if (::getsockname(socket_fd, reinterpret_cast<sockaddr *>(&address), &address_size) != 0) {
+        close_fd(socket_fd);
+        return -1;
+    }
+    port = ntohs(address.sin_port);
+    set_fd_nonblocking(socket_fd);
+    return socket_fd;
+}
+
 [[nodiscard]] int accept_until(int listener,
                                std::chrono::steady_clock::time_point deadline) noexcept {
     while (std::chrono::steady_clock::now() < deadline) {
@@ -163,6 +188,33 @@ void set_fd_nonblocking(int fd) noexcept {
         break;
     }
     return received;
+}
+
+template <std::size_t Count>
+[[nodiscard]] std::size_t recv_datagrams_until(int fd, std::array<std::string, Count> &received,
+                                               std::chrono::steady_clock::time_point deadline) {
+    std::size_t count = 0;
+    std::array<char, 256> buffer{};
+    while (std::chrono::steady_clock::now() < deadline && count < received.size()) {
+        const auto n = ::recv(fd, buffer.data(), buffer.size(), 0);
+        if (n > 0) {
+            received[count].assign(buffer.data(), static_cast<std::size_t>(n));
+            ++count;
+            continue;
+        }
+        if (n == 0) {
+            continue;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            continue;
+        }
+        break;
+    }
+    return count;
 }
 #endif
 
@@ -451,5 +503,49 @@ TEST(LogTests, TcpBackendWritesBatchedRecordsToLoopbackStream) {
     EXPECT_NE(received.find("tcp backend two\n"), std::string::npos);
     EXPECT_NE(received.find("tcp backend three\n"), std::string::npos);
     EXPECT_NE(received.find("tcp backend four\n"), std::string::npos);
+#endif
+}
+
+TEST(LogTests, UdpBackendWritesBatchedRecordsToLoopbackDatagrams) {
+#if defined(_WIN32)
+    GTEST_SKIP() << "udp log backend loopback test is POSIX-only";
+#else
+    std::uint16_t port = 0;
+    int socket_fd = make_loopback_udp_socket(port);
+    ASSERT_GE(socket_fd, 0) << std::strerror(errno);
+
+    af::UdpLogBackend backend({
+        .host = "127.0.0.1",
+        .port = port,
+    });
+    std::array<af::detail::LogRecord, 4> records;
+    records[0].reset("udp backend one\n");
+    records[1].reset("udp backend two\n");
+    records[2].reset("udp backend three\n");
+    records[3].reset("udp backend four\n");
+    std::array<af::detail::LogRecord *, 4> record_ptrs{
+        &records[0],
+        &records[1],
+        &records[2],
+        &records[3],
+    };
+
+    backend.write_batch(
+        std::span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
+
+    std::array<std::string, 4> received{};
+    const std::size_t received_count = recv_datagrams_until(
+        socket_fd, received, std::chrono::steady_clock::now() + std::chrono::seconds(2));
+    close_fd(socket_fd);
+
+    std::string combined;
+    for (const std::string &message : received) {
+        combined.append(message);
+    }
+    EXPECT_EQ(received_count, record_ptrs.size());
+    EXPECT_NE(combined.find("udp backend one\n"), std::string::npos);
+    EXPECT_NE(combined.find("udp backend two\n"), std::string::npos);
+    EXPECT_NE(combined.find("udp backend three\n"), std::string::npos);
+    EXPECT_NE(combined.find("udp backend four\n"), std::string::npos);
 #endif
 }
