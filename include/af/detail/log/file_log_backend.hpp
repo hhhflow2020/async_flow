@@ -46,19 +46,17 @@ public:
             return;
         }
 
-        constexpr std::size_t max_iov_count = 64;
-        std::array<iovec, max_iov_count> iovecs{};
         std::size_t index = 0;
         while (index < records.size()) {
             std::size_t count = 0;
-            while (index < records.size() && count < iovecs.size()) {
+            while (index < records.size() && count < iovecs_.size()) {
                 std::string_view message = records[index]->message();
-                iovecs[count].iov_base = const_cast<char *>(message.data());
-                iovecs[count].iov_len = message.size();
+                iovecs_[count].iov_base = const_cast<char *>(message.data());
+                iovecs_[count].iov_len = message.size();
                 ++count;
                 ++index;
             }
-            writev_all(iovecs.data(), count);
+            writev_all(iovecs_.data(), count);
         }
 #endif
     }
@@ -73,6 +71,8 @@ public:
 
 private:
 #if !defined(_WIN32)
+    static constexpr std::size_t max_iov_count = 64;
+
     [[nodiscard]] bool open_if_needed() noexcept {
         if (fd_ >= 0) {
             return true;
@@ -131,6 +131,7 @@ private:
     bool close_on_exec_{true};
 #if !defined(_WIN32)
     int fd_{-1};
+    std::array<iovec, max_iov_count> iovecs_{};
 #endif
 };
 

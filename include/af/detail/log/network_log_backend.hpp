@@ -113,6 +113,8 @@ public:
 
 private:
 #if !defined(_WIN32)
+    static constexpr std::size_t max_message_count = 64;
+
     [[nodiscard]] bool ensure_socket() noexcept {
         if (fd_ >= 0) {
             return true;
@@ -163,14 +165,10 @@ private:
 
 #if defined(__linux__)
     void send_batch_best_effort(std::span<detail::LogRecord *const> records) noexcept {
-        constexpr std::size_t max_message_count = 64;
-        std::array<iovec, max_message_count> iovecs{};
-        std::array<detail::LogMmsgHeader, max_message_count> messages{};
-
         std::size_t index = 0;
         while (index < records.size() && fd_ >= 0) {
             std::size_t count = 0;
-            while (index < records.size() && count < messages.size()) {
+            while (index < records.size() && count < messages_.size()) {
                 std::string_view message = records[index]->message();
                 ++index;
                 const std::size_t size = std::min(message.size(), config_.max_datagram_size);
@@ -178,14 +176,14 @@ private:
                     continue;
                 }
 
-                iovecs[count].iov_base = const_cast<char *>(message.data());
-                iovecs[count].iov_len = size;
-                messages[count] = {};
-                messages[count].msg_hdr.msg_iov = &iovecs[count];
-                messages[count].msg_hdr.msg_iovlen = 1;
+                iovecs_[count].iov_base = const_cast<char *>(message.data());
+                iovecs_[count].iov_len = size;
+                messages_[count] = {};
+                messages_[count].msg_hdr.msg_iov = &iovecs_[count];
+                messages_[count].msg_hdr.msg_iovlen = 1;
                 ++count;
             }
-            if (count == 0U || !sendmmsg_best_effort(messages.data(), count)) {
+            if (count == 0U || !sendmmsg_best_effort(messages_.data(), count)) {
                 return;
             }
         }
@@ -224,6 +222,10 @@ private:
     UdpLogBackendConfig config_;
 #if !defined(_WIN32)
     int fd_{-1};
+#if defined(__linux__)
+    std::array<iovec, max_message_count> iovecs_{};
+    std::array<detail::LogMmsgHeader, max_message_count> messages_{};
+#endif
 #endif
 };
 
@@ -250,6 +252,8 @@ public:
 
 private:
 #if !defined(_WIN32)
+    static constexpr std::size_t max_iov_count = 64;
+
     [[nodiscard]] bool ensure_socket() noexcept {
         if (fd_ >= 0) {
             return !connect_pending_ || finish_connect_if_ready();
@@ -327,24 +331,21 @@ private:
     }
 
     void send_batch_best_effort(std::span<detail::LogRecord *const> records) noexcept {
-        constexpr std::size_t max_iov_count = 64;
-        std::array<iovec, max_iov_count> iovecs{};
-
         std::size_t index = 0;
         while (index < records.size() && fd_ >= 0) {
             std::size_t count = 0;
-            while (index < records.size() && count < iovecs.size()) {
+            while (index < records.size() && count < iovecs_.size()) {
                 std::string_view message = records[index]->message();
                 ++index;
                 if (message.empty()) {
                     continue;
                 }
-                iovecs[count].iov_base = const_cast<char *>(message.data());
-                iovecs[count].iov_len = message.size();
+                iovecs_[count].iov_base = const_cast<char *>(message.data());
+                iovecs_[count].iov_len = message.size();
                 ++count;
             }
             if (count != 0U) {
-                sendmsg_all(iovecs.data(), count);
+                sendmsg_all(iovecs_.data(), count);
             }
         }
     }
@@ -398,6 +399,7 @@ private:
     int fd_{-1};
     bool connect_pending_{false};
     std::chrono::steady_clock::time_point next_connect_time_{};
+    std::array<iovec, max_iov_count> iovecs_{};
 #endif
 };
 
