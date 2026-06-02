@@ -1,6 +1,6 @@
 # Async IO Support Audit
 
-Date: 2026-06-02
+Date: 2026-06-03
 
 ## Scope
 
@@ -68,6 +68,9 @@ Fixed in this pass:
   poll submission path closes/fails the ring during submission. The old path
   returned failure after inserting the wait registration, leaving a stale
   `io_waits_` entry with no epoll interest.
+- The kqueue executor backend has been split out of `runtime_executor.hpp` into
+  `runtime_executor_kqueue_backend.hpp`, matching the epoll/backend include
+  style and reducing the main executor header's mixed responsibilities.
 
 Important existing strengths:
 
@@ -94,9 +97,9 @@ Remaining correctness and completeness gaps:
 - `prefer_rearm` is still present on the public wait path, but the active epoll
   implementation ignores it after the deferred-delete race fix. This should be
   removed or redefined before users treat it as a performance guarantee.
-- kqueue code is less isolated than the Linux epoll implementation and is not
-  continuously exercised on this Linux validation path. It needs macOS/BSD CI,
-  especially for timeout cancel/complete races and combined read/write waits.
+- kqueue is not continuously exercised on the Linux validation path. It needs
+  macOS/BSD CI, especially for timeout cancel/complete races and combined
+  read/write waits.
 - io_uring-heavy tests can be skipped when the host/container blocks
   `io_uring_setup`. A dedicated real-io_uring CI lane is required before calling
   the ring backend fully validated.
@@ -128,6 +131,11 @@ Remaining performance headroom:
 - Epoll/kqueue poll batches are fixed at 64 events. This avoids heap allocation
   and keeps stack usage bounded, but high fan-in workloads may benefit from a
   runtime trait or benchmark-validated larger batch.
+- io_uring submit batching defaults to `io_uring_entries / 4` and flushes after
+  the run loop drains ready tasks. This is throughput-friendly, but low-volume
+  submissions can wait behind a constantly non-empty task queue until the batch
+  threshold is reached. A latency-oriented trait or periodic flush heuristic
+  should be benchmarked before changing the default.
 - Native readiness waits use `absl::flat_hash_map<int, IoWaitRegistration *>`.
   It is owner-thread-only and usually fine, but fd/filter-keyed waits or very
   high fd counts should be benchmarked before changing the map shape.
@@ -152,15 +160,21 @@ The runtime test binary includes targeted sources for:
 ## Validation For This Pass
 
 - Local `git diff --check`: passed.
-- Remote GCC Release build on
-  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.0`:
-  `asyncflow_runtime_tests` built successfully.
-- Remote GCC Release targeted IO suite:
-  `ctest -R "Io|Uring|Epoll|Kqueue|RuntimeIo"` passed 89/89 selected tests.
-  Three capability/platform cases were skipped by test logic: kqueue on Linux,
-  io_uring accept-direct fixed-file, and io_uring openat-direct fixed-file.
-- Remote GCC Release full runtime suite: 161/161 passed, with the same three
-  capability/platform skips.
+- Local macOS Debug `asyncflow_runtime_tests` built successfully.
+- Local macOS Debug `ctest -R "IoRuntimeKqueue|Kqueue"` passed 5/5 kqueue tests.
+- Local macOS Debug
+  `ctest -R "^(Runtime|IoRuntime|IoState|BatchUtility)"` passed 84/84 selected
+  tests; Linux-only epoll/io_uring cases skipped by platform guards.
+- Remote Linux GCC Debug on
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`:
+  `asyncflow_runtime_tests` built and
+  `ctest -R "^(Runtime|IoRuntime|IoState|BatchUtility)"` passed 80/80 selected
+  tests; kqueue was skipped by platform guard.
+- Remote Linux Clang Debug on
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`:
+  `asyncflow_runtime_tests` built and
+  `ctest -R "^(Runtime|IoRuntime|IoState|BatchUtility)"` passed 80/80 selected
+  tests; kqueue was skipped by platform guard.
 
 ## Next Actions
 
@@ -169,8 +183,8 @@ The runtime test binary includes targeted sources for:
 - Decide and document the native readiness contract for same-fd concurrent
   waits. If concurrent read/write waits are a target, change registration keys
   from fd-only to fd/filter and add tests.
-- Split the kqueue backend out of `runtime_executor.hpp` with the same
-  class-out-of-line template style used by the epoll backend.
 - Add a live readiness-loop benchmark for epoll and, on macOS/BSD, kqueue.
+- Benchmark a latency-oriented io_uring submit flush policy against the current
+  throughput-oriented batch threshold.
 - Remove or re-specify `prefer_rearm` so public API semantics match the active
   backend implementation.
