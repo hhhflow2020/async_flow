@@ -24,6 +24,10 @@
 - Runtime-thread log lanes now use an SPSC record pool matching their SPSC
   submission queue. External producer shards keep the lock-free shared free-list
   because they still admit multiple producer threads.
+- Log record pool ownership is now split into `async_log_record_pool.hpp`.
+  `AsyncLogger` wires queues, counters, and consumer draining, while the shared
+  MPSC record pool and runtime SPSC record pool live in a focused internal
+  module.
 
 This is a useful intermediate shape: runtime log producers still get SPSC
 submission, external producers still have MPSC admission, and network backends do
@@ -73,6 +77,8 @@ can be driven by the same runtime-bound drain task.
 - Runtime-thread producers should remain SPSC and avoid cross-thread MPMC hops.
 - Runtime-thread producer record allocation should also stay SPSC, avoiding the
   shared free-list CAS pair used by external producer shards.
+- Record pool changes should stay isolated from the consumer drain loop so the
+  shared MPSC pool and runtime SPSC pool can be tuned independently.
 - Backend batches should be preallocated and recycled through SPSC free/ready
   queues or a shared runtime drain pool.
 - Counters and queue cursors that are touched by different threads should stay
