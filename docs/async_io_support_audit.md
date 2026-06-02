@@ -175,6 +175,11 @@ The runtime test binary includes targeted sources for:
   `asyncflow_runtime_tests` built and
   `ctest -R "^(Runtime|IoRuntime|IoState|BatchUtility)"` passed 80/80 selected
   tests; kqueue was skipped by platform guard.
+- Remote Linux Clang Debug + TSAN on
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`:
+  `asyncflow_runtime_tests` built with `ASYNCFLOW_ENABLE_TSAN=ON` and
+  `ctest -R "^(Runtime|IoRuntime|IoState|BatchUtility)"` passed 71/71 selected
+  tests with no ThreadSanitizer report; kqueue was skipped by platform guard.
 
 ## Next Actions
 
