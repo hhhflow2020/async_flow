@@ -28,6 +28,10 @@ template <typename TraitsT> struct RuntimeConfig {
     static constexpr std::size_t spsc_queue_capacity = TraitConfig::spsc_queue_capacity;
     static constexpr std::size_t external_queue_capacity = TraitConfig::external_queue_capacity;
     static constexpr QueueFullPolicy queue_full_policy = TraitConfig::queue_full_policy;
+    static constexpr QueueFullPolicy runtime_queue_full_policy =
+        TraitConfig::runtime_queue_full_policy;
+    static constexpr QueueFullPolicy external_queue_full_policy =
+        TraitConfig::external_queue_full_policy;
     static constexpr std::size_t queue_full_spin_count = TraitConfig::queue_full_spin_count;
     static constexpr ShutdownPolicy shutdown_policy = TraitConfig::shutdown_policy;
     static constexpr bool task_registry_enabled = TraitConfig::task_registry_enabled;

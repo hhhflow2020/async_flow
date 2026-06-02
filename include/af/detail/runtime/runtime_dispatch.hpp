@@ -175,11 +175,20 @@ void AsyncRuntime<TraitsT>::post_blocking(Thread thread, Task *task) noexcept {
 
 template <typename TraitsT>
 bool AsyncRuntime<TraitsT>::enqueue_ready_by_policy(std::uint16_t index, Task *task) noexcept {
-    if constexpr (queue_full_policy == QueueFullPolicy::Yield) {
-        enqueue_ready_blocking(index, task);
+    if (current_thread_index_ < thread_count) {
+        if constexpr (runtime_queue_full_policy == QueueFullPolicy::Yield) {
+            enqueue_ready_blocking_from_runtime_thread(current_thread_index_, index, task);
+            return true;
+        } else {
+            return try_enqueue_ready_from_runtime_thread(current_thread_index_, index, task);
+        }
+    }
+
+    if constexpr (external_queue_full_policy == QueueFullPolicy::Yield) {
+        enqueue_external_mpsc_blocking(index, task);
         return true;
     } else {
-        return try_enqueue_ready(index, task);
+        return try_enqueue_external_mpsc(index, task);
     }
 }
 

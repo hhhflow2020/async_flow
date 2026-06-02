@@ -32,6 +32,22 @@ template <typename TraitsT> struct RuntimeTraitsConfig {
         }
     }();
 
+    static constexpr QueueFullPolicy runtime_queue_full_policy = [] {
+        if constexpr (requires { TraitsT::runtime_queue_full_policy; }) {
+            return TraitsT::runtime_queue_full_policy;
+        } else {
+            return queue_full_policy;
+        }
+    }();
+
+    static constexpr QueueFullPolicy external_queue_full_policy = [] {
+        if constexpr (requires { TraitsT::external_queue_full_policy; }) {
+            return TraitsT::external_queue_full_policy;
+        } else {
+            return queue_full_policy;
+        }
+    }();
+
     static constexpr std::size_t queue_full_spin_count = [] {
         if constexpr (requires { TraitsT::queue_full_spin_count; }) {
             return static_cast<std::size_t>(TraitsT::queue_full_spin_count);

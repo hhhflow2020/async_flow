@@ -72,4 +72,44 @@ TEST(RuntimeBackpressureTests, YieldPolicyHandlesSameThreadFanoutWithBoundedLoca
 
     YieldRuntime::shutdown();
 }
+
+TEST(RuntimeBackpressureTests, SplitQueuePoliciesRejectFullExternalQueueWithoutBlockingProducer) {
+    SplitPolicyRuntime::init();
+
+    std::atomic<int> started{0};
+    std::atomic<bool> release{false};
+    std::atomic<int> completed{0};
+    std::atomic<int> destroyed{0};
+
+    ASSERT_TRUE(
+        SplitPolicyRuntime::start_task<SplitPolicyBlockingTask>(&started, &release, &completed));
+    ASSERT_TRUE(wait_until_at_least(started, 1));
+
+    EXPECT_TRUE(SplitPolicyRuntime::start_task<SplitPolicyCountTask>(&completed, &destroyed));
+    EXPECT_TRUE(SplitPolicyRuntime::start_task<SplitPolicyCountTask>(&completed, &destroyed));
+    EXPECT_FALSE(SplitPolicyRuntime::start_task<SplitPolicyCountTask>(&completed, &destroyed));
+    EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
+
+    release.store(true, std::memory_order_release);
+    release.notify_one();
+    EXPECT_TRUE(wait_until_at_least(completed, 3));
+    EXPECT_TRUE(wait_until_at_least(destroyed, 3));
+
+    SplitPolicyRuntime::shutdown();
+}
+
+TEST(RuntimeBackpressureTests, SplitQueuePoliciesKeepRuntimeThreadFanoutOnYieldPolicy) {
+    SplitPolicyRuntime::init();
+
+    constexpr int child_count = 32;
+    std::atomic<int> completed{0};
+    std::atomic<bool> all_started{true};
+
+    ASSERT_TRUE(SplitPolicyRuntime::start_task<SplitPolicyFanoutTask>(child_count, &completed,
+                                                                      &all_started));
+    EXPECT_TRUE(wait_until_at_least(completed, child_count + 1));
+    EXPECT_TRUE(all_started.load(std::memory_order_acquire));
+
+    SplitPolicyRuntime::shutdown();
+}
 } // namespace af::test::runtime_lifecycle
