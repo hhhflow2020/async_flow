@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cerrno>
 #include <cstdint>
@@ -14,7 +15,9 @@
 #if !defined(_WIN32)
 #include <fcntl.h>
 #include <netdb.h>
+#include <poll.h>
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <unistd.h>
 #endif
 
@@ -163,12 +166,7 @@ public:
         if (records.empty() || !ensure_socket()) {
             return;
         }
-        for (detail::LogRecord *record : records) {
-            send_best_effort(record->message());
-            if (fd_ < 0) {
-                return;
-            }
-        }
+        send_batch_best_effort(records);
 #endif
     }
 
@@ -176,7 +174,7 @@ private:
 #if !defined(_WIN32)
     [[nodiscard]] bool ensure_socket() noexcept {
         if (fd_ >= 0) {
-            return true;
+            return !connect_pending_ || finish_connect_if_ready();
         }
 
         const auto now = std::chrono::steady_clock::now();
@@ -201,30 +199,90 @@ private:
                 continue;
             }
             detail::set_log_socket_nonblocking(candidate);
-            if (::connect(candidate, entry->ai_addr, entry->ai_addrlen) == 0 ||
-                errno == EINPROGRESS) {
+            if (::connect(candidate, entry->ai_addr, entry->ai_addrlen) == 0) {
                 fd_ = candidate;
+                connect_pending_ = false;
+                break;
+            }
+            if (errno == EINPROGRESS || errno == EALREADY || errno == EWOULDBLOCK) {
+                fd_ = candidate;
+                connect_pending_ = true;
                 break;
             }
             static_cast<void>(::close(candidate));
         }
 
         ::freeaddrinfo(result);
-        return fd_ >= 0;
+        return fd_ >= 0 && (!connect_pending_ || finish_connect_if_ready());
     }
 
-    void send_best_effort(std::string_view message) noexcept {
-        const char *data = message.data();
-        std::size_t size = message.size();
-        while (size != 0U) {
-            const auto sent = ::send(fd_, data, size, detail::log_send_flags());
+    [[nodiscard]] bool finish_connect_if_ready() noexcept {
+        pollfd poll_fd{};
+        poll_fd.fd = fd_;
+        poll_fd.events = POLLOUT;
+        const int ready = ::poll(&poll_fd, 1, 0);
+        if (ready < 0) {
+            if (errno == EINTR) {
+                return false;
+            }
+            close_socket();
+            return false;
+        }
+        if ((poll_fd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0 &&
+            (poll_fd.revents & POLLOUT) == 0) {
+            close_socket();
+            return false;
+        }
+        if (ready == 0 || (poll_fd.revents & POLLOUT) == 0) {
+            return false;
+        }
+
+        int error = 0;
+        socklen_t error_size = sizeof(error);
+        if (::getsockopt(fd_, SOL_SOCKET, SO_ERROR, &error, &error_size) != 0 || error != 0) {
+            close_socket();
+            return false;
+        }
+
+        connect_pending_ = false;
+        return true;
+    }
+
+    void send_batch_best_effort(std::span<detail::LogRecord *const> records) noexcept {
+        constexpr std::size_t max_iov_count = 64;
+        std::array<iovec, max_iov_count> iovecs{};
+
+        std::size_t index = 0;
+        while (index < records.size() && fd_ >= 0) {
+            std::size_t count = 0;
+            while (index < records.size() && count < iovecs.size()) {
+                std::string_view message = records[index]->message();
+                ++index;
+                if (message.empty()) {
+                    continue;
+                }
+                iovecs[count].iov_base = const_cast<char *>(message.data());
+                iovecs[count].iov_len = message.size();
+                ++count;
+            }
+            if (count != 0U) {
+                sendmsg_all(iovecs.data(), count);
+            }
+        }
+    }
+
+    void sendmsg_all(iovec *iovecs, std::size_t count) noexcept {
+        while (count != 0U) {
+            msghdr message{};
+            message.msg_iov = iovecs;
+            message.msg_iovlen = count;
+            const auto sent = ::sendmsg(fd_, &message, detail::log_send_flags());
             if (sent > 0) {
-                data += sent;
-                size -= static_cast<std::size_t>(sent);
+                trim_iovecs(iovecs, count, static_cast<std::size_t>(sent));
                 continue;
             }
             if (sent == 0) {
-                detail::close_log_socket(fd_);
+                close_socket();
                 return;
             }
             if (errno == EINTR) {
@@ -233,15 +291,34 @@ private:
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 return;
             }
-            detail::close_log_socket(fd_);
+            close_socket();
             return;
         }
+    }
+
+    static void trim_iovecs(iovec *&iovecs, std::size_t &count, std::size_t sent) noexcept {
+        while (count != 0U && sent >= iovecs[0].iov_len) {
+            sent -= iovecs[0].iov_len;
+            ++iovecs;
+            --count;
+        }
+        if (count != 0U && sent != 0U) {
+            auto *base = static_cast<char *>(iovecs[0].iov_base);
+            iovecs[0].iov_base = base + sent;
+            iovecs[0].iov_len -= sent;
+        }
+    }
+
+    void close_socket() noexcept {
+        detail::close_log_socket(fd_);
+        connect_pending_ = false;
     }
 #endif
 
     TcpLogBackendConfig config_;
 #if !defined(_WIN32)
     int fd_{-1};
+    bool connect_pending_{false};
     std::chrono::steady_clock::time_point next_connect_time_{};
 #endif
 };
