@@ -56,11 +56,12 @@ inline void close_log_socket(int &fd) noexcept {
     }
 }
 
-inline void set_log_socket_nonblocking(int fd) noexcept {
+[[nodiscard]] inline bool set_log_socket_nonblocking(int fd) noexcept {
     const int flags = ::fcntl(fd, F_GETFL, 0);
-    if (flags >= 0) {
-        static_cast<void>(::fcntl(fd, F_SETFL, flags | O_NONBLOCK));
+    if (flags < 0) {
+        return false;
     }
+    return ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
 }
 
 [[nodiscard]] inline std::string log_port_string(std::uint16_t port) {
@@ -135,7 +136,10 @@ private:
             if (candidate < 0) {
                 continue;
             }
-            detail::set_log_socket_nonblocking(candidate);
+            if (!detail::set_log_socket_nonblocking(candidate)) {
+                static_cast<void>(::close(candidate));
+                continue;
+            }
             if (::connect(candidate, entry->ai_addr, entry->ai_addrlen) == 0) {
                 fd_ = candidate;
                 break;
@@ -280,7 +284,10 @@ private:
             if (candidate < 0) {
                 continue;
             }
-            detail::set_log_socket_nonblocking(candidate);
+            if (!detail::set_log_socket_nonblocking(candidate)) {
+                static_cast<void>(::close(candidate));
+                continue;
+            }
             if (::connect(candidate, entry->ai_addr, entry->ai_addrlen) == 0) {
                 fd_ = candidate;
                 connect_pending_ = false;

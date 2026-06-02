@@ -139,7 +139,10 @@ public:
         if (candidate < 0) {
             return false;
         }
-        set_log_socket_nonblocking(candidate);
+        if (!set_log_socket_nonblocking(candidate)) {
+            static_cast<void>(::close(candidate));
+            return false;
+        }
         if (::connect(candidate, reinterpret_cast<const sockaddr *>(&address), address_size) != 0) {
             static_cast<void>(::close(candidate));
             return false;

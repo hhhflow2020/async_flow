@@ -34,6 +34,12 @@ namespace {
     return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
 }
 
+#if !defined(_WIN32)
+TEST(LogTests, LogSocketNonblockingHelperReportsInvalidFd) {
+    EXPECT_FALSE(af::detail::set_log_socket_nonblocking(-1));
+}
+#endif
+
 class BlockingLogBackend final : public af::LogBackend {
 public:
     void write_batch(std::span<af::detail::LogRecord *const> records) noexcept override {

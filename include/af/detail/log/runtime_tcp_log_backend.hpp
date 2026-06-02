@@ -147,7 +147,13 @@ public:
             return false;
         }
 
-        set_log_socket_nonblocking(candidate);
+        if (!set_log_socket_nonblocking(candidate)) {
+            const int error = errno == 0 ? EIO : errno;
+            static_cast<void>(::close(candidate));
+            last_error.store(error, std::memory_order_release);
+            last_error_stage.store(7, std::memory_order_release);
+            return false;
+        }
         fd = candidate;
         return true;
     }
