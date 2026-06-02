@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -418,25 +419,22 @@ private:
     }
 
     void collect_batch(std::vector<detail::LogRecord *> &batch) noexcept {
+        constexpr std::size_t max_queue_drain_count = 64;
+        std::array<detail::LogRecord *, max_queue_drain_count> drained;
         std::size_t empty_visits = 0;
         while (batch.size() < max_batch_size_ && empty_visits < queue_shard_count_) {
             QueueShard &shard = *queue_shards_[next_drain_shard_];
             next_drain_shard_ = (next_drain_shard_ + 1U) & queue_shard_mask_;
 
-            detail::LogRecord *record = shard.queue.try_pop();
-            if (record == nullptr) {
+            const std::size_t count = shard.queue.try_pop_many(
+                drained.data(), std::min(drained.size(), max_batch_size_ - batch.size()));
+            if (count == 0U) {
                 ++empty_visits;
                 continue;
             }
 
             empty_visits = 0;
-            do {
-                batch.push_back(record);
-                if (batch.size() == max_batch_size_) {
-                    break;
-                }
-                record = shard.queue.try_pop();
-            } while (record != nullptr);
+            batch.insert(batch.end(), drained.data(), drained.data() + count);
         }
     }
 

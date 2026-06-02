@@ -49,18 +49,39 @@ public:
     }
 
     [[nodiscard]] T *try_pop() noexcept {
-        Cell &cell = buffer_[dequeue_pos_ & mask_];
+        const std::size_t pos = dequeue_pos_;
+        Cell &cell = buffer_[pos & mask_];
         const std::size_t seq = cell.sequence.load(std::memory_order_acquire);
-        const auto diff =
-            static_cast<std::intptr_t>(seq) - static_cast<std::intptr_t>(dequeue_pos_ + 1U);
+        const auto diff = static_cast<std::intptr_t>(seq) - static_cast<std::intptr_t>(pos + 1U);
         if (diff != 0) {
             return nullptr;
         }
 
         T *value = cell.data;
-        cell.sequence.store(dequeue_pos_ + capacity_, std::memory_order_release);
-        ++dequeue_pos_;
+        cell.sequence.store(pos + capacity_, std::memory_order_release);
+        dequeue_pos_ = pos + 1U;
         return value;
+    }
+
+    [[nodiscard]] std::size_t try_pop_many(T **out, std::size_t max_count) noexcept {
+        std::size_t count = 0;
+        std::size_t pos = dequeue_pos_;
+        while (count < max_count) {
+            Cell &cell = buffer_[pos & mask_];
+            const std::size_t seq = cell.sequence.load(std::memory_order_acquire);
+            const auto diff =
+                static_cast<std::intptr_t>(seq) - static_cast<std::intptr_t>(pos + 1U);
+            if (diff != 0) {
+                break;
+            }
+
+            out[count] = cell.data;
+            cell.sequence.store(pos + capacity_, std::memory_order_release);
+            ++count;
+            ++pos;
+        }
+        dequeue_pos_ = pos;
+        return count;
     }
 
 private:
