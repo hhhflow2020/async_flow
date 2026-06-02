@@ -23,11 +23,11 @@ void Executor<RuntimeT, TraitsT>::notify_external_ready() noexcept {
 
 template <typename RuntimeT, typename TraitsT>
 [[nodiscard]] bool Executor<RuntimeT, TraitsT>::try_push_local(Task *task) noexcept {
-    if (local_size_ == local_queue_.size()) {
+    if (local_size_ == local_capacity_) {
         return false;
     }
 
-    local_queue_[local_tail_ & (local_queue_.size() - 1U)] = task;
+    local_queue_[local_tail_ & local_mask_] = task;
     ++local_tail_;
     ++local_size_;
     return true;
@@ -40,7 +40,7 @@ Executor<RuntimeT, TraitsT>::try_pop_local() noexcept {
         return nullptr;
     }
 
-    Task *task = local_queue_[local_head_ & (local_queue_.size() - 1U)];
+    Task *task = local_queue_[local_head_ & local_mask_];
     ++local_head_;
     --local_size_;
     return task;
@@ -219,18 +219,18 @@ typename Executor<RuntimeT, TraitsT>::Task *Executor<RuntimeT, TraitsT>::pop_one
     }
 
     if (external_ready_.load(std::memory_order_acquire)) {
-        if (Task *task = RuntimeT::external_queues_[index_]->try_pop()) {
+        if (Task *task = external_queue_->try_pop()) {
             return task;
         }
 
         external_ready_.store(false, std::memory_order_release);
-        if (Task *task = RuntimeT::external_queues_[index_]->try_pop()) {
+        if (Task *task = external_queue_->try_pop()) {
             external_ready_.store(true, std::memory_order_release);
             return task;
         }
     }
 
-    return RuntimeT::external_queues_[index_]->try_pop();
+    return external_queue_->try_pop();
 }
 
 template <typename RuntimeT, typename TraitsT>

@@ -10,6 +10,7 @@ template <typename RuntimeT, typename TraitsT> class alignas(hardware_cache_line
     using Thread = typename RuntimeT::Thread;
     using Task = BasicTask<RuntimeT>;
     using RuntimeStatus = detail::RuntimeStatus;
+    using ExternalQueue = typename RuntimeT::ExternalQueue;
     template <typename T> using CacheLineAtomic = detail::CacheLineAtomic<T>;
     template <typename T> using IoObjectPool = detail::ObjectPool<T, 256, 1, false, 1>;
 
@@ -2421,9 +2422,12 @@ private:
     std::uint16_t next_source_{0};
     std::uint16_t next_ready_word_{0};
     std::vector<Task *> local_queue_;
+    std::size_t local_capacity_{0};
+    std::size_t local_mask_{0};
     std::size_t local_head_{0};
     std::size_t local_tail_{0};
     std::size_t local_size_{0};
+    ExternalQueue *external_queue_{nullptr};
     detail::ReadySourceSet<thread_count> ready_sources_;
     CacheLineAtomic<bool> external_ready_{false};
     CacheLineAtomic<std::uint32_t> wake_epoch_{0};
