@@ -36,6 +36,17 @@ namespace {
     return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
 }
 
+[[nodiscard]] std::size_t count_substring_occurrences(std::string_view text,
+                                                      std::string_view needle) {
+    std::size_t count = 0;
+    std::size_t position = 0;
+    while ((position = text.find(needle, position)) != std::string_view::npos) {
+        ++count;
+        position += needle.size();
+    }
+    return count;
+}
+
 #if !defined(_WIN32)
 TEST(LogTests, LogSocketNonblockingHelperReportsInvalidFd) {
     EXPECT_FALSE(af::detail::set_log_socket_nonblocking(-1));
@@ -302,10 +313,12 @@ public:
     explicit RuntimeTaskIdLogTask(LogTestTaskBase::FactoryToken token) : LogTestTaskBase(token) {}
 
     bool do_it(std::atomic<int> *completed, std::atomic<LogTestTaskBase::TaskId> *observed_task_id,
-               std::atomic<LogTestTaskBase::TaskId> *observed_current_task_id) {
+               std::atomic<LogTestTaskBase::TaskId> *observed_current_task_id,
+               const char *message = "runtime task id log") {
         completed_ = completed;
         observed_task_id_ = observed_task_id;
         observed_current_task_id_ = observed_current_task_id;
+        message_ = message;
         return schedule(LogTestThreads::Runtime_0);
     }
 
@@ -314,7 +327,7 @@ private:
         observed_task_id_->store(task_id(), std::memory_order_release);
         observed_current_task_id_->store(LogTestRuntime::current_task_id(),
                                          std::memory_order_release);
-        LOG(INFO) << "runtime task id log";
+        LOG(INFO) << message_;
         completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
@@ -322,6 +335,7 @@ private:
     std::atomic<int> *completed_{nullptr};
     std::atomic<LogTestTaskBase::TaskId> *observed_task_id_{nullptr};
     std::atomic<LogTestTaskBase::TaskId> *observed_current_task_id_{nullptr};
+    const char *message_{"runtime task id log"};
 };
 
 struct LogUdpIoThreadTag;
@@ -1075,6 +1089,43 @@ TEST(LogTests, RuntimeAwareSinkPrefixesRuntimeTaskId) {
     ASSERT_NE(task_tag_pos, std::string::npos);
     EXPECT_EQ(task_tag_pos, prefix_end + 2U);
     EXPECT_NE(contents.find(task_tag + "runtime task id log"), std::string::npos);
+}
+
+TEST(LogTests, RuntimeAwareSinkTagsOnlyFirstUserLogLine) {
+    const auto path = std::filesystem::temp_directory_path() / "async_flow_multiline_task_log.txt";
+    std::filesystem::remove(path);
+
+    af::AsyncLogConfig config;
+    config.queue_capacity = 16;
+    config.runtime_queue_capacity = 16;
+    config.backends.push_back(af::make_file_log_backend({.path = path, .append = false}));
+    LogTestRuntimeGuard runtime_guard;
+    auto logging = af::start_async_logging_for_runtime<LogTestRuntime>(std::move(config),
+                                                                       LogTestThreads::Runtime_0);
+    std::atomic<int> runtime_completed{0};
+    std::atomic<LogTestTaskBase::TaskId> observed_task_id{LogTestTaskBase::invalid_task_id};
+    std::atomic<LogTestTaskBase::TaskId> observed_current_task_id{LogTestTaskBase::invalid_task_id};
+    ASSERT_TRUE(LogTestRuntime::start_task<RuntimeTaskIdLogTask>(
+        &runtime_completed, &observed_task_id, &observed_current_task_id,
+        "runtime task id log first\nruntime task id log second"));
+    ASSERT_TRUE(wait_until_at_least(runtime_completed, 1));
+
+    ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
+    logging->stop();
+
+    const auto task_id = observed_task_id.load(std::memory_order_acquire);
+    ASSERT_NE(task_id, LogTestTaskBase::invalid_task_id);
+
+    const std::string contents = read_file(path);
+    const std::string task_tag = "[task=" + std::to_string(task_id) + "] ";
+    const std::size_t task_tag_pos = contents.find(task_tag);
+    const std::size_t first_user_line_pos = contents.find("runtime task id log first");
+    ASSERT_NE(task_tag_pos, std::string::npos);
+    ASSERT_NE(first_user_line_pos, std::string::npos);
+    EXPECT_EQ(first_user_line_pos, task_tag_pos + task_tag.size());
+    EXPECT_EQ(count_substring_occurrences(contents, task_tag), 1U);
+    EXPECT_NE(contents.find("\nruntime task id log second"), std::string::npos);
+    EXPECT_EQ(contents.find("\n" + task_tag + "runtime task id log second"), std::string::npos);
 }
 
 TEST(LogTests, BlockOverflowWaitsForQueueCapacity) {
