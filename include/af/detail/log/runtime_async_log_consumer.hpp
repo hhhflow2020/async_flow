@@ -2,9 +2,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <memory>
-#include <thread>
+#include <mutex>
 #include <vector>
 
 #include "af/detail/log/async_logger.hpp"
@@ -56,7 +57,9 @@ private:
         if (controller_->pending_record_count() != 0U) {
             return this->again();
         }
-        controller_->mark_idle();
+        if (controller_->mark_idle_or_continue()) {
+            return this->again();
+        }
         return this->pending();
     }
 
@@ -130,7 +133,7 @@ public:
         logger_->stop_bound_consumer_admission();
         if (!task_started_.load(std::memory_order_acquire) &&
             logger_->pending_record_count() == 0U) {
-            finished_.store(true, std::memory_order_release);
+            mark_finished();
             task_.reset();
             logger_->finish_bound_consumer_shutdown();
             return;
@@ -138,10 +141,7 @@ public:
 
         static_cast<void>(wake_async_log_consumer());
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-        while (!finished_.load(std::memory_order_acquire) &&
-               std::chrono::steady_clock::now() < deadline) {
-            std::this_thread::yield();
-        }
+        static_cast<void>(wait_until_finished(deadline));
         task_.reset();
         logger_->finish_bound_consumer_shutdown();
     }
@@ -170,17 +170,30 @@ public:
         static_cast<void>(logger_->drain_some(batch, max_batches_per_run_));
     }
 
-    void mark_idle() noexcept {
+    [[nodiscard]] bool mark_idle_or_continue() noexcept {
         wake_queued_.store(false, std::memory_order_release);
+        if (pending_record_count() == 0U && !stop_requested()) {
+            return false;
+        }
+        wake_queued_.store(true, std::memory_order_release);
+        return true;
     }
 
     void mark_finished() noexcept {
         wake_queued_.store(false, std::memory_order_release);
         finished_.store(true, std::memory_order_release);
         finished_.notify_all();
+        finished_cv_.notify_all();
     }
 
 private:
+    [[nodiscard]] bool
+    wait_until_finished(std::chrono::steady_clock::time_point deadline) noexcept {
+        std::unique_lock lock(finished_mutex_);
+        return finished_cv_.wait_until(
+            lock, deadline, [this] { return finished_.load(std::memory_order_acquire); });
+    }
+
     std::shared_ptr<AsyncLogger> logger_;
     Thread thread_;
     std::size_t max_batches_per_run_;
@@ -189,6 +202,8 @@ private:
     std::atomic<bool> task_started_{false};
     std::atomic<bool> shutdown_started_{false};
     std::atomic<bool> finished_{false};
+    std::mutex finished_mutex_;
+    std::condition_variable finished_cv_;
 };
 
 } // namespace af::detail

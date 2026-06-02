@@ -4,13 +4,14 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -112,13 +113,10 @@ public:
 
     [[nodiscard]] bool flush_until(std::uint64_t target,
                                    std::chrono::steady_clock::time_point deadline) noexcept {
-        while (completed_flushes.load(std::memory_order_acquire) < target) {
-            if (std::chrono::steady_clock::now() >= deadline) {
-                return false;
-            }
-            std::this_thread::yield();
-        }
-        return true;
+        std::unique_lock lock(flush_mutex_);
+        return flush_cv_.wait_until(lock, deadline, [this, target] {
+            return completed_flushes.load(std::memory_order_acquire) >= target;
+        });
     }
 
     [[nodiscard]] RuntimeFileLogBackendStats stats() const noexcept {
@@ -179,6 +177,7 @@ public:
         const std::uint64_t requested = flush_requests.load(std::memory_order_acquire);
         completed_flushes.store(requested, std::memory_order_release);
         completed_flushes.notify_all();
+        flush_cv_.notify_all();
     }
 
     [[nodiscard]] bool has_pending_flush() const noexcept {
@@ -212,6 +211,9 @@ private:
         }
         return std::min(requested, max_supported_records);
     }
+
+    std::mutex flush_mutex_;
+    std::condition_variable flush_cv_;
 };
 
 template <typename RuntimeT> class RuntimeFileLogWriterTask final : public RuntimeT::Task {
@@ -247,7 +249,7 @@ private:
         }
 #if !defined(_WIN32)
         if (state_->io_waiting.load(std::memory_order_acquire) && !io_wait_ready()) {
-            return idle();
+            return io_pending();
         }
 #endif
 
@@ -259,7 +261,7 @@ private:
                 if (current_ == nullptr) {
                     const FlushResult flush_result = flush_if_requested();
                     if (flush_result == FlushResult::Pending) {
-                        return idle();
+                        return io_pending();
                     }
                     if (state_->stopping.load(std::memory_order_acquire)) {
                         return finish();
@@ -270,7 +272,7 @@ private:
 
             const WriteResult result = write_current();
             if (result == WriteResult::Pending) {
-                return idle();
+                return io_pending();
             }
 
             state_->complete_batch(current_);
@@ -284,13 +286,22 @@ private:
 
     TaskResult idle() noexcept {
         state_->wake_queued.store(false, std::memory_order_release);
+        if (state_->stopping.load(std::memory_order_acquire) ||
+            state_->pending_batches.load(std::memory_order_acquire) != 0U ||
+            state_->has_pending_flush()) {
+            state_->wake_queued.store(true, std::memory_order_release);
+            return this->again();
+        }
+        return this->pending();
+    }
+
+    TaskResult io_pending() noexcept {
         return this->pending();
     }
 
     TaskResult finish() noexcept {
         state_->wake_queued.store(false, std::memory_order_release);
-        state_->finished.store(true, std::memory_order_release);
-        state_->finished.notify_all();
+        state_->mark_finished();
         return this->done();
     }
 

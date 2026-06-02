@@ -2,12 +2,13 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <string_view>
-#include <thread>
 #include <utility>
 
 #include "af/detail/config.hpp"
@@ -88,13 +89,10 @@ public:
     }
 
     [[nodiscard]] bool flush_until(std::chrono::steady_clock::time_point deadline) noexcept {
-        while (pending_batches.load(std::memory_order_acquire) != 0U) {
-            if (std::chrono::steady_clock::now() >= deadline) {
-                return false;
-            }
-            std::this_thread::yield();
-        }
-        return true;
+        std::unique_lock lock(pending_mutex_);
+        return pending_cv_.wait_until(lock, deadline, [this] {
+            return pending_batches.load(std::memory_order_acquire) == 0U;
+        });
     }
 
     void complete_batch(Batch *batch) noexcept {
@@ -104,6 +102,7 @@ public:
         recycle_batch(batch);
         if (pending_batches.fetch_sub(1U, std::memory_order_acq_rel) == 1U) {
             pending_batches.notify_all();
+            pending_cv_.notify_all();
         }
     }
 
@@ -111,6 +110,19 @@ public:
         const bool recycled = free_batches.try_push(batch);
         AF_ASSERT(recycled);
         static_cast<void>(recycled);
+    }
+
+    void mark_finished() noexcept {
+        finished.store(true, std::memory_order_release);
+        finished.notify_all();
+        finished_cv_.notify_all();
+    }
+
+    [[nodiscard]] bool
+    wait_until_finished(std::chrono::steady_clock::time_point deadline) noexcept {
+        std::unique_lock lock(finished_mutex_);
+        return finished_cv_.wait_until(lock, deadline,
+                                       [this] { return finished.load(std::memory_order_acquire); });
     }
 
     const std::size_t max_batch_records;
@@ -138,6 +150,11 @@ private:
             static_cast<void>(ok);
         }
     }
+
+    std::mutex pending_mutex_;
+    std::condition_variable pending_cv_;
+    std::mutex finished_mutex_;
+    std::condition_variable finished_cv_;
 };
 
 template <typename StateT, typename TaskHandleT>
@@ -211,16 +228,13 @@ public:
         state_->stopping.store(true, std::memory_order_release);
         if (!task_started_.load(std::memory_order_acquire) &&
             state_->pending_batches.load(std::memory_order_acquire) == 0U) {
-            state_->finished.store(true, std::memory_order_release);
+            state_->mark_finished();
             task_.reset();
             return;
         }
 
         if (wake(skip_when_io_waiting)) {
-            while (!state_->finished.load(std::memory_order_acquire) &&
-                   std::chrono::steady_clock::now() < deadline) {
-                std::this_thread::yield();
-            }
+            static_cast<void>(state_->wait_until_finished(deadline));
         }
         task_.reset();
     }

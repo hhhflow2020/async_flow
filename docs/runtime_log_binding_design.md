@@ -101,6 +101,12 @@ by the same runtime-bound drain task.
   ordinary logging does not schedule a framework task for every record.
 - Runtime-bound consumers should cap drain batches per run so one logging burst
   does not monopolize the bound runtime thread.
+- Runtime backend flush and shutdown waits should block on completion
+  notifications instead of spinning/yielding while bound IO tasks make progress.
+- The runtime-bound log task wake bit stays set while a task is queued, running
+  again, or parked on IO; it is cleared only at the no-work idle boundary and
+  then immediately rechecks queued batches, flush requests, and stop requests
+  before returning `pending()`.
 - Record pool changes should stay isolated from the consumer drain loop so the
   shared MPSC pool and runtime SPSC pool can be tuned independently.
 - Lane topology changes should stay isolated from consumer lifecycle code so

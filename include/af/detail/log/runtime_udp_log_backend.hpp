@@ -10,7 +10,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -247,7 +246,7 @@ private:
         }
 #if !defined(_WIN32)
         if (state_->io_waiting.load(std::memory_order_acquire) && !io_wait_ready()) {
-            return idle();
+            return io_pending();
         }
         state_->io_waiting.store(false, std::memory_order_release);
 #endif
@@ -266,7 +265,7 @@ private:
 
             const SendResult result = send_current();
             if (result == SendResult::Pending) {
-                return idle();
+                return io_pending();
             }
 
             state_->complete_batch(current_);
@@ -280,13 +279,21 @@ private:
 
     TaskResult idle() noexcept {
         state_->wake_queued.store(false, std::memory_order_release);
+        if (state_->stopping.load(std::memory_order_acquire) ||
+            state_->pending_batches.load(std::memory_order_acquire) != 0U) {
+            state_->wake_queued.store(true, std::memory_order_release);
+            return this->again();
+        }
+        return this->pending();
+    }
+
+    TaskResult io_pending() noexcept {
         return this->pending();
     }
 
     TaskResult finish() noexcept {
         state_->wake_queued.store(false, std::memory_order_release);
-        state_->finished.store(true, std::memory_order_release);
-        state_->finished.notify_all();
+        state_->mark_finished();
         return this->done();
     }
 
