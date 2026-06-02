@@ -17,7 +17,7 @@
 #include "af/detail/config.hpp"
 #include "af/detail/log/log_backend.hpp"
 #include "af/detail/log/network_log_backend.hpp"
-#include "af/detail/queue/bounded_spsc_queue.hpp"
+#include "af/detail/log/runtime_log_backend_common.hpp"
 #include "af/task.hpp"
 
 #if !defined(_WIN32)
@@ -54,54 +54,60 @@ struct RuntimeUdpLogMessage {
 
 class RuntimeUdpLogBatch {
 public:
-    RuntimeUdpLogBatch(std::size_t max_records, std::size_t max_datagram_size) {
+    RuntimeUdpLogBatch(std::size_t max_records, std::size_t max_datagram_size)
+        : max_datagram_size_(max_datagram_size) {
         messages.reserve(max_records);
         payload.reserve(max_records * max_datagram_size);
     }
 
     void reset() noexcept {
+        record_count = 0;
         messages.clear();
         payload.clear();
     }
 
-    [[nodiscard]] bool append(std::string_view message, std::size_t max_records,
-                              std::size_t max_datagram_size) {
+    [[nodiscard]] bool append(std::string_view message, std::size_t max_records) {
         if (message.empty()) {
             return true;
         }
-        if (messages.size() >= max_records) {
+        if (record_count >= max_records) {
             return false;
         }
 
-        const std::size_t size = std::min(message.size(), max_datagram_size);
+        const std::size_t size = std::min(message.size(), max_datagram_size_);
         const std::size_t offset = payload.size();
         payload.insert(payload.end(), message.data(), message.data() + size);
         messages.push_back(RuntimeUdpLogMessage{static_cast<std::uint32_t>(offset),
                                                 static_cast<std::uint32_t>(size)});
+        ++record_count;
         return true;
     }
 
     [[nodiscard]] bool empty() const noexcept {
-        return messages.empty();
+        return record_count == 0U;
     }
 
+    std::uint32_t record_count{0};
     std::vector<RuntimeUdpLogMessage> messages;
     std::vector<char> payload;
+
+private:
+    const std::size_t max_datagram_size_;
 };
 
-template <typename RuntimeT> class RuntimeUdpLogState {
+template <typename RuntimeT>
+class RuntimeUdpLogState : public RuntimeLogQueueState<RuntimeUdpLogBatch> {
 public:
     using Thread = typename RuntimeT::Thread;
     using Batch = RuntimeUdpLogBatch;
+    using QueueState = RuntimeLogQueueState<Batch>;
 
     explicit RuntimeUdpLogState(RuntimeUdpLogBackendConfig<RuntimeT> config)
-        : thread(config.thread),
-          max_batch_records(normalize_max_batch_records(config.max_batch_records)),
-          max_datagram_size(normalize_max_datagram_size(config.max_datagram_size)),
-          max_batches_per_run(config.max_batches_per_run == 0U ? 1U : config.max_batches_per_run),
-          ready_batches(config.batch_queue_capacity), free_batches(config.batch_queue_capacity) {
+        : QueueState(
+              config.batch_queue_capacity, normalize_max_batch_records(config.max_batch_records),
+              config.max_batches_per_run, normalize_max_datagram_size(config.max_datagram_size)),
+          thread(config.thread), sent_records(0) {
         resolve(config.host, config.port);
-        reserve_batches(config.batch_queue_capacity);
     }
 
     RuntimeUdpLogState(const RuntimeUdpLogState &) = delete;
@@ -111,63 +117,6 @@ public:
 #if !defined(_WIN32)
         close_socket();
 #endif
-    }
-
-    [[nodiscard]] bool enqueue(std::span<LogRecord *const> records) noexcept {
-        if (records.empty() || stopping.load(std::memory_order_acquire)) {
-            return false;
-        }
-
-        bool enqueued_any = false;
-        std::size_t index = 0;
-        while (index < records.size()) {
-            Batch *batch = free_batches.try_pop();
-            if (batch == nullptr) {
-                dropped_records.fetch_add(records.size() - index, std::memory_order_relaxed);
-                return enqueued_any;
-            }
-
-            batch->reset();
-            const std::size_t begin = index;
-            while (index < records.size()) {
-                const std::string_view message = records[index]->message();
-                if (!batch->append(message, max_batch_records, max_datagram_size)) {
-                    break;
-                }
-                ++index;
-                if (batch->messages.size() >= max_batch_records) {
-                    break;
-                }
-            }
-
-            if (batch->empty()) {
-                recycle_batch(batch);
-                if (index == begin) {
-                    ++index;
-                }
-                continue;
-            }
-
-            queued_records.fetch_add(batch->messages.size(), std::memory_order_relaxed);
-            pending_batches.fetch_add(1U, std::memory_order_acq_rel);
-            if (!ready_batches.try_push(batch)) [[unlikely]] {
-                complete_batch(batch);
-                dropped_records.fetch_add(index - begin, std::memory_order_relaxed);
-                return enqueued_any;
-            }
-            enqueued_any = true;
-        }
-        return enqueued_any;
-    }
-
-    [[nodiscard]] bool flush_until(std::chrono::steady_clock::time_point deadline) noexcept {
-        while (pending_batches.load(std::memory_order_acquire) != 0U) {
-            if (std::chrono::steady_clock::now() >= deadline) {
-                return false;
-            }
-            std::this_thread::yield();
-        }
-        return true;
     }
 
     [[nodiscard]] RuntimeUdpLogBackendStats stats() const noexcept {
@@ -205,36 +154,8 @@ public:
     }
 #endif
 
-    void complete_batch(Batch *batch) noexcept {
-        if (batch == nullptr) {
-            return;
-        }
-        recycle_batch(batch);
-        if (pending_batches.fetch_sub(1U, std::memory_order_acq_rel) == 1U) {
-            pending_batches.notify_all();
-        }
-    }
-
-    void recycle_batch(Batch *batch) noexcept {
-        const bool recycled = free_batches.try_push(batch);
-        AF_ASSERT(recycled);
-        static_cast<void>(recycled);
-    }
-
     Thread thread;
-    const std::size_t max_batch_records;
-    const std::size_t max_datagram_size;
-    const std::size_t max_batches_per_run;
-    BoundedSpscQueue<Batch> ready_batches;
-    BoundedSpscQueue<Batch> free_batches;
-    std::vector<std::unique_ptr<Batch>> storage;
-    std::atomic<std::uint64_t> queued_records{0};
-    std::atomic<std::uint64_t> sent_records{0};
-    std::atomic<std::uint64_t> dropped_records{0};
-    std::atomic<std::size_t> pending_batches{0};
-    std::atomic<bool> wake_queued{false};
-    std::atomic<bool> stopping{false};
-    std::atomic<bool> finished{false};
+    CacheLineAtomic<std::uint64_t> sent_records;
 
 #if !defined(_WIN32)
     sockaddr_storage address{};
@@ -259,19 +180,6 @@ private:
             return 1U;
         }
         return std::min(requested, max_udp_payload_size);
-    }
-
-    void reserve_batches(std::size_t queue_capacity) {
-        const std::size_t capacity = queue_capacity == 0U ? 1U : queue_capacity;
-        storage.reserve(capacity);
-        for (std::size_t i = 0; i < capacity; ++i) {
-            auto batch = std::make_unique<Batch>(max_batch_records, max_datagram_size);
-            Batch *ptr = batch.get();
-            storage.push_back(std::move(batch));
-            const bool ok = free_batches.try_push(ptr);
-            AF_ASSERT(ok);
-            static_cast<void>(ok);
-        }
     }
 
     void resolve(const std::string &host, std::uint16_t port) noexcept {

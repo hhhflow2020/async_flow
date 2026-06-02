@@ -16,7 +16,7 @@
 
 #include "af/detail/config.hpp"
 #include "af/detail/log/log_backend.hpp"
-#include "af/detail/queue/bounded_spsc_queue.hpp"
+#include "af/detail/log/runtime_log_backend_common.hpp"
 #include "af/io_file.hpp"
 #include "af/task.hpp"
 
@@ -81,19 +81,21 @@ public:
     std::vector<char> payload;
 };
 
-template <typename RuntimeT> class RuntimeFileLogState {
+template <typename RuntimeT>
+class RuntimeFileLogState : public RuntimeLogQueueState<RuntimeFileLogBatch> {
 public:
     using Thread = typename RuntimeT::Thread;
     using Batch = RuntimeFileLogBatch;
+    using QueueState = RuntimeLogQueueState<Batch>;
 
     explicit RuntimeFileLogState(RuntimeFileLogBackendConfig<RuntimeT> config)
-        : thread(config.thread), path(config.path.string()), append(config.append),
+        : QueueState(config.batch_queue_capacity,
+                     normalize_max_batch_records(config.max_batch_records),
+                     config.max_batches_per_run),
+          thread(config.thread), path(config.path.string()), append(config.append),
           close_on_exec(config.close_on_exec), fsync_on_flush(config.fsync_on_flush),
-          max_batch_records(normalize_max_batch_records(config.max_batch_records)),
-          max_batches_per_run(config.max_batches_per_run == 0U ? 1U : config.max_batches_per_run),
-          ready_batches(config.batch_queue_capacity), free_batches(config.batch_queue_capacity) {
-        reserve_batches(config.batch_queue_capacity);
-    }
+          written_records(0), flushes(0), last_error(0), last_error_stage(0), flush_requests(0),
+          completed_flushes(0), io_waiting(false) {}
 
     RuntimeFileLogState(const RuntimeFileLogState &) = delete;
     RuntimeFileLogState &operator=(const RuntimeFileLogState &) = delete;
@@ -102,53 +104,6 @@ public:
 #if !defined(_WIN32)
         close_file();
 #endif
-    }
-
-    [[nodiscard]] bool enqueue(std::span<LogRecord *const> records) noexcept {
-        if (records.empty() || stopping.load(std::memory_order_acquire)) {
-            return false;
-        }
-
-        bool enqueued_any = false;
-        std::size_t index = 0;
-        while (index < records.size()) {
-            Batch *batch = free_batches.try_pop();
-            if (batch == nullptr) {
-                dropped_records.fetch_add(records.size() - index, std::memory_order_relaxed);
-                return enqueued_any;
-            }
-
-            batch->reset();
-            const std::size_t begin = index;
-            while (index < records.size()) {
-                const std::string_view message = records[index]->message();
-                if (!batch->append(message, max_batch_records)) {
-                    break;
-                }
-                ++index;
-                if (batch->record_count >= max_batch_records) {
-                    break;
-                }
-            }
-
-            if (batch->empty()) {
-                recycle_batch(batch);
-                if (index == begin) {
-                    ++index;
-                }
-                continue;
-            }
-
-            queued_records.fetch_add(batch->record_count, std::memory_order_relaxed);
-            pending_batches.fetch_add(1U, std::memory_order_acq_rel);
-            if (!ready_batches.try_push(batch)) [[unlikely]] {
-                complete_batch(batch);
-                dropped_records.fetch_add(index - begin, std::memory_order_relaxed);
-                return enqueued_any;
-            }
-            enqueued_any = true;
-        }
-        return enqueued_any;
     }
 
     [[nodiscard]] std::uint64_t request_flush() noexcept {
@@ -220,22 +175,6 @@ public:
     }
 #endif
 
-    void complete_batch(Batch *batch) noexcept {
-        if (batch == nullptr) {
-            return;
-        }
-        recycle_batch(batch);
-        if (pending_batches.fetch_sub(1U, std::memory_order_acq_rel) == 1U) {
-            pending_batches.notify_all();
-        }
-    }
-
-    void recycle_batch(Batch *batch) noexcept {
-        const bool recycled = free_batches.try_push(batch);
-        AF_ASSERT(recycled);
-        static_cast<void>(recycled);
-    }
-
     void complete_requested_flushes() noexcept {
         const std::uint64_t requested = flush_requests.load(std::memory_order_acquire);
         completed_flushes.store(requested, std::memory_order_release);
@@ -252,24 +191,13 @@ public:
     const bool append;
     const bool close_on_exec;
     const bool fsync_on_flush;
-    const std::size_t max_batch_records;
-    const std::size_t max_batches_per_run;
-    BoundedSpscQueue<Batch> ready_batches;
-    BoundedSpscQueue<Batch> free_batches;
-    std::vector<std::unique_ptr<Batch>> storage;
-    std::atomic<std::uint64_t> queued_records{0};
-    std::atomic<std::uint64_t> written_records{0};
-    std::atomic<std::uint64_t> dropped_records{0};
-    std::atomic<std::uint64_t> flushes{0};
-    std::atomic<int> last_error{0};
-    std::atomic<int> last_error_stage{0};
-    std::atomic<std::size_t> pending_batches{0};
-    std::atomic<std::uint64_t> flush_requests{0};
-    std::atomic<std::uint64_t> completed_flushes{0};
-    std::atomic<bool> wake_queued{false};
-    std::atomic<bool> io_waiting{false};
-    std::atomic<bool> stopping{false};
-    std::atomic<bool> finished{false};
+    CacheLineAtomic<std::uint64_t> written_records;
+    CacheLineAtomic<std::uint64_t> flushes;
+    CacheLineAtomic<int> last_error;
+    CacheLineAtomic<int> last_error_stage;
+    CacheLineAtomic<std::uint64_t> flush_requests;
+    CacheLineAtomic<std::uint64_t> completed_flushes;
+    CacheLineAtomic<bool> io_waiting;
 
 #if !defined(_WIN32)
     int fd{-1};
@@ -283,19 +211,6 @@ private:
             return 1U;
         }
         return std::min(requested, max_supported_records);
-    }
-
-    void reserve_batches(std::size_t queue_capacity) {
-        const std::size_t capacity = queue_capacity == 0U ? 1U : queue_capacity;
-        storage.reserve(capacity);
-        for (std::size_t i = 0; i < capacity; ++i) {
-            auto batch = std::make_unique<Batch>(max_batch_records);
-            Batch *ptr = batch.get();
-            storage.push_back(std::move(batch));
-            const bool ok = free_batches.try_push(ptr);
-            AF_ASSERT(ok);
-            static_cast<void>(ok);
-        }
     }
 };
 

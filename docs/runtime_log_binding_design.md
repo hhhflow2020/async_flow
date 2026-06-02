@@ -9,6 +9,10 @@
 - `RuntimeFileLogBackend`, `RuntimeUdpLogBackend`, and `RuntimeTcpLogBackend`
   keep the consumer thread for batching, but bind the actual backend IO task to a
   configured runtime thread.
+- The three runtime backends now share a `RuntimeLogQueueState` drain component
+  for batch pooling, ready/free SPSC queues, pending counters, wake flags, and
+  bounded flush waits. File, UDP, and TCP keep only their backend-specific IO
+  strategy state.
 
 This is a useful intermediate shape: runtime log producers still get SPSC
 submission, external producers still have MPSC admission, and network backends do
@@ -69,6 +73,8 @@ can be driven by the same runtime-bound drain task.
 3. Add runtime-bound file logging so file writes and flushes can use framework IO
    threads.
 4. Factor the duplicate file/UDP/TCP runtime backend queue, wake, flush, and
-   shutdown state into a common runtime log drain component.
+   shutdown state into a common runtime log drain component. The queue, batch
+   pool, pending, and wake state are now shared; full shutdown/task placement
+   sharing is still a follow-up.
 5. Add an opt-in runtime consumer placement API once file/UDP/TCP can all be
    driven by the common drain component.
