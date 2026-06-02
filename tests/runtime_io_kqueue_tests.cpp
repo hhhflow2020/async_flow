@@ -41,6 +41,39 @@ void close_pair_local(int fds[2]) {
     }
 }
 
+bool fill_until_blocked_local(int fd) {
+    char data[4096]{};
+    bool blocked = false;
+    for (;;) {
+        const ssize_t n = ::write(fd, data, sizeof(data));
+        if (n > 0) {
+            continue;
+        }
+        if (n < 0 && errno == EINTR) {
+            continue;
+        }
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            blocked = true;
+        }
+        break;
+    }
+    return blocked;
+}
+
+void drain_available_local(int fd) {
+    char data[4096]{};
+    for (;;) {
+        const ssize_t n = ::read(fd, data, sizeof(data));
+        if (n > 0) {
+            continue;
+        }
+        if (n < 0 && errno == EINTR) {
+            continue;
+        }
+        break;
+    }
+}
+
 } // namespace
 
 class IoRuntimeKqueueFixture : public IoRuntimeFixture {};
@@ -73,6 +106,62 @@ TEST_F(IoRuntimeKqueueFixture, KqueueIoThreadResumesTaskWhenFdBecomesReadable) {
     ASSERT_EQ(::write(fds[1], &value, sizeof(value)), 1);
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(byte_read.load(std::memory_order_acquire), value);
+
+    close_pair_local(fds);
+}
+
+TEST_F(IoRuntimeKqueueFixture, KqueueIoThreadRejectsDuplicateReadWait) {
+    ASSERT_TRUE(IoRuntime::io_backend_available(IoTestThreads::IO_0));
+
+    int fds[2]{-1, -1};
+    ASSERT_TRUE(make_socket_pair(fds));
+
+    std::atomic<int> armed{0};
+    std::atomic<int> completed{0};
+    std::atomic<char> byte_read{0};
+    ASSERT_TRUE(IoRuntime::start_task<SocketReadableTask>(fds[0], &armed, &completed, &byte_read));
+    ASSERT_TRUE(wait_until_at_least(armed, 1));
+
+    std::atomic<int> rejected{0};
+    std::atomic<int> error{0};
+    ASSERT_TRUE(IoRuntime::start_task<DuplicateWaitRejectedTask>(fds[0], &rejected, &error));
+    ASSERT_TRUE(wait_until_at_least(rejected, 1));
+    EXPECT_EQ(error.load(std::memory_order_acquire), EALREADY);
+
+    const char value = 'd';
+    ASSERT_EQ(::write(fds[1], &value, sizeof(value)), 1);
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(byte_read.load(std::memory_order_acquire), value);
+
+    close_pair_local(fds);
+}
+
+TEST_F(IoRuntimeKqueueFixture, KqueueIoThreadAllowsSameFdReadAndWriteWaits) {
+    ASSERT_TRUE(IoRuntime::io_backend_available(IoTestThreads::IO_0));
+
+    int fds[2]{-1, -1};
+    ASSERT_TRUE(make_socket_pair(fds));
+    ASSERT_TRUE(fill_until_blocked_local(fds[0]));
+
+    std::atomic<int> read_armed{0};
+    std::atomic<int> read_completed{0};
+    std::atomic<char> byte_read{0};
+    ASSERT_TRUE(IoRuntime::start_task<SocketReadableTask>(fds[0], &read_armed, &read_completed,
+                                                          &byte_read));
+    ASSERT_TRUE(wait_until_at_least(read_armed, 1));
+
+    std::atomic<int> write_armed{0};
+    std::atomic<int> write_completed{0};
+    ASSERT_TRUE(IoRuntime::start_task<SocketWritableTask>(fds[0], &write_armed, &write_completed));
+    ASSERT_TRUE(wait_until_at_least(write_armed, 1));
+
+    const char value = 'r';
+    ASSERT_EQ(::write(fds[1], &value, sizeof(value)), 1);
+    ASSERT_TRUE(wait_until_at_least(read_completed, 1));
+    EXPECT_EQ(byte_read.load(std::memory_order_acquire), value);
+
+    drain_available_local(fds[1]);
+    ASSERT_TRUE(wait_until_at_least(write_completed, 1));
 
     close_pair_local(fds);
 }

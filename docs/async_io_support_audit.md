@@ -71,6 +71,13 @@ Fixed in this pass:
 - The kqueue executor backend has been split out of `runtime_executor.hpp` into
   `runtime_executor_kqueue_backend.hpp`, matching the epoll/backend include
   style and reducing the main executor header's mixed responsibilities.
+- Native readiness waits now use one owner-thread fd entry with independent
+  read and write slots. Duplicate same-direction waits are still rejected, but a
+  read waiter and a write waiter can now coexist on the same fd and complete
+  independently on epoll and kqueue.
+- io_uring poll waits are detached from their fd slot when the ring backend
+  fails existing operations, so resumed tasks can safely re-arm through the
+  epoll fallback without hitting a stale duplicate-wait registration.
 
 Important existing strengths:
 
@@ -89,11 +96,6 @@ Important existing strengths:
 
 Remaining correctness and completeness gaps:
 
-- One native readiness wait per fd is currently enforced by `io_waits_` being
-  keyed only by fd. That is simple and safe for the current adapters, but it does
-  not support independent concurrent read and write waiters on the same fd. The
-  framework should either document this as an exclusive wait contract or move to
-  fd/filter-keyed registrations.
 - `prefer_rearm` is still present on the public wait path, but the active epoll
   implementation ignores it after the deferred-delete race fix. This should be
   removed or redefined before users treat it as a performance guarantee.
@@ -136,9 +138,9 @@ Remaining performance headroom:
   submissions can wait behind a constantly non-empty task queue until the batch
   threshold is reached. A latency-oriented trait or periodic flush heuristic
   should be benchmarked before changing the default.
-- Native readiness waits use `absl::flat_hash_map<int, IoWaitRegistration *>`.
-  It is owner-thread-only and usually fine, but fd/filter-keyed waits or very
-  high fd counts should be benchmarked before changing the map shape.
+- Native readiness waits use `absl::flat_hash_map<int, IoWaitEntry>` with two
+  pointer slots per fd. It stays owner-thread-only and avoids locks; very high fd
+  counts should still be benchmarked against alternate table shapes.
 - A live epoll readiness-loop benchmark is still missing. Existing IO adapter
   microbenchmarks cover helper fast paths, not end-to-end readiness rearm rates.
 
@@ -154,40 +156,42 @@ The runtime test binary includes targeted sources for:
 - io_uring socket, accept, datagram, stream, multishot stream receive,
   multishot UDP receive, recvmsg multishot, file, fixed-file, batched file, and
   lifecycle/filesystem flows.
-- kqueue availability/readiness behavior on supported platforms.
+- kqueue availability/readiness/cancel/timeout behavior on supported platforms,
+  including same-fd read/write wait coexistence.
 - shutdown behavior for pending IO waits.
 
 ## Validation For This Pass
 
 - Local `git diff --check`: passed.
 - Local macOS Debug `asyncflow_runtime_tests` built successfully.
-- Local macOS Debug `ctest -R "IoRuntimeKqueue|Kqueue"` passed 5/5 kqueue tests.
+- Local macOS Debug `ctest -R "IoRuntimeKqueue|Kqueue"` passed 7/7 kqueue tests.
 - Local macOS Debug
-  `ctest -R "^(Runtime|IoRuntime|IoState|BatchUtility)"` passed 84/84 selected
+  `ctest -R "^(Runtime|IoRuntime|IoState|BatchUtility)"` passed 87/87 selected
   tests; Linux-only epoll/io_uring cases skipped by platform guards.
 - Remote Linux GCC Debug on
   `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`:
   `asyncflow_runtime_tests` built and
-  `ctest -R "^(Runtime|IoRuntime|IoState|BatchUtility)"` passed 80/80 selected
+  `ctest -R "IoRuntimeDatagramFixture|IoRuntimeEpollFixture"` passed 33/33
+  selected epoll/datagram tests, including same-fd read/write wait coexistence.
+- Remote Linux GCC Debug on
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`:
+  `ctest -R "^(Runtime|IoRuntime|IoState|BatchUtility)"` passed 81/81 selected
   tests; kqueue was skipped by platform guard.
 - Remote Linux Clang Debug on
   `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`:
   `asyncflow_runtime_tests` built and
-  `ctest -R "^(Runtime|IoRuntime|IoState|BatchUtility)"` passed 80/80 selected
+  `ctest -R "^(Runtime|IoRuntime|IoState|BatchUtility)"` passed 81/81 selected
   tests; kqueue was skipped by platform guard.
 - Remote Linux Clang Debug + TSAN on
   `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`:
   `asyncflow_runtime_tests` built with `ASYNCFLOW_ENABLE_TSAN=ON` and
-  `ctest -R "^(Runtime|IoRuntime|IoState|BatchUtility)"` passed 71/71 selected
+  `ctest -R "^(Runtime|IoRuntime|IoState|BatchUtility)"` passed 72/72 selected
   tests with no ThreadSanitizer report; kqueue was skipped by platform guard.
 
 ## Next Actions
 
 - Add or enable a CI lane where `io_uring_setup` is allowed, preferably with
   Release, Debug, and TSAN coverage for the ring-specific tests.
-- Decide and document the native readiness contract for same-fd concurrent
-  waits. If concurrent read/write waits are a target, change registration keys
-  from fd-only to fd/filter and add tests.
 - Add a live readiness-loop benchmark for epoll and, on macOS/BSD, kqueue.
 - Benchmark a latency-oriented io_uring submit flush policy against the current
   throughput-oriented batch threshold.

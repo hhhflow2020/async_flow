@@ -347,12 +347,15 @@ template <typename RuntimeT, typename TraitsT>
 
         const int fd = registration->fd;
         auto it = io_waits_.find(fd);
-        if (it == io_waits_.end() || it->second != registration) {
+        if (it == io_waits_.end() || !io_wait_entry_contains(it->second, registration)) {
             continue;
         }
 
         remove_kqueue_filters(*registration);
-        io_waits_.erase(it);
+        remove_io_wait_registration(it->second, registration);
+        if (io_wait_entry_empty(it->second)) {
+            io_waits_.erase(it);
+        }
 
         registration->result->fd = fd;
         registration->result->events = io_events_from_kqueue(event);
@@ -371,7 +374,12 @@ template <typename RuntimeT, typename TraitsT>
 template <typename RuntimeT, typename TraitsT>
 void Executor<RuntimeT, TraitsT>::clear_io_waits() noexcept {
     for (auto &entry : io_waits_) {
-        io_wait_pool_.destroy(entry.second);
+        if (entry.second.read != nullptr) {
+            io_wait_pool_.destroy(entry.second.read);
+        }
+        if (entry.second.write != nullptr && entry.second.write != entry.second.read) {
+            io_wait_pool_.destroy(entry.second.write);
+        }
     }
     io_waits_.clear();
 }
@@ -394,8 +402,9 @@ Executor<RuntimeT, TraitsT>::register_native_io_wait(int fd, std::uint32_t event
                                                      IoResult *result, bool prefer_rearm) noexcept {
     static_cast<void>(prefer_rearm);
     const bool unsupported_events = (events & (io_readable | io_writable)) == 0U;
+    auto existing = io_waits_.find(fd);
     if (io_kqueue_fd_ < 0 || fd < 0 || events == 0U || unsupported_events ||
-        io_waits_.find(fd) != io_waits_.end()) {
+        (existing != io_waits_.end() && io_wait_events_conflict(existing->second, events))) {
         result->fd = fd;
         result->events = io_error;
         if (fd < 0) {
@@ -411,17 +420,17 @@ Executor<RuntimeT, TraitsT>::register_native_io_wait(int fd, std::uint32_t event
     }
 
     IoWaitRegistration *registration = nullptr;
+    typename absl::flat_hash_map<int, IoWaitEntry>::iterator wait_it;
     try {
         registration = io_wait_pool_.create();
-        auto [it, inserted] = io_waits_.emplace(fd, registration);
-        static_cast<void>(it);
-        if (!inserted) {
-            io_wait_pool_.destroy(registration);
-            result->fd = fd;
-            result->events = io_error;
-            result->error = EALREADY;
-            return false;
-        }
+        registration->fd = fd;
+        registration->events = events;
+        registration->task = task;
+        registration->result = result;
+        auto [it, inserted] = io_waits_.try_emplace(fd);
+        static_cast<void>(inserted);
+        wait_it = it;
+        add_io_wait_registration(wait_it->second, registration);
     } catch (...) {
         if (registration != nullptr) {
             io_wait_pool_.destroy(registration);
@@ -432,16 +441,14 @@ Executor<RuntimeT, TraitsT>::register_native_io_wait(int fd, std::uint32_t event
         return false;
     }
 
-    registration->fd = fd;
-    registration->events = events;
-    registration->task = task;
-    registration->result = result;
-
     std::array<struct kevent, 2> changes;
     int change_count = fill_kqueue_changes(fd, events, registration, changes);
     if (::kevent(io_kqueue_fd_, changes.data(), change_count, nullptr, 0, nullptr) != 0) {
         const int error = errno == 0 ? EIO : errno;
-        io_waits_.erase(fd);
+        remove_io_wait_registration(wait_it->second, registration);
+        if (io_wait_entry_empty(wait_it->second)) {
+            io_waits_.erase(wait_it);
+        }
         io_wait_pool_.destroy(registration);
         result->fd = fd;
         result->events = io_error;
@@ -464,16 +471,20 @@ template <typename RuntimeT, typename TraitsT>
 
     const int fd = state.wait.fd;
     auto it = io_waits_.find(fd);
-    if (fd < 0 || it == io_waits_.end() || it->second->result != &state.wait) {
+    IoWaitRegistration *registration =
+        it == io_waits_.end() ? nullptr : find_io_wait_registration(it->second, &state.wait);
+    if (fd < 0 || it == io_waits_.end() || registration == nullptr) {
         state.wait.events = io_error;
         state.wait.error = ENOENT;
         state.wait.result = -ENOENT;
         return false;
     }
 
-    IoWaitRegistration *registration = it->second;
     remove_kqueue_filters(*registration);
-    io_waits_.erase(it);
+    remove_io_wait_registration(it->second, registration);
+    if (io_wait_entry_empty(it->second)) {
+        io_waits_.erase(it);
+    }
 
     state.wait.fd = fd;
     state.wait.events = io_error;

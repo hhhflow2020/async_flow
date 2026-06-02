@@ -2,7 +2,7 @@
 
 class IoRuntimeDatagramFixture : public IoRuntimeFixture {};
 
-TEST_F(IoRuntimeDatagramFixture, EpollIoThreadRejectsDuplicateFdWait) {
+TEST_F(IoRuntimeDatagramFixture, EpollIoThreadRejectsDuplicateReadWait) {
 #if defined(__linux__)
     if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
         GTEST_SKIP() << "epoll backend unavailable";
@@ -27,6 +27,42 @@ TEST_F(IoRuntimeDatagramFixture, EpollIoThreadRejectsDuplicateFdWait) {
     ASSERT_EQ(::write(fds[1], &value, sizeof(value)), 1);
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(byte_read.load(std::memory_order_acquire), value);
+
+    close_pair(fds);
+#else
+    GTEST_SKIP() << "epoll backend is Linux-only";
+#endif
+}
+
+TEST_F(IoRuntimeDatagramFixture, EpollIoThreadAllowsSameFdReadAndWriteWaits) {
+#if defined(__linux__)
+    if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
+        GTEST_SKIP() << "epoll backend unavailable";
+    }
+
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+    ASSERT_TRUE(fill_until_blocked(fds[0]));
+
+    std::atomic<int> read_armed{0};
+    std::atomic<int> read_completed{0};
+    std::atomic<char> byte_read{0};
+    ASSERT_TRUE(IoRuntime::start_task<SocketReadableTask>(fds[0], &read_armed, &read_completed,
+                                                          &byte_read));
+    ASSERT_TRUE(wait_until_at_least(read_armed, 1));
+
+    std::atomic<int> write_armed{0};
+    std::atomic<int> write_completed{0};
+    ASSERT_TRUE(IoRuntime::start_task<SocketWritableTask>(fds[0], &write_armed, &write_completed));
+    ASSERT_TRUE(wait_until_at_least(write_armed, 1));
+
+    const char value = 'r';
+    ASSERT_EQ(::write(fds[1], &value, sizeof(value)), 1);
+    ASSERT_TRUE(wait_until_at_least(read_completed, 1));
+    EXPECT_EQ(byte_read.load(std::memory_order_acquire), value);
+
+    drain_available(fds[1]);
+    ASSERT_TRUE(wait_until_at_least(write_completed, 1));
 
     close_pair(fds);
 #else

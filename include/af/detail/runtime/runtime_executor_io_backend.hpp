@@ -519,8 +519,11 @@ void Executor<RuntimeT, TraitsT>::complete_io_uring_poll_wait(IoUringOperation *
 
     const int fd = registration->fd;
     auto it = io_waits_.find(fd);
-    if (it != io_waits_.end() && it->second == registration) {
-        io_waits_.erase(it);
+    if (it != io_waits_.end() && io_wait_entry_contains(it->second, registration)) {
+        remove_io_wait_registration(it->second, registration);
+        if (io_wait_entry_empty(it->second)) {
+            io_waits_.erase(it);
+        }
     }
 
     registration->result->fd = fd;
@@ -679,6 +682,12 @@ void Executor<RuntimeT, TraitsT>::clear_or_fail_io_uring_operations(
             continue;
         }
 
+        if (fail_io_uring_poll_wait(operation, error)) {
+            destroy_io_uring_operation(operation);
+            operation = next;
+            continue;
+        }
+
         close_pending_io_uring_fd_result(operation);
         if (operation->task == nullptr || operation->result == nullptr) {
             destroy_io_uring_operation(operation);
@@ -692,6 +701,50 @@ void Executor<RuntimeT, TraitsT>::clear_or_fail_io_uring_operations(
         destroy_io_uring_operation(operation);
         operation = next;
     }
+}
+#endif
+
+#if defined(__linux__)
+template <typename RuntimeT, typename TraitsT>
+[[nodiscard]] bool Executor<RuntimeT, TraitsT>::fail_io_uring_poll_wait(IoUringOperation *operation,
+                                                                        int error) noexcept {
+    if (operation == nullptr || !operation->poll_wait) {
+        return false;
+    }
+
+    const int completion_error =
+        operation->cancel_requested ? ECANCELED : (error == 0 ? EIO : error);
+    IoWaitRegistration *registration = operation->wait_registration;
+    if (registration != nullptr) {
+        const int fd = registration->fd;
+        auto it = io_waits_.find(fd);
+        if (it != io_waits_.end() && io_wait_entry_contains(it->second, registration)) {
+            remove_io_wait_registration(it->second, registration);
+            if (io_wait_entry_empty(it->second)) {
+                io_waits_.erase(it);
+            }
+        }
+
+        registration->result->fd = fd;
+        registration->result->events = io_error;
+        registration->result->error = completion_error;
+        registration->result->result = -completion_error;
+        if (registration->task != nullptr) {
+            enqueue_pending_blocking(index_, registration->task);
+        }
+        registration->poll_operation = nullptr;
+        operation->wait_registration = nullptr;
+        io_wait_pool_.destroy(registration);
+        return true;
+    }
+
+    if (operation->task != nullptr && operation->result != nullptr) {
+        operation->result->events = io_error;
+        operation->result->error = completion_error;
+        operation->result->result = -completion_error;
+        enqueue_pending_blocking(index_, operation->task);
+    }
+    return true;
 }
 #endif
 

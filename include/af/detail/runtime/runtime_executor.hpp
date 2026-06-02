@@ -1341,6 +1341,75 @@ private:
 #endif
     };
 
+    struct IoWaitEntry {
+        IoWaitRegistration *read{nullptr};
+        IoWaitRegistration *write{nullptr};
+    };
+
+    [[nodiscard]] static bool io_wait_entry_empty(const IoWaitEntry &entry) noexcept {
+        return entry.read == nullptr && entry.write == nullptr;
+    }
+
+    [[nodiscard]] static bool
+    io_wait_entry_contains(const IoWaitEntry &entry,
+                           const IoWaitRegistration *registration) noexcept {
+        return entry.read == registration || entry.write == registration;
+    }
+
+    [[nodiscard]] static bool io_wait_events_conflict(const IoWaitEntry &entry,
+                                                      std::uint32_t events) noexcept {
+        return ((events & io_readable) != 0U && entry.read != nullptr) ||
+               ((events & io_writable) != 0U && entry.write != nullptr);
+    }
+
+    static void add_io_wait_registration(IoWaitEntry &entry,
+                                         IoWaitRegistration *registration) noexcept {
+        if ((registration->events & io_readable) != 0U) {
+            entry.read = registration;
+        }
+        if ((registration->events & io_writable) != 0U) {
+            entry.write = registration;
+        }
+    }
+
+    static void remove_io_wait_registration(IoWaitEntry &entry,
+                                            const IoWaitRegistration *registration) noexcept {
+        if (entry.read == registration) {
+            entry.read = nullptr;
+        }
+        if (entry.write == registration) {
+            entry.write = nullptr;
+        }
+    }
+
+    [[nodiscard]] static IoWaitRegistration *
+    find_io_wait_registration(IoWaitEntry &entry, const IoResult *result) noexcept {
+        if (entry.read != nullptr && entry.read->result == result) {
+            return entry.read;
+        }
+        if (entry.write != nullptr && entry.write != entry.read && entry.write->result == result) {
+            return entry.write;
+        }
+        return nullptr;
+    }
+
+    [[nodiscard]] static bool io_wait_registration_ready(const IoWaitRegistration &registration,
+                                                         std::uint32_t ready_events) noexcept {
+        if ((ready_events & (io_error | io_hangup)) != 0U) {
+            return true;
+        }
+        return (registration.events & ready_events & (io_readable | io_writable)) != 0U;
+    }
+
+    [[nodiscard]] static bool
+    io_wait_registration_uses_native_backend(const IoWaitRegistration *registration) noexcept {
+#if defined(__linux__)
+        return registration != nullptr && registration->poll_operation == nullptr;
+#else
+        return registration != nullptr;
+#endif
+    }
+
 #endif
 
 #if AF_DETAIL_HAS_KQUEUE
@@ -1756,6 +1825,8 @@ private:
     void close_native_io_backend() noexcept;
     void clear_io_waits() noexcept;
     [[nodiscard]] bool poll_native_io(int timeout_ms, bool did_work) noexcept;
+    [[nodiscard]] static std::uint32_t epoll_events_for_entry(const IoWaitEntry &entry) noexcept;
+    [[nodiscard]] bool update_epoll_interest(int fd, const IoWaitEntry &entry) noexcept;
     [[nodiscard]] bool register_native_io_wait(int fd, std::uint32_t events, Task *task,
                                                IoResult *result, bool prefer_rearm) noexcept;
     [[nodiscard]] bool cancel_native_io_wait(IoOpState &state) noexcept;
@@ -1876,6 +1947,7 @@ private:
     void clear_io_uring_operations() noexcept;
     void fail_io_uring_backend(int error, IoUringOperation *running_operation) noexcept;
     void clear_or_fail_io_uring_operations(int error, IoUringOperation *running_operation) noexcept;
+    [[nodiscard]] bool fail_io_uring_poll_wait(IoUringOperation *operation, int error) noexcept;
     void close_pending_io_uring_fd_result(IoUringOperation *operation) noexcept;
     static void clear_io_uring_result_token(IoUringOperation *operation) noexcept;
     void destroy_io_uring_operation(IoUringOperation *operation) noexcept;
@@ -1963,7 +2035,7 @@ private:
     CacheLineAtomic<bool> stop_requested_{false};
     Task *running_task_{nullptr};
 #if AF_DETAIL_HAS_NATIVE_IO_WAIT
-    absl::flat_hash_map<int, IoWaitRegistration *> io_waits_;
+    absl::flat_hash_map<int, IoWaitEntry> io_waits_;
     IoObjectPool<IoWaitRegistration> io_wait_pool_;
 #endif
 #if AF_DETAIL_HAS_EPOLL
