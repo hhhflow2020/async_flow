@@ -21,6 +21,7 @@
 #include "af/detail/log/log_backend.hpp"
 #include "af/detail/memory/contiguous_object_storage.hpp"
 #include "af/detail/queue/bounded_mpsc_queue.hpp"
+#include "af/detail/queue/bounded_spsc_queue.hpp"
 #include "af/detail/queue/queue_backoff.hpp"
 #include "af/detail/thread/thread_name.hpp"
 
@@ -34,6 +35,8 @@ enum class LogOverflowPolicy : std::uint8_t {
 struct AsyncLogConfig {
     std::size_t queue_capacity{1U << 16U};
     std::size_t queue_shard_count{0};
+    std::size_t runtime_thread_count{0};
+    std::size_t runtime_queue_capacity{0};
     std::size_t max_batch_size{256};
     std::size_t overflow_spin_count{64};
     LogOverflowPolicy overflow_policy{LogOverflowPolicy::DropNewest};
@@ -55,10 +58,18 @@ public:
         : cache_token_(next_cache_token_.fetch_add(1U, std::memory_order_relaxed)),
           queue_shard_count_(normalize_queue_shard_count(config.queue_shard_count)),
           queue_shard_mask_(queue_shard_count_ - 1U),
+          runtime_thread_count_(validate_runtime_thread_count(config.runtime_thread_count)),
           queue_shards_(
               make_queue_shards(queue_shard_count_,
                                 queue_capacity_per_shard(config.queue_capacity, queue_shard_count_),
                                 config.max_batch_size)),
+          runtime_lanes_(make_runtime_lanes(
+              runtime_thread_count_,
+              queue_capacity_per_runtime_thread(config.runtime_queue_capacity == 0U
+                                                    ? config.queue_capacity
+                                                    : config.runtime_queue_capacity,
+                                                runtime_thread_count_),
+              config.max_batch_size)),
           max_batch_size_(config.max_batch_size == 0U ? 1U : config.max_batch_size),
           overflow_spin_count_(config.overflow_spin_count),
           overflow_policy_(config.overflow_policy),
@@ -89,30 +100,17 @@ public:
 
     [[nodiscard]] bool try_log(std::string_view message) noexcept {
         QueueShard &shard = producer_shard();
-        if (!accepting_.load(std::memory_order_acquire)) {
-            record_dropped(shard);
-            return false;
+        return try_log_on_lane(shard, message);
+    }
+
+    [[nodiscard]] bool try_log_from_runtime_thread(std::uint16_t thread_index,
+                                                   std::string_view message) noexcept {
+        if (thread_index >= runtime_thread_count_) [[unlikely]] {
+            return try_log(message);
         }
 
-        detail::LogRecord *record = acquire_record(shard, message);
-        if (record == nullptr) {
-            record_dropped(shard);
-            return false;
-        }
-
-        const auto previous_pending = pending_.fetch_add(1U, std::memory_order_release);
-        if (!push_record(shard, record)) {
-            release_record(record);
-            abandon_pending_record();
-            record_dropped(shard);
-            return false;
-        }
-
-        record_accepted(shard);
-        if (previous_pending == 0U) {
-            wake_cv_.notify_one();
-        }
-        return true;
+        RuntimeLane &lane = *runtime_lanes_[thread_index];
+        return try_log_on_lane(lane, message);
     }
 
     [[nodiscard]] bool flush(std::chrono::milliseconds timeout) noexcept {
@@ -147,6 +145,10 @@ public:
             result.accepted += shard.accepted.load();
             result.dropped += shard.dropped.load();
         }
+        for (const RuntimeLane &lane : runtime_lanes_) {
+            result.accepted += lane.accepted.load();
+            result.dropped += lane.dropped.load();
+        }
         return result;
     }
 
@@ -155,6 +157,34 @@ public:
     }
 
 private:
+    template <typename Lane>
+    [[nodiscard]] bool try_log_on_lane(Lane &lane, std::string_view message) noexcept {
+        if (!accepting_.load(std::memory_order_acquire)) {
+            record_dropped(lane);
+            return false;
+        }
+
+        detail::LogRecord *record = acquire_record(lane, message);
+        if (record == nullptr) {
+            record_dropped(lane);
+            return false;
+        }
+
+        const auto previous_pending = pending_.fetch_add(1U, std::memory_order_release);
+        if (!push_record(lane, record)) {
+            release_record(record);
+            abandon_pending_record();
+            record_dropped(lane);
+            return false;
+        }
+
+        record_accepted(lane);
+        if (previous_pending == 0U) {
+            wake_cv_.notify_one();
+        }
+        return true;
+    }
+
     class LogRecordPool {
         static constexpr std::uint32_t null_slot = std::numeric_limits<std::uint32_t>::max();
         static constexpr std::size_t slot_index_bits = sizeof(std::uint32_t) * 8U;
@@ -289,6 +319,16 @@ private:
         LogRecordPool records;
     };
 
+    struct alignas(detail::hardware_cache_line_size) RuntimeLane {
+        RuntimeLane(std::size_t queue_capacity, std::size_t record_capacity)
+            : queue(queue_capacity), records(record_capacity) {}
+
+        LogStatCounter accepted;
+        LogStatCounter dropped;
+        detail::BoundedSpscQueue<detail::LogRecord> queue;
+        LogRecordPool records;
+    };
+
     struct ProducerShardCache {
         const AsyncLogger *logger{nullptr};
         std::uint64_t token{0};
@@ -296,6 +336,7 @@ private:
     };
 
     using QueueShardStorage = detail::ContiguousObjectStorage<QueueShard>;
+    using RuntimeLaneStorage = detail::ContiguousObjectStorage<RuntimeLane>;
 
     [[nodiscard]] static std::size_t default_queue_shard_count() noexcept {
         const unsigned int hardware_threads = std::thread::hardware_concurrency();
@@ -309,10 +350,27 @@ private:
         return detail::next_power_of_two(shard_count == 0U ? 1U : shard_count);
     }
 
+    [[nodiscard]] static std::size_t validate_runtime_thread_count(std::size_t requested) {
+        if (requested > static_cast<std::size_t>(std::numeric_limits<std::uint16_t>::max())) {
+            throw std::length_error("async log runtime thread count is out of range");
+        }
+        return requested;
+    }
+
     [[nodiscard]] static std::size_t queue_capacity_per_shard(std::size_t total_capacity,
                                                               std::size_t shard_count) noexcept {
         const std::size_t capacity = total_capacity == 0U ? 1U : total_capacity;
         return std::max<std::size_t>(2U, (capacity + shard_count - 1U) / shard_count);
+    }
+
+    [[nodiscard]] static std::size_t
+    queue_capacity_per_runtime_thread(std::size_t total_capacity,
+                                      std::size_t thread_count) noexcept {
+        if (thread_count == 0U) {
+            return 0U;
+        }
+        const std::size_t capacity = total_capacity == 0U ? 1U : total_capacity;
+        return std::max<std::size_t>(2U, (capacity + thread_count - 1U) / thread_count);
     }
 
     [[nodiscard]] static std::size_t record_capacity_per_shard(std::size_t queue_capacity,
@@ -337,6 +395,23 @@ private:
         return shards;
     }
 
+    [[nodiscard]] static RuntimeLaneStorage make_runtime_lanes(std::size_t thread_count,
+                                                               std::size_t capacity_per_thread,
+                                                               std::size_t max_batch_size) {
+        RuntimeLaneStorage lanes;
+        if (thread_count == 0U) {
+            return lanes;
+        }
+
+        lanes.reserve_exact(thread_count);
+        const std::size_t record_capacity =
+            record_capacity_per_shard(capacity_per_thread, max_batch_size);
+        for (std::size_t i = 0; i < thread_count; ++i) {
+            lanes.emplace_back(capacity_per_thread, record_capacity);
+        }
+        return lanes;
+    }
+
     [[nodiscard]] QueueShard &producer_shard() noexcept {
         thread_local ProducerShardCache cache;
         if (cache.logger != this || cache.token != cache_token_) [[unlikely]] {
@@ -350,23 +425,23 @@ private:
         return *cache.shard;
     }
 
-    static void record_accepted(QueueShard &shard) noexcept {
-        shard.accepted.add(1U);
+    template <typename Lane> static void record_accepted(Lane &lane) noexcept {
+        lane.accepted.add(1U);
     }
 
-    static void record_dropped(QueueShard &shard) noexcept {
-        shard.dropped.add(1U);
+    template <typename Lane> static void record_dropped(Lane &lane) noexcept {
+        lane.dropped.add(1U);
     }
 
-    [[nodiscard]] detail::LogRecord *acquire_record(QueueShard &shard,
-                                                    std::string_view message) noexcept {
+    template <typename Lane>
+    [[nodiscard]] detail::LogRecord *acquire_record(Lane &lane, std::string_view message) noexcept {
         if (overflow_policy_ == LogOverflowPolicy::DropNewest) {
-            return shard.records.try_acquire(message);
+            return lane.records.try_acquire(message);
         }
 
         detail::QueueFullBackoff backoff(overflow_spin_count_);
         while (accepting_.load(std::memory_order_acquire)) {
-            if (detail::LogRecord *record = shard.records.try_acquire(message); record != nullptr) {
+            if (detail::LogRecord *record = lane.records.try_acquire(message); record != nullptr) {
                 return record;
             }
             backoff.wait();
@@ -374,14 +449,15 @@ private:
         return nullptr;
     }
 
-    [[nodiscard]] bool push_record(QueueShard &shard, detail::LogRecord *record) noexcept {
+    template <typename Lane>
+    [[nodiscard]] bool push_record(Lane &lane, detail::LogRecord *record) noexcept {
         if (overflow_policy_ == LogOverflowPolicy::DropNewest) {
-            return accepting_.load(std::memory_order_acquire) && shard.queue.try_push(record);
+            return accepting_.load(std::memory_order_acquire) && lane.queue.try_push(record);
         }
 
         detail::QueueFullBackoff backoff(overflow_spin_count_);
         while (accepting_.load(std::memory_order_acquire)) {
-            if (shard.queue.try_push(record)) {
+            if (lane.queue.try_push(record)) {
                 return true;
             }
             backoff.wait();
@@ -451,6 +527,17 @@ private:
     }
 
     void collect_batch(std::vector<detail::LogRecord *> &batch) noexcept {
+        if (prefer_runtime_drain_) {
+            collect_runtime_batch(batch);
+            collect_shard_batch(batch);
+        } else {
+            collect_shard_batch(batch);
+            collect_runtime_batch(batch);
+        }
+        prefer_runtime_drain_ = !prefer_runtime_drain_;
+    }
+
+    void collect_shard_batch(std::vector<detail::LogRecord *> &batch) noexcept {
         constexpr std::size_t max_queue_drain_count = 64;
         std::array<detail::LogRecord *, max_queue_drain_count> drained;
         std::size_t empty_visits = 0;
@@ -459,6 +546,33 @@ private:
             next_drain_shard_ = (next_drain_shard_ + 1U) & queue_shard_mask_;
 
             const std::size_t count = shard.queue.try_pop_many(
+                drained.data(), std::min(drained.size(), max_batch_size_ - batch.size()));
+            if (count == 0U) {
+                ++empty_visits;
+                continue;
+            }
+
+            empty_visits = 0;
+            batch.insert(batch.end(), drained.data(), drained.data() + count);
+        }
+    }
+
+    void collect_runtime_batch(std::vector<detail::LogRecord *> &batch) noexcept {
+        if (runtime_thread_count_ == 0U) {
+            return;
+        }
+
+        constexpr std::size_t max_queue_drain_count = 64;
+        std::array<detail::LogRecord *, max_queue_drain_count> drained;
+        std::size_t empty_visits = 0;
+        while (batch.size() < max_batch_size_ && empty_visits < runtime_thread_count_) {
+            RuntimeLane &lane = *runtime_lanes_[next_runtime_drain_thread_];
+            ++next_runtime_drain_thread_;
+            if (next_runtime_drain_thread_ == runtime_thread_count_) {
+                next_runtime_drain_thread_ = 0U;
+            }
+
+            const std::size_t count = lane.queue.try_pop_many(
                 drained.data(), std::min(drained.size(), max_batch_size_ - batch.size()));
             if (count == 0U) {
                 ++empty_visits;
@@ -481,7 +595,9 @@ private:
     const std::uint64_t cache_token_;
     const std::size_t queue_shard_count_;
     const std::size_t queue_shard_mask_;
+    const std::size_t runtime_thread_count_;
     QueueShardStorage queue_shards_;
+    RuntimeLaneStorage runtime_lanes_;
     const std::size_t max_batch_size_;
     const std::size_t overflow_spin_count_;
     const LogOverflowPolicy overflow_policy_;
@@ -497,6 +613,8 @@ private:
     alignas(detail::hardware_cache_line_size) std::atomic<std::size_t> pending_{0};
 
     std::size_t next_drain_shard_{0};
+    std::size_t next_runtime_drain_thread_{0};
+    bool prefer_runtime_drain_{true};
     std::mutex wait_mutex_;
     std::condition_variable wake_cv_;
     std::condition_variable drained_cv_;

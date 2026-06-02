@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include "af/async_runtime.hpp"
 #include "af/log.hpp"
 
 #if !defined(_WIN32)
@@ -76,6 +77,17 @@ private:
     std::atomic<std::size_t> record_count_{0};
 };
 
+template <typename T> bool wait_until_at_least(std::atomic<T> &value, T expected) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (value.load(std::memory_order_acquire) < expected) {
+        if (std::chrono::steady_clock::now() > deadline) {
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+}
+
 #if defined(__linux__) || defined(__APPLE__)
 class ThreadNameLogBackend final : public af::LogBackend {
 public:
@@ -100,6 +112,43 @@ private:
     std::string thread_name_;
 };
 #endif
+
+struct LogTestRuntimeThreadTag;
+
+struct LogTestRuntimeTraits {
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<LogTestRuntimeThreadTag, 1, af::ThreadKind::Worker, "log-src">());
+    static constexpr std::size_t spsc_queue_capacity = 1024;
+    static constexpr std::size_t external_queue_capacity = 1024;
+    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+};
+
+using LogTestRuntime = af::AsyncRuntime<LogTestRuntimeTraits>;
+using LogTestTaskBase = LogTestRuntime::Task;
+
+struct LogTestThreads {
+    static constexpr auto Runtime_0 =
+        LogTestRuntime::thread_group<LogTestRuntimeThreadTag>().template at<0>();
+};
+
+class RuntimeLogTask final : public LogTestTaskBase {
+public:
+    explicit RuntimeLogTask(LogTestTaskBase::FactoryToken token) : LogTestTaskBase(token) {}
+
+    bool do_it(std::atomic<int> *completed) {
+        completed_ = completed;
+        return schedule(LogTestThreads::Runtime_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        LOG(INFO) << "runtime spsc lane log";
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int> *completed_{nullptr};
+};
 
 #if !defined(_WIN32)
 void close_fd(int &fd) noexcept {
@@ -335,6 +384,43 @@ TEST(LogTests, QueueOverflowDropsNewestWithoutBlockingProducer) {
     }
 
     EXPECT_GT(logging->stats().dropped, 0U);
+
+    blocking_backend->release();
+    ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
+}
+
+TEST(LogTests, RuntimeAwareSinkUsesSpscLaneWhenExternalMpscIsFull) {
+    auto backend = std::make_unique<BlockingLogBackend>();
+    auto *blocking_backend = backend.get();
+
+    af::AsyncLogConfig config;
+    config.queue_capacity = 1;
+    config.queue_shard_count = 1;
+    config.runtime_queue_capacity = 2;
+    config.max_batch_size = 1;
+    config.overflow_policy = af::LogOverflowPolicy::DropNewest;
+    config.backends.push_back(std::move(backend));
+    auto logging = af::start_async_logging_for_runtime<LogTestRuntime>(std::move(config));
+
+    LOG(INFO) << "block log worker";
+    ASSERT_TRUE(blocking_backend->wait_until_entered(std::chrono::seconds(2)));
+
+    LOG(INFO) << "external mpsc fill one";
+    LOG(INFO) << "external mpsc fill two";
+    const af::AsyncLogStats filled = logging->stats();
+
+    LOG(INFO) << "external mpsc overflow";
+    const af::AsyncLogStats overflowed = logging->stats();
+    ASSERT_GT(overflowed.dropped, filled.dropped);
+
+    LogTestRuntime::init();
+    std::atomic<int> runtime_completed{0};
+    ASSERT_TRUE(LogTestRuntime::start_task<RuntimeLogTask>(&runtime_completed));
+    ASSERT_TRUE(wait_until_at_least(runtime_completed, 1));
+    LogTestRuntime::shutdown();
+
+    const af::AsyncLogStats after_runtime = logging->stats();
+    EXPECT_EQ(after_runtime.accepted, overflowed.accepted + 1U);
 
     blocking_backend->release();
     ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));

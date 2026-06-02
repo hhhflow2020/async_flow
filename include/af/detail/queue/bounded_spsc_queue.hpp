@@ -47,6 +47,30 @@ public:
         return value;
     }
 
+    [[nodiscard]] std::size_t try_pop_many(T **out, std::size_t max_count) noexcept {
+        if (max_count == 0U) {
+            return 0;
+        }
+
+        const std::size_t head = head_.load(std::memory_order_relaxed);
+        if (tail_cache_ == head) {
+            tail_cache_ = tail_.load(std::memory_order_acquire);
+            if (tail_cache_ == head) {
+                return 0;
+            }
+        } else if (tail_cache_ - head < max_count) {
+            tail_cache_ = tail_.load(std::memory_order_acquire);
+        }
+
+        const std::size_t available = tail_cache_ - head;
+        const std::size_t count = available < max_count ? available : max_count;
+        for (std::size_t i = 0; i < count; ++i) {
+            out[i] = buffer_[(head + i) & mask_];
+        }
+        head_.store(head + count, std::memory_order_release);
+        return count;
+    }
+
 private:
     const std::size_t capacity_;
     const std::size_t mask_;
