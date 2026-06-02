@@ -6,8 +6,9 @@
   SPSC lanes, and external threads use sharded MPSC queues.
 - `FileLogBackend`, `UdpLogBackend`, and `TcpLogBackend` execute synchronously on
   the consumer thread.
-- `RuntimeUdpLogBackend` and `RuntimeTcpLogBackend` keep the consumer thread for
-  batching, but bind the actual network IO task to a configured runtime thread.
+- `RuntimeFileLogBackend`, `RuntimeUdpLogBackend`, and `RuntimeTcpLogBackend`
+  keep the consumer thread for batching, but bind the actual backend IO task to a
+  configured runtime thread.
 
 This is a useful intermediate shape: runtime log producers still get SPSC
 submission, external producers still have MPSC admission, and network backends do
@@ -65,8 +66,9 @@ can be driven by the same runtime-bound drain task.
 
 1. Keep the dedicated consumer thread as the default compatibility mode.
 2. Add runtime-bound TCP logging so network logs can use framework IO threads.
-3. Add a runtime-bound file backend or shared runtime drain abstraction.
-4. Factor the duplicate UDP/TCP runtime backend queue, wake, flush, and shutdown
-   state into a common runtime log drain component.
+3. Add runtime-bound file logging so file writes and flushes can use framework IO
+   threads.
+4. Factor the duplicate file/UDP/TCP runtime backend queue, wake, flush, and
+   shutdown state into a common runtime log drain component.
 5. Add an opt-in runtime consumer placement API once file/UDP/TCP can all be
    driven by the common drain component.

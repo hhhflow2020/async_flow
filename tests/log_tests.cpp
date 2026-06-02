@@ -374,6 +374,103 @@ TEST(LogTests, AsyncFileBackendWritesAbslFormattedMessages) {
     EXPECT_NE(contents.find("af async file backend test"), std::string::npos);
 }
 
+TEST(LogTests, RuntimeFileBackendWritesBatchesOnIoThread) {
+    const auto path =
+        std::filesystem::path(::testing::TempDir()) / "asyncflow-runtime-log-file.log";
+    std::filesystem::remove(path);
+
+    LogUdpIoRuntimeGuard runtime_guard;
+    af::RuntimeFileLogBackend<LogUdpIoRuntime> backend({
+        .thread = LogUdpIoThreads::IO_0,
+        .path = path,
+        .append = false,
+        .fsync_on_flush = true,
+        .batch_queue_capacity = 8,
+        .max_batch_records = 4,
+        .max_batches_per_run = 8,
+    });
+
+    std::array<af::detail::LogRecord, 4> records;
+    records[0].reset("runtime file backend one\n");
+    records[1].reset("runtime file backend two\n");
+    records[2].reset("runtime file backend three\n");
+    records[3].reset("runtime file backend four\n");
+    std::array<af::detail::LogRecord *, 4> record_ptrs{
+        &records[0],
+        &records[1],
+        &records[2],
+        &records[3],
+    };
+
+    backend.write_batch(
+        std::span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
+    const bool flushed = backend.flush(std::chrono::seconds(2));
+    const af::RuntimeFileLogBackendStats stats = backend.stats();
+    backend.shutdown();
+
+    const std::string contents = read_file(path);
+    EXPECT_TRUE(flushed);
+    EXPECT_EQ(stats.queued_records, record_ptrs.size());
+    EXPECT_EQ(stats.written_records, record_ptrs.size())
+        << "last_error=" << stats.last_error << " stage=" << stats.last_error_stage;
+    EXPECT_EQ(stats.dropped_records, 0U)
+        << "last_error=" << stats.last_error << " stage=" << stats.last_error_stage;
+    EXPECT_GE(stats.flushes, 1U);
+    EXPECT_NE(contents.find("runtime file backend one\n"), std::string::npos);
+    EXPECT_NE(contents.find("runtime file backend two\n"), std::string::npos);
+    EXPECT_NE(contents.find("runtime file backend three\n"), std::string::npos);
+    EXPECT_NE(contents.find("runtime file backend four\n"), std::string::npos);
+}
+
+TEST(LogTests, RuntimeFileAsyncLoggerBackendWritesOnIoThread) {
+    const auto path =
+        std::filesystem::path(::testing::TempDir()) / "asyncflow-runtime-async-log-file.log";
+    std::filesystem::remove(path);
+
+    LogUdpIoRuntimeGuard runtime_guard;
+    auto backend = std::make_unique<af::RuntimeFileLogBackend<LogUdpIoRuntime>>(
+        af::RuntimeFileLogBackendConfig<LogUdpIoRuntime>{
+            .thread = LogUdpIoThreads::IO_0,
+            .path = path,
+            .append = false,
+            .fsync_on_flush = true,
+            .batch_queue_capacity = 8,
+            .max_batch_records = 8,
+            .max_batches_per_run = 8,
+        });
+    auto *runtime_file_backend = backend.get();
+
+    af::AsyncLogConfig config;
+    config.queue_capacity = 64;
+    config.runtime_queue_capacity = 64;
+    config.max_batch_size = 8;
+    config.flush_poll_interval = std::chrono::milliseconds(1);
+    config.backends.push_back(std::move(backend));
+    auto logging = af::start_async_logging_for_runtime<LogUdpIoRuntime>(std::move(config));
+
+    LOG(INFO) << "runtime file async logger one";
+    LOG(INFO) << "runtime file async logger two";
+    LOG(INFO) << "runtime file async logger three";
+    LOG(INFO) << "runtime file async logger four";
+
+    const bool flushed = logging->flush(std::chrono::seconds(2));
+    const af::RuntimeFileLogBackendStats stats = runtime_file_backend->stats();
+    logging->stop();
+
+    const std::string contents = read_file(path);
+    EXPECT_TRUE(flushed);
+    EXPECT_EQ(stats.queued_records, 4U);
+    EXPECT_EQ(stats.written_records, 4U)
+        << "last_error=" << stats.last_error << " stage=" << stats.last_error_stage;
+    EXPECT_EQ(stats.dropped_records, 0U)
+        << "last_error=" << stats.last_error << " stage=" << stats.last_error_stage;
+    EXPECT_GE(stats.flushes, 1U);
+    EXPECT_NE(contents.find("runtime file async logger one"), std::string::npos);
+    EXPECT_NE(contents.find("runtime file async logger two"), std::string::npos);
+    EXPECT_NE(contents.find("runtime file async logger three"), std::string::npos);
+    EXPECT_NE(contents.find("runtime file async logger four"), std::string::npos);
+}
+
 #if defined(__linux__) || defined(__APPLE__)
 TEST(LogTests, AsyncLoggerNamesConsumerThread) {
     auto backend = std::make_unique<ThreadNameLogBackend>();
