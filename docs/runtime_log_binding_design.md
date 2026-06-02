@@ -10,10 +10,13 @@
 - Runtime threads use per-thread SPSC lanes, and external threads use sharded
   MPSC queues.
 - `FileLogBackend`, `UdpLogBackend`, and `TcpLogBackend` execute synchronously on
-  the consumer thread.
+  whichever consumer placement is selected: the compatibility dedicated thread
+  or the runtime-bound consumer task.
 - `RuntimeFileLogBackend`, `RuntimeUdpLogBackend`, and `RuntimeTcpLogBackend`
-  keep the consumer thread for batching, but bind the actual backend IO task to a
-  configured runtime thread.
+  bind their backend IO task to a configured runtime thread. When they are used
+  with `start_async_logging_for_runtime<RuntimeT>()`, batching and backend
+  enqueue both run from the runtime-bound consumer task, so the logging path does
+  not create a private consumer thread.
 - The three runtime backends now share a `RuntimeLogQueueState` drain component
   for batch pooling, ready/free SPSC queues, pending counters, wake flags, and
   bounded flush waits. File, UDP, and TCP keep only their backend-specific IO
@@ -48,6 +51,13 @@ This keeps runtime log producers on SPSC submission, external producers on MPSC
 admission, and network backends without private IO threads. Runtime deployments
 can now keep the log consumer inside the framework thread layout; non-runtime
 deployments can still use the compatibility dedicated thread.
+
+`start_async_logging_for_runtime<RuntimeT>(config)` now selects a default
+consumer thread from the runtime layout instead of blindly using index 0. The
+selection prefers the first `ThreadKind::Log` thread, then the first IO-capable
+thread (`Io`, `IoUring`, `Epoll`, or `Kqueue`), and falls back to index 0 only
+when the layout has neither. Callers can still pass an explicit consumer thread
+when they want a different placement.
 
 ## Recommended direction
 
@@ -130,7 +140,8 @@ by the same runtime-bound drain task.
 
 1. Keep the dedicated consumer thread for the non-runtime compatibility mode.
 2. Bind `start_async_logging_for_runtime<RuntimeT>()` to a runtime consumer task
-   by default, with an overload for explicitly selecting the consumer thread.
+   by default, selecting a `Log` or IO-capable layout thread when available,
+   with an overload for explicitly selecting the consumer thread.
 3. Add runtime-bound TCP logging so network logs can use framework IO threads.
 4. Add runtime-bound file logging so file writes and flushes can use framework IO
    threads.

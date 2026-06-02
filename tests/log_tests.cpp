@@ -252,6 +252,60 @@ struct LogUdpIoThreads {
         LogUdpIoRuntime::thread_group<LogUdpIoThreadTag>().template at<0>();
 };
 
+struct DefaultConsumerLogicThreadTag;
+struct DefaultConsumerIoThreadTag;
+
+struct LogDefaultIoRuntimeTraits {
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<DefaultConsumerLogicThreadTag, 1, af::ThreadKind::Worker, "log-def-cpu">(),
+        af::thread_group<DefaultConsumerIoThreadTag, 1, af::ThreadKind::Io, "log-def-io">());
+    static constexpr std::size_t spsc_queue_capacity = 1024;
+    static constexpr std::size_t external_queue_capacity = 1024;
+    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+};
+
+using LogDefaultIoRuntime = af::AsyncRuntime<LogDefaultIoRuntimeTraits>;
+
+struct LogDefaultIoThreads {
+    static constexpr auto IO_0 =
+        LogDefaultIoRuntime::thread_group<DefaultConsumerIoThreadTag>().template at<0>();
+};
+
+static_assert(af::default_async_log_consumer_thread<LogDefaultIoRuntime>() ==
+              LogDefaultIoThreads::IO_0);
+
+struct DefaultConsumerWorkerThreadTag;
+struct DefaultConsumerLogThreadTag;
+
+struct LogDefaultLogRuntimeTraits {
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<DefaultConsumerWorkerThreadTag, 1, af::ThreadKind::Worker,
+                         "log-pref-cpu">(),
+        af::thread_group<DefaultConsumerIoThreadTag, 1, af::ThreadKind::Io, "log-pref-io">(),
+        af::thread_group<DefaultConsumerLogThreadTag, 1, af::ThreadKind::Log, "log-pref-log">());
+};
+
+using LogDefaultLogRuntime = af::AsyncRuntime<LogDefaultLogRuntimeTraits>;
+
+struct LogDefaultLogThreads {
+    static constexpr auto LOG_0 =
+        LogDefaultLogRuntime::thread_group<DefaultConsumerLogThreadTag>().template at<0>();
+};
+
+static_assert(af::default_async_log_consumer_thread<LogDefaultLogRuntime>() ==
+              LogDefaultLogThreads::LOG_0);
+
+class LogDefaultIoRuntimeGuard {
+public:
+    LogDefaultIoRuntimeGuard() {
+        LogDefaultIoRuntime::init();
+    }
+
+    ~LogDefaultIoRuntimeGuard() {
+        LogDefaultIoRuntime::shutdown();
+    }
+};
+
 class LogUdpIoRuntimeGuard {
 public:
     LogUdpIoRuntimeGuard() {
@@ -654,6 +708,31 @@ TEST(LogTests, RuntimeAwareSinkDrainsOnConfiguredRuntimeThread) {
                                                                        LogTestThreads::Runtime_1);
 
     LOG(INFO) << "runtime-bound consumer external log";
+
+    ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
+    logging->stop();
+
+    EXPECT_EQ(observing_backend->record_count(), 1U);
+    EXPECT_TRUE(observing_backend->ran_on_runtime_thread());
+    EXPECT_EQ(observing_backend->observed_thread_index(),
+              observing_backend->expected_thread_index());
+}
+
+TEST(LogTests, RuntimeAwareSinkDefaultConsumerPrefersIoThread) {
+    LogDefaultIoRuntimeGuard runtime_guard;
+
+    auto backend = std::make_unique<RuntimeThreadObservingLogBackend<LogDefaultIoRuntime>>(
+        LogDefaultIoThreads::IO_0);
+    auto *observing_backend = backend.get();
+
+    af::AsyncLogConfig config;
+    config.queue_capacity = 16;
+    config.runtime_queue_capacity = 16;
+    config.max_batch_size = 4;
+    config.backends.push_back(std::move(backend));
+    auto logging = af::start_async_logging_for_runtime<LogDefaultIoRuntime>(std::move(config));
+
+    LOG(INFO) << "default runtime-bound consumer external log";
 
     ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
     logging->stop();

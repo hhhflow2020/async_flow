@@ -21,6 +21,7 @@
 #include "af/detail/config.hpp"
 #include "af/detail/log/async_logger.hpp"
 #include "af/detail/log/runtime_async_log_consumer.hpp"
+#include "af/thread_kind.hpp"
 
 namespace af {
 
@@ -42,6 +43,49 @@ template <typename TaskId>
 }
 
 } // namespace detail
+
+namespace detail {
+
+[[nodiscard]] constexpr bool async_log_consumer_prefers_io_thread_kind(ThreadKind kind) noexcept {
+    switch (kind) {
+    case ThreadKind::Io:
+    case ThreadKind::IoUring:
+    case ThreadKind::Epoll:
+    case ThreadKind::Kqueue:
+        return true;
+    case ThreadKind::Worker:
+    case ThreadKind::Log:
+        return false;
+    }
+    return false;
+}
+
+template <typename RuntimeT>
+[[nodiscard]] constexpr typename RuntimeT::Thread
+select_default_async_log_consumer_thread() noexcept {
+    for (std::uint32_t i = 0; i < RuntimeT::thread_count; ++i) {
+        const auto thread = RuntimeT::thread_from_index(static_cast<std::uint16_t>(i));
+        if (RuntimeT::thread_kind(thread) == ThreadKind::Log) {
+            return thread;
+        }
+    }
+
+    for (std::uint32_t i = 0; i < RuntimeT::thread_count; ++i) {
+        const auto thread = RuntimeT::thread_from_index(static_cast<std::uint16_t>(i));
+        if (async_log_consumer_prefers_io_thread_kind(RuntimeT::thread_kind(thread))) {
+            return thread;
+        }
+    }
+
+    return RuntimeT::thread_from_index(0);
+}
+
+} // namespace detail
+
+template <typename RuntimeT>
+[[nodiscard]] constexpr typename RuntimeT::Thread default_async_log_consumer_thread() noexcept {
+    return detail::select_default_async_log_consumer_thread<RuntimeT>();
+}
 
 class AbslAsyncLogSink final : public absl::LogSink {
 public:
@@ -216,7 +260,7 @@ template <typename RuntimeT>
 [[nodiscard]] inline std::unique_ptr<AsyncLogHandle>
 start_async_logging_for_runtime(AsyncLogConfig config) {
     return start_async_logging_for_runtime<RuntimeT>(std::move(config),
-                                                     RuntimeT::thread_from_index(0));
+                                                     default_async_log_consumer_thread<RuntimeT>());
 }
 
 } // namespace af

@@ -43,6 +43,7 @@ TEST_F(RuntimeFixture, CreatedHandleKeepsCompletedTaskAliveUntilReset) {
         auto task = Runtime::make_task<TrackedDoneTask>(&destroyed);
         ASSERT_TRUE(task->do_it(&completed));
         ASSERT_TRUE(wait_until_at_least(completed, 1));
+        Runtime::wait_for_idle();
         EXPECT_EQ(destroyed.load(std::memory_order_acquire), 0);
     }
 
