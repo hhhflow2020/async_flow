@@ -1,0 +1,142 @@
+#pragma once
+
+#include <array>
+#include <cerrno>
+#include <cstddef>
+#include <filesystem>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <utility>
+
+#include "af/detail/log/log_backend.hpp"
+
+#if !defined(_WIN32)
+#include <fcntl.h>
+#include <sys/uio.h>
+#include <unistd.h>
+#endif
+
+namespace af {
+
+struct FileLogBackendConfig {
+    std::filesystem::path path;
+    bool append{true};
+    bool close_on_exec{true};
+};
+
+class FileLogBackend final : public LogBackend {
+public:
+    explicit FileLogBackend(FileLogBackendConfig config)
+        : path_(config.path.string()), append_(config.append),
+          close_on_exec_(config.close_on_exec) {}
+
+    FileLogBackend(const FileLogBackend &) = delete;
+    FileLogBackend &operator=(const FileLogBackend &) = delete;
+
+    ~FileLogBackend() override {
+        close_file();
+    }
+
+    void write_batch(std::span<detail::LogRecord *const> records) noexcept override {
+#if defined(_WIN32)
+        static_cast<void>(records);
+#else
+        if (records.empty() || !open_if_needed()) {
+            return;
+        }
+
+        constexpr std::size_t max_iov_count = 64;
+        std::array<iovec, max_iov_count> iovecs{};
+        std::size_t index = 0;
+        while (index < records.size()) {
+            std::size_t count = 0;
+            while (index < records.size() && count < iovecs.size()) {
+                std::string_view message = records[index]->message();
+                iovecs[count].iov_base = const_cast<char *>(message.data());
+                iovecs[count].iov_len = message.size();
+                ++count;
+                ++index;
+            }
+            writev_all(iovecs.data(), count);
+        }
+#endif
+    }
+
+    void flush() noexcept override {
+#if !defined(_WIN32)
+        if (fd_ >= 0) {
+            static_cast<void>(::fsync(fd_));
+        }
+#endif
+    }
+
+private:
+#if !defined(_WIN32)
+    [[nodiscard]] bool open_if_needed() noexcept {
+        if (fd_ >= 0) {
+            return true;
+        }
+
+        int flags = O_CREAT | O_WRONLY;
+        flags |= append_ ? O_APPEND : O_TRUNC;
+#if defined(O_CLOEXEC)
+        if (close_on_exec_) {
+            flags |= O_CLOEXEC;
+        }
+#endif
+        fd_ = ::open(path_.c_str(), flags, 0644);
+        return fd_ >= 0;
+    }
+
+    void writev_all(iovec *iovecs, std::size_t count) noexcept {
+        while (count != 0U) {
+            const auto written = ::writev(fd_, iovecs, static_cast<int>(count));
+            if (written < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                return;
+            }
+            if (written == 0) {
+                return;
+            }
+
+            auto remaining = static_cast<std::size_t>(written);
+            while (count != 0U && remaining >= iovecs[0].iov_len) {
+                remaining -= iovecs[0].iov_len;
+                ++iovecs;
+                --count;
+            }
+            if (count != 0U && remaining != 0U) {
+                auto *base = static_cast<char *>(iovecs[0].iov_base);
+                iovecs[0].iov_base = base + remaining;
+                iovecs[0].iov_len -= remaining;
+            }
+        }
+    }
+
+    void close_file() noexcept {
+        if (fd_ >= 0) {
+            static_cast<void>(::close(fd_));
+            fd_ = -1;
+        }
+    }
+#else
+    void close_file() noexcept {}
+#endif
+
+    std::string path_;
+    bool append_{true};
+    bool close_on_exec_{true};
+#if !defined(_WIN32)
+    int fd_{-1};
+#endif
+};
+
+[[nodiscard]] inline std::unique_ptr<LogBackend>
+make_file_log_backend(FileLogBackendConfig config) {
+    return std::make_unique<FileLogBackend>(std::move(config));
+}
+
+} // namespace af

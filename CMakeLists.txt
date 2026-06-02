@@ -13,7 +13,16 @@ target_include_directories(
         $<INSTALL_INTERFACE:include>
 )
 find_package(absl CONFIG REQUIRED)
-target_link_libraries(asyncflow INTERFACE absl::flat_hash_map)
+target_link_libraries(
+    asyncflow
+    INTERFACE
+        absl::flat_hash_map
+        absl::log
+        absl::log_initialize
+        absl::log_internal_globals
+        absl::log_sink
+        absl::log_sink_registry
+)
 
 option(ASYNCFLOW_BUILD_EXAMPLES "Build AsyncFlow examples" ON)
 option(ASYNCFLOW_BUILD_TESTS "Build AsyncFlow tests" ON)
@@ -183,6 +192,7 @@ if(ASYNCFLOW_BUILD_TESTS)
         tests/runtime_cross_thread_stress_tests.cpp
         tests/runtime_parallel_stress_tests.cpp
         tests/runtime_running_pending_stress_tests.cpp
+        tests/log_tests.cpp
         tests/queue_tests.cpp
         tests/pool_tests.cpp
         tests/io_state_utility_tests.cpp

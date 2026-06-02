@@ -2,9 +2,10 @@
 #include <atomic>
 #include <cstdint>
 #include <iostream>
-#include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include "absl/container/flat_hash_map.h"
 
 #include "app_runtime.hpp"
 
@@ -14,7 +15,7 @@ struct PlayerProfile {
 };
 
 using PlayerChangeBatch = af::ChangeBatch<std::uint64_t, PlayerProfile>;
-using PlayerStore = std::unordered_map<std::uint64_t, PlayerProfile>;
+using PlayerStore = absl::flat_hash_map<std::uint64_t, PlayerProfile>;
 
 struct PlayerCrudStream {};
 
