@@ -585,6 +585,35 @@ TEST(LogTests, RuntimeAwareSinkUsesSpscLaneWhenExternalMpscIsFull) {
     ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
 }
 
+TEST(LogTests, RuntimeLaneRecordPoolReusesSlotsAcrossFlushes) {
+    auto backend = std::make_unique<CountingLogBackend>();
+    auto *counting_backend = backend.get();
+
+    af::AsyncLogConfig config;
+    config.queue_capacity = 1;
+    config.queue_shard_count = 1;
+    config.runtime_thread_count = 1;
+    config.runtime_queue_capacity = 1;
+    config.max_batch_size = 1;
+    config.overflow_policy = af::LogOverflowPolicy::DropNewest;
+    config.backends.push_back(std::move(backend));
+
+    af::AsyncLogger logger(std::move(config));
+    logger.start();
+
+    constexpr int record_count = 32;
+    for (int i = 0; i < record_count; ++i) {
+        ASSERT_TRUE(logger.try_log_from_runtime_thread(0, "runtime pooled log record\n"));
+        ASSERT_TRUE(logger.flush(std::chrono::seconds(2)));
+    }
+
+    const af::AsyncLogStats stats = logger.stats();
+    EXPECT_EQ(stats.accepted, static_cast<std::uint64_t>(record_count));
+    EXPECT_EQ(stats.dropped, 0U);
+    EXPECT_EQ(counting_backend->record_count(), static_cast<std::size_t>(record_count));
+    logger.shutdown();
+}
+
 TEST(LogTests, RuntimeAwareSinkPrefixesRuntimeTaskId) {
     const auto path = std::filesystem::temp_directory_path() / "async_flow_task_id_log.txt";
     std::filesystem::remove(path);

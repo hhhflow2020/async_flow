@@ -156,6 +156,13 @@ public:
     }
 
 private:
+    struct LogRecordPoolSlot {
+        using ReleaseFn = void (*)(LogRecordPoolSlot *) noexcept;
+
+        void *owner{nullptr};
+        ReleaseFn release{nullptr};
+    };
+
     template <typename Lane>
     [[nodiscard]] bool try_log_on_lane(Lane &lane, std::string_view message) noexcept {
         if (!accepting_.load(std::memory_order_acquire)) {
@@ -189,8 +196,7 @@ private:
         static constexpr std::size_t slot_index_bits = sizeof(std::uint32_t) * 8U;
         static constexpr std::uint64_t slot_index_mask = (std::uint64_t{1} << slot_index_bits) - 1U;
 
-        struct Slot {
-            LogRecordPool *owner{nullptr};
+        struct Slot : LogRecordPoolSlot {
             std::atomic<std::uint32_t> next{null_slot};
             detail::LogRecord record;
         };
@@ -201,9 +207,10 @@ private:
             for (std::size_t i = 0; i < capacity_; ++i) {
                 Slot &slot = slots_[i];
                 slot.owner = this;
+                slot.release = &release_slot;
                 slot.next.store(i + 1U < capacity_ ? static_cast<std::uint32_t>(i + 1U) : null_slot,
                                 std::memory_order_relaxed);
-                slot.record.set_pool_slot(&slot);
+                slot.record.set_pool_slot(static_cast<LogRecordPoolSlot *>(&slot));
             }
             free_head_.store(pack_head(0U, 0U), std::memory_order_relaxed);
         }
@@ -224,12 +231,6 @@ private:
                 return nullptr;
             }
             return &slot->record;
-        }
-
-        static void release(detail::LogRecord *record) noexcept {
-            auto *slot = static_cast<Slot *>(record->pool_slot());
-            AF_ASSERT(slot != nullptr);
-            slot->owner->release(slot);
         }
 
     private:
@@ -257,6 +258,12 @@ private:
             const auto index = static_cast<std::size_t>(slot - slots_.get());
             AF_ASSERT(index < capacity_);
             return static_cast<std::uint32_t>(index);
+        }
+
+        static void release_slot(LogRecordPoolSlot *header) noexcept {
+            auto *slot = static_cast<Slot *>(header);
+            AF_ASSERT(slot != nullptr && slot->owner != nullptr);
+            static_cast<LogRecordPool *>(slot->owner)->release(slot);
         }
 
         [[nodiscard]] Slot *try_pop() noexcept {
@@ -296,6 +303,69 @@ private:
             pack_head(null_slot, 0U)};
     };
 
+    class SpscLogRecordPool {
+        struct Slot : LogRecordPoolSlot {
+            detail::LogRecord record;
+        };
+
+    public:
+        explicit SpscLogRecordPool(std::size_t capacity)
+            : capacity_(validate_capacity(capacity)), slots_(new Slot[capacity_]),
+              free_slots_(capacity_) {
+            for (std::size_t i = 0; i < capacity_; ++i) {
+                Slot &slot = slots_[i];
+                slot.owner = this;
+                slot.release = &release_slot;
+                slot.record.set_pool_slot(static_cast<LogRecordPoolSlot *>(&slot));
+                const bool pushed = free_slots_.try_push(&slot);
+                AF_ASSERT(pushed);
+                static_cast<void>(pushed);
+            }
+        }
+
+        SpscLogRecordPool(const SpscLogRecordPool &) = delete;
+        SpscLogRecordPool &operator=(const SpscLogRecordPool &) = delete;
+
+        [[nodiscard]] detail::LogRecord *try_acquire(std::string_view message) noexcept {
+            Slot *slot = free_slots_.try_pop();
+            if (slot == nullptr) {
+                return nullptr;
+            }
+
+            try {
+                slot->record.reset(message);
+            } catch (...) {
+                release(slot);
+                return nullptr;
+            }
+            return &slot->record;
+        }
+
+    private:
+        [[nodiscard]] static std::size_t validate_capacity(std::size_t capacity) {
+            if (capacity == 0U || capacity >= std::numeric_limits<std::uint32_t>::max()) {
+                throw std::length_error("async log record pool capacity is out of range");
+            }
+            return capacity;
+        }
+
+        static void release_slot(LogRecordPoolSlot *header) noexcept {
+            auto *slot = static_cast<Slot *>(header);
+            AF_ASSERT(slot != nullptr && slot->owner != nullptr);
+            static_cast<SpscLogRecordPool *>(slot->owner)->release(slot);
+        }
+
+        void release(Slot *slot) noexcept {
+            const bool pushed = free_slots_.try_push(slot);
+            AF_ASSERT(pushed);
+            static_cast<void>(pushed);
+        }
+
+        const std::size_t capacity_;
+        std::unique_ptr<Slot[]> slots_;
+        detail::BoundedSpscQueue<Slot> free_slots_;
+    };
+
     struct alignas(detail::hardware_cache_line_size) LogStatCounter {
         void add(std::uint64_t value) noexcept {
             count.fetch_add(value, std::memory_order_relaxed);
@@ -325,7 +395,7 @@ private:
         LogStatCounter accepted;
         LogStatCounter dropped;
         detail::BoundedSpscQueue<detail::LogRecord> queue;
-        LogRecordPool records;
+        SpscLogRecordPool records;
     };
 
     struct ProducerShardCache {
@@ -465,7 +535,9 @@ private:
     }
 
     static void release_record(detail::LogRecord *record) noexcept {
-        LogRecordPool::release(record);
+        auto *slot = static_cast<LogRecordPoolSlot *>(record->pool_slot());
+        AF_ASSERT(slot != nullptr && slot->release != nullptr);
+        slot->release(slot);
     }
 
     void abandon_pending_record() noexcept {
