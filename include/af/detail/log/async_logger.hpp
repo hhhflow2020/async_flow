@@ -18,6 +18,7 @@
 #include "af/detail/config.hpp"
 #include "af/detail/log/log_backend.hpp"
 #include "af/detail/memory/contiguous_object_storage.hpp"
+#include "af/detail/queue/queue_backoff.hpp"
 #include "af/detail/queue/bounded_mpsc_queue.hpp"
 
 namespace af {
@@ -31,6 +32,7 @@ struct AsyncLogConfig {
     std::size_t queue_capacity{1U << 16U};
     std::size_t queue_shard_count{0};
     std::size_t max_batch_size{256};
+    std::size_t overflow_spin_count{64};
     LogOverflowPolicy overflow_policy{LogOverflowPolicy::DropNewest};
     std::chrono::milliseconds flush_poll_interval{std::chrono::milliseconds(1)};
     std::chrono::milliseconds fatal_flush_timeout{std::chrono::milliseconds(200)};
@@ -54,6 +56,7 @@ public:
                                 queue_capacity_per_shard(config.queue_capacity, queue_shard_count_),
                                 config.max_batch_size)),
           max_batch_size_(config.max_batch_size == 0U ? 1U : config.max_batch_size),
+          overflow_spin_count_(config.overflow_spin_count),
           overflow_policy_(config.overflow_policy),
           flush_poll_interval_(config.flush_poll_interval),
           fatal_flush_timeout_(config.fatal_flush_timeout), backends_(std::move(config.backends)) {}
@@ -328,11 +331,12 @@ private:
             return shard.records.try_acquire(message);
         }
 
+        detail::QueueFullBackoff backoff(overflow_spin_count_);
         while (accepting_.load(std::memory_order_acquire)) {
             if (detail::LogRecord *record = shard.records.try_acquire(message); record != nullptr) {
                 return record;
             }
-            std::this_thread::yield();
+            backoff.wait();
         }
         return nullptr;
     }
@@ -342,11 +346,12 @@ private:
             return accepting_.load(std::memory_order_acquire) && shard.queue.try_push(record);
         }
 
+        detail::QueueFullBackoff backoff(overflow_spin_count_);
         while (accepting_.load(std::memory_order_acquire)) {
             if (shard.queue.try_push(record)) {
                 return true;
             }
-            std::this_thread::yield();
+            backoff.wait();
         }
         return false;
     }
@@ -448,6 +453,7 @@ private:
     const std::size_t queue_shard_mask_;
     QueueShardStorage queue_shards_;
     const std::size_t max_batch_size_;
+    const std::size_t overflow_spin_count_;
     const LogOverflowPolicy overflow_policy_;
     const std::chrono::milliseconds flush_poll_interval_;
     const std::chrono::milliseconds fatal_flush_timeout_;
