@@ -19,6 +19,10 @@ public:
                                           std::chrono::steady_clock::time_point deadline,
                                           std::chrono::milliseconds retry_interval,
                                           WakeFn &&wake_consumer) noexcept {
+        if (pending.load(std::memory_order_acquire) == 0U) {
+            return true;
+        }
+
         std::unique_lock lock(mutex_);
         while (pending.load(std::memory_order_acquire) != 0U) {
             wake_consumer();

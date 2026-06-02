@@ -200,6 +200,10 @@ public:
 private:
     [[nodiscard]] bool
     wait_until_finished(std::chrono::steady_clock::time_point deadline) noexcept {
+        if (finished_.load(std::memory_order_acquire)) {
+            return true;
+        }
+
         std::unique_lock lock(finished_mutex_);
         return finished_cv_.wait_until(
             lock, deadline, [this] { return finished_.load(std::memory_order_acquire); });

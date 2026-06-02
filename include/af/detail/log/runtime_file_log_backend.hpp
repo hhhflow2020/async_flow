@@ -113,6 +113,10 @@ public:
 
     [[nodiscard]] bool flush_until(std::uint64_t target,
                                    std::chrono::steady_clock::time_point deadline) noexcept {
+        if (completed_flushes.load(std::memory_order_acquire) >= target) {
+            return true;
+        }
+
         std::unique_lock lock(flush_mutex_);
         return flush_cv_.wait_until(lock, deadline, [this, target] {
             return completed_flushes.load(std::memory_order_acquire) >= target;

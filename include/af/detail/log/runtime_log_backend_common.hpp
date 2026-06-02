@@ -89,6 +89,10 @@ public:
     }
 
     [[nodiscard]] bool flush_until(std::chrono::steady_clock::time_point deadline) noexcept {
+        if (pending_batches.load(std::memory_order_acquire) == 0U) {
+            return true;
+        }
+
         std::unique_lock lock(pending_mutex_);
         return pending_cv_.wait_until(lock, deadline, [this] {
             return pending_batches.load(std::memory_order_acquire) == 0U;
@@ -120,6 +124,10 @@ public:
 
     [[nodiscard]] bool
     wait_until_finished(std::chrono::steady_clock::time_point deadline) noexcept {
+        if (finished.load(std::memory_order_acquire)) {
+            return true;
+        }
+
         std::unique_lock lock(finished_mutex_);
         return finished_cv_.wait_until(lock, deadline,
                                        [this] { return finished.load(std::memory_order_acquire); });
