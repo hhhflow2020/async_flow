@@ -502,7 +502,7 @@ public:
 
 private:
     detail::RuntimeLogTaskBinding<RuntimeT, State, WriterTask> binding_;
-    std::atomic<bool> shutdown_started_{false};
+    detail::CacheLineAtomic<bool> shutdown_started_{false};
 };
 
 template <typename RuntimeT>

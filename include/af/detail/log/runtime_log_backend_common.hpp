@@ -209,9 +209,9 @@ private:
     Batch *producer_spare_batch_{nullptr};
 };
 
-template <typename StateT, typename TaskHandleT>
+template <typename StateT, typename TaskHandleT, typename TaskStartedAtomicT>
 [[nodiscard]] bool wake_runtime_log_task(StateT *state, TaskHandleT &task,
-                                         std::atomic<bool> &task_started,
+                                         TaskStartedAtomicT &task_started,
                                          bool skip_when_io_waiting) noexcept {
     if (!task) {
         return false;
@@ -298,7 +298,7 @@ public:
 private:
     std::unique_ptr<StateT> state_;
     typename RuntimeT::template TaskHandle<TaskT> task_;
-    std::atomic<bool> task_started_{false};
+    CacheLineAtomic<bool> task_started_{false};
 };
 
 } // namespace af::detail

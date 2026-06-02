@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "af/detail/log/async_logger.hpp"
+#include "af/detail/runtime/runtime_common_state.hpp"
 #include "af/task.hpp"
 
 namespace af::detail {
@@ -216,10 +217,10 @@ private:
     Thread thread_;
     std::size_t max_batches_per_run_;
     typename RuntimeT::template TaskHandle<Task> task_;
-    std::atomic<bool> wake_queued_{false};
-    std::atomic<bool> task_started_{false};
-    std::atomic<bool> shutdown_started_{false};
-    std::atomic<bool> finished_{false};
+    CacheLineAtomic<bool> wake_queued_{false};
+    CacheLineAtomic<bool> task_started_{false};
+    CacheLineAtomic<bool> shutdown_started_{false};
+    CacheLineAtomic<bool> finished_{false};
     std::mutex finished_mutex_;
     std::condition_variable finished_cv_;
 };

@@ -3,6 +3,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cerrno>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -30,6 +31,13 @@
 #endif
 
 namespace {
+
+static_assert(alignof(af::detail::CacheLineAtomic<bool>) == af::detail::hardware_cache_line_size);
+static_assert(sizeof(af::detail::CacheLineAtomic<bool>) >= af::detail::hardware_cache_line_size);
+static_assert(alignof(af::detail::CacheLineAtomic<std::uint64_t>) ==
+              af::detail::hardware_cache_line_size);
+static_assert(sizeof(af::detail::CacheLineAtomic<std::uint64_t>) >=
+              af::detail::hardware_cache_line_size);
 
 [[nodiscard]] std::string read_file(const std::filesystem::path &path) {
     std::ifstream input(path);

@@ -30,6 +30,9 @@ was run against Boost.Asio, libuv, Seastar, or Go in this pass.
 - Runtime global counters that are touched from multiple threads use
   `CacheLineAtomic`, including runtime status, unfinished-task count, generation,
   external post counters, executor wake flags, and stop/sleep flags.
+- Runtime-bound async logging control flags now use `CacheLineAtomic` for
+  consumer wake/task/shutdown/finish state and file/TCP/UDP backend shutdown
+  state, keeping cross-thread wake and shutdown traffic off adjacent cold fields.
 - `ReadySourceSet` stores each 64-bit ready-source word on its own cache line.
   The executor also rotates multi-word scans, so thread counts above 64 do not
   permanently bias ready-source word zero.
@@ -115,6 +118,8 @@ The implementation deliberately avoids several common false-sharing traps:
 - Queue head/tail counters are cache-line separated.
 - MPSC/MPMC queue cells are cache-line aligned.
 - Executor wake/sleep/stop flags are cache-line padded.
+- Runtime-bound async log consumer/backend wake, started, finished, and shutdown
+  flags are cache-line padded.
 - Ready-source words are cache-line padded.
 - Executors are held behind `std::unique_ptr`, so adjacent executor objects are
   not packed contiguously in one vector allocation.
