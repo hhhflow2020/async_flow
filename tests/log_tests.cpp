@@ -21,6 +21,7 @@
 #if !defined(_WIN32)
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
@@ -74,6 +75,31 @@ public:
 private:
     std::atomic<std::size_t> record_count_{0};
 };
+
+#if defined(__linux__) || defined(__APPLE__)
+class ThreadNameLogBackend final : public af::LogBackend {
+public:
+    void write_batch(std::span<af::detail::LogRecord *const> records) noexcept override {
+        static_cast<void>(records);
+        std::array<char, 16> name{};
+        if (::pthread_getname_np(::pthread_self(), name.data(), name.size()) != 0) {
+            return;
+        }
+
+        std::lock_guard lock(mutex_);
+        thread_name_ = name.data();
+    }
+
+    [[nodiscard]] std::string thread_name() const {
+        std::lock_guard lock(mutex_);
+        return thread_name_;
+    }
+
+private:
+    mutable std::mutex mutex_;
+    std::string thread_name_;
+};
+#endif
 
 #if !defined(_WIN32)
 void close_fd(int &fd) noexcept {
@@ -236,6 +262,25 @@ TEST(LogTests, AsyncFileBackendWritesAbslFormattedMessages) {
     const std::string contents = read_file(path);
     EXPECT_NE(contents.find("af async file backend test"), std::string::npos);
 }
+
+#if defined(__linux__) || defined(__APPLE__)
+TEST(LogTests, AsyncLoggerNamesConsumerThread) {
+    auto backend = std::make_unique<ThreadNameLogBackend>();
+    auto *thread_name_backend = backend.get();
+
+    af::AsyncLogConfig config;
+    config.consumer_thread_name = "log";
+    config.backends.push_back(std::move(backend));
+
+    af::AsyncLogger logger(std::move(config));
+    logger.start();
+    ASSERT_TRUE(logger.try_log("named consumer thread\n"));
+    ASSERT_TRUE(logger.flush(std::chrono::seconds(2)));
+
+    EXPECT_EQ(thread_name_backend->thread_name(), "af-log-0");
+    logger.shutdown();
+}
+#endif
 
 TEST(LogTests, ProducerShardCacheRefreshesWhenLoggerReusesAddress) {
     alignas(af::AsyncLogger) unsigned char storage[sizeof(af::AsyncLogger)];

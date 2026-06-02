@@ -24,6 +24,9 @@ allows only one active wait registration per fd.
 ## Backend Model
 
 - `ThreadKind::Worker`: no IO backend is exposed.
+- `ThreadKind::Log`: no IO backend is exposed; it is intended for dedicated
+  logging/background consumers that must not compete with ordinary worker
+  queues.
 - `ThreadKind::Io` / `ThreadKind::Epoll` on Linux: epoll readiness backend plus
   eventfd wakeup.
 - `ThreadKind::IoUring` on Linux: still owns the epoll readiness/wakeup backend,

@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
@@ -19,8 +20,9 @@
 #include "af/detail/config.hpp"
 #include "af/detail/log/log_backend.hpp"
 #include "af/detail/memory/contiguous_object_storage.hpp"
-#include "af/detail/queue/queue_backoff.hpp"
 #include "af/detail/queue/bounded_mpsc_queue.hpp"
+#include "af/detail/queue/queue_backoff.hpp"
+#include "af/detail/thread/thread_name.hpp"
 
 namespace af {
 
@@ -37,6 +39,7 @@ struct AsyncLogConfig {
     LogOverflowPolicy overflow_policy{LogOverflowPolicy::DropNewest};
     std::chrono::milliseconds flush_poll_interval{std::chrono::milliseconds(1)};
     std::chrono::milliseconds fatal_flush_timeout{std::chrono::milliseconds(200)};
+    std::string consumer_thread_name{"log"};
     bool initialize_absl_log{true};
     std::vector<std::unique_ptr<LogBackend>> backends;
 };
@@ -60,7 +63,9 @@ public:
           overflow_spin_count_(config.overflow_spin_count),
           overflow_policy_(config.overflow_policy),
           flush_poll_interval_(config.flush_poll_interval),
-          fatal_flush_timeout_(config.fatal_flush_timeout), backends_(std::move(config.backends)) {}
+          fatal_flush_timeout_(config.fatal_flush_timeout),
+          consumer_thread_name_(std::move(config.consumer_thread_name)),
+          backends_(std::move(config.backends)) {}
 
     AsyncLogger(const AsyncLogger &) = delete;
     AsyncLogger &operator=(const AsyncLogger &) = delete;
@@ -76,7 +81,10 @@ public:
             return;
         }
         accepting_.store(true, std::memory_order_release);
-        worker_ = std::thread([this] { worker_main(); });
+        worker_ = std::thread([this] {
+            detail::set_current_thread_name(consumer_thread_name_, 0U);
+            worker_main();
+        });
     }
 
     [[nodiscard]] bool try_log(std::string_view message) noexcept {
@@ -479,6 +487,7 @@ private:
     const LogOverflowPolicy overflow_policy_;
     const std::chrono::milliseconds flush_poll_interval_;
     const std::chrono::milliseconds fatal_flush_timeout_;
+    const std::string consumer_thread_name_;
     std::vector<std::unique_ptr<LogBackend>> backends_;
 
     alignas(detail::hardware_cache_line_size) std::atomic<bool> started_{false};

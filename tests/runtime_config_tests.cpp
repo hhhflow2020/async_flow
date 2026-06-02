@@ -11,6 +11,7 @@ namespace {
 struct ConfigThreadTag;
 struct ConfigLogicThreadTag;
 struct ConfigIoThreadTag;
+struct ConfigLogThreadTag;
 
 struct AboveSixtyFourThreadTraits {
     static constexpr auto threads = af::thread_layout(af::thread_group<ConfigThreadTag, 257>());
@@ -31,14 +32,15 @@ static_assert(AboveSixtyFourRuntime::Config::queue_full_spin_count == 64U);
 struct ThreadLayoutMetadataTraits {
     static constexpr auto threads = af::thread_layout(
         af::thread_group<ConfigLogicThreadTag, 3, af::ThreadKind::Worker, "logic">(),
-        af::thread_group<ConfigIoThreadTag, 2, af::ThreadKind::IoUring, "io">());
+        af::thread_group<ConfigIoThreadTag, 2, af::ThreadKind::IoUring, "io">(),
+        af::thread_group<ConfigLogThreadTag, 1, af::ThreadKind::Log, "log">());
 };
 
 using ThreadLayoutMetadataRuntime = af::AsyncRuntime<ThreadLayoutMetadataTraits>;
 using ConfigLogicGroup =
     decltype(ThreadLayoutMetadataRuntime::thread_group<ConfigLogicThreadTag>());
 
-static_assert(ThreadLayoutMetadataRuntime::thread_count == 5U);
+static_assert(ThreadLayoutMetadataRuntime::thread_count == 6U);
 static_assert(sizeof(ThreadLayoutMetadataRuntime::Thread) == sizeof(std::uint16_t));
 static_assert(std::is_empty_v<ConfigLogicGroup>);
 
@@ -87,22 +89,28 @@ TEST(RuntimeConfigTests, PreservesThreadCountsAboveSixtyFour) {
 TEST(RuntimeConfigTests, ThreadLayoutGroupsCarryKindNameAndIndexMetadata) {
     constexpr auto logic = ThreadLayoutMetadataRuntime::thread_group<ConfigLogicThreadTag>();
     constexpr auto io = ThreadLayoutMetadataRuntime::thread_group<ConfigIoThreadTag>();
+    constexpr auto log = ThreadLayoutMetadataRuntime::thread_group<ConfigLogThreadTag>();
 
     EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_index(logic.begin()), 0U);
     EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_index(logic.template at<2>()), 2U);
     EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_index(io.begin()), 3U);
     EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_index(io.shard(5U)), 4U);
+    EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_index(log.begin()), 5U);
     EXPECT_TRUE(logic.contains(logic.template at<1>()));
     EXPECT_FALSE(logic.contains(io.template at<0>()));
+    EXPECT_FALSE(log.contains(io.template at<0>()));
     EXPECT_EQ(logic.offset_of(logic.template at<2>()), 2U);
 
     EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_kind(logic.template at<0>()),
               af::ThreadKind::Worker);
     EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_kind(io.template at<0>()),
               af::ThreadKind::IoUring);
+    EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_kind(log.template at<0>()), af::ThreadKind::Log);
     EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_name(logic.template at<0>()), "logic");
     EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_name(io.template at<1>()), "io");
+    EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_name(log.template at<0>()), "log");
     EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_group_offset(io.template at<1>()), 1U);
+    EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_group_offset(log.template at<0>()), 0U);
 }
 
 TEST(RuntimeConfigTests, DefaultsAndOverridesTaskPoolRemoteReleaseBatchSize) {

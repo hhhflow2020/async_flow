@@ -34,6 +34,7 @@ int main(int argc, char **argv) {
     config.overflow_spin_count = 128;
     config.overflow_policy = af::LogOverflowPolicy::DropNewest;
     config.flush_poll_interval = 1ms;
+    config.consumer_thread_name = "log";
 
     const std::filesystem::path log_path = argc > 1 ? argv[1] : "asyncflow-example.log";
     config.backends.push_back(af::make_file_log_backend({.path = log_path, .append = false}));
