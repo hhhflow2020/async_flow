@@ -14,6 +14,21 @@ public:
     ContiguousObjectStorage(const ContiguousObjectStorage &) = delete;
     ContiguousObjectStorage &operator=(const ContiguousObjectStorage &) = delete;
 
+    ContiguousObjectStorage(ContiguousObjectStorage &&other) noexcept {
+        move_from(other);
+    }
+
+    ContiguousObjectStorage &operator=(ContiguousObjectStorage &&other) noexcept {
+        if (this == &other) {
+            return *this;
+        }
+
+        clear();
+        release_storage();
+        move_from(other);
+        return *this;
+    }
+
     ~ContiguousObjectStorage() {
         clear();
         release_storage();
@@ -87,6 +102,16 @@ private:
         ::operator delete(data_, std::align_val_t{alignof(T)});
         data_ = nullptr;
         capacity_ = 0;
+    }
+
+    void move_from(ContiguousObjectStorage &other) noexcept {
+        data_ = other.data_;
+        size_ = other.size_;
+        capacity_ = other.capacity_;
+
+        other.data_ = nullptr;
+        other.size_ = 0;
+        other.capacity_ = 0;
     }
 
     T *data_{nullptr};

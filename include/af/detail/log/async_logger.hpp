@@ -17,6 +17,7 @@
 
 #include "af/detail/config.hpp"
 #include "af/detail/log/log_backend.hpp"
+#include "af/detail/memory/contiguous_object_storage.hpp"
 #include "af/detail/queue/bounded_mpsc_queue.hpp"
 
 namespace af {
@@ -45,7 +46,8 @@ struct AsyncLogStats {
 class AsyncLogger {
 public:
     explicit AsyncLogger(AsyncLogConfig config)
-        : queue_shard_count_(normalize_queue_shard_count(config.queue_shard_count)),
+        : cache_token_(next_cache_token_.fetch_add(1U, std::memory_order_relaxed)),
+          queue_shard_count_(normalize_queue_shard_count(config.queue_shard_count)),
           queue_shard_mask_(queue_shard_count_ - 1U),
           queue_shards_(
               make_queue_shards(queue_shard_count_,
@@ -261,8 +263,11 @@ private:
 
     struct ProducerShardCache {
         const AsyncLogger *logger{nullptr};
-        std::size_t shard_index{0};
+        std::uint64_t token{0};
+        QueueShard *shard{nullptr};
     };
+
+    using QueueShardStorage = detail::ContiguousObjectStorage<QueueShard>;
 
     [[nodiscard]] static std::size_t default_queue_shard_count() noexcept {
         const unsigned int hardware_threads = std::thread::hardware_concurrency();
@@ -291,27 +296,30 @@ private:
         return queue_capacity + batch_capacity;
     }
 
-    [[nodiscard]] static std::vector<std::unique_ptr<QueueShard>>
-    make_queue_shards(std::size_t shard_count, std::size_t capacity_per_shard,
-                      std::size_t max_batch_size) {
-        std::vector<std::unique_ptr<QueueShard>> shards;
-        shards.reserve(shard_count);
+    [[nodiscard]] static QueueShardStorage make_queue_shards(std::size_t shard_count,
+                                                             std::size_t capacity_per_shard,
+                                                             std::size_t max_batch_size) {
+        QueueShardStorage shards;
+        shards.reserve_exact(shard_count);
         const std::size_t record_capacity =
             record_capacity_per_shard(capacity_per_shard, max_batch_size);
         for (std::size_t i = 0; i < shard_count; ++i) {
-            shards.push_back(std::make_unique<QueueShard>(capacity_per_shard, record_capacity));
+            shards.emplace_back(capacity_per_shard, record_capacity);
         }
         return shards;
     }
 
     [[nodiscard]] QueueShard &producer_shard() noexcept {
         thread_local ProducerShardCache cache;
-        if (cache.logger != this) [[unlikely]] {
-            cache.logger = this;
-            cache.shard_index =
+        if (cache.logger != this || cache.token != cache_token_) [[unlikely]] {
+            const std::size_t shard_index =
                 next_producer_shard_.fetch_add(1U, std::memory_order_relaxed) & queue_shard_mask_;
+            cache.logger = this;
+            cache.token = cache_token_;
+            cache.shard = queue_shards_[shard_index];
         }
-        return *queue_shards_[cache.shard_index];
+        AF_ASSERT(cache.shard != nullptr);
+        return *cache.shard;
     }
 
     [[nodiscard]] detail::LogRecord *acquire_record(QueueShard &shard,
@@ -433,9 +441,12 @@ private:
         }
     }
 
+    static inline std::atomic<std::uint64_t> next_cache_token_{1};
+
+    const std::uint64_t cache_token_;
     const std::size_t queue_shard_count_;
     const std::size_t queue_shard_mask_;
-    std::vector<std::unique_ptr<QueueShard>> queue_shards_;
+    QueueShardStorage queue_shards_;
     const std::size_t max_batch_size_;
     const LogOverflowPolicy overflow_policy_;
     const std::chrono::milliseconds flush_poll_interval_;

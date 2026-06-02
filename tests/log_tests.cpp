@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iterator>
 #include <mutex>
+#include <new>
 #include <span>
 #include <string>
 #include <string_view>
@@ -182,6 +183,40 @@ TEST(LogTests, AsyncFileBackendWritesAbslFormattedMessages) {
 
     const std::string contents = read_file(path);
     EXPECT_NE(contents.find("af async file backend test"), std::string::npos);
+}
+
+TEST(LogTests, ProducerShardCacheRefreshesWhenLoggerReusesAddress) {
+    alignas(af::AsyncLogger) unsigned char storage[sizeof(af::AsyncLogger)];
+
+    auto make_config = [](std::size_t shard_count, CountingLogBackend *&counter) {
+        auto backend = std::make_unique<CountingLogBackend>();
+        counter = backend.get();
+
+        af::AsyncLogConfig config;
+        config.queue_capacity = 8;
+        config.queue_shard_count = shard_count;
+        config.max_batch_size = 4;
+        config.backends.push_back(std::move(backend));
+        return config;
+    };
+
+    CountingLogBackend *first_counter = nullptr;
+    af::AsyncLogger *first =
+        ::new (static_cast<void *>(storage)) af::AsyncLogger(make_config(1, first_counter));
+    first->start();
+    ASSERT_TRUE(first->try_log("first logger record\n"));
+    ASSERT_TRUE(first->flush(std::chrono::seconds(2)));
+    EXPECT_EQ(first_counter->record_count(), 1U);
+    first->~AsyncLogger();
+
+    CountingLogBackend *second_counter = nullptr;
+    af::AsyncLogger *second =
+        ::new (static_cast<void *>(storage)) af::AsyncLogger(make_config(8, second_counter));
+    second->start();
+    ASSERT_TRUE(second->try_log("second logger record\n"));
+    ASSERT_TRUE(second->flush(std::chrono::seconds(2)));
+    EXPECT_EQ(second_counter->record_count(), 1U);
+    second->~AsyncLogger();
 }
 
 TEST(LogTests, QueueOverflowDropsNewestWithoutBlockingProducer) {
