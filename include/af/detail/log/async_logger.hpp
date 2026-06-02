@@ -162,7 +162,7 @@ private:
             return false;
         }
 
-        pending_.fetch_add(1U, std::memory_order_release);
+        pending_.fetch_add(1U, std::memory_order_relaxed);
         if (!push_record(lane, record)) {
             release_record(record);
             abandon_pending_record();
@@ -366,7 +366,7 @@ private:
     }
 
     void abandon_pending_record() noexcept {
-        const auto previous = pending_.fetch_sub(1U, std::memory_order_acq_rel);
+        const auto previous = pending_.fetch_sub(1U, std::memory_order_release);
         AF_ASSERT(previous != 0U);
         if (previous == 1U) {
             drain_waiter_.notify_drained();
@@ -404,9 +404,9 @@ private:
             const auto drained = batch.size();
             detail::release_async_log_records(
                 std::span<detail::LogRecord *const>(batch.data(), drained));
-            const auto previous_ready = ready_.fetch_sub(drained, std::memory_order_acq_rel);
+            const auto previous_ready = ready_.fetch_sub(drained, std::memory_order_release);
             AF_ASSERT(previous_ready >= drained);
-            const auto previous = pending_.fetch_sub(drained, std::memory_order_acq_rel);
+            const auto previous = pending_.fetch_sub(drained, std::memory_order_release);
             AF_ASSERT(previous >= drained);
             if (previous == drained) {
                 drain_waiter_.notify_drained();

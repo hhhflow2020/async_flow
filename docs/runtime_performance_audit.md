@@ -33,6 +33,9 @@ was run against Boost.Asio, libuv, Seastar, or Go in this pass.
 - Runtime-bound async logging control flags now use `CacheLineAtomic` for
   consumer wake/task/shutdown/finish state and file/TCP/UDP backend shutdown
   state, keeping cross-thread wake and shutdown traffic off adjacent cold fields.
+- `AsyncLogger` keeps the separate `ready_` and `pending_` counters for correct
+  publication/flush semantics, but its producer-side pending increment and
+  consumer-side counter decrements now avoid unnecessary acquire fences.
 - `ReadySourceSet` stores each 64-bit ready-source word on its own cache line.
   The executor also rotates multi-word scans, so thread counts above 64 do not
   permanently bias ready-source word zero.
