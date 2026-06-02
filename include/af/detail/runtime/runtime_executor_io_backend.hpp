@@ -125,6 +125,11 @@ void Executor<RuntimeT, TraitsT>::close_io_uring_backend() noexcept {
     io_uring_cq_tail_ = nullptr;
     io_uring_cq_ring_mask_ = nullptr;
     io_uring_cqes_ = nullptr;
+    io_uring_sq_cached_head_ = 0;
+    io_uring_sq_cached_tail_ = 0;
+    io_uring_sq_ring_mask_value_ = 0;
+    io_uring_sq_ring_entries_value_ = 0;
+    io_uring_cq_ring_mask_value_ = 0;
     io_uring_pending_submissions_ = 0;
     io_uring_send_zc_available_ = false;
     io_uring_sendmsg_zc_available_ = false;
@@ -221,6 +226,11 @@ void Executor<RuntimeT, TraitsT>::bind_io_uring_ring_pointers(
     io_uring_cq_tail_ = ptr_at<std::uint32_t>(io_uring_cq_ring_, params.cq_off.tail);
     io_uring_cq_ring_mask_ = ptr_at<std::uint32_t>(io_uring_cq_ring_, params.cq_off.ring_mask);
     io_uring_cqes_ = ptr_at<io_uring_cqe>(io_uring_cq_ring_, params.cq_off.cqes);
+    io_uring_sq_cached_head_ = __atomic_load_n(io_uring_sq_head_, __ATOMIC_ACQUIRE);
+    io_uring_sq_cached_tail_ = __atomic_load_n(io_uring_sq_tail_, __ATOMIC_RELAXED);
+    io_uring_sq_ring_mask_value_ = *io_uring_sq_ring_mask_;
+    io_uring_sq_ring_entries_value_ = *io_uring_sq_ring_entries_;
+    io_uring_cq_ring_mask_value_ = *io_uring_cq_ring_mask_;
 }
 #endif
 
@@ -302,9 +312,9 @@ template <typename RuntimeT, typename TraitsT>
         return nullptr;
     }
 
-    std::uint32_t head = __atomic_load_n(io_uring_sq_head_, __ATOMIC_ACQUIRE);
-    std::uint32_t tail = __atomic_load_n(io_uring_sq_tail_, __ATOMIC_RELAXED);
-    if (tail - head >= *io_uring_sq_ring_entries_ && io_uring_pending_submissions_ != 0U) {
+    std::uint32_t head = io_uring_sq_cached_head_;
+    std::uint32_t tail = io_uring_sq_cached_tail_;
+    if (tail - head >= io_uring_sq_ring_entries_value_ && io_uring_pending_submissions_ != 0U) {
         const int submit_error = flush_io_uring_submissions();
         if (submit_error != 0) {
             error = submit_error;
@@ -312,16 +322,22 @@ template <typename RuntimeT, typename TraitsT>
             return nullptr;
         }
         head = __atomic_load_n(io_uring_sq_head_, __ATOMIC_ACQUIRE);
-        tail = __atomic_load_n(io_uring_sq_tail_, __ATOMIC_RELAXED);
+        io_uring_sq_cached_head_ = head;
+        tail = io_uring_sq_cached_tail_;
     }
-    if (tail - head >= *io_uring_sq_ring_entries_) {
+    if (tail - head >= io_uring_sq_ring_entries_value_) {
+        io_uring_sq_cached_head_ = __atomic_load_n(io_uring_sq_head_, __ATOMIC_ACQUIRE);
+        head = io_uring_sq_cached_head_;
+    }
+    if (tail - head >= io_uring_sq_ring_entries_value_) {
         error = EBUSY;
         return nullptr;
     }
 
-    const std::uint32_t index = tail & *io_uring_sq_ring_mask_;
+    const std::uint32_t index = tail & io_uring_sq_ring_mask_value_;
     io_uring_sq_array_[index] = index;
-    __atomic_store_n(io_uring_sq_tail_, tail + 1U, __ATOMIC_RELEASE);
+    io_uring_sq_cached_tail_ = tail + 1U;
+    __atomic_store_n(io_uring_sq_tail_, io_uring_sq_cached_tail_, __ATOMIC_RELEASE);
     ++io_uring_pending_submissions_;
     return &io_uring_sqes_[index];
 }
@@ -382,7 +398,7 @@ template <typename RuntimeT, typename TraitsT>
     std::uint32_t head = __atomic_load_n(io_uring_cq_head_, __ATOMIC_ACQUIRE);
     const std::uint32_t tail = __atomic_load_n(io_uring_cq_tail_, __ATOMIC_ACQUIRE);
     while (head != tail) {
-        io_uring_cqe &cqe = io_uring_cqes_[head & *io_uring_cq_ring_mask_];
+        io_uring_cqe &cqe = io_uring_cqes_[head & io_uring_cq_ring_mask_value_];
         auto *operation = reinterpret_cast<IoUringOperation *>(cqe.user_data);
         if (operation != nullptr) {
             const bool yield_to_task = complete_io_uring_operation(operation, cqe.res, cqe.flags);

@@ -2463,6 +2463,11 @@ private:
     std::uint32_t *io_uring_cq_tail_{nullptr};
     std::uint32_t *io_uring_cq_ring_mask_{nullptr};
     io_uring_cqe *io_uring_cqes_{nullptr};
+    std::uint32_t io_uring_sq_cached_head_{0};
+    std::uint32_t io_uring_sq_cached_tail_{0};
+    std::uint32_t io_uring_sq_ring_mask_value_{0};
+    std::uint32_t io_uring_sq_ring_entries_value_{0};
+    std::uint32_t io_uring_cq_ring_mask_value_{0};
     unsigned io_uring_pending_submissions_{0};
     bool io_uring_send_zc_available_{false};
     bool io_uring_sendmsg_zc_available_{false};
