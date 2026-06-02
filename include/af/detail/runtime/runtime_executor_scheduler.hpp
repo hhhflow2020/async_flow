@@ -203,6 +203,8 @@ typename Executor<RuntimeT, TraitsT>::Task *Executor<RuntimeT, TraitsT>::pop_one
         }
     }
 
+    // Drain cross-thread SPSC fallback before accepting more external starts:
+    // bounded SPSC links can otherwise fill and block runtime-thread producers.
     for (std::uint16_t checked = 0; checked < thread_count; ++checked) {
         const std::uint16_t source =
             static_cast<std::uint16_t>((next_source_ + checked) % thread_count);
