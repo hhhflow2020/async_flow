@@ -72,9 +72,23 @@ struct AsyncLogConfig {
         return config;
     }
 
+    [[nodiscard]] static AsyncLogConfig ordered(std::size_t producer_shard_count) noexcept {
+        AsyncLogConfig config;
+        config.use_ordered(producer_shard_count);
+        return config;
+    }
+
     [[nodiscard]] static AsyncLogConfig relaxed() noexcept {
         AsyncLogConfig config;
         config.use_relaxed();
+        return config;
+    }
+
+    [[nodiscard]] static AsyncLogConfig
+    relaxed(std::size_t runtime_threads,
+            std::size_t external_shard_count = auto_queue_shard_count) noexcept {
+        AsyncLogConfig config;
+        config.use_relaxed(runtime_threads, external_shard_count);
         return config;
     }
 

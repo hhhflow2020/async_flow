@@ -161,11 +161,21 @@ TEST(LogTests, AsyncLogConfigProfilesSelectQueueStrategy) {
     EXPECT_EQ(ordered.queue_shard_count, 4U);
     EXPECT_EQ(ordered.runtime_thread_count, 0U);
 
+    const af::AsyncLogConfig ordered_factory = af::AsyncLogConfig::ordered(3);
+    EXPECT_EQ(ordered_factory.ordering, af::LogOrdering::Ordered);
+    EXPECT_EQ(ordered_factory.queue_shard_count, 3U);
+    EXPECT_EQ(ordered_factory.runtime_thread_count, 0U);
+
     af::AsyncLogConfig relaxed = af::AsyncLogConfig::relaxed();
     relaxed.use_relaxed(8, 16);
     EXPECT_EQ(relaxed.ordering, af::LogOrdering::Relaxed);
     EXPECT_EQ(relaxed.runtime_thread_count, 8U);
     EXPECT_EQ(relaxed.queue_shard_count, 16U);
+
+    const af::AsyncLogConfig relaxed_factory = af::AsyncLogConfig::relaxed(6, 12);
+    EXPECT_EQ(relaxed_factory.ordering, af::LogOrdering::Relaxed);
+    EXPECT_EQ(relaxed_factory.runtime_thread_count, 6U);
+    EXPECT_EQ(relaxed_factory.queue_shard_count, 12U);
 
     relaxed.use_ordered(2);
     EXPECT_EQ(relaxed.ordering, af::LogOrdering::Ordered);

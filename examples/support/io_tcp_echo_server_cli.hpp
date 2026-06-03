@@ -16,12 +16,20 @@
 
 namespace io_tcp_echo_example {
 
+enum class EchoLogLevel : std::uint8_t {
+    Info,
+    Warning,
+    Error,
+    Fatal,
+};
+
 struct EchoServerOptions {
     std::string bind_address{"0.0.0.0"};
     std::filesystem::path log_path{"asyncflow-tcp-echo-server.log"};
     std::chrono::milliseconds shutdown_grace{5000};
     std::uint16_t port{7000};
     int backlog{1024};
+    EchoLogLevel log_level{EchoLogLevel::Info};
     bool bind_set{false};
     bool port_set{false};
     bool self_test{false};
@@ -46,12 +54,51 @@ struct EchoServerOptions {
     return true;
 }
 
+[[nodiscard]] inline bool echo_parse_log_level(std::string_view text,
+                                               EchoLogLevel *level) noexcept {
+    if (level == nullptr) {
+        return false;
+    }
+    if (text == "info" || text == "INFO") {
+        *level = EchoLogLevel::Info;
+        return true;
+    }
+    if (text == "warning" || text == "warn" || text == "WARNING" || text == "WARN") {
+        *level = EchoLogLevel::Warning;
+        return true;
+    }
+    if (text == "error" || text == "err" || text == "ERROR" || text == "ERR") {
+        *level = EchoLogLevel::Error;
+        return true;
+    }
+    if (text == "fatal" || text == "FATAL") {
+        *level = EchoLogLevel::Fatal;
+        return true;
+    }
+    return false;
+}
+
+[[nodiscard]] inline std::string_view echo_log_level_name(EchoLogLevel level) noexcept {
+    switch (level) {
+    case EchoLogLevel::Info:
+        return "info";
+    case EchoLogLevel::Warning:
+        return "warning";
+    case EchoLogLevel::Error:
+        return "error";
+    case EchoLogLevel::Fatal:
+        return "fatal";
+    }
+    return "info";
+}
+
 inline void echo_print_server_usage(std::ostream &out) {
     out << "Usage: asyncflow_io_tcp_echo_server_example [options]\n"
         << "  --bind ADDR              IPv4 address to bind, default 0.0.0.0\n"
         << "  --port PORT              TCP port to bind, default 7000\n"
         << "  --backlog N              listen backlog, default 1024\n"
         << "  --log PATH               async file log path\n"
+        << "  --log-level LEVEL        minimum log level: info, warning, error, fatal\n"
         << "  --shutdown-grace-ms N    graceful shutdown wait, default 5000\n"
         << "  --self-test              run loopback clients and exit\n";
 }
@@ -107,6 +154,22 @@ inline void echo_print_server_usage(std::ostream &out) {
         }
         if (arg.starts_with("--log=")) {
             options->log_path = std::filesystem::path(std::string(arg.substr(6)));
+            continue;
+        }
+        if (arg == "--log-level") {
+            const std::string_view value = require_value(arg);
+            if (!echo_parse_log_level(value, &options->log_level)) {
+                error_stream << "invalid log level: " << value << '\n';
+                return false;
+            }
+            continue;
+        }
+        if (arg.starts_with("--log-level=")) {
+            constexpr std::string_view prefix = "--log-level=";
+            if (!echo_parse_log_level(arg.substr(prefix.size()), &options->log_level)) {
+                error_stream << "invalid log level: " << arg.substr(prefix.size()) << '\n';
+                return false;
+            }
             continue;
         }
 

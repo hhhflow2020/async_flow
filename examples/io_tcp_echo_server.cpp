@@ -12,6 +12,28 @@
 #include "support/io_tcp_echo_server_task.hpp"
 #include "support/io_tcp_echo_sockets.hpp"
 
+#include "absl/base/log_severity.h"
+#include "absl/log/globals.h"
+
+namespace {
+
+[[nodiscard]] absl::LogSeverityAtLeast
+echo_absl_min_log_level(io_tcp_echo_example::EchoLogLevel level) noexcept {
+    switch (level) {
+    case io_tcp_echo_example::EchoLogLevel::Info:
+        return absl::LogSeverityAtLeast::kInfo;
+    case io_tcp_echo_example::EchoLogLevel::Warning:
+        return absl::LogSeverityAtLeast::kWarning;
+    case io_tcp_echo_example::EchoLogLevel::Error:
+        return absl::LogSeverityAtLeast::kError;
+    case io_tcp_echo_example::EchoLogLevel::Fatal:
+        return absl::LogSeverityAtLeast::kFatal;
+    }
+    return absl::LogSeverityAtLeast::kInfo;
+}
+
+} // namespace
+
 int main(int argc, char **argv) {
     using namespace std::chrono_literals;
     using namespace io_tcp_echo_example;
@@ -35,12 +57,12 @@ int main(int argc, char **argv) {
 
     std::error_code remove_error;
     std::filesystem::remove(options.log_path, remove_error);
+    absl::SetMinLogLevel(echo_absl_min_log_level(options.log_level));
 
     echo_async::init();
 
-    af::AsyncLogConfig log_config = af::AsyncLogConfig::ordered();
+    af::AsyncLogConfig log_config = af::AsyncLogConfig::ordered(echo_async::thread_count);
     log_config.queue_capacity = 8192;
-    log_config.runtime_queue_capacity = 8192;
     log_config.max_batch_size = 256;
     log_config.overflow_policy = af::LogOverflowPolicy::DropNewest;
     log_config.backends.push_back(
@@ -70,7 +92,8 @@ int main(int argc, char **argv) {
 
     LOG(INFO) << "tcp echo server starting bind=" << options.bind_address
               << " port=" << options.port << " backlog=" << options.backlog
-              << " self_test=" << options.self_test << " log=" << options.log_path.string();
+              << " self_test=" << options.self_test << " log=" << options.log_path.string()
+              << " log_level=" << echo_log_level_name(options.log_level);
 
     if (!echo_async::io_backend_available(EchoThreads::IO_0) ||
         !echo_async::io_backend_available(EchoThreads::IO_1)) {
