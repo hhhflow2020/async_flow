@@ -16,13 +16,7 @@ template <typename TaskT>
         return IoStatus::ready(0);
     }
 
-#if !defined(__linux__)
-    static_cast<void>(task);
-    static_cast<void>(thread);
-    static_cast<void>(fd);
-    static_cast<void>(state);
-    return IoStatus::failed(ENOSYS);
-#else
+#if defined(__linux__)
     bool skip_uring = false;
     if (detail::waiting_for_completion(state)) {
         const IoStatus completion = detail::completed_uring_status(state);
@@ -54,6 +48,9 @@ template <typename TaskT>
             return IoStatus::failed(state.wait.error);
         }
     }
+#else
+    detail::clear_waiting(state);
+#endif
 
     msghdr message{};
     message.msg_iov = const_cast<iovec *>(iov);
@@ -73,5 +70,4 @@ template <typename TaskT>
         }
         return IoStatus::failed(error);
     }
-#endif
 }

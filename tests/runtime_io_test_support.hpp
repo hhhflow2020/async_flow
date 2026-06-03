@@ -35,22 +35,15 @@ namespace {
 
 #include "support/runtime_io_basic_socket_tasks.hpp"
 
+#include "support/runtime_io_stream_basic_tasks.hpp"
+
+#include "support/runtime_io_stream_vectored_tasks.hpp"
+
+#include "support/runtime_io_stream_zc_send_tasks.hpp"
+
+#include "support/runtime_io_stream_send_zc_pending_tasks.hpp"
+
 #include "support/runtime_io_wait_cancel_tasks.hpp"
-
-#if defined(__linux__)
-#include "support/runtime_io_accept_tasks.hpp"
-
-#include "support/runtime_io_stream_tasks.hpp"
-
-#include "support/runtime_io_file_tasks.hpp"
-
-#include "support/runtime_io_uring_socket_tasks.hpp"
-
-#include "support/runtime_io_timer_event_tasks.hpp"
-
-#include "support/runtime_io_socket_lifecycle_tasks.hpp"
-
-#include "support/runtime_io_udp_socket_helpers.hpp"
 
 void close_pair(int fds[2]) {
     if (fds[0] >= 0) {
@@ -59,6 +52,30 @@ void close_pair(int fds[2]) {
     if (fds[1] >= 0) {
         ::close(fds[1]);
     }
+}
+
+bool set_nonblocking_cloexec(int fd) {
+    const int flags = ::fcntl(fd, F_GETFL, 0);
+    if (flags < 0 || ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) {
+        return false;
+    }
+    const int fd_flags = ::fcntl(fd, F_GETFD, 0);
+    return fd_flags >= 0 && ::fcntl(fd, F_SETFD, fd_flags | FD_CLOEXEC) == 0;
+}
+
+bool create_socket_pair(int fds[2]) {
+    fds[0] = -1;
+    fds[1] = -1;
+    if (::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0) {
+        return false;
+    }
+    if (set_nonblocking_cloexec(fds[0]) && set_nonblocking_cloexec(fds[1])) {
+        return true;
+    }
+    close_pair(fds);
+    fds[0] = -1;
+    fds[1] = -1;
+    return false;
 }
 
 bool fill_until_blocked(int fd) {
@@ -142,6 +159,21 @@ bool write_exact_until(int fd, const char *input, std::size_t size) {
     }
     return true;
 }
+
+#if defined(__linux__)
+#include "support/runtime_io_accept_tasks.hpp"
+
+#include "support/runtime_io_stream_tasks.hpp"
+
+#include "support/runtime_io_file_tasks.hpp"
+
+#include "support/runtime_io_uring_socket_tasks.hpp"
+
+#include "support/runtime_io_timer_event_tasks.hpp"
+
+#include "support/runtime_io_socket_lifecycle_tasks.hpp"
+
+#include "support/runtime_io_udp_socket_helpers.hpp"
 
 bool create_tcp_listener(int &listener, sockaddr_in &address, socklen_t &address_size) {
     listener = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);

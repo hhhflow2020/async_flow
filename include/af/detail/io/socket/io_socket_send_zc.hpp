@@ -14,13 +14,7 @@ template <typename TaskT>
         return IoStatus::failed(EINVAL);
     }
 
-#if !defined(__linux__)
-    static_cast<void>(task);
-    static_cast<void>(thread);
-    static_cast<void>(fd);
-    static_cast<void>(state);
-    return IoStatus::failed(ENOSYS);
-#else
+#if defined(__linux__)
     bool skip_uring = false;
     if (detail::waiting_for_completion(state)) {
         const IoStatus completion = detail::completed_uring_status(state);
@@ -52,6 +46,9 @@ template <typename TaskT>
             return IoStatus::failed(state.wait.error);
         }
     }
+#else
+    detail::clear_waiting(state);
+#endif
 
     for (;;) {
         const ssize_t n = ::send(fd, data, size, detail::io_no_signal_flag());
@@ -68,5 +65,4 @@ template <typename TaskT>
         }
         return IoStatus::failed(error);
     }
-#endif
 }

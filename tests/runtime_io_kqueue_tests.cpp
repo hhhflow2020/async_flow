@@ -3,7 +3,7 @@
 #if AF_DETAIL_HAS_KQUEUE
 namespace {
 
-bool set_nonblocking_cloexec(int fd) {
+bool set_kqueue_nonblocking_cloexec(int fd) {
     const int flags = ::fcntl(fd, F_GETFL, 0);
     if (flags < 0 || ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) {
         return false;
@@ -18,7 +18,7 @@ bool make_socket_pair(int fds[2]) {
     if (::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0) {
         return false;
     }
-    if (set_nonblocking_cloexec(fds[0]) && set_nonblocking_cloexec(fds[1])) {
+    if (set_kqueue_nonblocking_cloexec(fds[0]) && set_kqueue_nonblocking_cloexec(fds[1])) {
         return true;
     }
     if (fds[0] >= 0) {

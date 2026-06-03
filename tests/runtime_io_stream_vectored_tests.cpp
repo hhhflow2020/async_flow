@@ -3,13 +3,12 @@
 class IoRuntimeStreamFixture : public IoRuntimeFixture {};
 
 TEST_F(IoRuntimeStreamFixture, StreamAdapterReceivesAndSendsVectoredSocketBytes) {
-#if defined(__linux__)
     if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
-        GTEST_SKIP() << "epoll backend unavailable";
+        GTEST_SKIP() << "native IO backend unavailable";
     }
 
     int fds[2]{-1, -1};
-    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+    ASSERT_TRUE(create_socket_pair(fds));
 
     std::atomic<int> armed{0};
     std::atomic<int> completed{0};
@@ -29,19 +28,15 @@ TEST_F(IoRuntimeStreamFixture, StreamAdapterReceivesAndSendsVectoredSocketBytes)
     EXPECT_EQ(response[1], 'Y');
 
     close_pair(fds);
-#else
-    GTEST_SKIP() << "epoll backend is Linux-only";
-#endif
 }
 
 TEST_F(IoRuntimeStreamFixture, StreamAdapterSendvZcSendsSocketBytes) {
-#if defined(__linux__)
     if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
-        GTEST_SKIP() << "epoll backend unavailable";
+        GTEST_SKIP() << "native IO backend unavailable";
     }
 
     int fds[2]{-1, -1};
-    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds), 0);
+    ASSERT_TRUE(create_socket_pair(fds));
 
     const char first[] = "asyncflow-";
     const char second[] = "sendmsg-zc";
@@ -61,7 +56,4 @@ TEST_F(IoRuntimeStreamFixture, StreamAdapterSendvZcSendsSocketBytes) {
     EXPECT_EQ(std::memcmp(received + first_size, second, second_size), 0);
 
     close_pair(fds);
-#else
-    GTEST_SKIP() << "sendmsg_zc helper is Linux-only";
-#endif
 }
