@@ -88,6 +88,36 @@ make_timerfd(clockid_t clock_id = CLOCK_MONOTONIC,
 [[nodiscard]] inline bool disarm_timerfd(int fd, int &error) noexcept {
     return arm_timerfd(fd, std::chrono::nanoseconds{0}, std::chrono::nanoseconds{0}, error);
 }
+
+namespace detail {
+
+template <typename TaskT>
+[[nodiscard]] IoStatus io_wait_uint64_counter_fd(TaskT &task, typename TaskT::Thread thread, int fd,
+                                                 std::uint64_t *value, IoOpState &state) noexcept {
+    detail::clear_waiting(state);
+    for (;;) {
+        std::uint64_t counter = 0;
+        const ssize_t n = ::read(fd, &counter, sizeof(counter));
+        if (n == static_cast<ssize_t>(sizeof(counter))) {
+            *value = counter;
+            return IoStatus::ready(sizeof(counter));
+        }
+        if (n >= 0) {
+            return IoStatus::failed(EIO);
+        }
+
+        const int error = errno;
+        if (error == EINTR) {
+            continue;
+        }
+        if (detail::io_would_block(error)) {
+            return detail::arm_io_wait(task, thread, fd, io_readable, state);
+        }
+        return IoStatus::failed(error);
+    }
+}
+
+} // namespace detail
 #endif
 
 #if !defined(__linux__)
@@ -138,4 +168,19 @@ make_timerfd(clockid_t clock_id = CLOCK_MONOTONIC,
     error = ENOSYS;
     return false;
 }
+
+namespace detail {
+
+template <typename TaskT>
+[[nodiscard]] IoStatus io_wait_uint64_counter_fd(TaskT &task, typename TaskT::Thread thread, int fd,
+                                                 std::uint64_t *value, IoOpState &state) noexcept {
+    static_cast<void>(task);
+    static_cast<void>(thread);
+    static_cast<void>(fd);
+    static_cast<void>(value);
+    static_cast<void>(state);
+    return IoStatus::failed(ENOSYS);
+}
+
+} // namespace detail
 #endif

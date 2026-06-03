@@ -13,36 +13,7 @@ template <typename TaskT>
     if (value == nullptr) {
         return IoStatus::failed(EINVAL);
     }
-
-#if !defined(__linux__)
-    static_cast<void>(task);
-    static_cast<void>(thread);
-    static_cast<void>(fd);
-    static_cast<void>(state);
-    return IoStatus::failed(ENOSYS);
-#else
-    detail::clear_waiting(state);
-    for (;;) {
-        std::uint64_t counter = 0;
-        const ssize_t n = ::read(fd, &counter, sizeof(counter));
-        if (n == static_cast<ssize_t>(sizeof(counter))) {
-            *value = counter;
-            return IoStatus::ready(sizeof(counter));
-        }
-        if (n >= 0) {
-            return IoStatus::failed(EIO);
-        }
-
-        const int error = errno;
-        if (error == EINTR) {
-            continue;
-        }
-        if (detail::io_would_block(error)) {
-            return detail::arm_io_wait(task, thread, fd, io_readable, state);
-        }
-        return IoStatus::failed(error);
-    }
-#endif
+    return detail::io_wait_uint64_counter_fd(task, thread, fd, value, state);
 }
 
 template <typename TaskT>
@@ -54,36 +25,7 @@ template <typename TaskT>
     if (expirations == nullptr) {
         return IoStatus::failed(EINVAL);
     }
-
-#if !defined(__linux__)
-    static_cast<void>(task);
-    static_cast<void>(thread);
-    static_cast<void>(fd);
-    static_cast<void>(state);
-    return IoStatus::failed(ENOSYS);
-#else
-    detail::clear_waiting(state);
-    for (;;) {
-        std::uint64_t value = 0;
-        const ssize_t n = ::read(fd, &value, sizeof(value));
-        if (n == static_cast<ssize_t>(sizeof(value))) {
-            *expirations = value;
-            return IoStatus::ready(sizeof(value));
-        }
-        if (n >= 0) {
-            return IoStatus::failed(EIO);
-        }
-
-        const int error = errno;
-        if (error == EINTR) {
-            continue;
-        }
-        if (detail::io_would_block(error)) {
-            return detail::arm_io_wait(task, thread, fd, io_readable, state);
-        }
-        return IoStatus::failed(error);
-    }
-#endif
+    return detail::io_wait_uint64_counter_fd(task, thread, fd, expirations, state);
 }
 
 } // namespace af

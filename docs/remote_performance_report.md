@@ -2157,3 +2157,53 @@ Interpretation:
   system headers and Linux-specific syscalls. Those are implementation details
   of specific examples and remain separate from the public scheduling/runtime
   configuration style.
+
+## 2026-06-03 Event/Timer Wait Platform Branch Encapsulation
+
+This pass moves the `eventfd`/`timerfd` wait-read platform branch out of the
+public `io_event_timer.hpp` API surface and into the common IO detail layer.
+
+Changes under validation:
+
+- Added `detail::io_wait_uint64_counter_fd()` in
+  `io_common_event_timer.hpp`.
+- Kept the Linux implementation behavior unchanged: clear waiting state, retry
+  `read()` on `EINTR`, arm readiness wait on would-block, return `EIO` on
+  short reads, and publish the 64-bit counter on success.
+- Kept the non-Linux behavior unchanged: public calls still validate
+  cancellation/null output first and then return `ENOSYS`.
+- Simplified `io_wait_eventfd()` and `io_wait_timerfd()` so the public header no
+  longer contains `__linux__` conditional compilation.
+- Rechecked log task-tag formatting based on the latest requirement:
+  `[task=...]` may repeat on continuation lines, but it remains after the
+  Abseil line prefix and never starts a physical log line.
+
+Correctness checks:
+
+- Local macOS Debug full `all` build: passed.
+- Local macOS Debug full `asyncflow_runtime_tests`: 193 tests, 107 passed,
+  86 skipped, 0 failed.
+- Local macOS Debug `asyncflow_runtime_stress_tests`: 9/9 passed.
+- Local macOS Debug task-tag focused `asyncflow_log_tests`: 5/5 passed.
+- Remote GCC Debug, `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: full `all` build passed.
+- Remote GCC Debug full `asyncflow_runtime_tests`: 187 tests, 183 passed,
+  4 skipped, 0 failed.
+- Remote GCC Debug `asyncflow_runtime_stress_tests`: 9/9 passed.
+- Remote GCC Debug event/timer example smoke passed:
+  `event value=7`, `timer expirations=1`, and `io_uring timeout fired`.
+- Remote Clang Debug, `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: full `all` build passed.
+- Remote Clang Debug full `asyncflow_runtime_tests`: 187 tests, 183 passed,
+  4 skipped, 0 failed.
+- Remote Clang Debug `asyncflow_runtime_stress_tests`: 9/9 passed.
+- Remote Clang Debug event/timer example smoke passed:
+  `event value=7`, `timer expirations=1`, and `io_uring timeout fired`.
+
+Interpretation:
+
+- Normal users including `af/io_event_timer.hpp` no longer see the Linux
+  platform branch for event/timer wait operations.
+- The branch remains close to the syscall-specific detail implementation, where
+  it belongs, without adding locks, allocations, state transitions, or runtime
+  scheduling behavior.
