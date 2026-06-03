@@ -17,7 +17,7 @@ int main(int argc, char **argv) {
     using namespace std::chrono_literals;
     using namespace io_tcp_echo_example;
 
-    af::SignalSet stop_signals({SIGINT, SIGTERM});
+    af::SignalSet stop_signals = af::make_termination_signal_set();
     if (!stop_signals.valid()) {
         std::cerr << "failed to configure signal wait set error=" << stop_signals.error() << '\n';
         return 2;

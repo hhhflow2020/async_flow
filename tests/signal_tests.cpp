@@ -61,6 +61,17 @@ TEST(SignalTests, SignalSetWaitUntilConsumesBlockedRaisedSignal) {
     EXPECT_EQ(result.signal, SIGUSR1);
 }
 
+TEST(SignalTests, TerminationSignalSetConsumesBlockedTerminationSignal) {
+    af::SignalSet signals = af::make_termination_signal_set();
+    ASSERT_TRUE(signals.valid()) << signals.error();
+
+    ASSERT_EQ(std::raise(SIGTERM), 0);
+    const af::SignalWaitResult result = signals.wait_for(std::chrono::seconds(1));
+
+    EXPECT_TRUE(result.ok()) << result.error;
+    EXPECT_EQ(result.signal, SIGTERM);
+}
+
 TEST(SignalTests, EmptySignalSetIsInvalid) {
     af::SignalSet signals({});
 

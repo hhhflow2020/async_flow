@@ -247,6 +247,10 @@ private:
 #endif
 };
 
+[[nodiscard]] inline SignalSet make_termination_signal_set() noexcept {
+    return SignalSet({SIGINT, SIGTERM});
+}
+
 [[nodiscard]] inline bool ignore_process_signal(int signal) noexcept {
 #if defined(_WIN32)
     static_cast<void>(signal);
