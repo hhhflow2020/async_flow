@@ -67,6 +67,21 @@ TEST(LogTests, TaskIdTagIsInsertedAtFirstUserLogField) {
     EXPECT_EQ(tagged.find("[task=1025] "), message.size() - user_message.size());
 }
 
+TEST(LogTests, TaskIdTagUsesSharedLogEntryUserFieldStart) {
+    const std::string prefix = "I0603 10:31:40.550430 123 log_tests.cpp:42] ";
+    const std::string message = prefix + "user first\nsecond\n";
+    const std::string_view formatted_message(message);
+    const std::string_view user_message(formatted_message.data() + prefix.size(),
+                                        formatted_message.size() - prefix.size());
+    const std::string tagged =
+        af::detail::task_id_tagged_user_log_message(formatted_message, user_message, 1025);
+
+    EXPECT_EQ(tagged, prefix + "[task=1025] user first\nsecond\n");
+    EXPECT_NE(tagged.find("[task=1025] "), 0U);
+    EXPECT_EQ(count_substring_occurrences(tagged, "[task=1025] "), 1U);
+    EXPECT_EQ(tagged.find("\n[task=1025] "), std::string::npos);
+}
+
 TEST(LogTests, TaskIdTagKeepsOriginalMessageWhenUserLogFieldCannotBeLocated) {
     const std::string message = "I0603 10:31:40.550430 123 log_tests.cpp:42] user first\n";
     const std::string tagged =

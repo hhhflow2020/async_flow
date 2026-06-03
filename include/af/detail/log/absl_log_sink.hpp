@@ -4,6 +4,7 @@
 #include <atomic>
 #include <charconv>
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -27,18 +28,35 @@ namespace af {
 
 namespace detail {
 
+[[nodiscard]] inline std::size_t user_log_field_offset(std::string_view message,
+                                                       std::string_view user_message) noexcept {
+    const auto message_begin = reinterpret_cast<std::uintptr_t>(message.data());
+    const auto user_begin = reinterpret_cast<std::uintptr_t>(user_message.data());
+    if (message_begin != 0U && user_begin >= message_begin) {
+        const auto offset = static_cast<std::size_t>(user_begin - message_begin);
+        if (offset <= message.size() && user_message.size() <= message.size() - offset) {
+            return offset;
+        }
+    }
+
+    const bool user_message_is_suffix =
+        user_message.size() <= message.size() &&
+        message.substr(message.size() - user_message.size()) == user_message;
+    if (user_message_is_suffix) {
+        return message.size() - user_message.size();
+    }
+    return std::string_view::npos;
+}
+
 template <typename TaskId>
 [[nodiscard]] std::string task_id_tagged_user_log_message(std::string_view message,
                                                           std::string_view user_message,
                                                           TaskId task_id) {
-    const bool user_message_is_suffix =
-        user_message.size() <= message.size() &&
-        message.substr(message.size() - user_message.size()) == user_message;
-    if (!user_message_is_suffix) [[unlikely]] {
+    const std::size_t prefix_size = user_log_field_offset(message, user_message);
+    if (prefix_size == std::string_view::npos) [[unlikely]] {
         return std::string(message);
     }
 
-    const std::size_t prefix_size = message.size() - user_message.size();
     std::array<char, 32> digits{};
     const auto converted = std::to_chars(digits.data(), digits.data() + digits.size(), task_id);
     AF_ASSERT(converted.ec == std::errc{});
