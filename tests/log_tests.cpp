@@ -55,6 +55,12 @@ static_assert(sizeof(af::detail::CacheLineAtomic<std::uint64_t>) >=
     return count;
 }
 
+[[nodiscard]] std::size_t line_begin_for_position(std::string_view text,
+                                                  std::size_t position) noexcept {
+    const std::size_t newline = text.rfind('\n', position);
+    return newline == std::string_view::npos ? 0U : newline + 1U;
+}
+
 TEST(LogTests, TaskIdTagIsInsertedAtFirstUserLogField) {
     const std::string message = "I0603 10:31:40.550430 123 log_tests.cpp:42] user first\nsecond\n";
     const std::string user_message = "user first\nsecond\n";
@@ -1178,9 +1184,21 @@ TEST(LogTests, RuntimeAwareSinkTagsEachUserLogLineAfterPrefix) {
     EXPECT_NE(contents.find(task_tag + "runtime task id log second"), std::string::npos);
     EXPECT_EQ(contents.find("\n" + task_tag), std::string::npos);
 
+    const std::size_t first_line_begin = line_begin_for_position(contents, first_user_line_pos);
+    const std::size_t first_prefix_end = contents.find("] ", first_line_begin);
+    ASSERT_NE(first_prefix_end, std::string::npos);
+    EXPECT_EQ(task_tag_pos, first_prefix_end + 2U);
+
     const std::size_t second_line_begin = contents.rfind('\n', second_user_line_pos);
     ASSERT_NE(second_line_begin, std::string::npos);
     EXPECT_EQ(contents[second_line_begin + 1U], 'I');
+
+    const std::size_t second_task_tag_pos = contents.find(task_tag, task_tag_pos + task_tag.size());
+    const std::size_t second_prefix_end = contents.find("] ", second_line_begin + 1U);
+    ASSERT_NE(second_task_tag_pos, std::string::npos);
+    ASSERT_NE(second_prefix_end, std::string::npos);
+    EXPECT_EQ(second_task_tag_pos, second_prefix_end + 2U);
+    EXPECT_LT(second_line_begin + 1U, second_task_tag_pos);
 }
 
 TEST(LogTests, BlockOverflowWaitsForQueueCapacity) {
