@@ -2,10 +2,9 @@
 
 class IoRuntimeDatagramFixture : public IoRuntimeFixture {};
 
-TEST_F(IoRuntimeDatagramFixture, EpollIoThreadSendsUdpDatagramFromHelper) {
-#if defined(__linux__)
+TEST_F(IoRuntimeDatagramFixture, NativeIoThreadSendsUdpDatagramFromHelper) {
     if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
-        GTEST_SKIP() << "epoll backend unavailable";
+        GTEST_SKIP() << "native IO backend unavailable";
     }
 
     UdpLoopbackSockets sockets;
@@ -23,15 +22,11 @@ TEST_F(IoRuntimeDatagramFixture, EpollIoThreadSendsUdpDatagramFromHelper) {
     char received = 0;
     ASSERT_EQ(recv_udp_payload(sockets, &received, sizeof(received)), 1);
     EXPECT_EQ(received, value);
-#else
-    GTEST_SKIP() << "epoll backend is Linux-only";
-#endif
 }
 
-TEST_F(IoRuntimeDatagramFixture, EpollIoThreadSendsVectoredUdpDatagramFromHelper) {
-#if defined(__linux__)
+TEST_F(IoRuntimeDatagramFixture, NativeIoThreadSendsVectoredUdpDatagramFromHelper) {
     if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
-        GTEST_SKIP() << "epoll backend unavailable";
+        GTEST_SKIP() << "native IO backend unavailable";
     }
 
     UdpLoopbackSockets sockets;
@@ -49,15 +44,11 @@ TEST_F(IoRuntimeDatagramFixture, EpollIoThreadSendsVectoredUdpDatagramFromHelper
     ASSERT_EQ(recv_udp_payload(sockets, received, sizeof(received)), 2);
     EXPECT_EQ(received[0], 'd');
     EXPECT_EQ(received[1], 'g');
-#else
-    GTEST_SKIP() << "epoll backend is Linux-only";
-#endif
 }
 
-TEST_F(IoRuntimeDatagramFixture, EpollIoThreadSendsVectoredUdpDatagramWithSendmsgZcHelper) {
-#if defined(__linux__)
+TEST_F(IoRuntimeDatagramFixture, NativeIoThreadSendsVectoredUdpDatagramWithSendmsgZcHelper) {
     if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
-        GTEST_SKIP() << "epoll backend unavailable";
+        GTEST_SKIP() << "native IO backend unavailable";
     }
 
     UdpLoopbackSockets sockets;
@@ -75,7 +66,4 @@ TEST_F(IoRuntimeDatagramFixture, EpollIoThreadSendsVectoredUdpDatagramWithSendms
     ASSERT_EQ(recv_udp_payload(sockets, received, sizeof(received)), 2);
     EXPECT_EQ(received[0], 'z');
     EXPECT_EQ(received[1], 'c');
-#else
-    GTEST_SKIP() << "sendmsg_zc helper is Linux-only";
-#endif
 }

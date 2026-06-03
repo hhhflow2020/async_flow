@@ -15,15 +15,7 @@ template <typename TaskT>
         return IoStatus::failed(EINVAL);
     }
 
-#if !defined(__linux__)
-    static_cast<void>(task);
-    static_cast<void>(thread);
-    static_cast<void>(fd);
-    static_cast<void>(address);
-    static_cast<void>(address_size);
-    static_cast<void>(state);
-    return IoStatus::failed(ENOSYS);
-#else
+#if defined(__linux__)
     bool skip_uring = false;
     if (detail::waiting_for_completion(state)) {
         const IoStatus completion = detail::completed_uring_status(state);
@@ -54,6 +46,9 @@ template <typename TaskT>
             return IoStatus::failed(state.wait.error);
         }
     }
+#else
+    detail::clear_waiting(state);
+#endif
     for (;;) {
         const ssize_t n =
             ::sendto(fd, data, size, detail::io_no_signal_flag(), address, address_size);
@@ -70,7 +65,6 @@ template <typename TaskT>
         }
         return IoStatus::failed(error);
     }
-#endif
 }
 
 template <typename TaskT>
@@ -89,15 +83,7 @@ template <typename TaskT>
         return IoStatus::ready(0);
     }
 
-#if !defined(__linux__)
-    static_cast<void>(task);
-    static_cast<void>(thread);
-    static_cast<void>(fd);
-    static_cast<void>(address);
-    static_cast<void>(address_size);
-    static_cast<void>(state);
-    return IoStatus::failed(ENOSYS);
-#else
+#if defined(__linux__)
     bool skip_uring = false;
     if (detail::waiting_for_completion(state)) {
         const IoStatus completion = detail::completed_uring_status(state);
@@ -128,6 +114,9 @@ template <typename TaskT>
             return IoStatus::failed(state.wait.error);
         }
     }
+#else
+    detail::clear_waiting(state);
+#endif
 
     msghdr message{};
     message.msg_name = const_cast<sockaddr *>(address);
@@ -149,5 +138,4 @@ template <typename TaskT>
         }
         return IoStatus::failed(error);
     }
-#endif
 }

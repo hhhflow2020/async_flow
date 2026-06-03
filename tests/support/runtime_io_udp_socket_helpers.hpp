@@ -9,12 +9,12 @@ struct UdpLoopbackSockets {
 
 bool create_udp_loopback_sockets(UdpLoopbackSockets &sockets) {
     sockets = UdpLoopbackSockets{};
-    sockets.receiver.reset(::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
-    if (!sockets.receiver) {
+    sockets.receiver.reset(::socket(AF_INET, SOCK_DGRAM, 0));
+    if (!sockets.receiver || !set_nonblocking_cloexec(sockets.receiver.get())) {
         return false;
     }
-    sockets.sender.reset(::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
-    if (!sockets.sender) {
+    sockets.sender.reset(::socket(AF_INET, SOCK_DGRAM, 0));
+    if (!sockets.sender || !set_nonblocking_cloexec(sockets.sender.get())) {
         return false;
     }
 

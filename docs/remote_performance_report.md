@@ -3241,3 +3241,48 @@ Interpretation:
   retaining the optimized io_uring zero-copy path.
 - Scheduler routing, local/SPSC/MPSC queue topology, locks, atomics,
   allocations, memory ordering, and cache layout were not changed.
+
+## 2026-06-03 POSIX Datagram Zero-Copy Send Fallback
+
+This pass makes the public datagram zero-copy send helpers usable on the
+supported POSIX backend set. Linux keeps the existing io_uring zero-copy submit
+path; non-Linux now falls back to ordinary POSIX datagram sends instead of
+returning `ENOSYS`.
+
+Changes under validation:
+
+- Changed `af::io_send_zc_to_some` to use `::sendto` as the non-Linux fallback
+  while keeping the Linux io_uring zero-copy submit path and readiness fallback.
+- Changed `af::io_sendv_zc_to_some` to use `::sendmsg` as the non-Linux
+  fallback while keeping the Linux io_uring sendmsg-zc submit path and
+  readiness fallback.
+- Moved UDP loopback socket test helpers out of the Linux-only test include
+  block and made their socket setup use portable `fcntl` nonblocking and
+  close-on-exec handling.
+- Changed datagram send tests to run UDP send, sendv, and sendv-zc paths
+  through the native IO backend on macOS/BSD instead of skipping.
+
+Correctness checks:
+
+- Local macOS Debug built `asyncflow_runtime_tests`.
+- Local macOS Debug ctest
+  `NativeIoThreadSends.*Udp|Datagram.*Send|UdpDatagram.*Send|SendmsgZc`: 6
+  tests selected, 0 failures; native kqueue UDP send/sendv/sendv-zc tests
+  passed, while Linux-only io_uring-specific tests were skipped by capability
+  logic.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: clean-first rebuilt `asyncflow_runtime_tests`; the
+  same ctest selection reported 6 tests, 0 failures.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: clean-first rebuilt `asyncflow_runtime_tests`; the
+  same ctest selection reported 6 tests, 0 failures.
+
+Interpretation:
+
+- This improves the public POSIX IO API surface: users can call datagram
+  zero-copy send helpers portably and get best-effort behavior, with Linux
+  retaining the optimized io_uring zero-copy path.
+- Scheduler routing, local/SPSC/MPSC queue topology, locks, atomics,
+  allocations, memory ordering, and cache layout were not changed.

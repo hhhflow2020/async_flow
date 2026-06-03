@@ -160,6 +160,8 @@ bool write_exact_until(int fd, const char *input, std::size_t size) {
     return true;
 }
 
+#include "support/runtime_io_udp_socket_helpers.hpp"
+
 #if defined(__linux__)
 #include "support/runtime_io_accept_tasks.hpp"
 
@@ -172,8 +174,6 @@ bool write_exact_until(int fd, const char *input, std::size_t size) {
 #include "support/runtime_io_timer_event_tasks.hpp"
 
 #include "support/runtime_io_socket_lifecycle_tasks.hpp"
-
-#include "support/runtime_io_udp_socket_helpers.hpp"
 
 bool create_tcp_listener(int &listener, sockaddr_in &address, socklen_t &address_size) {
     listener = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
