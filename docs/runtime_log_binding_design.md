@@ -13,6 +13,10 @@
   consumer observes the queue's enqueue linearization order. `LogOrdering::Relaxed`
   switches to per-runtime-thread SPSC lanes plus external sharded MPSC queues for
   higher producer throughput when strict global ordering is not required.
+- Ordered logging keeps only the enqueue position as the required global
+  serialization point. Producer record pools and accepted/dropped counters are
+  sharded and cache-line isolated so unrelated producer-side state does not
+  bounce between cores.
 - `FileLogBackend`, `UdpLogBackend`, and `TcpLogBackend` execute synchronously on
   the runtime-bound consumer task when used directly as async logger backends.
 - `RuntimeFileLogBackend`, `RuntimeUdpLogBackend`, and `RuntimeTcpLogBackend`
@@ -39,16 +43,17 @@
 - File, UDP, and TCP all skip ordinary producer wakeups while their bound task is
   waiting on runtime IO readiness, so producer notifications do not masquerade as
   IO completions.
-- Relaxed runtime-thread log lanes use an SPSC record pool matching their SPSC
-  submission queue. Ordered records and relaxed external producer shards keep the
-  lock-free shared free-list because they admit multiple producer threads.
+- Ordered producer shards and relaxed external producer shards use lock-free MPSC
+  record pools. Relaxed runtime-thread log lanes use an SPSC record pool matching
+  their SPSC submission queue.
 - Log record pool ownership is now split into `async_log_record_pool.hpp`.
-  `AsyncLogger` wires queues, counters, and consumer draining, while the shared
-  MPSC record pool and relaxed runtime SPSC record pool live in a focused
-  internal module.
+  `AsyncLogger` wires queues, counters, and consumer draining, while the MPSC
+  producer-shard record pools and relaxed runtime SPSC record pools live in a
+  focused internal module.
 - Producer lane ownership is now split into `async_log_lanes.hpp`. External
-  producer shards, runtime SPSC lanes, and their cache-line-isolated counters are
-  grouped with the queue and record-pool topology they protect.
+  producer shards, ordered producer shards, runtime SPSC lanes, and their
+  cache-line-isolated counters are grouped with the queue and record-pool
+  topology they protect.
 - Flush drain waiting is now split into `async_log_drain_waiter.hpp`.
   `AsyncLogger` no longer directly includes `<thread>`, `<mutex>`, or
   `<condition_variable>` and keeps the timed blocking wait out of the producer
@@ -121,6 +126,9 @@ by the same runtime-bound drain task.
 - Producer hot paths should not take locks.
 - Ordered logging should avoid an additional global sequence counter and consumer
   sort. The MPSC queue reservation is the ordering point.
+- Ordered producer-side record allocation and accepted/dropped accounting should
+  stay sharded so the MPSC enqueue cursor is the only unavoidable high-contention
+  cache line.
 - Relaxed runtime-thread producers should remain SPSC and avoid cross-thread MPMC
   hops.
 - Relaxed runtime-thread producer record allocation should also stay SPSC,
@@ -147,13 +155,13 @@ by the same runtime-bound drain task.
   prod the bound task to observe a completed IO result, a flush request, or a
   stop request.
 - The consumer releases drained log records in contiguous owner/kind groups.
-  Ordered records and relaxed external shard records from the same shared pool
-  can therefore return to the record free-list with one tagged-stack CAS per
-  drained group instead of one CAS per record; relaxed runtime SPSC lane records
-  return to their queue-local pool in fixed-size chunks so a release group
-  publishes the free queue with far fewer tail updates than one push per record.
+  Ordered producer-shard records and relaxed external shard records therefore
+  return to their owning record free-list with one tagged-stack CAS per drained
+  group instead of one CAS per record; relaxed runtime SPSC lane records return
+  to their queue-local pool in fixed-size chunks so a release group publishes the
+  free queue with far fewer tail updates than one push per record.
 - Record pool changes should stay isolated from the consumer drain loop so the
-  shared MPSC pool and runtime SPSC pool can be tuned independently.
+  MPSC producer-shard pools and runtime SPSC pools can be tuned independently.
 - Lane topology changes should stay isolated from consumer lifecycle code so
   cache layout and false-sharing tuning can be done without touching backend
   flush/shutdown behavior.

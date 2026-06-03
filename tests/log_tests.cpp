@@ -1331,7 +1331,9 @@ TEST(LogTests, OrderedLoggingIsDefaultSingleMpscQueue) {
     }
 
     EXPECT_EQ(accepted.load(std::memory_order_acquire), 2);
-    EXPECT_EQ(logger->stats().dropped, 2U);
+    const af::AsyncLogStats stats = logger->stats();
+    EXPECT_EQ(stats.accepted, 3U);
+    EXPECT_EQ(stats.dropped, 2U);
 
     blocking_backend->release();
     ASSERT_TRUE(logger->flush(std::chrono::seconds(2)));

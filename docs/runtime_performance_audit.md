@@ -39,6 +39,10 @@ was run against Boost.Asio, libuv, Seastar, or Go in this pass.
 - `AsyncLogger` keeps the separate `ready_` and `pending_` counters for correct
   publication/flush semantics, but its producer-side pending increment and
   consumer-side counter decrements now avoid unnecessary acquire fences.
+- Ordered async logging keeps one global MPSC enqueue cursor for strict
+  producer order, but shards producer record pools and accepted/dropped counters
+  onto cache-line-isolated producer shards so allocation and stats updates do not
+  create additional high-fan-in cache-line bouncing.
 - Runtime-bound file/TCP/UDP log backend batch counters keep acquire loads for
   flush waiters, but their enqueue/complete RMW operations now avoid unnecessary
   acquire fences.

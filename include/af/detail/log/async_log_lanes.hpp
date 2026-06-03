@@ -36,6 +36,20 @@ struct alignas(hardware_cache_line_size) AsyncLogQueueShard {
     AsyncLogRecordPool records;
 };
 
+struct alignas(hardware_cache_line_size) AsyncLogOrderedQueue {
+    explicit AsyncLogOrderedQueue(std::size_t queue_capacity) : queue(queue_capacity) {}
+
+    BoundedMpscQueue<LogRecord> queue;
+};
+
+struct alignas(hardware_cache_line_size) AsyncLogProducerShard {
+    explicit AsyncLogProducerShard(std::size_t record_capacity) : records(record_capacity) {}
+
+    AsyncLogStatCounter accepted;
+    AsyncLogStatCounter dropped;
+    AsyncLogRecordPool records;
+};
+
 struct alignas(hardware_cache_line_size) AsyncLogRuntimeLane {
     AsyncLogRuntimeLane(std::size_t queue_capacity, std::size_t record_capacity)
         : queue(queue_capacity), records(record_capacity) {}
@@ -47,6 +61,7 @@ struct alignas(hardware_cache_line_size) AsyncLogRuntimeLane {
 };
 
 using AsyncLogQueueShardStorage = ContiguousObjectStorage<AsyncLogQueueShard>;
+using AsyncLogProducerShardStorage = ContiguousObjectStorage<AsyncLogProducerShard>;
 using AsyncLogRuntimeLaneStorage = ContiguousObjectStorage<AsyncLogRuntimeLane>;
 
 } // namespace af::detail

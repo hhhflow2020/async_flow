@@ -87,14 +87,26 @@ public:
     explicit AsyncLogger(AsyncLogConfig config)
         : cache_token_(next_cache_token_.fetch_add(1U, std::memory_order_relaxed)),
           ordering_(validate_ordering(config.ordering)),
-          queue_shard_count_(queue_shard_count_for_ordering(ordering_, config.queue_shard_count)),
-          queue_shard_mask_(queue_shard_count_ - 1U),
+          queue_shard_count_(
+              relaxed_queue_shard_count_for_ordering(ordering_, config.queue_shard_count)),
+          queue_shard_mask_(queue_shard_count_ == 0U ? 0U : queue_shard_count_ - 1U),
+          ordered_producer_shard_count_(
+              ordered_producer_shard_count_for_ordering(ordering_, config.queue_shard_count)),
+          ordered_producer_shard_mask_(
+              ordered_producer_shard_count_ == 0U ? 0U : ordered_producer_shard_count_ - 1U),
           runtime_thread_count_(
               runtime_thread_count_for_ordering(ordering_, config.runtime_thread_count)),
-          queue_shards_(
-              make_queue_shards(queue_shard_count_,
-                                queue_capacity_per_shard(config.queue_capacity, queue_shard_count_),
-                                config.max_batch_size)),
+          ordered_queue_(make_ordered_queue(ordering_, config.queue_capacity)),
+          ordered_producer_shards_(make_ordered_producer_shards(
+              ordered_producer_shard_count_,
+              ordered_record_capacity_per_producer_shard(
+                  config.queue_capacity, ordered_producer_shard_count_, config.max_batch_size))),
+          queue_shards_(make_queue_shards(
+              queue_shard_count_,
+              queue_shard_count_ == 0U
+                  ? 0U
+                  : queue_capacity_per_shard(config.queue_capacity, queue_shard_count_),
+              config.max_batch_size)),
           runtime_lanes_(make_runtime_lanes(
               runtime_thread_count_,
               queue_capacity_per_runtime_thread(config.runtime_queue_capacity == 0U
@@ -116,8 +128,8 @@ public:
     }
 
     [[nodiscard]] bool try_log(std::string_view message) noexcept {
-        if (ordering_ == LogOrdering::Ordered) {
-            return try_log_on_lane(ordered_queue(), message);
+        if (ordering_ == LogOrdering::Ordered) [[likely]] {
+            return try_log_ordered(message);
         }
 
         detail::AsyncLogQueueShard &shard = producer_shard();
@@ -135,6 +147,10 @@ public:
 
     [[nodiscard]] AsyncLogStats stats() const noexcept {
         AsyncLogStats result;
+        for (const detail::AsyncLogProducerShard &shard : ordered_producer_shards_) {
+            result.accepted += shard.accepted.load();
+            result.dropped += shard.dropped.load();
+        }
         for (const detail::AsyncLogQueueShard &shard : queue_shards_) {
             result.accepted += shard.accepted.load();
             result.dropped += shard.dropped.load();
@@ -156,7 +172,7 @@ private:
 
     [[nodiscard]] bool try_log_from_runtime_thread(std::uint16_t thread_index,
                                                    std::string_view message) noexcept {
-        if (ordering_ == LogOrdering::Ordered) {
+        if (ordering_ == LogOrdering::Ordered) [[likely]] {
             return try_log(message);
         }
 
@@ -243,6 +259,12 @@ private:
         detail::AsyncLogQueueShard *shard{nullptr};
     };
 
+    struct OrderedProducerShardCache {
+        const AsyncLogger *logger{nullptr};
+        std::uint64_t token{0};
+        detail::AsyncLogProducerShard *shard{nullptr};
+    };
+
     [[nodiscard]] static LogOrdering validate_ordering(LogOrdering ordering) {
         switch (ordering) {
         case LogOrdering::Ordered:
@@ -252,10 +274,18 @@ private:
         throw std::invalid_argument("invalid async log ordering");
     }
 
-    [[nodiscard]] static std::size_t queue_shard_count_for_ordering(LogOrdering ordering,
-                                                                    std::size_t requested) {
+    [[nodiscard]] static std::size_t relaxed_queue_shard_count_for_ordering(LogOrdering ordering,
+                                                                            std::size_t requested) {
         if (ordering == LogOrdering::Ordered) {
-            return 1U;
+            return 0U;
+        }
+        return normalize_queue_shard_count(requested);
+    }
+
+    [[nodiscard]] static std::size_t
+    ordered_producer_shard_count_for_ordering(LogOrdering ordering, std::size_t requested) {
+        if (ordering == LogOrdering::Relaxed) {
+            return 0U;
         }
         return normalize_queue_shard_count(requested);
     }
@@ -313,10 +343,46 @@ private:
         return queue_capacity + batch_capacity;
     }
 
+    [[nodiscard]] static std::size_t
+    ordered_record_capacity_per_producer_shard(std::size_t total_capacity, std::size_t shard_count,
+                                               std::size_t max_batch_size) {
+        if (shard_count == 0U) {
+            return 0U;
+        }
+        return record_capacity_per_shard(queue_capacity_per_shard(total_capacity, shard_count),
+                                         max_batch_size);
+    }
+
+    [[nodiscard]] static std::unique_ptr<detail::AsyncLogOrderedQueue>
+    make_ordered_queue(LogOrdering ordering, std::size_t queue_capacity) {
+        if (ordering == LogOrdering::Relaxed) {
+            return nullptr;
+        }
+        return std::make_unique<detail::AsyncLogOrderedQueue>(queue_capacity);
+    }
+
+    [[nodiscard]] static detail::AsyncLogProducerShardStorage
+    make_ordered_producer_shards(std::size_t shard_count, std::size_t record_capacity) {
+        detail::AsyncLogProducerShardStorage shards;
+        if (shard_count == 0U) {
+            return shards;
+        }
+
+        shards.reserve_exact(shard_count);
+        for (std::size_t i = 0; i < shard_count; ++i) {
+            shards.emplace_back(record_capacity);
+        }
+        return shards;
+    }
+
     [[nodiscard]] static detail::AsyncLogQueueShardStorage
     make_queue_shards(std::size_t shard_count, std::size_t capacity_per_shard,
                       std::size_t max_batch_size) {
         detail::AsyncLogQueueShardStorage shards;
+        if (shard_count == 0U) {
+            return shards;
+        }
+
         shards.reserve_exact(shard_count);
         const std::size_t record_capacity =
             record_capacity_per_shard(capacity_per_shard, max_batch_size);
@@ -343,9 +409,18 @@ private:
         return lanes;
     }
 
-    [[nodiscard]] detail::AsyncLogQueueShard &ordered_queue() noexcept {
-        AF_ASSERT(queue_shard_count_ == 1U);
-        return *queue_shards_[0];
+    [[nodiscard]] detail::AsyncLogProducerShard &ordered_producer_shard() noexcept {
+        thread_local OrderedProducerShardCache cache;
+        if (cache.logger != this || cache.token != cache_token_) [[unlikely]] {
+            const std::size_t shard_index =
+                next_ordered_producer_shard_.fetch_add(1U, std::memory_order_relaxed) &
+                ordered_producer_shard_mask_;
+            cache.logger = this;
+            cache.token = cache_token_;
+            cache.shard = ordered_producer_shards_[shard_index];
+        }
+        AF_ASSERT(cache.shard != nullptr);
+        return *cache.shard;
     }
 
     [[nodiscard]] detail::AsyncLogQueueShard &producer_shard() noexcept {
@@ -359,6 +434,35 @@ private:
         }
         AF_ASSERT(cache.shard != nullptr);
         return *cache.shard;
+    }
+
+    [[nodiscard]] bool try_log_ordered(std::string_view message) noexcept {
+        detail::AsyncLogProducerShard &producer = ordered_producer_shard();
+        if (!accepting_.load(std::memory_order_acquire)) {
+            record_dropped(producer);
+            return false;
+        }
+
+        detail::LogRecord *record = acquire_record(producer, message);
+        if (record == nullptr) {
+            record_dropped(producer);
+            return false;
+        }
+
+        pending_.fetch_add(1U, std::memory_order_relaxed);
+        if (!push_ordered_record(record)) {
+            release_unpublished_record(producer, record);
+            abandon_pending_record();
+            record_dropped(producer);
+            return false;
+        }
+
+        record_accepted(producer);
+        const auto previous_ready = ready_.fetch_add(1U, std::memory_order_release);
+        if (previous_ready == 0U) {
+            notify_consumer();
+        }
+        return true;
     }
 
     template <typename Lane> static void record_accepted(Lane &lane) noexcept {
@@ -401,11 +505,33 @@ private:
         return false;
     }
 
+    [[nodiscard]] bool push_ordered_record(detail::LogRecord *record) noexcept {
+        AF_ASSERT(ordered_queue_ != nullptr);
+        if (overflow_policy_ == LogOverflowPolicy::DropNewest) {
+            return accepting_.load(std::memory_order_acquire) &&
+                   ordered_queue_->queue.try_push(record);
+        }
+
+        detail::QueueFullBackoff backoff(overflow_spin_count_);
+        while (accepting_.load(std::memory_order_acquire)) {
+            if (ordered_queue_->queue.try_push(record)) {
+                return true;
+            }
+            backoff.wait();
+        }
+        return false;
+    }
+
     static void release_record(detail::LogRecord *record) noexcept {
         detail::release_async_log_record(record);
     }
 
     static void release_unpublished_record(detail::AsyncLogQueueShard &,
+                                           detail::LogRecord *record) noexcept {
+        release_record(record);
+    }
+
+    static void release_unpublished_record(detail::AsyncLogProducerShard &,
                                            detail::LogRecord *record) noexcept {
         release_record(record);
     }
@@ -478,6 +604,11 @@ private:
     }
 
     void collect_batch(std::vector<detail::LogRecord *> &batch, std::size_t max_records) noexcept {
+        if (ordering_ == LogOrdering::Ordered) [[likely]] {
+            collect_ordered_batch(batch, max_records);
+            return;
+        }
+
         if (prefer_runtime_drain_) {
             collect_runtime_batch(batch, max_records);
             collect_shard_batch(batch, max_records);
@@ -486,6 +617,21 @@ private:
             collect_runtime_batch(batch, max_records);
         }
         prefer_runtime_drain_ = !prefer_runtime_drain_;
+    }
+
+    void collect_ordered_batch(std::vector<detail::LogRecord *> &batch,
+                               std::size_t max_records) noexcept {
+        AF_ASSERT(ordered_queue_ != nullptr);
+        constexpr std::size_t max_queue_drain_count = 64;
+        std::array<detail::LogRecord *, max_queue_drain_count> drained;
+        while (batch.size() < max_records) {
+            const std::size_t count = ordered_queue_->queue.try_pop_many(
+                drained.data(), std::min(drained.size(), max_records - batch.size()));
+            if (count == 0U) {
+                return;
+            }
+            batch.insert(batch.end(), drained.data(), drained.data() + count);
+        }
     }
 
     void collect_shard_batch(std::vector<detail::LogRecord *> &batch,
@@ -578,7 +724,11 @@ private:
     const LogOrdering ordering_;
     const std::size_t queue_shard_count_;
     const std::size_t queue_shard_mask_;
+    const std::size_t ordered_producer_shard_count_;
+    const std::size_t ordered_producer_shard_mask_;
     const std::size_t runtime_thread_count_;
+    std::unique_ptr<detail::AsyncLogOrderedQueue> ordered_queue_;
+    detail::AsyncLogProducerShardStorage ordered_producer_shards_;
     detail::AsyncLogQueueShardStorage queue_shards_;
     detail::AsyncLogRuntimeLaneStorage runtime_lanes_;
     const std::size_t max_batch_size_;
@@ -593,6 +743,8 @@ private:
     alignas(detail::hardware_cache_line_size) std::atomic<bool> stopping_{false};
     alignas(detail::hardware_cache_line_size)
         std::atomic<detail::AsyncLogConsumerWakeTarget *> consumer_wake_target_{nullptr};
+    alignas(detail::hardware_cache_line_size) std::atomic<std::size_t> next_ordered_producer_shard_{
+        0};
     alignas(detail::hardware_cache_line_size) std::atomic<std::size_t> next_producer_shard_{0};
     alignas(detail::hardware_cache_line_size) std::atomic<std::size_t> pending_{0};
     alignas(detail::hardware_cache_line_size) std::atomic<std::size_t> ready_{0};

@@ -29,7 +29,7 @@ public:
     }
 
     [[nodiscard]] std::string_view message() const noexcept {
-        if (uses_heap_) {
+        if (uses_heap_) [[unlikely]] {
             return heap_message_;
         }
         return {inline_message_.data(), size_};
@@ -46,7 +46,7 @@ public:
 private:
     void assign(std::string_view message) {
         size_ = message.size();
-        if (message.size() <= inline_message_.size()) {
+        if (message.size() <= inline_message_.size()) [[likely]] {
             std::copy(message.begin(), message.end(), inline_message_.begin());
             uses_heap_ = false;
             return;
