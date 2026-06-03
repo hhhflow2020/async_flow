@@ -90,4 +90,27 @@ private:
 
 } // namespace io_uring_multishot_accept_example
 
+#else
+
+namespace io_uring_multishot_accept_example {
+
+class MultishotAcceptTask final : public AcceptTask {
+public:
+    explicit MultishotAcceptTask(AcceptTask::FactoryToken token) : AcceptTask(token) {}
+
+    bool do_it(int fd, int target_accepts, MultishotAcceptResult *result) {
+        static_cast<void>(fd);
+        static_cast<void>(target_accepts);
+        static_cast<void>(result);
+        return false;
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
+};
+
+} // namespace io_uring_multishot_accept_example
+
 #endif

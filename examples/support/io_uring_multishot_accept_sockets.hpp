@@ -58,4 +58,29 @@ template <std::size_t Count>
 
 } // namespace io_uring_multishot_accept_example
 
+#else
+
+namespace io_uring_multishot_accept_example {
+
+struct MultishotAcceptListener {
+    af::UniqueFd fd{};
+    int address{0};
+    std::size_t address_size{0};
+
+    bool listen() noexcept {
+        return false;
+    }
+};
+
+template <std::size_t Count>
+[[nodiscard]] bool connect_accept_clients(const int &address, std::size_t address_size,
+                                          std::array<af::UniqueFd, Count> &clients) noexcept {
+    static_cast<void>(address);
+    static_cast<void>(address_size);
+    static_cast<void>(clients);
+    return false;
+}
+
+} // namespace io_uring_multishot_accept_example
+
 #endif

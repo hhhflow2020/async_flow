@@ -5,7 +5,11 @@
 #include "support/io_uring_multishot_accept_task.hpp"
 
 int main() {
-#if defined(__linux__)
+    if constexpr (!af::supports_io_uring) {
+        std::cout << "io_uring multishot accept example is Linux-only\n";
+        return 0;
+    }
+
     using namespace io_uring_multishot_accept_example;
 
     accept_async::init();
@@ -52,8 +56,4 @@ int main() {
 
     std::cout << "io_uring multishot accepted=" << result.accepted_count << '\n';
     return 0;
-#else
-    std::cout << "io_uring multishot accept example is Linux-only\n";
-    return 0;
-#endif
 }
