@@ -2,11 +2,9 @@
 
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <mutex>
 #include <span>
 #include <stdexcept>
 #include <string_view>
@@ -108,10 +106,8 @@ public:
             return true;
         }
 
-        std::unique_lock lock(pending_mutex_);
-        return pending_cv_.wait_until(lock, deadline, [this] {
-            return pending_batches.load(std::memory_order_acquire) == 0U;
-        });
+        return wait_until_atomic_condition(
+            pending_batches, deadline, [](std::size_t pending) noexcept { return pending == 0U; });
     }
 
     void complete_batch(Batch *batch) noexcept {
@@ -168,7 +164,6 @@ private:
     void abandon_pending_batch() noexcept {
         if (pending_batches.fetch_sub(1U, std::memory_order_release) == 1U) {
             pending_batches.notify_all();
-            pending_cv_.notify_all();
         }
     }
 
@@ -196,8 +191,6 @@ private:
         }
     }
 
-    std::mutex pending_mutex_;
-    std::condition_variable pending_cv_;
     Batch *producer_spare_batch_{nullptr};
 };
 

@@ -6,18 +6,18 @@
 
 namespace af::detail {
 
-template <typename AtomicBool>
-[[nodiscard]] bool wait_until_atomic_flag_true(
-    const AtomicBool &flag, std::chrono::steady_clock::time_point deadline,
+template <typename AtomicValue, typename Predicate>
+[[nodiscard]] bool wait_until_atomic_condition(
+    const AtomicValue &value, std::chrono::steady_clock::time_point deadline, Predicate &&predicate,
     std::chrono::milliseconds poll_interval = std::chrono::milliseconds(1)) noexcept {
     if (poll_interval <= std::chrono::milliseconds(0)) [[unlikely]] {
         poll_interval = std::chrono::milliseconds(1);
     }
 
-    while (!flag.load(std::memory_order_acquire)) {
+    while (!predicate(value.load(std::memory_order_acquire))) {
         const auto now = std::chrono::steady_clock::now();
         if (now >= deadline) {
-            return flag.load(std::memory_order_acquire);
+            return predicate(value.load(std::memory_order_acquire));
         }
 
         auto wake_time = now + poll_interval;
@@ -27,6 +27,14 @@ template <typename AtomicBool>
         std::this_thread::sleep_until(wake_time);
     }
     return true;
+}
+
+template <typename AtomicBool>
+[[nodiscard]] bool wait_until_atomic_flag_true(
+    const AtomicBool &flag, std::chrono::steady_clock::time_point deadline,
+    std::chrono::milliseconds poll_interval = std::chrono::milliseconds(1)) noexcept {
+    return wait_until_atomic_condition(
+        flag, deadline, [](bool value) noexcept { return value; }, poll_interval);
 }
 
 } // namespace af::detail

@@ -2,9 +2,8 @@
 
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstddef>
-#include <mutex>
+#include <thread>
 
 namespace af::detail {
 
@@ -22,32 +21,25 @@ public:
         if (pending.load(std::memory_order_acquire) == 0U) {
             return true;
         }
+        if (retry_interval <= std::chrono::milliseconds(0)) [[unlikely]] {
+            retry_interval = std::chrono::milliseconds(1);
+        }
 
-        std::unique_lock lock(mutex_);
         while (pending.load(std::memory_order_acquire) != 0U) {
             wake_consumer();
             auto retry_deadline = std::chrono::steady_clock::now() + retry_interval;
             if (retry_deadline > deadline) {
                 retry_deadline = deadline;
             }
-            if (!cv_.wait_until(
-                    lock, retry_deadline,
-                    [&pending] { return pending.load(std::memory_order_acquire) == 0U; }) &&
-                std::chrono::steady_clock::now() >= deadline &&
-                pending.load(std::memory_order_acquire) != 0U) {
-                return false;
+            if (std::chrono::steady_clock::now() >= deadline) {
+                return pending.load(std::memory_order_acquire) == 0U;
             }
+            std::this_thread::sleep_until(retry_deadline);
         }
         return true;
     }
 
-    void notify_drained() noexcept {
-        cv_.notify_all();
-    }
-
-private:
-    std::mutex mutex_;
-    std::condition_variable cv_;
+    void notify_drained() noexcept {}
 };
 
 } // namespace af::detail

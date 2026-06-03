@@ -4,11 +4,9 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
-#include <condition_variable>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
-#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -117,10 +115,9 @@ public:
             return true;
         }
 
-        std::unique_lock lock(flush_mutex_);
-        return flush_cv_.wait_until(lock, deadline, [this, target] {
-            return completed_flushes.load(std::memory_order_acquire) >= target;
-        });
+        return wait_until_atomic_condition(
+            completed_flushes, deadline,
+            [target](std::uint64_t completed) noexcept { return completed >= target; });
     }
 
     [[nodiscard]] RuntimeFileLogBackendStats stats() const noexcept {
@@ -181,7 +178,6 @@ public:
         const std::uint64_t requested = flush_requests.load(std::memory_order_relaxed);
         completed_flushes.store(requested, std::memory_order_release);
         completed_flushes.notify_all();
-        flush_cv_.notify_all();
     }
 
     [[nodiscard]] bool has_pending_flush() const noexcept {
@@ -215,9 +211,6 @@ private:
         }
         return std::min(requested, max_supported_records);
     }
-
-    std::mutex flush_mutex_;
-    std::condition_variable flush_cv_;
 };
 
 template <typename RuntimeT> class RuntimeFileLogWriterTask final : public RuntimeT::Task {
