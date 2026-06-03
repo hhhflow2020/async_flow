@@ -91,9 +91,7 @@ template <typename RuntimeT, typename TraitsT>
         if (submit_error == 0) {
             return true;
         }
-        result->events = io_error;
-        result->error = submit_error;
-        result->result = -submit_error;
+        detail::set_io_result_error(*result, fd, submit_error);
         fail_io_uring_backend(submit_error, operation);
         return false;
     }
@@ -171,9 +169,7 @@ template <typename FillSqe>
         if (submit_error == 0) {
             return true;
         }
-        result->events = io_error;
-        result->error = submit_error;
-        result->result = -submit_error;
+        detail::set_io_result_error(*result, result_fd, submit_error);
         fail_io_uring_backend(submit_error, operation);
         return false;
     }
@@ -254,9 +250,7 @@ Executor<RuntimeT, TraitsT>::submit_io_uring_socket_impl(int domain, int type, i
         if (submit_error == 0) {
             return true;
         }
-        result->events = io_error;
-        result->error = submit_error;
-        result->result = -submit_error;
+        detail::set_io_result_error(*result, -1, submit_error);
         fail_io_uring_backend(submit_error, operation);
         return false;
     }
@@ -362,9 +356,7 @@ template <typename RuntimeT, typename TraitsT>
         if (submit_error == 0) {
             return true;
         }
-        result->events = io_error;
-        result->error = submit_error;
-        result->result = -submit_error;
+        detail::set_io_result_error(*result, file_index, submit_error);
         fail_io_uring_backend(submit_error, operation);
         return false;
     }
@@ -771,9 +763,7 @@ template <typename RuntimeT, typename TraitsT>
         if (submit_error == 0) {
             return true;
         }
-        result->events = io_error;
-        result->error = submit_error;
-        result->result = -submit_error;
+        detail::set_io_result_error(*result, fd, submit_error);
         fail_io_uring_backend(submit_error, operation);
         return false;
     }

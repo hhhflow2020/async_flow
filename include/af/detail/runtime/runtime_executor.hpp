@@ -337,9 +337,7 @@ public:
             if (submit_error == 0) {
                 return true;
             }
-            result->events = io_error;
-            result->error = submit_error;
-            result->result = -submit_error;
+            detail::set_io_result_error(*result, -1, submit_error);
             fail_io_uring_backend(submit_error, operation);
             return false;
         }
@@ -1394,9 +1392,7 @@ private:
             if (submit_error == 0) {
                 return IoUringPollSubmitResult::Submitted;
             }
-            result->events = io_error;
-            result->error = submit_error;
-            result->result = -submit_error;
+            detail::set_io_result_error(*result, fd, submit_error);
             fail_io_uring_backend(submit_error, operation);
             return IoUringPollSubmitResult::BackendClosed;
         }
