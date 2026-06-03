@@ -3527,6 +3527,51 @@ Interpretation:
   semantics as socketpair setup. `af::io_socket` state machines remain
   unchanged; only their type flag expression is centralized.
 
+## 2026-06-03 Epoll Backend Helper Split
+
+This pass moves Linux epoll-specific helper bodies out of the core executor
+class body and into the epoll backend implementation header. The core executor
+now declares these helpers while the backend header owns their syscall/event-mask
+details.
+
+Changes under validation:
+
+- Moved `drain_io_wake()` to `runtime_executor_epoll_backend.hpp`.
+- Moved `native_poll_events()`, `io_events_from_poll()`, and
+  `io_events_from_native()` to `runtime_executor_epoll_backend.hpp`.
+- `runtime_executor.hpp` dropped from 1977 lines to 1925 lines. The moved
+  functions remain template-inline definitions after the executor class, so this
+  does not add virtual dispatch, function-pointer dispatch, allocation, locking,
+  atomics, or cross-thread communication.
+
+Correctness checks:
+
+- Local macOS Debug built `asyncflow_runtime_tests`,
+  `asyncflow_io_epoll_example`, and `asyncflow_io_native_readiness_example`.
+- Local macOS Debug ctest selection
+  `IoRuntimeKqueueFixture|IoRuntimeStreamFixture|IoRuntimeDatagramFixture|RuntimePublicIo|RuntimeConfig|RuntimeIo`:
+  36 tests selected, 0 failures; Linux-only cases in that selection were
+  skipped by platform capability checks.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: rebuilt the same targets; ctest selection
+  `IoRuntimeEpollFixture|IoRuntimeStreamFixture|IoRuntimeDatagramFixture|RuntimePublicIo|RuntimeConfig|RuntimeIo`
+  reported 51 tests selected, 0 failures, with the non-Linux-only public IO
+  test skipped by capability checks. `asyncflow_io_epoll_example` and
+  `asyncflow_io_native_readiness_example` also ran successfully.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: rebuilt the same targets; the same ctest selection
+  reported 51 tests selected, 0 failures, with the same capability skip. The
+  same two example binaries also ran successfully.
+
+Interpretation:
+
+- This is a modularity-only runtime cleanup. It moves Linux epoll details to
+  the backend file that uses them and leaves runtime scheduling, queue topology,
+  wake coalescing semantics, IO wait ownership, locks, atomics, and cache layout
+  unchanged.
+
 ## 2026-06-03 Scheduling Mode Convenience API
 
 This pass makes the SPSC/MPSC scheduling semantics explicit at the task API
