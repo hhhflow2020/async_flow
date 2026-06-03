@@ -102,4 +102,26 @@ private:
 
 } // namespace io_uring_send_zc_example
 
+#else
+
+namespace io_uring_send_zc_example {
+
+class SendZcServerTask final : public SendZcTaskBase {
+public:
+    explicit SendZcServerTask(SendZcTaskBase::FactoryToken token) : SendZcTaskBase(token) {}
+
+    bool do_it(int listener_fd, SendZcServerResult *result) {
+        static_cast<void>(listener_fd);
+        static_cast<void>(result);
+        return false;
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
+};
+
+} // namespace io_uring_send_zc_example
+
 #endif
