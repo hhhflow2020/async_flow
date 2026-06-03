@@ -2,10 +2,15 @@
 
 #include "support/io_rpc_length_prefixed_client.hpp"
 #include "support/io_rpc_length_prefixed_server.hpp"
+#include "support/io_rpc_length_prefixed_socket_helpers.hpp"
 
 int main() {
-#if defined(__linux__)
     using namespace io_rpc_length_prefixed_example;
+
+    if constexpr (!af::supports_io_uring) {
+        std::cout << "rpc length-prefixed example is Linux-only\n";
+        return 0;
+    }
 
     rpc_async::init();
     if (!rpc_async::io_backend_available(RpcThreads::IO_0)) {
@@ -18,28 +23,9 @@ int main() {
         rpc_async::io_uring_backend_available(RpcThreads::IO_0) ? "enabled" : "epoll-fallback";
     std::cout << "rpc length-prefixed backend=" << backend << '\n';
 
-    af::UniqueFd listener(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
-    af::UniqueFd client(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
-    if (!listener || !client) {
+    RpcLoopbackSockets sockets{};
+    if (!sockets.create()) {
         std::cout << "tcp socket failed\n";
-        rpc_async::shutdown();
-        return 1;
-    }
-
-    sockaddr_in address{};
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    address.sin_port = 0;
-    if (::bind(listener.get(), reinterpret_cast<sockaddr *>(&address), sizeof(address)) != 0 ||
-        ::listen(listener.get(), 16) != 0) {
-        std::cout << "tcp bind/listen failed\n";
-        rpc_async::shutdown();
-        return 1;
-    }
-
-    socklen_t address_size = sizeof(address);
-    if (::getsockname(listener.get(), reinterpret_cast<sockaddr *>(&address), &address_size) != 0) {
-        std::cout << "tcp getsockname failed\n";
         rpc_async::shutdown();
         return 1;
     }
@@ -51,9 +37,9 @@ int main() {
     bool response_ok = false;
 
     const bool server_started =
-        rpc_async::start_task<RpcServerTask>(listener.get(), &server_ok, &server_error);
+        rpc_async::start_task<RpcServerTask>(sockets.listener.get(), &server_ok, &server_error);
     const bool client_started = rpc_async::start_task<RpcClientTask>(
-        client.get(), address, address_size, &client_ok, &client_error, &response_ok);
+        sockets.client.get(), sockets.endpoint(), &client_ok, &client_error, &response_ok);
     AF_ASSERT(server_started && client_started);
 
     if (!server_started || !client_started) {
@@ -78,8 +64,4 @@ int main() {
 
     std::cout << "rpc response_ok=" << (response_ok ? 1 : 0) << '\n';
     return 0;
-#else
-    std::cout << "rpc length-prefixed example is Linux-only\n";
-    return 0;
-#endif
 }

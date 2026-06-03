@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "io_rpc_length_prefixed_runtime.hpp"
+#include "io_rpc_length_prefixed_socket_helpers.hpp"
 
 #if defined(__linux__)
 
@@ -15,11 +16,9 @@ class RpcClientTask final : public RpcTask {
 public:
     explicit RpcClientTask(RpcTask::FactoryToken token) : RpcTask(token) {}
 
-    bool do_it(int fd, sockaddr_in server, socklen_t server_size, bool *ok, int *error,
-               bool *response_ok) {
+    bool do_it(int fd, const RpcLoopbackEndpoint &server, bool *ok, int *error, bool *response_ok) {
         stream_.reset(RpcThreads::IO_0, fd);
         server_ = server;
-        server_size_ = server_size;
         ok_ = ok;
         error_ = error;
         response_ok_ = response_ok;
@@ -58,8 +57,9 @@ private:
     }
 
     af::TaskResult connect() {
-        const af::IoStatus status = stream_.connect(
-            *this, reinterpret_cast<const sockaddr *>(&server_), server_size_, connect_);
+        const af::IoStatus status =
+            stream_.connect(*this, reinterpret_cast<const sockaddr *>(&server_.address),
+                            server_.address_size, connect_);
         if (status.pending()) {
             return pending();
         }
@@ -166,8 +166,7 @@ private:
 
     State state_{State::Connect};
     af::TcpStream<RpcThread> stream_{};
-    sockaddr_in server_{};
-    socklen_t server_size_{sizeof(server_)};
+    RpcLoopbackEndpoint server_{};
 
     af::IoOpState connect_{};
     af::IoOpState write_{};
@@ -188,6 +187,31 @@ private:
     bool *ok_{nullptr};
     int *error_{nullptr};
     bool *response_ok_{nullptr};
+};
+
+} // namespace io_rpc_length_prefixed_example
+
+#else
+
+namespace io_rpc_length_prefixed_example {
+
+class RpcClientTask final : public RpcTask {
+public:
+    explicit RpcClientTask(RpcTask::FactoryToken token) : RpcTask(token) {}
+
+    bool do_it(int fd, const RpcLoopbackEndpoint &server, bool *ok, int *error, bool *response_ok) {
+        static_cast<void>(fd);
+        static_cast<void>(server);
+        static_cast<void>(ok);
+        static_cast<void>(error);
+        static_cast<void>(response_ok);
+        return false;
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
 };
 
 } // namespace io_rpc_length_prefixed_example
