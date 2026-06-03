@@ -15,13 +15,6 @@ io_accept_direct(TaskT &task, typename TaskT::Thread thread, int fd, sockaddr *a
         return IoStatus::failed(EINVAL);
     }
 
-#if defined(_WIN32)
-    static_cast<void>(task);
-    static_cast<void>(thread);
-    static_cast<void>(state);
-    static_cast<void>(flags);
-    return IoStatus::failed(ENOSYS);
-#else
     if (detail::waiting_for_completion(state)) {
         const IoStatus completion = detail::completed_uring_status(state);
         if (!completion.ready()) {
@@ -40,5 +33,4 @@ io_accept_direct(TaskT &task, typename TaskT::Thread thread, int fd, sockaddr *a
         return IoStatus::make_pending();
     }
     return IoStatus::failed(state.wait.error == 0 ? ENOSYS : state.wait.error);
-#endif
 }

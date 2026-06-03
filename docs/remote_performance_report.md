@@ -2509,3 +2509,52 @@ Interpretation:
   POSIX pending-signal polling fallback for timed waits.
 - No scheduler, queue, IO backend, logging, locking, atomic, allocation, or
   memory-ordering behavior changed.
+
+## 2026-06-03 POSIX-Only Socket Helper Cleanup
+
+This pass removes Windows fallback branches from the POSIX socket helper family
+under `include/af/detail/io/socket`. The public socket API shape is unchanged;
+the implementation now assumes the supported POSIX baseline directly and keeps
+only real Linux/macOS/BSD backend capability differences.
+
+Changes under validation:
+
+- Removed `ENOSYS` Windows fallbacks from socket create, option, name, listener,
+  accept, connect, recv, send, vectored recv/send, sendv zero-copy, direct
+  accept, and multishot accept helper headers.
+- Preserved Linux `accept4` handling, non-Linux accepted-fd flag application,
+  io_uring submit/completion paths, readiness fallback paths, and non-Linux
+  zero-copy fallback behavior.
+- Rechecked `include/af/detail/io/socket` for `_WIN32`/Windows spellings: no
+  matches remained.
+
+Correctness checks:
+
+- Local macOS Debug `asyncflow_runtime_tests` build: passed.
+- Local macOS Debug IO-targeted ctest
+  `IoRuntime|RuntimeIo|UringIoRuntimeSocket|IoRuntimeStream|IoRuntimeDatagram`:
+  95 tests, 0 failures; Linux-only tests were skipped by platform/capability
+  logic.
+- Local macOS Debug TCP example smoke passed:
+  `asyncflow_io_tcp_connect_accept_example`,
+  `asyncflow_io_socket_lifecycle_example`, and
+  `asyncflow_io_tcp_echo_server_example --self-test`.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: `asyncflow_runtime_tests` and the three TCP example
+  targets built; IO-targeted ctest reported 89 tests, 0 failures, 4 skipped;
+  the TCP example smoke run passed.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: `asyncflow_runtime_tests` and the three TCP example
+  targets built; IO-targeted ctest reported 89 tests, 0 failures, 4 skipped;
+  the TCP example smoke run passed.
+
+Interpretation:
+
+- This is a platform-scope cleanup only. It does not change scheduler routing,
+  local/SPSC/MPSC queue topology, IO wait state transitions, io_uring SQE
+  arguments, readiness fallback behavior, locks, atomics, allocations, memory
+  ordering, or cache layout.
+- Remaining socket-platform branches now correspond to actual backend/syscall
+  capability differences instead of unsupported Windows compatibility.

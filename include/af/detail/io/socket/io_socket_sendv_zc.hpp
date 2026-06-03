@@ -1,6 +1,5 @@
 #pragma once
 
-#if !defined(_WIN32)
 template <typename TaskT>
 [[nodiscard]] IoStatus io_sendv_zc_some(TaskT &task, typename TaskT::Thread thread, int fd,
                                         const iovec *iov, int iov_count,
@@ -76,4 +75,3 @@ template <typename TaskT>
     }
 #endif
 }
-#endif

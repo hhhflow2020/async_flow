@@ -9,16 +9,6 @@ template <typename TaskT>
     }
     *opened_fd = -1;
 
-#if defined(_WIN32)
-    static_cast<void>(task);
-    static_cast<void>(thread);
-    static_cast<void>(domain);
-    static_cast<void>(type);
-    static_cast<void>(protocol);
-    static_cast<void>(state);
-    static_cast<void>(flags);
-    return IoStatus::failed(ENOSYS);
-#else
     if (detail::waiting_for_completion(state)) {
         const IoStatus completion = detail::completed_uring_status(state);
         if (!completion.ready()) {
@@ -60,5 +50,4 @@ template <typename TaskT>
         }
         return IoStatus::failed(error);
     }
-#endif
 }

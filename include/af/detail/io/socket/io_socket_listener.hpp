@@ -11,10 +11,6 @@ template <typename TaskT>
         return IoStatus::failed(EINVAL);
     }
 
-#if defined(_WIN32)
-    static_cast<void>(thread);
-    return IoStatus::failed(ENOSYS);
-#else
     if (!detail::io_on_target_thread<TaskT>(thread)) {
         return IoStatus::failed(EINVAL);
     }
@@ -28,7 +24,6 @@ template <typename TaskT>
         }
         return IoStatus::failed(error);
     }
-#endif
 }
 
 template <typename TaskT>
@@ -39,11 +34,6 @@ template <typename TaskT>
         return IoStatus::failed(EBADF);
     }
 
-#if defined(_WIN32)
-    static_cast<void>(thread);
-    static_cast<void>(backlog);
-    return IoStatus::failed(ENOSYS);
-#else
     if (!detail::io_on_target_thread<TaskT>(thread)) {
         return IoStatus::failed(EINVAL);
     }
@@ -57,5 +47,4 @@ template <typename TaskT>
         }
         return IoStatus::failed(error);
     }
-#endif
 }

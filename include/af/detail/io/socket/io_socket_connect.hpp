@@ -11,15 +11,6 @@ template <typename TaskT>
         return IoStatus::failed(EINVAL);
     }
 
-#if defined(_WIN32)
-    static_cast<void>(task);
-    static_cast<void>(thread);
-    static_cast<void>(fd);
-    static_cast<void>(address);
-    static_cast<void>(address_size);
-    static_cast<void>(state);
-    return IoStatus::failed(ENOSYS);
-#else
     if (detail::waiting_for_completion(state)) {
         const IoStatus completion = detail::completed_uring_status(state);
         if (completion.failed() && detail::io_connect_in_progress(completion.error)) {
@@ -65,5 +56,4 @@ template <typename TaskT>
         }
         return IoStatus::failed(error);
     }
-#endif
 }

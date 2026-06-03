@@ -16,16 +16,6 @@ template <typename TaskT>
     }
     *accepted_fd = -1;
 
-#if defined(_WIN32)
-    static_cast<void>(task);
-    static_cast<void>(thread);
-    static_cast<void>(fd);
-    static_cast<void>(address);
-    static_cast<void>(address_size);
-    static_cast<void>(state);
-    static_cast<void>(flags);
-    return IoStatus::failed(ENOSYS);
-#else
     if (detail::waiting_for_completion(state)) {
         if (!detail::io_wait_result_ready(state)) {
             return IoStatus::make_pending();
@@ -68,5 +58,4 @@ template <typename TaskT>
         return IoStatus::make_pending();
     }
     return IoStatus::failed(state.wait.error == 0 ? ENOSYS : state.wait.error);
-#endif
 }

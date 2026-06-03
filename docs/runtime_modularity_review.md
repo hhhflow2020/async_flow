@@ -114,6 +114,11 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - The bounded queue implementations are now split by SPSC, MPSC, and MPMC queue family, with `bounded_queues.hpp` kept as a compatibility umbrella. The split is mechanical and preserves queue layout, cache-line alignment, memory ordering, and template visibility.
 - Socket transfer helpers are now split by sendfile, shutdown, and splice operation family, with `io_socket_transfer.hpp` kept as a small inline umbrella.
 - `include/af/io_socket.hpp` is now a small public umbrella over lifecycle, accept/connect, recv, send, transfer, and vectored helper headers with normal module names instead of `*_fragment.hpp`.
+- `include/af/detail/io/socket` no longer carries Windows fallback branches in
+  the POSIX socket helper family. Socket create/options/name/listener,
+  accept/connect, basic recv/send, vectored recv/send, and io_uring accept
+  helper headers now rely on the supported POSIX baseline directly while
+  preserving Linux/macOS/BSD backend capability branches.
 - `IoFixedFile`, `IoFile`, `IoStream`, and `IoDatagramSocket` are now cohesive thin adapter class definitions in normally named internal headers. The previous class-body method-fragment split has been reverted because it made each adapter harder to audit without creating an independent abstraction boundary.
 - Public file read helpers are now split into current-offset read/readv and positioned read/readv headers, with `io_file_read.hpp` kept as a small inline umbrella.
 - `include/af/io_file.hpp` is now a small public umbrella over current-offset read, positioned write/read, fixed-file/registered-buffer/vectored write, lifecycle/open/close/fsync, metadata, namespace, and current-offset write headers with normal module names instead of `*_fragment.hpp`.
