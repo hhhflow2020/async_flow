@@ -33,7 +33,7 @@ public:
     }
 
     void clear(std::uint16_t source) noexcept {
-        words_[word_index(source)].bits.fetch_and(~source_bit(source), std::memory_order_acq_rel);
+        words_[word_index(source)].bits.fetch_and(~source_bit(source), std::memory_order_relaxed);
     }
 
     [[nodiscard]] std::uint64_t load_word(std::size_t word) const noexcept {

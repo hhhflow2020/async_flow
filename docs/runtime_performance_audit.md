@@ -41,7 +41,10 @@ was run against Boost.Asio, libuv, Seastar, or Go in this pass.
   acquire fences.
 - `ReadySourceSet` stores each 64-bit ready-source word on its own cache line.
   The executor also rotates multi-word scans, so thread counts above 64 do not
-  permanently bias ready-source word zero.
+  permanently bias ready-source word zero. Ready-source bit clearing is a
+  relaxed hint update; cross-thread task publication is synchronized by the SPSC
+  queue tail acquire/release pair, and the scheduler rechecks the queue after
+  clearing to cover concurrent producer marks.
 - `ObjectPool` uses a batched thread-local slot cache and cache-line-aligned
   slots. Small objects can use a compact single-cache-line slot layout, while
   larger and over-aligned objects keep explicit cache-line storage separation.
