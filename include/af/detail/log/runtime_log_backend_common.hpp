@@ -17,6 +17,7 @@
 #include "af/detail/memory/contiguous_object_storage.hpp"
 #include "af/detail/queue/bounded_spsc_queue.hpp"
 #include "af/detail/runtime/runtime_common_state.hpp"
+#include "af/detail/runtime/timed_atomic_wait.hpp"
 
 namespace af::detail {
 
@@ -130,18 +131,11 @@ public:
     void mark_finished() noexcept {
         finished.store(true, std::memory_order_release);
         finished.notify_all();
-        finished_cv_.notify_all();
     }
 
     [[nodiscard]] bool
     wait_until_finished(std::chrono::steady_clock::time_point deadline) noexcept {
-        if (finished.load(std::memory_order_acquire)) {
-            return true;
-        }
-
-        std::unique_lock lock(finished_mutex_);
-        return finished_cv_.wait_until(lock, deadline,
-                                       [this] { return finished.load(std::memory_order_acquire); });
+        return wait_until_atomic_flag_true(finished, deadline);
     }
 
     const std::size_t max_batch_records;
@@ -204,8 +198,6 @@ private:
 
     std::mutex pending_mutex_;
     std::condition_variable pending_cv_;
-    std::mutex finished_mutex_;
-    std::condition_variable finished_cv_;
     Batch *producer_spare_batch_{nullptr};
 };
 
