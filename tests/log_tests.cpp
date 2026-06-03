@@ -55,6 +55,26 @@ static_assert(sizeof(af::detail::CacheLineAtomic<std::uint64_t>) >=
     return count;
 }
 
+TEST(LogTests, TaskIdTagIsInsertedAtFirstUserLogField) {
+    const std::string message = "I0603 10:31:40.550430 123 log_tests.cpp:42] user first\nsecond\n";
+    const std::string user_message = "user first\nsecond\n";
+    const std::string tagged =
+        af::detail::task_id_tagged_user_log_message(message, user_message, 1025);
+
+    EXPECT_EQ(tagged,
+              "I0603 10:31:40.550430 123 log_tests.cpp:42] [task=1025] user first\nsecond\n");
+    EXPECT_EQ(count_substring_occurrences(tagged, "[task=1025] "), 1U);
+    EXPECT_EQ(tagged.find("[task=1025] "), message.size() - user_message.size());
+}
+
+TEST(LogTests, TaskIdTagKeepsOriginalMessageWhenUserLogFieldCannotBeLocated) {
+    const std::string message = "I0603 10:31:40.550430 123 log_tests.cpp:42] user first\n";
+    const std::string tagged =
+        af::detail::task_id_tagged_user_log_message(message, "different user field\n", 1025);
+
+    EXPECT_EQ(tagged, message);
+}
+
 #if !defined(_WIN32)
 TEST(LogTests, LogSocketNonblockingHelperReportsInvalidFd) {
     EXPECT_FALSE(af::detail::set_log_socket_nonblocking(-1));
@@ -1064,7 +1084,7 @@ TEST(LogTests, SpscRecordPoolBatchReleaseReusesSlots) {
         std::span<af::detail::LogRecord *const>(records.data(), records.size()));
 }
 
-TEST(LogTests, RuntimeAwareSinkPrefixesRuntimeTaskId) {
+TEST(LogTests, RuntimeAwareSinkTagsFirstUserLogFieldWithRuntimeTaskId) {
     const auto path = std::filesystem::temp_directory_path() / "async_flow_task_id_log.txt";
     std::filesystem::remove(path);
 
@@ -1093,9 +1113,13 @@ TEST(LogTests, RuntimeAwareSinkPrefixesRuntimeTaskId) {
     const std::string task_tag = "[task=" + std::to_string(task_id) + "] ";
     const std::size_t prefix_end = contents.find("] ");
     const std::size_t task_tag_pos = contents.find(task_tag);
+    const std::size_t user_message_pos = contents.find("runtime task id log");
     ASSERT_NE(prefix_end, std::string::npos);
     ASSERT_NE(task_tag_pos, std::string::npos);
+    ASSERT_NE(user_message_pos, std::string::npos);
+    EXPECT_EQ(contents.find('I'), 0U);
     EXPECT_EQ(task_tag_pos, prefix_end + 2U);
+    EXPECT_EQ(user_message_pos, task_tag_pos + task_tag.size());
     EXPECT_NE(contents.find(task_tag + "runtime task id log"), std::string::npos);
 }
 
