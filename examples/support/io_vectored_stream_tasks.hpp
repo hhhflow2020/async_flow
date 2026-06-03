@@ -156,4 +156,44 @@ private:
 
 } // namespace io_vectored_example
 
+#else
+
+namespace io_vectored_example {
+
+class ServerTask final : public VectoredTask {
+public:
+    explicit ServerTask(VectoredTask::FactoryToken token) : VectoredTask(token) {}
+
+    bool do_it(int fd, bool *ok, int *request_seen) {
+        static_cast<void>(fd);
+        static_cast<void>(ok);
+        static_cast<void>(request_seen);
+        return false;
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
+};
+
+class ClientTask final : public VectoredTask {
+public:
+    explicit ClientTask(VectoredTask::FactoryToken token) : VectoredTask(token) {}
+
+    bool do_it(int fd, bool *ok, int *response_seen) {
+        static_cast<void>(fd);
+        static_cast<void>(ok);
+        static_cast<void>(response_seen);
+        return false;
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
+};
+
+} // namespace io_vectored_example
+
 #endif

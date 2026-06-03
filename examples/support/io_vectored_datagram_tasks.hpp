@@ -3,6 +3,7 @@
 #include <atomic>
 
 #include "io_vectored_runtime.hpp"
+#include "io_vectored_socket_helpers.hpp"
 
 #if defined(__linux__)
 
@@ -57,10 +58,9 @@ class DatagramSenderTask final : public VectoredTask {
 public:
     explicit DatagramSenderTask(VectoredTask::FactoryToken token) : VectoredTask(token) {}
 
-    bool do_it(int fd, sockaddr_in address, socklen_t address_size, bool *ok, int *bytes_sent) {
+    bool do_it(int fd, const VectoredUdpEndpoint &endpoint, bool *ok, int *bytes_sent) {
         socket_.reset(VectoredThreads::IO_0, fd);
-        address_ = address;
-        address_size_ = address_size;
+        endpoint_ = endpoint;
         ok_ = ok;
         bytes_sent_ = bytes_sent;
         return schedule(VectoredThreads::IO_0);
@@ -71,7 +71,8 @@ private:
         iov_[0] = iovec{&payload_[0], 1};
         iov_[1] = iovec{&payload_[1], 1};
         const af::IoStatus status = socket_.sendv_to_some(
-            *this, iov_, 2, reinterpret_cast<const sockaddr *>(&address_), address_size_, write_);
+            *this, iov_, 2, reinterpret_cast<const sockaddr *>(&endpoint_.address),
+            endpoint_.address_size, write_);
         if (status.pending()) {
             return pending();
         }
@@ -85,13 +86,54 @@ private:
     }
 
     af::UdpSocket<VectoredThread> socket_{};
-    sockaddr_in address_{};
-    socklen_t address_size_{sizeof(address_)};
+    VectoredUdpEndpoint endpoint_{};
     char payload_[2]{'U', 'D'};
     iovec iov_[2]{};
     af::IoOpState write_{};
     bool *ok_{nullptr};
     int *bytes_sent_{nullptr};
+};
+
+} // namespace io_vectored_example
+
+#else
+
+namespace io_vectored_example {
+
+class DatagramReceiverTask final : public VectoredTask {
+public:
+    explicit DatagramReceiverTask(VectoredTask::FactoryToken token) : VectoredTask(token) {}
+
+    bool do_it(int fd, std::atomic<int> *armed, bool *ok, int *payload_seen) {
+        static_cast<void>(fd);
+        static_cast<void>(armed);
+        static_cast<void>(ok);
+        static_cast<void>(payload_seen);
+        return false;
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
+};
+
+class DatagramSenderTask final : public VectoredTask {
+public:
+    explicit DatagramSenderTask(VectoredTask::FactoryToken token) : VectoredTask(token) {}
+
+    bool do_it(int fd, const VectoredUdpEndpoint &endpoint, bool *ok, int *bytes_sent) {
+        static_cast<void>(fd);
+        static_cast<void>(endpoint);
+        static_cast<void>(ok);
+        static_cast<void>(bytes_sent);
+        return false;
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
 };
 
 } // namespace io_vectored_example
