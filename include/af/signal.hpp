@@ -96,6 +96,20 @@ signal_remaining_timeout(std::chrono::steady_clock::time_point deadline) noexcep
     error = 0;
     return false;
 }
+
+[[nodiscard]] inline bool signal_can_be_waited(int signal) noexcept {
+#if defined(SIGKILL)
+    if (signal == SIGKILL) {
+        return false;
+    }
+#endif
+#if defined(SIGSTOP)
+    if (signal == SIGSTOP) {
+        return false;
+    }
+#endif
+    return true;
+}
 #endif
 
 } // namespace detail
@@ -116,6 +130,10 @@ public:
             return;
         }
         for (const int signal : signals) {
+            if (!detail::signal_can_be_waited(signal)) {
+                error_ = EINVAL;
+                return;
+            }
             if (sigaddset(&set_, signal) != 0) {
                 error_ = errno == 0 ? EINVAL : errno;
                 return;

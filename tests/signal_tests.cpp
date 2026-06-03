@@ -89,4 +89,14 @@ TEST(SignalTests, EmptySignalSetIsInvalid) {
     EXPECT_FALSE(signals.valid());
     EXPECT_EQ(signals.error(), EINVAL);
 }
+
+TEST(SignalTests, UncatchableSignalsAreInvalid) {
+    af::SignalSet kill_signals({SIGKILL});
+    af::SignalSet stop_signals({SIGSTOP});
+
+    EXPECT_FALSE(kill_signals.valid());
+    EXPECT_EQ(kill_signals.error(), EINVAL);
+    EXPECT_FALSE(stop_signals.valid());
+    EXPECT_EQ(stop_signals.error(), EINVAL);
+}
 #endif
