@@ -3623,6 +3623,58 @@ Interpretation:
   scheduling, queue topology, IO wait ownership, locks, atomics, memory
   ordering, and cache layout unchanged.
 
+## 2026-06-03 IO Wait Cancel Entry Split
+
+This pass moves the public executor IO wait/cancel control entry bodies out of
+the core executor declaration header and into the generic IO backend
+implementation header. The core executor now keeps declarations for these
+entries, while the backend header owns the readiness/completion cancellation
+dispatch that already depends on backend-specific helpers.
+
+Changes under validation:
+
+- Moved `register_io_wait()` to `runtime_executor_io_backend.hpp`.
+- Moved Linux `cancel_io_completion()` to
+  `runtime_executor_io_backend.hpp`.
+- Moved `cancel_io()` to `runtime_executor_io_backend.hpp`.
+- `runtime_executor.hpp` dropped from 1877 lines to 1793 lines. The moved
+  functions remain template-inline definitions included after the executor
+  class, so this does not add dispatch, allocation, locking, atomics, or
+  cross-thread communication.
+
+Correctness checks:
+
+- Local macOS Debug built `asyncflow_runtime_tests`,
+  `asyncflow_io_epoll_example`, `asyncflow_io_native_readiness_example`,
+  `asyncflow_io_timeout_example`, and `asyncflow_io_shutdown_example`.
+- Local macOS Debug ctest selection
+  `IoRuntimeKqueueFixture|IoRuntimeStreamFixture|IoRuntimeDatagramFixture|RuntimePublicIo|RuntimeConfig|RuntimeIo`:
+  36 tests selected, 0 failures; Linux-only cases in that selection were
+  skipped by platform capability checks.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: rebuilt the same targets; ctest selection
+  `IoRuntimeEpollFixture|IoRuntimeStreamFixture|IoRuntimeDatagramFixture|RuntimePublicIo|RuntimeConfig|RuntimeIo`
+  reported 51 tests selected, 0 failures, with the non-Linux-only public IO
+  test skipped by capability checks. A separate `Uring|IoUring` ctest selection
+  reported 43 tests selected, 0 failures, with 3 platform/capability skips.
+  `asyncflow_io_epoll_example`,
+  `asyncflow_io_native_readiness_example`, `asyncflow_io_timeout_example`, and
+  `asyncflow_io_shutdown_example` also ran successfully.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: rebuilt the same targets; the same ctest selection
+  reported 51 tests selected, 0 failures, with the same capability skip. A
+  separate `Uring|IoUring` ctest selection reported 43 tests selected, 0
+  failures, with the same 3 platform/capability skips. The same four example
+  binaries also ran successfully.
+
+Interpretation:
+
+- This is a modularity-only runtime cleanup. It keeps IO wait/cancel dispatch
+  with the IO backend layer and leaves scheduling, queue topology, IO wait
+  ownership, locks, atomics, memory ordering, and cache layout unchanged.
+
 ## 2026-06-03 Scheduling Mode Convenience API
 
 This pass makes the SPSC/MPSC scheduling semantics explicit at the task API
