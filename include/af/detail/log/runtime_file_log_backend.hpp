@@ -125,12 +125,12 @@ public:
 
     [[nodiscard]] RuntimeFileLogBackendStats stats() const noexcept {
         return RuntimeFileLogBackendStats{
-            queued_records.load(std::memory_order_acquire),
-            written_records.load(std::memory_order_acquire),
-            dropped_records.load(std::memory_order_acquire),
-            flushes.load(std::memory_order_acquire),
-            last_error.load(std::memory_order_acquire),
-            last_error_stage.load(std::memory_order_acquire),
+            queued_records.load(std::memory_order_relaxed),
+            written_records.load(std::memory_order_relaxed),
+            dropped_records.load(std::memory_order_relaxed),
+            flushes.load(std::memory_order_relaxed),
+            last_error.load(std::memory_order_relaxed),
+            last_error_stage.load(std::memory_order_relaxed),
         };
     }
 

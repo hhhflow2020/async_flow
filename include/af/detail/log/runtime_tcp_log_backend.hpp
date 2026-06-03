@@ -107,11 +107,11 @@ public:
 
     [[nodiscard]] RuntimeTcpLogBackendStats stats() const noexcept {
         return RuntimeTcpLogBackendStats{
-            queued_records.load(std::memory_order_acquire),
-            sent_records.load(std::memory_order_acquire),
-            dropped_records.load(std::memory_order_acquire),
-            last_error.load(std::memory_order_acquire),
-            last_error_stage.load(std::memory_order_acquire),
+            queued_records.load(std::memory_order_relaxed),
+            sent_records.load(std::memory_order_relaxed),
+            dropped_records.load(std::memory_order_relaxed),
+            last_error.load(std::memory_order_relaxed),
+            last_error_stage.load(std::memory_order_relaxed),
         };
     }
 

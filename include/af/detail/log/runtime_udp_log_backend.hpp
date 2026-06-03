@@ -120,9 +120,9 @@ public:
 
     [[nodiscard]] RuntimeUdpLogBackendStats stats() const noexcept {
         return RuntimeUdpLogBackendStats{
-            queued_records.load(std::memory_order_acquire),
-            sent_records.load(std::memory_order_acquire),
-            dropped_records.load(std::memory_order_acquire),
+            queued_records.load(std::memory_order_relaxed),
+            sent_records.load(std::memory_order_relaxed),
+            dropped_records.load(std::memory_order_relaxed),
         };
     }
 

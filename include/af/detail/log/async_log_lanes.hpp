@@ -18,8 +18,9 @@ struct alignas(hardware_cache_line_size) AsyncLogStatCounter {
         count.fetch_add(value, std::memory_order_relaxed);
     }
 
-    [[nodiscard]] std::uint64_t load() const noexcept {
-        return count.load(std::memory_order_acquire);
+    [[nodiscard]] std::uint64_t
+    load(std::memory_order order = std::memory_order_relaxed) const noexcept {
+        return count.load(order);
     }
 
     std::atomic<std::uint64_t> count{0};
