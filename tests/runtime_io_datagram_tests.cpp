@@ -2,10 +2,9 @@
 
 class IoRuntimeDatagramFixture : public IoRuntimeFixture {};
 
-TEST_F(IoRuntimeDatagramFixture, EpollIoThreadResumesUdpRecvFromHelper) {
-#if defined(__linux__)
+TEST_F(IoRuntimeDatagramFixture, NativeIoThreadResumesUdpRecvFromHelper) {
     if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
-        GTEST_SKIP() << "epoll backend unavailable";
+        GTEST_SKIP() << "native IO backend unavailable";
     }
 
     UdpLoopbackSockets sockets;
@@ -22,15 +21,11 @@ TEST_F(IoRuntimeDatagramFixture, EpollIoThreadResumesUdpRecvFromHelper) {
     ASSERT_EQ(send_udp_payload(sockets, &value, sizeof(value)), 1);
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(byte_read.load(std::memory_order_acquire), value);
-#else
-    GTEST_SKIP() << "epoll backend is Linux-only";
-#endif
 }
 
-TEST_F(IoRuntimeDatagramFixture, EpollIoThreadReceivesVectoredUdpDatagramFromHelper) {
-#if defined(__linux__)
+TEST_F(IoRuntimeDatagramFixture, NativeIoThreadReceivesVectoredUdpDatagramFromHelper) {
     if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
-        GTEST_SKIP() << "epoll backend unavailable";
+        GTEST_SKIP() << "native IO backend unavailable";
     }
 
     UdpLoopbackSockets sockets;
@@ -47,15 +42,11 @@ TEST_F(IoRuntimeDatagramFixture, EpollIoThreadReceivesVectoredUdpDatagramFromHel
     ASSERT_EQ(send_udp_payload(sockets, payload, sizeof(payload)), 2);
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(payload_seen.load(std::memory_order_acquire), ('u' << 8) | 'v');
-#else
-    GTEST_SKIP() << "epoll backend is Linux-only";
-#endif
 }
 
-TEST_F(IoRuntimeDatagramFixture, EpollIoThreadAcceptsUdpZeroLengthDatagram) {
-#if defined(__linux__)
+TEST_F(IoRuntimeDatagramFixture, NativeIoThreadAcceptsUdpZeroLengthDatagram) {
     if (!IoRuntime::io_backend_available(IoTestThreads::IO_0)) {
-        GTEST_SKIP() << "epoll backend unavailable";
+        GTEST_SKIP() << "native IO backend unavailable";
     }
 
     UdpLoopbackSockets sockets;
@@ -72,7 +63,4 @@ TEST_F(IoRuntimeDatagramFixture, EpollIoThreadAcceptsUdpZeroLengthDatagram) {
                                                    &byte_read, 0U));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(byte_read.load(std::memory_order_acquire), 'z');
-#else
-    GTEST_SKIP() << "epoll backend is Linux-only";
-#endif
 }

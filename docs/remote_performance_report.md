@@ -3242,6 +3242,46 @@ Interpretation:
 - Scheduler routing, local/SPSC/MPSC queue topology, locks, atomics,
   allocations, memory ordering, and cache layout were not changed.
 
+## 2026-06-03 POSIX Datagram Receive And Readiness Tests
+
+This pass expands datagram and readiness coverage to the supported POSIX native
+backend set. The runtime code is unchanged; the tests now exercise already
+portable UDP recv/recvv and readiness behavior on macOS/BSD instead of skipping
+behind Linux-only guards.
+
+Changes under validation:
+
+- Changed UDP recv, vectored recv, and zero-length datagram tests to use the
+  native IO backend and portable UDP loopback helpers.
+- Changed duplicate wait, same-fd read/write wait, writable resume, and hangup
+  readiness tests to use portable socketpair setup and the native IO backend.
+- Removed Linux-only skip branches from the targeted datagram receive and
+  readiness tests.
+
+Correctness checks:
+
+- Local macOS Debug built `asyncflow_runtime_tests`.
+- Local macOS Debug ctest
+  `NativeIoThread.*(Udp|Duplicate|SameFd|Writable|Hangup|ZeroLength)|DatagramFixture`:
+  15 tests selected, 0 failures; native kqueue datagram/readiness tests passed,
+  while Linux-only io_uring datagram tests were skipped by capability logic.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: clean-first rebuilt `asyncflow_runtime_tests`; the
+  same ctest selection reported 15 tests, 0 failures.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: clean-first rebuilt `asyncflow_runtime_tests`; the
+  same ctest selection reported 15 tests, 0 failures.
+
+Interpretation:
+
+- This does not change scheduler routing, local/SPSC/MPSC queue topology,
+  locks, atomics, allocations, memory ordering, or cache layout.
+- The stronger macOS/BSD test coverage reduces the risk that portable datagram
+  behavior regresses while Linux-only io_uring capabilities remain separately
+  guarded.
+
 ## 2026-06-03 POSIX Datagram Zero-Copy Send Fallback
 
 This pass makes the public datagram zero-copy send helpers usable on the
