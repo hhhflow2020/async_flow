@@ -1,5 +1,6 @@
 #include <array>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <condition_variable>
 #include <cerrno>
@@ -14,6 +15,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -51,6 +53,42 @@ static_assert(sizeof(af::detail::CacheLineAtomic<std::uint64_t>) >=
         position += needle.size();
     }
     return count;
+}
+
+[[nodiscard]] bool parse_indexed_log_message(std::string_view message, std::string_view prefix,
+                                             int *index) noexcept {
+    if (message.size() <= prefix.size() || message.substr(0, prefix.size()) != prefix) {
+        return false;
+    }
+
+    const std::string_view digits = message.substr(prefix.size());
+    int parsed = -1;
+    const auto *begin = digits.data();
+    const auto *end = digits.data() + digits.size();
+    const auto result = std::from_chars(begin, end, parsed);
+    if (result.ec != std::errc{} || result.ptr != end || parsed < 0) {
+        return false;
+    }
+
+    *index = parsed;
+    return true;
+}
+
+void expect_exact_indexed_log_set(const std::vector<std::string> &messages, std::string_view prefix,
+                                  int expected_count) {
+    ASSERT_EQ(messages.size(), static_cast<std::size_t>(expected_count));
+
+    std::vector<int> seen(static_cast<std::size_t>(expected_count), 0);
+    for (const std::string &message : messages) {
+        int index = -1;
+        ASSERT_TRUE(parse_indexed_log_message(message, prefix, &index)) << message;
+        ASSERT_LT(index, expected_count) << message;
+        ++seen[static_cast<std::size_t>(index)];
+    }
+
+    for (int index = 0; index < expected_count; ++index) {
+        EXPECT_EQ(seen[static_cast<std::size_t>(index)], 1) << "index=" << index;
+    }
 }
 
 [[nodiscard]] std::size_t line_begin_for_position(std::string_view text,
@@ -1340,6 +1378,98 @@ TEST(LogTests, OrderedLoggingIsDefaultSingleMpscQueue) {
     consumer.shutdown();
 }
 
+TEST(LogTests, OrderedLoggingPreservesSingleProducerFifoAcrossBatches) {
+    auto backend = std::make_unique<CapturingLogBackend>();
+    auto *capturing_backend = backend.get();
+
+    af::AsyncLogConfig config;
+    config.queue_capacity = 256;
+    config.queue_shard_count = 1;
+    config.max_batch_size = 7;
+    config.overflow_policy = af::LogOverflowPolicy::DropNewest;
+    config.backends.push_back(std::move(backend));
+
+    LogTestRuntimeGuard runtime_guard;
+    auto logger = std::make_shared<af::AsyncLogger>(std::move(config));
+    ScopedRuntimeLogConsumer<LogTestRuntime> consumer(logger, LogTestThreads::Runtime_1, 64);
+    ASSERT_TRUE(consumer.start());
+
+    constexpr int record_count = 128;
+    for (int index = 0; index < record_count; ++index) {
+        ASSERT_TRUE(logger->try_log("ordered-fifo-" + std::to_string(index)));
+    }
+
+    ASSERT_TRUE(logger->flush(std::chrono::seconds(2)));
+    const std::vector<std::string> messages = capturing_backend->messages();
+    ASSERT_EQ(messages.size(), static_cast<std::size_t>(record_count));
+    for (int index = 0; index < record_count; ++index) {
+        EXPECT_EQ(messages[static_cast<std::size_t>(index)],
+                  "ordered-fifo-" + std::to_string(index));
+    }
+    const af::AsyncLogStats stats = logger->stats();
+    EXPECT_EQ(stats.accepted, static_cast<std::uint64_t>(record_count));
+    EXPECT_EQ(stats.dropped, 0U);
+    consumer.shutdown();
+}
+
+TEST(LogTests, OrderedLoggingConcurrentProducersDrainWithoutLossOrDuplicates) {
+    auto backend = std::make_unique<CapturingLogBackend>();
+    auto *capturing_backend = backend.get();
+
+    af::AsyncLogConfig config;
+    config.queue_capacity = 8192;
+    config.queue_shard_count = 8;
+    config.max_batch_size = 128;
+    config.overflow_policy = af::LogOverflowPolicy::DropNewest;
+    config.backends.push_back(std::move(backend));
+
+    LogTestRuntimeGuard runtime_guard;
+    auto logger = std::make_shared<af::AsyncLogger>(std::move(config));
+    ScopedRuntimeLogConsumer<LogTestRuntime> consumer(logger, LogTestThreads::Runtime_1, 256);
+    ASSERT_TRUE(consumer.start());
+
+    constexpr int producer_count = 8;
+    constexpr int records_per_producer = 512;
+    constexpr int expected_records = producer_count * records_per_producer;
+    constexpr std::string_view prefix = "ordered-stress-";
+
+    std::atomic<int> ready{0};
+    std::atomic<bool> start{false};
+    std::atomic<int> failures{0};
+    std::array<std::thread, producer_count> producers;
+    for (int producer = 0; producer < producer_count; ++producer) {
+        producers[static_cast<std::size_t>(producer)] = std::thread([&, producer] {
+            ready.fetch_add(1, std::memory_order_release);
+            while (!start.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+
+            const int base = producer * records_per_producer;
+            for (int index = 0; index < records_per_producer; ++index) {
+                if (!logger->try_log(std::string(prefix) + std::to_string(base + index))) {
+                    failures.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        });
+    }
+
+    while (ready.load(std::memory_order_acquire) != producer_count) {
+        std::this_thread::yield();
+    }
+    start.store(true, std::memory_order_release);
+    for (std::thread &producer : producers) {
+        producer.join();
+    }
+
+    EXPECT_EQ(failures.load(std::memory_order_acquire), 0);
+    ASSERT_TRUE(logger->flush(std::chrono::seconds(5)));
+    const af::AsyncLogStats stats = logger->stats();
+    EXPECT_EQ(stats.accepted, static_cast<std::uint64_t>(expected_records));
+    EXPECT_EQ(stats.dropped, 0U);
+    expect_exact_indexed_log_set(capturing_backend->messages(), prefix, expected_records);
+    consumer.shutdown();
+}
+
 TEST(LogTests, ShardedQueuesAvoidSingleQueueProducerContention) {
     auto backend = std::make_unique<BlockingLogBackend>();
     auto *blocking_backend = backend.get();
@@ -1379,6 +1509,65 @@ TEST(LogTests, ShardedQueuesAvoidSingleQueueProducerContention) {
 
     blocking_backend->release();
     ASSERT_TRUE(logger->flush(std::chrono::seconds(2)));
+    consumer.shutdown();
+}
+
+TEST(LogTests, RelaxedLoggingConcurrentProducersDrainWithoutLossOrDuplicates) {
+    auto backend = std::make_unique<CapturingLogBackend>();
+    auto *capturing_backend = backend.get();
+
+    af::AsyncLogConfig config;
+    config.queue_capacity = 8192;
+    config.queue_shard_count = 8;
+    config.max_batch_size = 128;
+    config.overflow_policy = af::LogOverflowPolicy::DropNewest;
+    config.ordering = af::LogOrdering::Relaxed;
+    config.backends.push_back(std::move(backend));
+
+    LogTestRuntimeGuard runtime_guard;
+    auto logger = std::make_shared<af::AsyncLogger>(std::move(config));
+    ScopedRuntimeLogConsumer<LogTestRuntime> consumer(logger, LogTestThreads::Runtime_1, 256);
+    ASSERT_TRUE(consumer.start());
+
+    constexpr int producer_count = 8;
+    constexpr int records_per_producer = 512;
+    constexpr int expected_records = producer_count * records_per_producer;
+    constexpr std::string_view prefix = "relaxed-stress-";
+
+    std::atomic<int> ready{0};
+    std::atomic<bool> start{false};
+    std::atomic<int> failures{0};
+    std::array<std::thread, producer_count> producers;
+    for (int producer = 0; producer < producer_count; ++producer) {
+        producers[static_cast<std::size_t>(producer)] = std::thread([&, producer] {
+            ready.fetch_add(1, std::memory_order_release);
+            while (!start.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+
+            const int base = producer * records_per_producer;
+            for (int index = 0; index < records_per_producer; ++index) {
+                if (!logger->try_log(std::string(prefix) + std::to_string(base + index))) {
+                    failures.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        });
+    }
+
+    while (ready.load(std::memory_order_acquire) != producer_count) {
+        std::this_thread::yield();
+    }
+    start.store(true, std::memory_order_release);
+    for (std::thread &producer : producers) {
+        producer.join();
+    }
+
+    EXPECT_EQ(failures.load(std::memory_order_acquire), 0);
+    ASSERT_TRUE(logger->flush(std::chrono::seconds(5)));
+    const af::AsyncLogStats stats = logger->stats();
+    EXPECT_EQ(stats.accepted, static_cast<std::uint64_t>(expected_records));
+    EXPECT_EQ(stats.dropped, 0U);
+    expect_exact_indexed_log_set(capturing_backend->messages(), prefix, expected_records);
     consumer.shutdown();
 }
 

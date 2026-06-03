@@ -3865,3 +3865,56 @@ Interpretation:
   retaining the optimized io_uring zero-copy path.
 - Scheduler routing, local/SPSC/MPSC queue topology, locks, atomics,
   allocations, memory ordering, and cache layout were not changed.
+
+## 2026-06-03 Async Logger Correctness and Performance
+
+This pass tightened async logger correctness checks and added a direct
+runtime-bound logger benchmark. The benchmark validates no drops, successful
+flush, and exact backend record count on every measured iteration before
+reporting throughput.
+
+Changes under validation:
+
+- Added ordered single-producer FIFO coverage across multiple consumer batches.
+- Added ordered and relaxed concurrent-producer checks that validate no loss,
+  no duplicates, accepted/dropped counters, and flush completion.
+- Added `benchmarks/log_benchmarks.cpp` with
+  `BM_AsyncLoggerOrderedExternalProducers` and
+  `BM_AsyncLoggerRelaxedExternalProducers`.
+- Hardened the runtime-bound async log consumer wake state to
+  `Idle/Active/Parking`, so producer wakeups are coalesced while queued/running
+  and cannot strand work at the drain-to-pending boundary.
+
+Correctness checks:
+
+- Local macOS Debug `asyncflow_log_tests`: 36/36 passed.
+- Local macOS Debug targeted repeat:
+  `OrderedLoggingPreservesSingleProducerFifoAcrossBatches`,
+  `OrderedLoggingConcurrentProducersDrainWithoutLossOrDuplicates`, and
+  `RelaxedLoggingConcurrentProducersDrainWithoutLossOrDuplicates`: 200
+  repetitions passed.
+- Local macOS TSAN `asyncflow_log_tests`: 36/36 passed with no ThreadSanitizer
+  report.
+- Remote Linux GCC Release, `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: `asyncflow_log_tests` 36/36 passed.
+- Remote Linux GCC Release targeted repeat for the same three strict log tests:
+  200 repetitions passed.
+
+Remote GCC Release benchmark, 12 logical CPUs, `--benchmark_min_time=0.1s`,
+`--benchmark_repetitions=5`, aggregate means:
+
+- Ordered 1 producer x 8192 records: 1.56 ms, 5.33M records/s.
+- Ordered 4 producers x 8192 records: 3.69 ms, 8.94M records/s.
+- Ordered 8 producers x 8192 records: 6.53 ms, 10.08M records/s.
+- Relaxed 1 producer x 8192 records: 1.56 ms, 5.25M records/s.
+- Relaxed 4 producers x 8192 records: 2.92 ms, 11.25M records/s.
+- Relaxed 8 producers x 8192 records: 2.87 ms, 22.88M records/s.
+
+Interpretation:
+
+- Default ordered logging pays the expected single MPSC ordering point under
+  multi-producer pressure, but keeps backend-visible enqueue-linearized order.
+- Relaxed logging scales higher with 4-8 external producers because the queue
+  topology stays sharded; it remains the explicit throughput-oriented mode.
+- The wake-state fix adds one cache-line-isolated state machine and no locks,
+  heap allocations, backend thread, or extra queue hop.

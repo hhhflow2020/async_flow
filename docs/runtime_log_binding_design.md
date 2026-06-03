@@ -146,10 +146,13 @@ by the same runtime-bound drain task.
   between reservation and queue publication.
 - Runtime backend flush and shutdown waits should block on completion
   notifications instead of spinning/yielding while bound IO tasks make progress.
-- The runtime-bound log task wake bit stays set while a task is queued, running
-  again, or parked on IO; it is cleared only at the no-work idle boundary and
-  then immediately rechecks queued batches, flush requests, and stop requests
-  before returning `pending()`.
+- The runtime-bound async log consumer uses a cache-line-isolated
+  `WakeState { Idle, Active, Parking }`. Producers only schedule the task when
+  the previous state was `Idle`; `Active` coalesces queued/running work, and
+  `Parking` lets a producer mark new work while the consumer is doing its final
+  no-work check. The consumer converts `Parking` to `Idle` only after rechecking
+  ready records and stop state, so a wake cannot be stranded between drain and
+  `pending()`, and a queued task is not scheduled twice.
 - Runtime backend flush and shutdown paths should not use the ordinary
   producer-wakeup skip while a backend task is parked on IO. A waiter may need to
   prod the bound task to observe a completed IO result, a flush request, or a

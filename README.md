@@ -305,7 +305,7 @@ ASYNCFLOW_STRESS_MS=1500 ctest --test-dir build-tsan/build/Debug -R RuntimeStres
 - `tests/runtime_io_*_tests.cpp`：按 setup、epoll、kqueue、stream/zero-copy、io_uring socket、io_uring file、datagram、shutdown 拆分 IO 覆盖；公共 fixture 和 task helper 放在 `tests/runtime_io_test_support.hpp`。
 - `tests/runtime_parallel_tests.cpp`：parallel shard、失败汇总、有序 batch 和 retryable ordered apply。
 - `tests/runtime_stress_tests.cpp`：高并发 init/shutdown/start_task stress，CI 中也用于 TSAN job。
-- `benchmarks/io_*_benchmarks.cpp`、`benchmarks/queue_benchmarks.cpp` 与 `benchmarks/runtime_benchmarks.cpp`：IO adapter、文件系统、zero-copy、file/fixed-file、vectored、底层结构和 runtime 路径分开压测；公共 fake runtime 放在 `benchmarks/io_benchmark_support.hpp`。
+- `benchmarks/io_*_benchmarks.cpp`、`benchmarks/log_benchmarks.cpp`、`benchmarks/queue_benchmarks.cpp` 与 `benchmarks/runtime_benchmarks.cpp`：IO adapter、文件系统、zero-copy、file/fixed-file、vectored、异步日志、底层结构和 runtime 路径分开压测；公共 fake runtime 放在 `benchmarks/io_benchmark_support.hpp` 与 `benchmarks/runtime_benchmark_support.hpp`。
 - `benchmarks/perf_baseline.json`：本地 runtime benchmark baseline。
 - `benchmarks/perf_baseline_github_ubuntu.json` 与 `scripts/check_benchmark_regression.py`：GitHub Ubuntu runner 性能 baseline 与回归阈值检查。
 

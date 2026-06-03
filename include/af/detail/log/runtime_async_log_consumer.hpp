@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -47,6 +48,7 @@ private:
             return this->done();
         }
 
+        controller_->mark_running();
         controller_->drain_some(batch_);
 
         if (controller_->stop_requested() && controller_->pending_record_count() == 0U) {
@@ -102,9 +104,9 @@ public:
             return false;
         }
 
-        bool wake_expected = false;
-        if (!wake_queued_.compare_exchange_strong(wake_expected, true, std::memory_order_acq_rel,
-                                                  std::memory_order_acquire)) {
+        const WakeState previous =
+            wake_state_.exchange(WakeState::Active, std::memory_order_acq_rel);
+        if (previous != WakeState::Idle) {
             return true;
         }
 
@@ -115,14 +117,14 @@ public:
                 return true;
             }
             task_started_.store(false, std::memory_order_release);
-            wake_queued_.store(false, std::memory_order_release);
+            wake_state_.store(previous, std::memory_order_release);
             return false;
         }
 
         if (task_->wake()) {
             return true;
         }
-        wake_queued_.store(false, std::memory_order_release);
+        wake_state_.store(previous, std::memory_order_release);
         return false;
     }
 
@@ -184,22 +186,38 @@ public:
         static_cast<void>(logger_->drain_some(batch, max_batches_per_run_));
     }
 
+    void mark_running() noexcept {
+        wake_state_.store(WakeState::Active, std::memory_order_release);
+    }
+
     [[nodiscard]] bool mark_idle_or_continue() noexcept {
-        wake_queued_.store(false, std::memory_order_release);
+        wake_state_.store(WakeState::Parking, std::memory_order_release);
         if (ready_record_count() == 0U && !(stop_requested() && pending_record_count() == 0U)) {
-            return false;
+            WakeState expected = WakeState::Parking;
+            if (wake_state_.compare_exchange_strong(expected, WakeState::Idle,
+                                                    std::memory_order_acq_rel,
+                                                    std::memory_order_acquire)) {
+                return false;
+            }
+            return true;
         }
-        wake_queued_.store(true, std::memory_order_release);
+        wake_state_.store(WakeState::Active, std::memory_order_release);
         return true;
     }
 
     void mark_finished() noexcept {
-        wake_queued_.store(false, std::memory_order_release);
+        wake_state_.store(WakeState::Active, std::memory_order_release);
         finished_.store(true, std::memory_order_release);
         finished_.notify_all();
     }
 
 private:
+    enum class WakeState : std::uint8_t {
+        Idle,
+        Active,
+        Parking,
+    };
+
     [[nodiscard]] bool
     wait_until_finished(std::chrono::steady_clock::time_point deadline) noexcept {
         return wait_until_atomic_flag_true(finished_, deadline);
@@ -209,7 +227,7 @@ private:
     Thread thread_;
     std::size_t max_batches_per_run_;
     typename RuntimeT::template TaskHandle<Task> task_;
-    CacheLineAtomic<bool> wake_queued_{false};
+    CacheLineAtomic<WakeState> wake_state_{WakeState::Idle};
     CacheLineAtomic<bool> task_started_{false};
     CacheLineAtomic<bool> shutdown_started_{false};
     CacheLineAtomic<bool> finished_{false};

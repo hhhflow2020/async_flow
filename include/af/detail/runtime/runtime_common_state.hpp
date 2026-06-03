@@ -31,6 +31,10 @@ template <typename T> struct alignas(hardware_cache_line_size) CacheLineAtomic {
         value.store(desired, order);
     }
 
+    T exchange(T desired, std::memory_order order) noexcept {
+        return value.exchange(desired, order);
+    }
+
     [[nodiscard]] bool compare_exchange_weak(T &expected, T desired, std::memory_order success,
                                              std::memory_order failure) noexcept {
         return value.compare_exchange_weak(expected, desired, success, failure);

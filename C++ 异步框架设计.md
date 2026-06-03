@@ -931,6 +931,7 @@ async::parallel_shards_ordered(
 - `tests/runtime_parallel_shards_tests.cpp`、`tests/runtime_ordered_batch_tests.cpp`、`tests/runtime_ordered_start_tests.cpp`：parallel shards、失败汇总、有序 batch、ordered start 边界、retryable ordered apply。
 - `tests/runtime_*_stress_tests.cpp`：高并发 init/shutdown/start_task、cross-thread hop、running->pending、self-post 等 stress，可配合 TSAN 拉长运行。
 - `tests/queue_tests.cpp`、`tests/pool_tests.cpp`、`tests/batch_utility_tests.cpp`、`tests/io_state_utility_tests.cpp`：SPSC/MPSC/MPMC 队列、对象池、分片工具、CRUD helper、BatchSequencer、ordered retry/skip policy 和 IO state helper。
+- `tests/log_tests.cpp`：异步日志格式、runtime-bound consumer、文件/TCP/UDP 后端、ordered/relaxed 队列策略、flush/shutdown、无丢失/无重复和单 producer FIFO 边界。
 - `tests/runtime_io_*_tests.cpp`：按 setup、epoll/kqueue、stream/zero-copy、io_uring socket/file、datagram、shutdown 拆分 IO 覆盖；公共 fixture 和 task helper 主要放在 `tests/support/runtime_io_*`。
 
 重点覆盖：
@@ -954,6 +955,7 @@ async::parallel_shards_ordered(
 - ordered batch 连续推进每个 shard 的 `last_applied_batch_id`。
 - retryable ordered batch 跳过已经应用过同一 batch id 的 shard，只重跑仍落后的 shard。
 - ordered batch handler 失败时失败 shard 不推进版本。
+- 异步日志默认 ordered 路径跨 batch 保持单 producer FIFO；ordered 与 relaxed 并发 producer 压力下 flush 后无丢失、无重复，并校验 accepted/dropped 计数。
 - epoll IO task 在 readable/writable、eventfd、timerfd、UDP 零长度报文、duplicate wait、peer HUP/EOF、非法 fd、adapter 边界下行为正确。
 - `ThreadKind::IoUring` 在线程上支持 epoll readiness fallback；io_uring 可用时覆盖文件 `openat/close/statx/fallocate/renameat/unlinkat/write_at/writev_at/fsync/read_at/readv_at`、TCP `accept/connect/recv/send/send_zc/recvv/sendv` 和 UDP `recvmsg/sendmsg/recvv_from/sendv_to`。
 
@@ -970,6 +972,7 @@ Benchmark 使用 Google Benchmark，入口目标是 `asyncflow_runtime_benchmark
 文件布局：
 
 - `benchmarks/io_*_benchmarks.cpp`：按 adapter、filesystem、zero-copy、file/fixed-file、vectored 拆分 IO 快路径压测；公共 fake runtime 放在 `benchmarks/io_benchmark_support.hpp`。
+- `benchmarks/log_benchmarks.cpp`：压测 runtime-bound `AsyncLogger` 外部 producer 路径，benchmark 每轮校验无 drop、flush 成功、后端 record count 匹配；覆盖 `LogOrdering::Ordered` 与 `LogOrdering::Relaxed`。
 - `benchmarks/queue_benchmarks.cpp`：SPSC、MPSC、对象池基础性能。
 - `benchmarks/runtime_benchmarks.cpp`：外部 start、跨线程 hop、parallel shards runtime 路径。
 
@@ -977,6 +980,11 @@ Benchmark 使用 Google Benchmark，入口目标是 `asyncflow_runtime_benchmark
 
 ```sh
 ./build-conan/build/Release/asyncflow_runtime_benchmarks --benchmark_min_time=0.01s
+./build-conan/build/Release/asyncflow_runtime_benchmarks \
+  --benchmark_filter=AsyncLogger.*ExternalProducers \
+  --benchmark_min_time=0.1s \
+  --benchmark_repetitions=5 \
+  --benchmark_report_aggregates_only=true
 ./build-conan/build/Release/asyncflow_runtime_benchmarks \
   --benchmark_filter=BM_Runtime \
   --benchmark_min_time=0.01s \
