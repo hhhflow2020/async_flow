@@ -8,8 +8,11 @@
 - `AsyncLogger` no longer owns a private consumer thread. Its consumer lifecycle
   is driven by `RuntimeAsyncLogConsumerController`, so production logging stays
   inside the framework thread layout.
-- Runtime threads use per-thread SPSC lanes, and external threads use sharded
-  MPSC queues.
+- `AsyncLogConfig::ordering` defaults to `LogOrdering::Ordered`: runtime and
+  external producers publish to one bounded MPSC queue, so the runtime-bound
+  consumer observes the queue's enqueue linearization order. `LogOrdering::Relaxed`
+  switches to per-runtime-thread SPSC lanes plus external sharded MPSC queues for
+  higher producer throughput when strict global ordering is not required.
 - `FileLogBackend`, `UdpLogBackend`, and `TcpLogBackend` execute synchronously on
   the runtime-bound consumer task when used directly as async logger backends.
 - `RuntimeFileLogBackend`, `RuntimeUdpLogBackend`, and `RuntimeTcpLogBackend`
@@ -36,13 +39,13 @@
 - File, UDP, and TCP all skip ordinary producer wakeups while their bound task is
   waiting on runtime IO readiness, so producer notifications do not masquerade as
   IO completions.
-- Runtime-thread log lanes now use an SPSC record pool matching their SPSC
-  submission queue. External producer shards keep the lock-free shared free-list
-  because they still admit multiple producer threads.
+- Relaxed runtime-thread log lanes use an SPSC record pool matching their SPSC
+  submission queue. Ordered records and relaxed external producer shards keep the
+  lock-free shared free-list because they admit multiple producer threads.
 - Log record pool ownership is now split into `async_log_record_pool.hpp`.
   `AsyncLogger` wires queues, counters, and consumer draining, while the shared
-  MPSC record pool and runtime SPSC record pool live in a focused internal
-  module.
+  MPSC record pool and relaxed runtime SPSC record pool live in a focused
+  internal module.
 - Producer lane ownership is now split into `async_log_lanes.hpp`. External
   producer shards, runtime SPSC lanes, and their cache-line-isolated counters are
   grouped with the queue and record-pool topology they protect.
@@ -54,9 +57,10 @@
   `hardware_threads.hpp`, so the logger does not mix runtime lifecycle code with
   platform thread queries.
 
-This keeps runtime log producers on SPSC submission, external producers on MPSC
-admission, and network backends without private IO threads. Runtime deployments
-should keep the log consumer inside the framework thread layout.
+This keeps the default logging path ordered without adding private logging
+threads, while still allowing runtime SPSC submission and external MPSC sharding
+when callers explicitly choose relaxed ordering. Runtime deployments should keep
+the log consumer inside the framework thread layout.
 
 `start_async_logging_for_runtime<RuntimeT>(config)` now selects a default
 consumer thread from the runtime layout instead of blindly using index 0. The
@@ -90,8 +94,9 @@ by the same runtime-bound drain task.
 
 ## Correctness constraints
 
-- Runtime-thread log submission must stay explicit: runtime producers use their
-  own SPSC lane, external producers use MPSC shards.
+- Runtime-thread log submission mode must stay explicit: ordered logging uses the
+  single global MPSC, while relaxed logging uses runtime SPSC lanes and external
+  MPSC shards.
 - Flush must wait for both the producer-to-consumer queues and backend IO
   completion counters. The pending-record wait must use a predicate and bounded
   retry wakeups so a notify that races with the waiter going to sleep cannot
@@ -114,9 +119,12 @@ by the same runtime-bound drain task.
 ## Performance constraints
 
 - Producer hot paths should not take locks.
-- Runtime-thread producers should remain SPSC and avoid cross-thread MPMC hops.
-- Runtime-thread producer record allocation should also stay SPSC, avoiding the
-  shared free-list CAS pair used by external producer shards.
+- Ordered logging should avoid an additional global sequence counter and consumer
+  sort. The MPSC queue reservation is the ordering point.
+- Relaxed runtime-thread producers should remain SPSC and avoid cross-thread MPMC
+  hops.
+- Relaxed runtime-thread producer record allocation should also stay SPSC,
+  avoiding the shared free-list CAS pair used by external producer shards.
 - Runtime-bound consumers should wake only on empty-to-nonempty transitions so
   ordinary logging does not schedule a framework task for every record.
 - Runtime-bound consumers should cap drain batches per run so one logging burst
@@ -139,11 +147,11 @@ by the same runtime-bound drain task.
   prod the bound task to observe a completed IO result, a flush request, or a
   stop request.
 - The consumer releases drained log records in contiguous owner/kind groups.
-  External shard records from the same shared pool can therefore return to the
-  record free-list with one tagged-stack CAS per drained group instead of one
-  CAS per record; runtime SPSC lane records return to their queue-local pool in
-  fixed-size chunks so a release group publishes the free queue with far fewer
-  tail updates than one push per record.
+  Ordered records and relaxed external shard records from the same shared pool
+  can therefore return to the record free-list with one tagged-stack CAS per
+  drained group instead of one CAS per record; relaxed runtime SPSC lane records
+  return to their queue-local pool in fixed-size chunks so a release group
+  publishes the free queue with far fewer tail updates than one push per record.
 - Record pool changes should stay isolated from the consumer drain loop so the
   shared MPSC pool and runtime SPSC pool can be tuned independently.
 - Lane topology changes should stay isolated from consumer lifecycle code so

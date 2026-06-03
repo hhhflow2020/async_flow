@@ -575,6 +575,7 @@ auto sharded = af::split_change_batch(batch, shard_count);
 - `af::IoEvent` 使用 Linux `eventfd` readiness，适合业务侧异步通知、轻量计数器和跨组件唤醒，`ThreadKind::IoUring` 线程也可复用 epoll fallback。
 - `af::IoTimer` 使用 Linux `timerfd` readiness，适合超时、重试、心跳和连接保活，`ThreadKind::IoUring` 线程也可复用 epoll fallback。
 - `af::IoFile` / `af::TcpListener` / `af::TcpStream` / `af::UdpSocket` / `af::IoEvent` / `af::IoTimer` 仅保存 `thread + fd`，内联转发到 IO helper，不拥有 fd、不分配堆内存、不增加额外分支表；`af::TcpStream::sendfile_some()` 只是 thin adapter，不接管文件 fd 或 socket fd 所有权。
+- 异步日志提供 `LogOrdering::Ordered` 与 `LogOrdering::Relaxed` 两种生产者队列策略。默认 `Ordered` 使用单个 bounded MPSC，让消费者按入队线性化顺序批量写后端；`Relaxed` 用 runtime 线程 SPSC lane + 外部 sharded MPSC 换取更低争用，但只保证每个 lane/shard 内 FIFO。
 
 仍需注意：
 
@@ -1045,6 +1046,7 @@ ctest --test-dir build-conan/build/Release --output-on-failure
 - 固定 runtime 线程之间使用 source -> target 一条 bounded SPSC ring。
 - runtime 线程默认调度到自身时走 executor 本地无锁 queue，避免同线程投递也走跨线程队列；如果调用方选择 `ScheduleMode::Ordered`，即使 self-post 也会走目标 MPSC。
 - 非 runtime 线程进入 executor 使用 bounded MPSC ingress。
+- 异步日志默认使用单全局 MPSC 保持后端可见顺序；显式 `LogOrdering::Relaxed` 后才使用 runtime SPSC lane 和外部 sharded MPSC。
 - 每个 task type 使用独立对象池，slot 按 cache line 对齐，并有 TLS 小缓存减少频繁回到共享 free queue。
 - `WaitForTasks` 通过 unfinished task counter 等已接收任务结束；`StopImmediately` 可用 task registry 取消并释放 pending/queued task。
 

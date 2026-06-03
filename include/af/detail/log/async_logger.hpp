@@ -56,6 +56,11 @@ enum class LogOverflowPolicy : std::uint8_t {
     Block,
 };
 
+enum class LogOrdering : std::uint8_t {
+    Ordered,
+    Relaxed,
+};
+
 struct AsyncLogConfig {
     std::size_t queue_capacity{1U << 16U};
     std::size_t queue_shard_count{0};
@@ -65,6 +70,7 @@ struct AsyncLogConfig {
     std::size_t max_consumer_batches_per_run{64};
     std::size_t overflow_spin_count{64};
     LogOverflowPolicy overflow_policy{LogOverflowPolicy::DropNewest};
+    LogOrdering ordering{LogOrdering::Ordered};
     std::chrono::milliseconds flush_poll_interval{std::chrono::milliseconds(1)};
     std::chrono::milliseconds fatal_flush_timeout{std::chrono::milliseconds(200)};
     bool initialize_absl_log{true};
@@ -80,9 +86,11 @@ class AsyncLogger {
 public:
     explicit AsyncLogger(AsyncLogConfig config)
         : cache_token_(next_cache_token_.fetch_add(1U, std::memory_order_relaxed)),
-          queue_shard_count_(normalize_queue_shard_count(config.queue_shard_count)),
+          ordering_(validate_ordering(config.ordering)),
+          queue_shard_count_(queue_shard_count_for_ordering(ordering_, config.queue_shard_count)),
           queue_shard_mask_(queue_shard_count_ - 1U),
-          runtime_thread_count_(validate_runtime_thread_count(config.runtime_thread_count)),
+          runtime_thread_count_(
+              runtime_thread_count_for_ordering(ordering_, config.runtime_thread_count)),
           queue_shards_(
               make_queue_shards(queue_shard_count_,
                                 queue_capacity_per_shard(config.queue_capacity, queue_shard_count_),
@@ -108,6 +116,10 @@ public:
     }
 
     [[nodiscard]] bool try_log(std::string_view message) noexcept {
+        if (ordering_ == LogOrdering::Ordered) {
+            return try_log_on_lane(ordered_queue(), message);
+        }
+
         detail::AsyncLogQueueShard &shard = producer_shard();
         return try_log_on_lane(shard, message);
     }
@@ -144,6 +156,10 @@ private:
 
     [[nodiscard]] bool try_log_from_runtime_thread(std::uint16_t thread_index,
                                                    std::string_view message) noexcept {
+        if (ordering_ == LogOrdering::Ordered) {
+            return try_log(message);
+        }
+
         if (thread_index >= runtime_thread_count_) [[unlikely]] {
             return try_log(message);
         }
@@ -227,6 +243,29 @@ private:
         detail::AsyncLogQueueShard *shard{nullptr};
     };
 
+    [[nodiscard]] static LogOrdering validate_ordering(LogOrdering ordering) {
+        switch (ordering) {
+        case LogOrdering::Ordered:
+        case LogOrdering::Relaxed:
+            return ordering;
+        }
+        throw std::invalid_argument("invalid async log ordering");
+    }
+
+    [[nodiscard]] static std::size_t queue_shard_count_for_ordering(LogOrdering ordering,
+                                                                    std::size_t requested) {
+        if (ordering == LogOrdering::Ordered) {
+            return 1U;
+        }
+        return normalize_queue_shard_count(requested);
+    }
+
+    [[nodiscard]] static std::size_t runtime_thread_count_for_ordering(LogOrdering ordering,
+                                                                       std::size_t requested) {
+        const std::size_t validated = validate_runtime_thread_count(requested);
+        return ordering == LogOrdering::Relaxed ? validated : 0U;
+    }
+
     [[nodiscard]] static std::size_t default_queue_shard_count() noexcept {
         const std::size_t hardware_threads = detail::hardware_thread_count();
         return hardware_threads == 0U
@@ -302,6 +341,11 @@ private:
             lanes.emplace_back(capacity_per_thread, record_capacity);
         }
         return lanes;
+    }
+
+    [[nodiscard]] detail::AsyncLogQueueShard &ordered_queue() noexcept {
+        AF_ASSERT(queue_shard_count_ == 1U);
+        return *queue_shards_[0];
     }
 
     [[nodiscard]] detail::AsyncLogQueueShard &producer_shard() noexcept {
@@ -531,6 +575,7 @@ private:
     static inline std::atomic<std::uint64_t> next_cache_token_{1};
 
     const std::uint64_t cache_token_;
+    const LogOrdering ordering_;
     const std::size_t queue_shard_count_;
     const std::size_t queue_shard_mask_;
     const std::size_t runtime_thread_count_;

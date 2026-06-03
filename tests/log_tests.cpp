@@ -891,6 +891,7 @@ TEST(LogTests, ProducerShardCacheRefreshesWhenLoggerReusesAddress) {
         config.queue_capacity = 8;
         config.queue_shard_count = shard_count;
         config.max_batch_size = 4;
+        config.ordering = af::LogOrdering::Relaxed;
         config.backends.push_back(std::move(backend));
         return config;
     };
@@ -964,6 +965,7 @@ TEST(LogTests, RuntimeAwareSinkUsesSpscLaneWhenExternalMpscIsFull) {
     config.runtime_queue_capacity = 2;
     config.max_batch_size = 1;
     config.overflow_policy = af::LogOverflowPolicy::DropNewest;
+    config.ordering = af::LogOrdering::Relaxed;
     config.backends.push_back(std::move(backend));
     auto logging = af::start_async_logging_for_runtime<LogTestRuntime>(std::move(config),
                                                                        LogTestThreads::Runtime_1);
@@ -1053,6 +1055,7 @@ TEST(LogTests, RuntimeLaneRecordPoolReusesSlotsAcrossFlushes) {
     config.runtime_queue_capacity = 1;
     config.max_batch_size = 1;
     config.overflow_policy = af::LogOverflowPolicy::DropNewest;
+    config.ordering = af::LogOrdering::Relaxed;
     config.backends.push_back(std::move(backend));
 
     LogTestRuntimeGuard runtime_guard;
@@ -1294,6 +1297,47 @@ TEST(LogTests, BlockOverflowWaitsForQueueCapacity) {
     consumer.shutdown();
 }
 
+TEST(LogTests, OrderedLoggingIsDefaultSingleMpscQueue) {
+    auto backend = std::make_unique<BlockingLogBackend>();
+    auto *blocking_backend = backend.get();
+
+    af::AsyncLogConfig config;
+    config.queue_capacity = 1;
+    config.queue_shard_count = 4;
+    config.max_batch_size = 1;
+    config.overflow_policy = af::LogOverflowPolicy::DropNewest;
+    config.backends.push_back(std::move(backend));
+
+    LogTestRuntimeGuard runtime_guard;
+    auto logger = std::make_shared<af::AsyncLogger>(std::move(config));
+    ScopedRuntimeLogConsumer<LogTestRuntime> consumer(logger, LogTestThreads::Runtime_1, 64);
+    ASSERT_TRUE(consumer.start());
+
+    ASSERT_TRUE(logger->try_log("block ordered log worker\n"));
+    ASSERT_TRUE(blocking_backend->wait_until_entered(std::chrono::seconds(2)));
+
+    std::array<std::thread, 4> producers;
+    std::atomic<int> accepted{0};
+    for (std::size_t i = 0; i < producers.size(); ++i) {
+        producers[i] = std::thread([&logger, &accepted] {
+            if (logger->try_log("ordered producer log\n")) {
+                accepted.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+    }
+
+    for (auto &producer : producers) {
+        producer.join();
+    }
+
+    EXPECT_EQ(accepted.load(std::memory_order_acquire), 2);
+    EXPECT_EQ(logger->stats().dropped, 2U);
+
+    blocking_backend->release();
+    ASSERT_TRUE(logger->flush(std::chrono::seconds(2)));
+    consumer.shutdown();
+}
+
 TEST(LogTests, ShardedQueuesAvoidSingleQueueProducerContention) {
     auto backend = std::make_unique<BlockingLogBackend>();
     auto *blocking_backend = backend.get();
@@ -1303,6 +1347,7 @@ TEST(LogTests, ShardedQueuesAvoidSingleQueueProducerContention) {
     config.queue_shard_count = 4;
     config.max_batch_size = 1;
     config.overflow_policy = af::LogOverflowPolicy::DropNewest;
+    config.ordering = af::LogOrdering::Relaxed;
     config.backends.push_back(std::move(backend));
 
     LogTestRuntimeGuard runtime_guard;
@@ -1344,6 +1389,7 @@ TEST(LogTests, ShardedQueuesDrainConcurrentProducers) {
     config.queue_shard_count = 8;
     config.max_batch_size = 64;
     config.overflow_policy = af::LogOverflowPolicy::DropNewest;
+    config.ordering = af::LogOrdering::Relaxed;
     config.backends.push_back(std::move(backend));
 
     LogTestRuntimeGuard runtime_guard;
