@@ -36,4 +36,24 @@ struct DirectOpenTempPath {
 
 } // namespace io_uring_openat_direct_example
 
+#else
+
+namespace io_uring_openat_direct_example {
+
+struct DirectOpenTempPath {
+    char path[40]{};
+
+    bool create() noexcept {
+        return false;
+    }
+
+    void cleanup() noexcept {}
+
+    ~DirectOpenTempPath() {
+        cleanup();
+    }
+};
+
+} // namespace io_uring_openat_direct_example
+
 #endif

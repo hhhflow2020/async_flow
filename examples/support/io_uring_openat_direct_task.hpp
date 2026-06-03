@@ -142,4 +142,26 @@ private:
 
 } // namespace io_uring_openat_direct_example
 
+#else
+
+namespace io_uring_openat_direct_example {
+
+class DirectOpenRoundTripTask final : public DirectOpenTask {
+public:
+    explicit DirectOpenRoundTripTask(DirectOpenTask::FactoryToken token) : DirectOpenTask(token) {}
+
+    bool do_it(const char *path, DirectOpenRoundTripResult *result) {
+        static_cast<void>(path);
+        static_cast<void>(result);
+        return false;
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
+};
+
+} // namespace io_uring_openat_direct_example
+
 #endif

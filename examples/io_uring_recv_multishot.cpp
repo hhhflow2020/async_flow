@@ -5,7 +5,11 @@
 #include "support/io_uring_recv_multishot_task.hpp"
 
 int main() {
-#if defined(__linux__)
+    if constexpr (!af::supports_io_uring) {
+        std::cout << "io_uring recv_multishot example is Linux-only\n";
+        return 0;
+    }
+
     using namespace io_uring_recv_multishot_example;
 
     recv_async::init();
@@ -65,8 +69,4 @@ int main() {
     std::cout << "io_uring recv_multishot bytes=" << static_cast<char>((packed >> 8) & 0xff)
               << static_cast<char>(packed & 0xff) << '\n';
     return 0;
-#else
-    std::cout << "io_uring recv_multishot example is Linux-only\n";
-    return 0;
-#endif
 }

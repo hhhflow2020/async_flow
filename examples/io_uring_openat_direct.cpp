@@ -4,7 +4,11 @@
 #include "support/io_uring_openat_direct_task.hpp"
 
 int main() {
-#if defined(__linux__)
+    if constexpr (!af::supports_io_uring) {
+        std::cout << "io_uring openat direct example is Linux-only\n";
+        return 0;
+    }
+
     using namespace io_uring_openat_direct_example;
 
     direct_open_async::init();
@@ -42,8 +46,4 @@ int main() {
 
     std::cout << "io_uring openat direct byte=" << result.byte_read << '\n';
     return 0;
-#else
-    std::cout << "io_uring openat direct example is Linux-only\n";
-    return 0;
-#endif
 }

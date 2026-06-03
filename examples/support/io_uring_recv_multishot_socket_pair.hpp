@@ -27,4 +27,26 @@ inline bool write_payload_once(int fd, const char *payload, std::size_t size) {
 
 } // namespace io_uring_recv_multishot_example
 
+#else
+
+namespace io_uring_recv_multishot_example {
+
+struct RecvMultishotSocketPair {
+    af::UniqueFd receiver{};
+    af::UniqueFd sender{};
+
+    bool create() noexcept {
+        return false;
+    }
+};
+
+inline bool write_payload_once(int fd, const char *payload, std::size_t size) {
+    static_cast<void>(fd);
+    static_cast<void>(payload);
+    static_cast<void>(size);
+    return false;
+}
+
+} // namespace io_uring_recv_multishot_example
+
 #endif
