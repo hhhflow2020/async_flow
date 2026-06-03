@@ -456,12 +456,9 @@ Executor<RuntimeT, TraitsT>::complete_io_uring_operation(IoUringOperation *opera
         if (cancel_draining_more) {
             return false;
         }
-        operation->result->events = io_error;
-        operation->result->error = ECANCELED;
-        operation->result->result = -ECANCELED;
+        detail::set_io_result_error(*operation->result, operation->result->fd, ECANCELED);
     } else if (result < 0) {
-        operation->result->events = io_error;
-        operation->result->error = -result;
+        detail::set_io_result_error(*operation->result, operation->result->fd, -result);
     } else {
         std::uint32_t events = operation->complete_events | (more ? io_more : 0U);
         if ((cqe_flags & IORING_CQE_F_BUFFER) != 0U) {
@@ -529,12 +526,9 @@ void Executor<RuntimeT, TraitsT>::complete_io_uring_poll_wait(IoUringOperation *
     registration->result->fd = fd;
     registration->result->result = result;
     if (operation->cancel_requested) {
-        registration->result->events = io_error;
-        registration->result->error = ECANCELED;
-        registration->result->result = -ECANCELED;
+        detail::set_io_result_error(*registration->result, fd, ECANCELED);
     } else if (result < 0) {
-        registration->result->events = io_error;
-        registration->result->error = -result;
+        detail::set_io_result_error(*registration->result, fd, -result);
     } else {
         registration->result->events = io_events_from_poll(static_cast<std::uint32_t>(result));
         registration->result->error = 0;
@@ -694,9 +688,8 @@ void Executor<RuntimeT, TraitsT>::clear_or_fail_io_uring_operations(
             operation = next;
             continue;
         }
-        operation->result->events = io_error;
-        operation->result->error = operation->cancel_requested ? ECANCELED : error;
-        operation->result->result = operation->cancel_requested ? -ECANCELED : -error;
+        detail::set_io_result_error(*operation->result, operation->result->fd,
+                                    operation->cancel_requested ? ECANCELED : error);
         enqueue_pending_blocking(index_, operation->task);
         destroy_io_uring_operation(operation);
         operation = next;
@@ -725,10 +718,7 @@ template <typename RuntimeT, typename TraitsT>
             }
         }
 
-        registration->result->fd = fd;
-        registration->result->events = io_error;
-        registration->result->error = completion_error;
-        registration->result->result = -completion_error;
+        detail::set_io_result_error(*registration->result, fd, completion_error);
         if (registration->task != nullptr) {
             enqueue_pending_blocking(index_, registration->task);
         }
@@ -739,9 +729,7 @@ template <typename RuntimeT, typename TraitsT>
     }
 
     if (operation->task != nullptr && operation->result != nullptr) {
-        operation->result->events = io_error;
-        operation->result->error = completion_error;
-        operation->result->result = -completion_error;
+        detail::set_io_result_error(*operation->result, operation->result->fd, completion_error);
         enqueue_pending_blocking(index_, operation->task);
     }
     return true;
@@ -759,9 +747,7 @@ void Executor<RuntimeT, TraitsT>::close_pending_io_uring_fd_result(
         return;
     }
     ::close(static_cast<int>(operation->result->result));
-    operation->result->events = io_error;
-    operation->result->error = ECANCELED;
-    operation->result->result = -ECANCELED;
+    detail::set_io_result_error(*operation->result, operation->result->fd, ECANCELED);
 }
 #endif
 

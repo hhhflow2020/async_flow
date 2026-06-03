@@ -264,14 +264,8 @@ Executor<RuntimeT, TraitsT>::complete_kqueue_timeout(KqueueTimeoutRegistration *
     }
 
     untrack_kqueue_timeout(registration);
-    result->fd = -1;
-    result->events = io_error;
-    result->error = io_error_from_kqueue(event);
-    if (result->error == 0) {
-        result->error = ETIMEDOUT;
-    }
-    result->result = -result->error;
-    result->completion_token = nullptr;
+    const int error = io_error_from_kqueue(event);
+    detail::set_io_result_error(*result, -1, error == 0 ? ETIMEDOUT : error);
     enqueue_pending_blocking(index_, registration->task);
     io_kqueue_timeout_pool_.destroy(registration);
     return true;
@@ -337,9 +331,14 @@ template <typename RuntimeT, typename TraitsT>
             io_waits_.erase(it);
         }
 
-        registration->result->fd = fd;
-        registration->result->events = io_events_from_kqueue(event);
-        registration->result->error = io_error_from_kqueue(event);
+        const int error = io_error_from_kqueue(event);
+        if (error != 0) {
+            detail::set_io_result_error(*registration->result, fd, error);
+        } else {
+            registration->result->fd = fd;
+            registration->result->events = io_events_from_kqueue(event);
+            registration->result->error = 0;
+        }
         enqueue_pending_blocking(index_, registration->task);
         completed[completed_count++] = registration;
         did_work = true;
