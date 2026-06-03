@@ -243,7 +243,7 @@ private:
             return this->done();
         }
 
-        if (state_->stopping.load(std::memory_order_acquire)) {
+        if (state_->stopping.load(std::memory_order_relaxed)) {
             drop_current();
             drop_ready_batches();
 #if !defined(_WIN32)
@@ -267,7 +267,7 @@ private:
                     if (flush_result == FlushResult::Pending) {
                         return io_pending();
                     }
-                    if (state_->stopping.load(std::memory_order_acquire)) {
+                    if (state_->stopping.load(std::memory_order_relaxed)) {
                         return finish();
                     }
                     return idle();
@@ -290,7 +290,7 @@ private:
 
     TaskResult idle() noexcept {
         state_->wake_queued.store(false, std::memory_order_release);
-        if (state_->stopping.load(std::memory_order_acquire) ||
+        if (state_->stopping.load(std::memory_order_relaxed) ||
             state_->pending_batches.load(std::memory_order_acquire) != 0U ||
             state_->has_pending_flush()) {
             state_->wake_queued.store(true, std::memory_order_release);

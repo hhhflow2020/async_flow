@@ -186,14 +186,14 @@ private:
         }
 
         consumer_wake_target_.store(&target, std::memory_order_release);
-        stopping_.store(false, std::memory_order_release);
+        stopping_.store(false, std::memory_order_relaxed);
         accepting_.store(true, std::memory_order_release);
         return true;
     }
 
     void stop_bound_consumer_admission() noexcept {
         accepting_.store(false, std::memory_order_release);
-        stopping_.store(true, std::memory_order_release);
+        stopping_.store(true, std::memory_order_relaxed);
     }
 
     void finish_bound_consumer_shutdown() noexcept {
@@ -203,7 +203,7 @@ private:
     }
 
     [[nodiscard]] bool consumer_stop_requested() const noexcept {
-        return stopping_.load(std::memory_order_acquire);
+        return stopping_.load(std::memory_order_relaxed);
     }
 
     [[nodiscard]] std::size_t pending_record_count() const noexcept {
@@ -358,7 +358,7 @@ private:
     void shutdown() noexcept {
         const bool was_started = started_.exchange(false, std::memory_order_acq_rel);
         accepting_.store(false, std::memory_order_release);
-        stopping_.store(true, std::memory_order_release);
+        stopping_.store(true, std::memory_order_relaxed);
         notify_consumer();
         if (was_started) {
             shutdown_backends();

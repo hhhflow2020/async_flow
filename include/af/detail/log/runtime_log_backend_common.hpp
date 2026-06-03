@@ -42,7 +42,7 @@ public:
     RuntimeLogQueueState &operator=(const RuntimeLogQueueState &) = delete;
 
     [[nodiscard]] bool enqueue(std::span<LogRecord *const> records) noexcept {
-        if (records.empty() || stopping.load(std::memory_order_acquire)) {
+        if (records.empty() || stopping.load(std::memory_order_relaxed)) {
             return false;
         }
 
@@ -277,7 +277,7 @@ public:
     }
 
     void stop_and_wait(std::chrono::steady_clock::time_point deadline) noexcept {
-        state_->stopping.store(true, std::memory_order_release);
+        state_->stopping.store(true, std::memory_order_relaxed);
         if (!task_started_.load(std::memory_order_acquire) &&
             state_->pending_batches.load(std::memory_order_acquire) == 0U) {
             state_->mark_finished();
