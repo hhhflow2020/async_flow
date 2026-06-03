@@ -176,18 +176,12 @@ Executor<RuntimeT, TraitsT>::submit_kqueue_timeout(std::chrono::nanoseconds time
     if (RuntimeT::current_thread_index_ != index_ || task == nullptr || result == nullptr ||
         timeout.count() <= 0) {
         if (result != nullptr) {
-            result->fd = -1;
-            result->events = io_error;
-            result->error = EINVAL;
-            result->result = -EINVAL;
+            detail::set_io_result_error(*result, -1, EINVAL);
         }
         return false;
     }
     if (io_kqueue_fd_ < 0) {
-        result->fd = -1;
-        result->events = io_error;
-        result->error = ENOSYS;
-        result->result = -ENOSYS;
+        detail::set_io_result_error(*result, -1, ENOSYS);
         return false;
     }
 
@@ -195,10 +189,7 @@ Executor<RuntimeT, TraitsT>::submit_kqueue_timeout(std::chrono::nanoseconds time
     try {
         registration = io_kqueue_timeout_pool_.create();
     } catch (...) {
-        result->fd = -1;
-        result->events = io_error;
-        result->error = ENOMEM;
-        result->result = -ENOMEM;
+        detail::set_io_result_error(*result, -1, ENOMEM);
         return false;
     }
 
@@ -214,10 +205,7 @@ Executor<RuntimeT, TraitsT>::submit_kqueue_timeout(std::chrono::nanoseconds time
     if (::kevent(io_kqueue_fd_, &event, 1, nullptr, 0, nullptr) != 0) {
         const int error = errno == 0 ? EIO : errno;
         io_kqueue_timeout_pool_.destroy(registration);
-        result->fd = -1;
-        result->events = io_error;
-        result->error = error;
-        result->result = -error;
+        detail::set_io_result_error(*result, -1, error);
         return false;
     }
 
@@ -233,17 +221,13 @@ Executor<RuntimeT, TraitsT>::submit_kqueue_timeout(std::chrono::nanoseconds time
 template <typename RuntimeT, typename TraitsT>
 [[nodiscard]] bool Executor<RuntimeT, TraitsT>::cancel_kqueue_timeout(IoOpState &state) noexcept {
     if (io_kqueue_fd_ < 0) {
-        state.wait.events = io_error;
-        state.wait.error = ENOSYS;
-        state.wait.result = -ENOSYS;
+        detail::set_io_result_error(state.wait, state.wait.fd, ENOSYS);
         return false;
     }
 
     auto *registration = static_cast<KqueueTimeoutRegistration *>(state.wait.completion_token);
     if (registration == nullptr || registration->result != &state.wait) {
-        state.wait.events = io_error;
-        state.wait.error = ENOENT;
-        state.wait.result = -ENOENT;
+        detail::set_io_result_error(state.wait, state.wait.fd, ENOENT);
         return false;
     }
 
@@ -258,11 +242,7 @@ template <typename RuntimeT, typename TraitsT>
     }
 
     untrack_kqueue_timeout(registration);
-    state.wait.fd = -1;
-    state.wait.events = io_error;
-    state.wait.error = ECANCELED;
-    state.wait.result = -ECANCELED;
-    state.wait.completion_token = nullptr;
+    detail::set_io_result_error(state.wait, -1, ECANCELED);
     if (registration->task != running_task_) {
         enqueue_pending_blocking(index_, registration->task);
     }
@@ -405,17 +385,17 @@ Executor<RuntimeT, TraitsT>::register_native_io_wait(int fd, std::uint32_t event
     auto existing = io_waits_.find(fd);
     if (io_kqueue_fd_ < 0 || fd < 0 || events == 0U || unsupported_events ||
         (existing != io_waits_.end() && io_wait_events_conflict(existing->second, events))) {
-        result->fd = fd;
-        result->events = io_error;
+        int error = 0;
         if (fd < 0) {
-            result->error = EBADF;
+            error = EBADF;
         } else if (events == 0U || unsupported_events) {
-            result->error = EINVAL;
+            error = EINVAL;
         } else if (io_kqueue_fd_ < 0) {
-            result->error = ENOSYS;
+            error = ENOSYS;
         } else {
-            result->error = EALREADY;
+            error = EALREADY;
         }
+        detail::set_io_result_error(*result, fd, error);
         return false;
     }
 
@@ -435,9 +415,7 @@ Executor<RuntimeT, TraitsT>::register_native_io_wait(int fd, std::uint32_t event
         if (registration != nullptr) {
             io_wait_pool_.destroy(registration);
         }
-        result->fd = fd;
-        result->events = io_error;
-        result->error = ENOMEM;
+        detail::set_io_result_error(*result, fd, ENOMEM);
         return false;
     }
 
@@ -450,9 +428,7 @@ Executor<RuntimeT, TraitsT>::register_native_io_wait(int fd, std::uint32_t event
             io_waits_.erase(wait_it);
         }
         io_wait_pool_.destroy(registration);
-        result->fd = fd;
-        result->events = io_error;
-        result->error = error;
+        detail::set_io_result_error(*result, fd, error);
         return false;
     }
 
@@ -463,9 +439,7 @@ Executor<RuntimeT, TraitsT>::register_native_io_wait(int fd, std::uint32_t event
 template <typename RuntimeT, typename TraitsT>
 [[nodiscard]] bool Executor<RuntimeT, TraitsT>::cancel_native_io_wait(IoOpState &state) noexcept {
     if (io_kqueue_fd_ < 0) {
-        state.wait.events = io_error;
-        state.wait.error = ENOSYS;
-        state.wait.result = -ENOSYS;
+        detail::set_io_result_error(state.wait, state.wait.fd, ENOSYS);
         return false;
     }
 
@@ -474,9 +448,7 @@ template <typename RuntimeT, typename TraitsT>
     IoWaitRegistration *registration =
         it == io_waits_.end() ? nullptr : find_io_wait_registration(it->second, &state.wait);
     if (fd < 0 || it == io_waits_.end() || registration == nullptr) {
-        state.wait.events = io_error;
-        state.wait.error = ENOENT;
-        state.wait.result = -ENOENT;
+        detail::set_io_result_error(state.wait, fd, ENOENT);
         return false;
     }
 
@@ -486,10 +458,7 @@ template <typename RuntimeT, typename TraitsT>
         io_waits_.erase(it);
     }
 
-    state.wait.fd = fd;
-    state.wait.events = io_error;
-    state.wait.error = ECANCELED;
-    state.wait.result = -ECANCELED;
+    detail::set_io_result_error(state.wait, fd, ECANCELED);
     if (registration->task != running_task_) {
         enqueue_pending_blocking(index_, registration->task);
     }

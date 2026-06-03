@@ -37,6 +37,19 @@ struct IoResult {
     }
 };
 
+namespace detail {
+
+inline void set_io_result_error(IoResult &result, int fd, int error) noexcept {
+    const int normalized_error = error == 0 ? EIO : error;
+    result.fd = fd;
+    result.events = io_error;
+    result.error = normalized_error;
+    result.result = -static_cast<std::int64_t>(normalized_error);
+    result.completion_token = nullptr;
+}
+
+} // namespace detail
+
 enum class IoWaitKind : std::uint8_t {
     None,
     Readiness,

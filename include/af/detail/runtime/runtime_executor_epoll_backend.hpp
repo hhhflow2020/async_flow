@@ -230,17 +230,17 @@ Executor<RuntimeT, TraitsT>::register_native_io_wait(int fd, std::uint32_t event
     auto existing = io_waits_.find(fd);
     if (io_epoll_fd_ < 0 || fd < 0 || events == 0U || unsupported_events ||
         (existing != io_waits_.end() && io_wait_events_conflict(existing->second, events))) {
-        result->fd = fd;
-        result->events = io_error;
+        int error = 0;
         if (fd < 0) {
-            result->error = EBADF;
+            error = EBADF;
         } else if (events == 0U || unsupported_events) {
-            result->error = EINVAL;
+            error = EINVAL;
         } else if (io_epoll_fd_ < 0) {
-            result->error = ENOSYS;
+            error = ENOSYS;
         } else {
-            result->error = EALREADY;
+            error = EALREADY;
         }
+        detail::set_io_result_error(*result, fd, error);
         return false;
     }
 
@@ -261,9 +261,7 @@ Executor<RuntimeT, TraitsT>::register_native_io_wait(int fd, std::uint32_t event
         if (registration != nullptr) {
             io_wait_pool_.destroy(registration);
         }
-        result->fd = fd;
-        result->events = io_error;
-        result->error = ENOMEM;
+        detail::set_io_result_error(*result, fd, ENOMEM);
         return false;
     }
 
@@ -296,9 +294,7 @@ Executor<RuntimeT, TraitsT>::register_native_io_wait(int fd, std::uint32_t event
             static_cast<void>(update_epoll_interest(fd, wait_it->second));
         }
         io_wait_pool_.destroy(registration);
-        result->fd = fd;
-        result->events = io_error;
-        result->error = error;
+        detail::set_io_result_error(*result, fd, error);
         return false;
     }
 
@@ -309,9 +305,7 @@ Executor<RuntimeT, TraitsT>::register_native_io_wait(int fd, std::uint32_t event
 template <typename RuntimeT, typename TraitsT>
 [[nodiscard]] bool Executor<RuntimeT, TraitsT>::cancel_native_io_wait(IoOpState &state) noexcept {
     if (io_epoll_fd_ < 0) {
-        state.wait.events = io_error;
-        state.wait.error = ENOSYS;
-        state.wait.result = -ENOSYS;
+        detail::set_io_result_error(state.wait, state.wait.fd, ENOSYS);
         return false;
     }
 
@@ -320,9 +314,7 @@ template <typename RuntimeT, typename TraitsT>
     IoWaitRegistration *registration =
         it == io_waits_.end() ? nullptr : find_io_wait_registration(it->second, &state.wait);
     if (fd < 0 || it == io_waits_.end() || registration == nullptr) {
-        state.wait.events = io_error;
-        state.wait.error = ENOENT;
-        state.wait.result = -ENOENT;
+        detail::set_io_result_error(state.wait, fd, ENOENT);
         return false;
     }
 
@@ -330,6 +322,7 @@ template <typename RuntimeT, typename TraitsT>
         IoUringOperation *operation = registration->poll_operation;
         const int submit_error = submit_io_uring_cancel(operation);
         if (submit_error != 0) {
+            state.wait.fd = fd;
             state.wait.events = io_error;
             state.wait.error = submit_error;
             state.wait.result = -submit_error;
@@ -348,10 +341,7 @@ template <typename RuntimeT, typename TraitsT>
         operation->task = nullptr;
         operation->result = nullptr;
 
-        state.wait.fd = fd;
-        state.wait.events = io_error;
-        state.wait.error = ECANCELED;
-        state.wait.result = -ECANCELED;
+        detail::set_io_result_error(state.wait, fd, ECANCELED);
         if (registration->task != running_task_) {
             enqueue_pending_blocking(index_, registration->task);
         }
@@ -366,10 +356,7 @@ template <typename RuntimeT, typename TraitsT>
         static_cast<void>(update_epoll_interest(fd, it->second));
     }
 
-    state.wait.fd = fd;
-    state.wait.events = io_error;
-    state.wait.error = ECANCELED;
-    state.wait.result = -ECANCELED;
+    detail::set_io_result_error(state.wait, fd, ECANCELED);
     if (registration->task != running_task_) {
         enqueue_pending_blocking(index_, registration->task);
     }
