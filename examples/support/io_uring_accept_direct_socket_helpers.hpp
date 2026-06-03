@@ -7,17 +7,23 @@
 
 #include "io_uring_accept_direct_runtime.hpp"
 
-#if defined(__linux__)
-
 namespace io_uring_accept_direct_example {
 
 [[nodiscard]] inline bool unsupported_direct_accept_error(int error) noexcept {
-    return error == EINVAL || error == EBADF || error == ENOSYS || error == ENXIO
+    return error == EINVAL || error == EBADF
+#ifdef ENOSYS
+           || error == ENOSYS
+#endif
+#ifdef ENXIO
+           || error == ENXIO
+#endif
 #ifdef EOPNOTSUPP
            || error == EOPNOTSUPP
 #endif
         ;
 }
+
+#if defined(__linux__)
 
 inline bool create_loopback_listener(af::UniqueFd &listener, sockaddr_in &address) {
     listener.reset(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
@@ -91,6 +97,63 @@ inline bool read_exact_until(int fd, char *output, std::size_t size) {
     return true;
 }
 
-} // namespace io_uring_accept_direct_example
+struct DirectAcceptLoopbackPeer {
+    [[nodiscard]] bool create_listener() noexcept {
+        return create_loopback_listener(listener, address_);
+    }
+
+    [[nodiscard]] bool connect_client() noexcept {
+        client.reset(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
+        if (!client) {
+            return false;
+        }
+        const int rc =
+            ::connect(client.get(), reinterpret_cast<sockaddr *>(&address_), sizeof(address_));
+        return rc == 0 || errno == EINPROGRESS;
+    }
+
+    [[nodiscard]] bool write_request(const char *request, std::size_t size) noexcept {
+        return client && write_exact_until(client.get(), request, size);
+    }
+
+    [[nodiscard]] bool read_response(char *response, std::size_t size) noexcept {
+        return client && read_exact_until(client.get(), response, size);
+    }
+
+    af::UniqueFd listener{};
+    af::UniqueFd client{};
+
+private:
+    sockaddr_in address_{};
+};
+
+#else
+
+struct DirectAcceptLoopbackPeer {
+    [[nodiscard]] bool create_listener() noexcept {
+        return false;
+    }
+
+    [[nodiscard]] bool connect_client() noexcept {
+        return false;
+    }
+
+    [[nodiscard]] bool write_request(const char *request, std::size_t size) noexcept {
+        static_cast<void>(request);
+        static_cast<void>(size);
+        return false;
+    }
+
+    [[nodiscard]] bool read_response(char *response, std::size_t size) noexcept {
+        static_cast<void>(response);
+        static_cast<void>(size);
+        return false;
+    }
+
+    af::UniqueFd listener{};
+    af::UniqueFd client{};
+};
 
 #endif
+
+} // namespace io_uring_accept_direct_example

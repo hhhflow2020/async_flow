@@ -152,4 +152,30 @@ private:
 
 } // namespace io_uring_accept_direct_example
 
+#else
+
+namespace io_uring_accept_direct_example {
+
+class DirectAcceptRoundTripTask final : public DirectAcceptTask {
+public:
+    explicit DirectAcceptRoundTripTask(DirectAcceptTask::FactoryToken token)
+        : DirectAcceptTask(token) {}
+
+    bool do_it(int listener_fd, std::atomic<int> *armed, std::atomic<int> *error,
+               int *packed_read) {
+        static_cast<void>(listener_fd);
+        static_cast<void>(armed);
+        static_cast<void>(error);
+        static_cast<void>(packed_read);
+        return false;
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
+};
+
+} // namespace io_uring_accept_direct_example
+
 #endif

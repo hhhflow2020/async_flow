@@ -1,13 +1,16 @@
 #include <atomic>
-#include <cerrno>
 #include <iostream>
 
 #include "support/io_uring_accept_direct_socket_helpers.hpp"
 #include "support/io_uring_accept_direct_task.hpp"
 
 int main() {
-#if defined(__linux__)
     using namespace io_uring_accept_direct_example;
+
+    if constexpr (!af::supports_io_uring) {
+        std::cout << "io_uring accept direct example is Linux-only\n";
+        return 0;
+    }
 
     direct_accept_async::init();
     if (!direct_accept_async::io_uring_backend_available(DirectAcceptThreads::IO_0)) {
@@ -16,9 +19,8 @@ int main() {
         return 0;
     }
 
-    af::UniqueFd listener;
-    sockaddr_in address{};
-    if (!create_loopback_listener(listener, address)) {
+    DirectAcceptLoopbackPeer peer{};
+    if (!peer.create_listener()) {
         std::cerr << "listener setup failed\n";
         direct_accept_async::shutdown();
         return 1;
@@ -28,7 +30,7 @@ int main() {
     std::atomic<int> error{0};
     int packed_read = 0;
     const bool started = direct_accept_async::start_task<DirectAcceptRoundTripTask>(
-        listener.get(), &armed, &error, &packed_read);
+        peer.listener.get(), &armed, &error, &packed_read);
     AF_ASSERT(started);
     if (!started) {
         direct_accept_async::shutdown();
@@ -49,22 +51,14 @@ int main() {
         return unsupported_direct_accept_error(task_error) ? 0 : 1;
     }
 
-    af::UniqueFd client(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
-    if (!client) {
-        std::cerr << "client socket failed\n";
-        direct_accept_async::shutdown();
-        return 1;
-    }
-    const int connect_rc =
-        ::connect(client.get(), reinterpret_cast<sockaddr *>(&address), sizeof(address));
-    if (connect_rc != 0 && errno != EINPROGRESS) {
+    if (!peer.connect_client()) {
         std::cerr << "client connect failed\n";
         direct_accept_async::shutdown();
         return 1;
     }
 
     const char request[2]{'A', 'B'};
-    if (!write_exact_until(client.get(), request, sizeof(request))) {
+    if (!peer.write_request(request, sizeof(request))) {
         std::cerr << "client write failed\n";
         direct_accept_async::shutdown();
         return 1;
@@ -81,7 +75,7 @@ int main() {
     }
 
     char response[2]{};
-    if (!read_exact_until(client.get(), response, sizeof(response))) {
+    if (!peer.read_response(response, sizeof(response))) {
         std::cerr << "client read failed\n";
         return 1;
     }
@@ -89,8 +83,4 @@ int main() {
     std::cout << "io_uring accept direct packed=" << packed_read << " response=" << response[0]
               << response[1] << '\n';
     return 0;
-#else
-    std::cout << "io_uring accept direct example is Linux-only\n";
-    return 0;
-#endif
 }
