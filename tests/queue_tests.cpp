@@ -8,6 +8,16 @@
 
 #include "af/detail/queue/bounded_queues.hpp"
 
+TEST(QueueTests, BoundedQueueSequenceBeforeHandlesUnsignedWrapWindow) {
+    constexpr std::size_t max = std::numeric_limits<std::size_t>::max();
+
+    EXPECT_FALSE(af::detail::bounded_queue_sequence_before(10, 10));
+    EXPECT_FALSE(af::detail::bounded_queue_sequence_before(11, 10));
+    EXPECT_TRUE(af::detail::bounded_queue_sequence_before(9, 10));
+    EXPECT_FALSE(af::detail::bounded_queue_sequence_before(0, max));
+    EXPECT_TRUE(af::detail::bounded_queue_sequence_before(max, 0));
+}
+
 TEST(QueueTests, BoundedSpscPreservesFifoAndRejectsWhenFull) {
     af::detail::BoundedSpscQueue<int> queue(2);
     int a = 1;

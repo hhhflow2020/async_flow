@@ -30,13 +30,12 @@ public:
         for (;;) {
             cell = &buffer_[pos & mask_];
             const std::size_t seq = cell->sequence.load(std::memory_order_acquire);
-            const auto diff = static_cast<std::intptr_t>(seq) - static_cast<std::intptr_t>(pos);
-            if (diff == 0) {
+            if (seq == pos) {
                 if (enqueue_pos_.compare_exchange_weak(pos, pos + 1U, std::memory_order_relaxed,
                                                        std::memory_order_relaxed)) {
                     break;
                 }
-            } else if (diff < 0) {
+            } else if (bounded_queue_sequence_before(seq, pos)) {
                 return false;
             } else {
                 pos = enqueue_pos_.load(std::memory_order_relaxed);
@@ -52,8 +51,7 @@ public:
         const std::size_t pos = dequeue_pos_;
         Cell &cell = buffer_[pos & mask_];
         const std::size_t seq = cell.sequence.load(std::memory_order_acquire);
-        const auto diff = static_cast<std::intptr_t>(seq) - static_cast<std::intptr_t>(pos + 1U);
-        if (diff != 0) {
+        if (seq != pos + 1U) {
             return nullptr;
         }
 
@@ -69,9 +67,7 @@ public:
         while (count < max_count) {
             Cell &cell = buffer_[pos & mask_];
             const std::size_t seq = cell.sequence.load(std::memory_order_acquire);
-            const auto diff =
-                static_cast<std::intptr_t>(seq) - static_cast<std::intptr_t>(pos + 1U);
-            if (diff != 0) {
+            if (seq != pos + 1U) {
                 break;
             }
 

@@ -12,6 +12,11 @@ inline constexpr std::size_t max_power_of_two_size =
 inline constexpr std::size_t max_bounded_queue_capacity =
     std::size_t{1} << (std::numeric_limits<std::size_t>::digits - 2U);
 
+[[nodiscard]] inline constexpr bool bounded_queue_sequence_before(std::size_t sequence,
+                                                                  std::size_t position) noexcept {
+    return sequence - position >= max_power_of_two_size;
+}
+
 inline constexpr std::size_t next_power_of_two(std::size_t value) noexcept {
     if (value <= 1U) {
         return 1U;
