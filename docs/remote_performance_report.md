@@ -1977,3 +1977,43 @@ Interpretation:
   one CAS reservation. Further gains likely require a dedicated producer-side
   reservation/cache strategy or runtime-level batch drain so producers do less
   per-cell readiness probing.
+
+## 2026-06-03 Executor Drain And Notify Experiments Rejected
+
+This pass evaluated two scheduler hot-path ideas and rejected both after remote
+benchmarking:
+
+- Batch-draining SPSC/MPSC queues into an executor-local inbound buffer.
+- Skipping repeated external-queue notifications when `external_ready_` was
+  already set and the executor did not report itself sleeping.
+
+The batch-drain experiment preserved correctness in local and remote tests, but
+it changed the scheduler cost profile enough to regress remote runtime
+benchmarks. The notify experiment was narrowed to external queues only, but the
+remote result was still mixed and did not justify changing the wake protocol.
+
+Validation and comparison data:
+
+- Local macOS Debug full `asyncflow_runtime_tests`: 189 tests, 103 passed,
+  86 skipped, 0 failed.
+- Local macOS Debug `asyncflow_runtime_stress_tests`: 9/9 passed.
+- Remote GCC Debug batch-drain experiment:
+  `ExternalStart/8192` 11.6 ms, `CrossThreadHop/8192` 20.2 ms.
+- Remote Clang Debug batch-drain experiment:
+  `ExternalStart/8192` 11.3 ms, `CrossThreadHop/8192` 19.2 ms.
+- Remote GCC Debug external-notify-only experiment:
+  `ExternalStart/8192` 11.6 ms, `CrossThreadHop/8192` 19.5 ms.
+- Remote GCC Debug after reverting the experiments:
+  `ExternalStart/8192` 9.20 ms, `CrossThreadHop/8192` 21.0 ms.
+- Remote Clang Debug after reverting the experiments:
+  `ExternalStart/8192` 11.8 ms, `CrossThreadHop/8192` 19.5 ms.
+
+Interpretation:
+
+- Do not add executor-side inbound drain just to reduce `pop_one()` queue
+  probes; the extra buffering and scheduling-shape change are not justified by
+  current Linux GCC/Clang results.
+- Do not move the generic `notify()` sleeping check ahead of `wake_epoch_`, and
+  do not currently special-case repeated external notifications. A future wake
+  optimization needs a dedicated benchmark and likely a more explicit
+  sleep-transition protocol rather than a local branch reorder.
