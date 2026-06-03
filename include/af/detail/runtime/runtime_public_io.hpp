@@ -29,6 +29,28 @@ private:
         return false;
     }
 
+    template <typename Submit>
+    [[nodiscard]] static bool submit_to_executor(Thread thread, int fd, IoResult *result,
+                                                 Submit submit) noexcept {
+        const std::uint16_t index = RuntimeT::thread_index(thread);
+        if (index >= RuntimeT::executors_.size()) {
+            return fail_io_result(result, fd, EINVAL);
+        }
+        return submit(*RuntimeT::executors_[index]);
+    }
+
+    template <typename Submit>
+    [[nodiscard]] static bool submit_linux_only_to_executor(Thread thread, int fd, IoResult *result,
+                                                            Submit submit) noexcept {
+        if constexpr (detail::platform_linux) {
+            return submit_to_executor(thread, fd, result, submit);
+        } else {
+            static_cast<void>(thread);
+            static_cast<void>(submit);
+            return fail_io_result(result, fd, ENOSYS);
+        }
+    }
+
 public:
     [[nodiscard]] static bool io_backend_available(Thread thread) noexcept {
         const std::uint16_t index = RuntimeT::thread_index(thread);
@@ -749,20 +771,9 @@ public:
             return fail_io_result(result, fd, fd < 0 ? EBADF : EINVAL);
         }
 
-#if defined(__linux__)
-        const std::uint16_t index = RuntimeT::thread_index(thread);
-        if (index >= RuntimeT::executors_.size()) {
-            return fail_io_result(result, fd, EINVAL);
-        }
-        return RuntimeT::executors_[index]->submit_io_uring_accept(fd, address, address_size, flags,
-                                                                   task, result);
-#else
-        static_cast<void>(thread);
-        static_cast<void>(address);
-        static_cast<void>(address_size);
-        static_cast<void>(flags);
-        return fail_io_result(result, fd, ENOSYS);
-#endif
+        return submit_linux_only_to_executor(thread, fd, result, [&](auto &executor) noexcept {
+            return executor.submit_io_uring_accept(fd, address, address_size, flags, task, result);
+        });
     }
 
     [[nodiscard]] static bool io_submit_accept_direct(Thread thread, int fd, sockaddr *address,
@@ -774,20 +785,11 @@ public:
             return fail_io_result(result, file_index, fd < 0 || file_index < 0 ? EBADF : EINVAL);
         }
 
-#if defined(__linux__)
-        const std::uint16_t index = RuntimeT::thread_index(thread);
-        if (index >= RuntimeT::executors_.size()) {
-            return fail_io_result(result, file_index, EINVAL);
-        }
-        return RuntimeT::executors_[index]->submit_io_uring_accept_direct(
-            fd, address, address_size, flags, file_index, task, result);
-#else
-        static_cast<void>(thread);
-        static_cast<void>(address);
-        static_cast<void>(address_size);
-        static_cast<void>(flags);
-        return fail_io_result(result, file_index, ENOSYS);
-#endif
+        return submit_linux_only_to_executor(
+            thread, file_index, result, [&](auto &executor) noexcept {
+                return executor.submit_io_uring_accept_direct(fd, address, address_size, flags,
+                                                              file_index, task, result);
+            });
     }
 
     [[nodiscard]] static bool io_submit_accept_multishot(Thread thread, int fd, sockaddr *address,
@@ -798,20 +800,10 @@ public:
             return fail_io_result(result, fd, fd < 0 ? EBADF : EINVAL);
         }
 
-#if defined(__linux__)
-        const std::uint16_t index = RuntimeT::thread_index(thread);
-        if (index >= RuntimeT::executors_.size()) {
-            return fail_io_result(result, fd, EINVAL);
-        }
-        return RuntimeT::executors_[index]->submit_io_uring_accept_multishot(
-            fd, address, address_size, flags, task, result);
-#else
-        static_cast<void>(thread);
-        static_cast<void>(address);
-        static_cast<void>(address_size);
-        static_cast<void>(flags);
-        return fail_io_result(result, fd, ENOSYS);
-#endif
+        return submit_linux_only_to_executor(thread, fd, result, [&](auto &executor) noexcept {
+            return executor.submit_io_uring_accept_multishot(fd, address, address_size, flags, task,
+                                                             result);
+        });
     }
 
     [[nodiscard]] static bool io_submit_connect(Thread thread, int fd, const sockaddr *address,
@@ -822,19 +814,9 @@ public:
             return fail_io_result(result, fd, fd < 0 ? EBADF : EINVAL);
         }
 
-#if defined(__linux__)
-        const std::uint16_t index = RuntimeT::thread_index(thread);
-        if (index >= RuntimeT::executors_.size()) {
-            return fail_io_result(result, fd, EINVAL);
-        }
-        return RuntimeT::executors_[index]->submit_io_uring_connect(fd, address, address_size, task,
-                                                                    result);
-#else
-        static_cast<void>(thread);
-        static_cast<void>(address);
-        static_cast<void>(address_size);
-        return fail_io_result(result, fd, ENOSYS);
-#endif
+        return submit_linux_only_to_executor(thread, fd, result, [&](auto &executor) noexcept {
+            return executor.submit_io_uring_connect(fd, address, address_size, task, result);
+        });
     }
 
     [[nodiscard]] static bool io_submit_recv_multishot(Thread thread, int fd,
@@ -845,19 +827,9 @@ public:
             return fail_io_result(result, fd, fd < 0 ? EBADF : EINVAL);
         }
 
-#if defined(__linux__)
-        const std::uint16_t index = RuntimeT::thread_index(thread);
-        if (index >= RuntimeT::executors_.size()) {
-            return fail_io_result(result, fd, EINVAL);
-        }
-        return RuntimeT::executors_[index]->submit_io_uring_recv_multishot(fd, buffer_group, flags,
-                                                                           task, result);
-#else
-        static_cast<void>(thread);
-        static_cast<void>(buffer_group);
-        static_cast<void>(flags);
-        return fail_io_result(result, fd, ENOSYS);
-#endif
+        return submit_linux_only_to_executor(thread, fd, result, [&](auto &executor) noexcept {
+            return executor.submit_io_uring_recv_multishot(fd, buffer_group, flags, task, result);
+        });
     }
 
     [[nodiscard]] static bool
@@ -868,21 +840,10 @@ public:
             return fail_io_result(result, fd, fd < 0 ? EBADF : EINVAL);
         }
 
-#if defined(__linux__)
-        const std::uint16_t index = RuntimeT::thread_index(thread);
-        if (index >= RuntimeT::executors_.size()) {
-            return fail_io_result(result, fd, EINVAL);
-        }
-        return RuntimeT::executors_[index]->submit_io_uring_recvmsg_multishot(
-            fd, buffer_group, name_capacity, control_capacity, flags, task, result);
-#else
-        static_cast<void>(thread);
-        static_cast<void>(buffer_group);
-        static_cast<void>(name_capacity);
-        static_cast<void>(control_capacity);
-        static_cast<void>(flags);
-        return fail_io_result(result, fd, ENOSYS);
-#endif
+        return submit_linux_only_to_executor(thread, fd, result, [&](auto &executor) noexcept {
+            return executor.submit_io_uring_recvmsg_multishot(
+                fd, buffer_group, name_capacity, control_capacity, flags, task, result);
+        });
     }
 
     [[nodiscard]] static bool io_submit_send_zc(Thread thread, int fd, const void *data,
@@ -892,19 +853,9 @@ public:
             return fail_io_result(result, fd, fd < 0 ? EBADF : EINVAL);
         }
 
-#if defined(__linux__)
-        const std::uint16_t index = RuntimeT::thread_index(thread);
-        if (index >= RuntimeT::executors_.size()) {
-            return fail_io_result(result, fd, EINVAL);
-        }
-        return RuntimeT::executors_[index]->submit_io_uring_send_zc(fd, data, size, flags, task,
-                                                                    result);
-#else
-        static_cast<void>(thread);
-        static_cast<void>(size);
-        static_cast<void>(flags);
-        return fail_io_result(result, fd, ENOSYS);
-#endif
+        return submit_linux_only_to_executor(thread, fd, result, [&](auto &executor) noexcept {
+            return executor.submit_io_uring_send_zc(fd, data, size, flags, task, result);
+        });
     }
 
     [[nodiscard]] static bool io_submit_sendmsg_zc(Thread thread, int fd, const void *data,
@@ -915,21 +866,10 @@ public:
             return fail_io_result(result, fd, fd < 0 ? EBADF : EINVAL);
         }
 
-#if defined(__linux__)
-        const std::uint16_t index = RuntimeT::thread_index(thread);
-        if (index >= RuntimeT::executors_.size()) {
-            return fail_io_result(result, fd, EINVAL);
-        }
-        return RuntimeT::executors_[index]->submit_io_uring_sendmsg_zc(
-            fd, data, size, address, address_size, flags, task, result);
-#else
-        static_cast<void>(thread);
-        static_cast<void>(size);
-        static_cast<void>(address);
-        static_cast<void>(address_size);
-        static_cast<void>(flags);
-        return fail_io_result(result, fd, ENOSYS);
-#endif
+        return submit_linux_only_to_executor(thread, fd, result, [&](auto &executor) noexcept {
+            return executor.submit_io_uring_sendmsg_zc(fd, data, size, address, address_size, flags,
+                                                       task, result);
+        });
     }
 
     [[nodiscard]] static bool io_submit_sendmsg_zc_iov(Thread thread, int fd, const iovec *iov,
@@ -940,20 +880,10 @@ public:
             return fail_io_result(result, fd, fd < 0 ? EBADF : EINVAL);
         }
 
-#if defined(__linux__)
-        const std::uint16_t index = RuntimeT::thread_index(thread);
-        if (index >= RuntimeT::executors_.size()) {
-            return fail_io_result(result, fd, EINVAL);
-        }
-        return RuntimeT::executors_[index]->submit_io_uring_sendmsg_zc_iov(
-            fd, iov, iov_count, address, address_size, flags, task, result);
-#else
-        static_cast<void>(thread);
-        static_cast<void>(address);
-        static_cast<void>(address_size);
-        static_cast<void>(flags);
-        return fail_io_result(result, fd, ENOSYS);
-#endif
+        return submit_linux_only_to_executor(thread, fd, result, [&](auto &executor) noexcept {
+            return executor.submit_io_uring_sendmsg_zc_iov(fd, iov, iov_count, address,
+                                                           address_size, flags, task, result);
+        });
     }
 
     [[nodiscard]] static bool io_submit_recvmsg_fixed_file_iov(Thread thread, int file_index,
@@ -965,18 +895,11 @@ public:
             return fail_io_result(result, file_index, file_index < 0 ? EBADF : EINVAL);
         }
 
-#if defined(__linux__)
-        const std::uint16_t index = RuntimeT::thread_index(thread);
-        if (index >= RuntimeT::executors_.size()) {
-            return fail_io_result(result, file_index, EINVAL);
-        }
-        return RuntimeT::executors_[index]->submit_io_uring_recvmsg_fixed_file_iov(
-            file_index, iov, iov_count, flags, task, result);
-#else
-        static_cast<void>(thread);
-        static_cast<void>(flags);
-        return fail_io_result(result, file_index, ENOSYS);
-#endif
+        return submit_linux_only_to_executor(
+            thread, file_index, result, [&](auto &executor) noexcept {
+                return executor.submit_io_uring_recvmsg_fixed_file_iov(file_index, iov, iov_count,
+                                                                       flags, task, result);
+            });
     }
 
     [[nodiscard]] static bool io_submit_recvmsg_iov(Thread thread, int fd, const iovec *iov,
@@ -987,20 +910,10 @@ public:
             return fail_io_result(result, fd, fd < 0 ? EBADF : EINVAL);
         }
 
-#if defined(__linux__)
-        const std::uint16_t index = RuntimeT::thread_index(thread);
-        if (index >= RuntimeT::executors_.size()) {
-            return fail_io_result(result, fd, EINVAL);
-        }
-        return RuntimeT::executors_[index]->submit_io_uring_recvmsg_iov(
-            fd, iov, iov_count, address, address_size, flags, task, result);
-#else
-        static_cast<void>(thread);
-        static_cast<void>(address);
-        static_cast<void>(address_size);
-        static_cast<void>(flags);
-        return fail_io_result(result, fd, ENOSYS);
-#endif
+        return submit_linux_only_to_executor(thread, fd, result, [&](auto &executor) noexcept {
+            return executor.submit_io_uring_recvmsg_iov(fd, iov, iov_count, address, address_size,
+                                                        flags, task, result);
+        });
     }
 
     [[nodiscard]] static bool io_submit_recvmsg(Thread thread, int fd, void *data, std::size_t size,
@@ -1011,21 +924,10 @@ public:
             return fail_io_result(result, fd, fd < 0 ? EBADF : EINVAL);
         }
 
-#if defined(__linux__)
-        const std::uint16_t index = RuntimeT::thread_index(thread);
-        if (index >= RuntimeT::executors_.size()) {
-            return fail_io_result(result, fd, EINVAL);
-        }
-        return RuntimeT::executors_[index]->submit_io_uring_recvmsg(
-            fd, data, size, address, address_size, flags, task, result);
-#else
-        static_cast<void>(thread);
-        static_cast<void>(size);
-        static_cast<void>(address);
-        static_cast<void>(address_size);
-        static_cast<void>(flags);
-        return fail_io_result(result, fd, ENOSYS);
-#endif
+        return submit_linux_only_to_executor(thread, fd, result, [&](auto &executor) noexcept {
+            return executor.submit_io_uring_recvmsg(fd, data, size, address, address_size, flags,
+                                                    task, result);
+        });
     }
 
     [[nodiscard]] static bool io_submit_sendmsg_fixed_file_iov(Thread thread, int file_index,
@@ -1037,18 +939,11 @@ public:
             return fail_io_result(result, file_index, file_index < 0 ? EBADF : EINVAL);
         }
 
-#if defined(__linux__)
-        const std::uint16_t index = RuntimeT::thread_index(thread);
-        if (index >= RuntimeT::executors_.size()) {
-            return fail_io_result(result, file_index, EINVAL);
-        }
-        return RuntimeT::executors_[index]->submit_io_uring_sendmsg_fixed_file_iov(
-            file_index, iov, iov_count, flags, task, result);
-#else
-        static_cast<void>(thread);
-        static_cast<void>(flags);
-        return fail_io_result(result, file_index, ENOSYS);
-#endif
+        return submit_linux_only_to_executor(
+            thread, file_index, result, [&](auto &executor) noexcept {
+                return executor.submit_io_uring_sendmsg_fixed_file_iov(file_index, iov, iov_count,
+                                                                       flags, task, result);
+            });
     }
 
     [[nodiscard]] static bool io_submit_sendmsg_iov(Thread thread, int fd, const iovec *iov,
@@ -1059,20 +954,10 @@ public:
             return fail_io_result(result, fd, fd < 0 ? EBADF : EINVAL);
         }
 
-#if defined(__linux__)
-        const std::uint16_t index = RuntimeT::thread_index(thread);
-        if (index >= RuntimeT::executors_.size()) {
-            return fail_io_result(result, fd, EINVAL);
-        }
-        return RuntimeT::executors_[index]->submit_io_uring_sendmsg_iov(
-            fd, iov, iov_count, address, address_size, flags, task, result);
-#else
-        static_cast<void>(thread);
-        static_cast<void>(address);
-        static_cast<void>(address_size);
-        static_cast<void>(flags);
-        return fail_io_result(result, fd, ENOSYS);
-#endif
+        return submit_linux_only_to_executor(thread, fd, result, [&](auto &executor) noexcept {
+            return executor.submit_io_uring_sendmsg_iov(fd, iov, iov_count, address, address_size,
+                                                        flags, task, result);
+        });
     }
 
     [[nodiscard]] static bool io_submit_sendmsg(Thread thread, int fd, const void *data,
@@ -1083,21 +968,10 @@ public:
             return fail_io_result(result, fd, fd < 0 ? EBADF : EINVAL);
         }
 
-#if defined(__linux__)
-        const std::uint16_t index = RuntimeT::thread_index(thread);
-        if (index >= RuntimeT::executors_.size()) {
-            return fail_io_result(result, fd, EINVAL);
-        }
-        return RuntimeT::executors_[index]->submit_io_uring_sendmsg(
-            fd, data, size, address, address_size, flags, task, result);
-#else
-        static_cast<void>(thread);
-        static_cast<void>(size);
-        static_cast<void>(address);
-        static_cast<void>(address_size);
-        static_cast<void>(flags);
-        return fail_io_result(result, fd, ENOSYS);
-#endif
+        return submit_linux_only_to_executor(thread, fd, result, [&](auto &executor) noexcept {
+            return executor.submit_io_uring_sendmsg(fd, data, size, address, address_size, flags,
+                                                    task, result);
+        });
     }
 };
 

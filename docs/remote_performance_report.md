@@ -3282,6 +3282,51 @@ Interpretation:
   behavior regresses while Linux-only io_uring capabilities remain separately
   guarded.
 
+## 2026-06-03 Runtime Public IO Macro Consolidation
+
+This pass reduces platform-guard noise in the public runtime IO forwarding
+layer. The behavior is unchanged: Linux-only io_uring operations still submit to
+the configured executor on Linux, and still report `ENOSYS` on non-Linux POSIX
+platforms after the public argument validation that existed before.
+
+Changes under validation:
+
+- Added a shared `RuntimePublicIo::submit_to_executor` helper for executor index
+  lookup, invalid-thread error handling, and final forwarding.
+- Added `RuntimePublicIo::submit_linux_only_to_executor`, implemented with
+  `detail::platform_linux` instead of local preprocessor branches, so Linux-only
+  submit methods keep the prior non-Linux `ENOSYS` behavior before executor
+  lookup.
+- Added non-Linux `Executor` stubs for the few io_uring methods that previously
+  only existed inside Linux compilation blocks, allowing the public forwarding
+  layer to compile without method-level platform branches.
+- Rechecked `include/af/detail/runtime/runtime_public_io.hpp`: no
+  `#if defined(__linux__)`, `#else`, or `#endif` remains in that header.
+
+Correctness checks:
+
+- Local macOS Debug built `asyncflow_runtime_tests`.
+- Local macOS Debug ctest selection
+  `RuntimePublicIo|NonLinuxIoUringReadFallback|IoUringSubmitFallback`: 3 tests,
+  0 failures.
+- Local macOS Debug full CTest: 236 tests, 0 failures.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: built `asyncflow_runtime_tests`; CTest excluding
+  `NOT_BUILT` placeholders reported 188 tests, 0 failures.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: built `asyncflow_runtime_tests`; the same CTest
+  selection reported 188 tests, 0 failures.
+
+Interpretation:
+
+- This is a structure and public-layer portability cleanup. It does not change
+  queue topology, IO operation ownership, lock use, atomics, memory ordering,
+  wakeups, or io_uring SQE/CQE handling.
+- Keeping the non-Linux fallback as `ENOSYS` before executor lookup preserves the
+  existing public API semantics for Linux-only capabilities.
+
 ## 2026-06-03 Scheduling Mode Convenience API
 
 This pass makes the SPSC/MPSC scheduling semantics explicit at the task API

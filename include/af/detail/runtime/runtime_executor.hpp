@@ -866,6 +866,28 @@ public:
                                   nullptr, 0, nullptr, nullptr, nullptr, 0, 0, -1, 0, false, true,
                                   false, buffer_group, true);
     }
+#else
+    [[nodiscard]] bool submit_io_uring_recv_multishot(int fd, std::uint16_t buffer_group,
+                                                      std::uint32_t flags, Task *task,
+                                                      IoResult *result) noexcept {
+        static_cast<void>(buffer_group);
+        static_cast<void>(flags);
+        static_cast<void>(task);
+        return fail_io_result(result, fd, ENOSYS);
+    }
+
+    [[nodiscard]] bool submit_io_uring_recvmsg_multishot(int fd, std::uint16_t buffer_group,
+                                                         socklen_t name_capacity,
+                                                         std::size_t control_capacity,
+                                                         std::uint32_t flags, Task *task,
+                                                         IoResult *result) noexcept {
+        static_cast<void>(buffer_group);
+        static_cast<void>(name_capacity);
+        static_cast<void>(control_capacity);
+        static_cast<void>(flags);
+        static_cast<void>(task);
+        return fail_io_result(result, fd, ENOSYS);
+    }
 #endif
     [[nodiscard]] bool submit_io_uring_send(int fd, const void *data, std::size_t size,
                                             std::uint32_t flags, Task *task,
@@ -944,6 +966,42 @@ public:
             detail::io_uring_op_sendmsg_zc, fd, nullptr, 0, 0, flags, io_writable, task, result,
             const_cast<sockaddr *>(address), address_size, nullptr, nullptr, 0, nullptr, nullptr,
             iov, static_cast<std::size_t>(iov_count), 0, -1, 0, false, false, true);
+    }
+#else
+    [[nodiscard]] bool submit_io_uring_send_zc(int fd, const void *data, std::size_t size,
+                                               std::uint32_t flags, Task *task,
+                                               IoResult *result) noexcept {
+        static_cast<void>(data);
+        static_cast<void>(size);
+        static_cast<void>(flags);
+        static_cast<void>(task);
+        return fail_io_result(result, fd, ENOSYS);
+    }
+
+    [[nodiscard]] bool submit_io_uring_sendmsg_zc(int fd, const void *data, std::size_t size,
+                                                  const sockaddr *address, socklen_t address_size,
+                                                  std::uint32_t flags, Task *task,
+                                                  IoResult *result) noexcept {
+        static_cast<void>(data);
+        static_cast<void>(size);
+        static_cast<void>(address);
+        static_cast<void>(address_size);
+        static_cast<void>(flags);
+        static_cast<void>(task);
+        return fail_io_result(result, fd, ENOSYS);
+    }
+
+    [[nodiscard]] bool submit_io_uring_sendmsg_zc_iov(int fd, const iovec *iov, int iov_count,
+                                                      const sockaddr *address,
+                                                      socklen_t address_size, std::uint32_t flags,
+                                                      Task *task, IoResult *result) noexcept {
+        static_cast<void>(iov);
+        static_cast<void>(iov_count);
+        static_cast<void>(address);
+        static_cast<void>(address_size);
+        static_cast<void>(flags);
+        static_cast<void>(task);
+        return fail_io_result(result, fd, ENOSYS);
     }
 #endif
     [[nodiscard]] bool submit_io_uring_recvmsg_fixed_file_iov(int file_index, const iovec *iov,
