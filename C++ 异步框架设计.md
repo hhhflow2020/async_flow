@@ -12,7 +12,7 @@ AsyncRuntime + Fixed Threads + Task + Scheduler + Shard + Ordered Batch
 
 核心目标：
 
-- 业务线程在编译期通过连续递增 enum 定义。
+- 业务线程在编译期通过 `thread_layout` 声明线程组、线程数量、线程能力和调试名称。
 - 任务对象由框架创建、调度、释放，业务不直接 `new` / `delete` / 栈上创建任务。
 - 任务内部可写状态机，可跨固定线程挂起恢复。
 - 同一个业务 key 始终路由到同一个逻辑线程，减少共享数据加锁。
@@ -25,36 +25,18 @@ AsyncRuntime + Fixed Threads + Task + Scheduler + Shard + Ordered Batch
 
 ## 2. 线程定义
 
-业务使用连续递增 enum 定义固定线程。建议使用 signed underlying type，并保留首尾哨兵：
+业务使用 tag + `thread_layout` 定义固定线程。不再要求业务手写连续递增 enum；runtime 会根据 layout 在编译期生成连续线程索引，并保留线程组的 begin/count/at()/shard() 视图。
 
 ```cpp
-enum class AppThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    Logic_1,
-    Logic_2,
-    Logic_3,
-    DB_0,
-    IO_0,
-    enum_thread_index_end,
-};
-```
+struct AppLogicThreadTag;
+struct AppDbThreadTag;
+struct AppIoThreadTag;
 
-规则：
-
-- `enum_thread_index_start = -1` 只作为边界哨兵，不参与调度。
-- 第一个真实线程默认索引为 0。
-- `enum_thread_index_end` 的值等于真实线程数量，可直接作为 `thread_count`。
-- 业务分组如 logic shard 数量不放入 runtime traits，而是在业务配置处根据 enum 计算。
-
-示例：
-
-```cpp
 struct AppRuntimeTraits {
-    using Thread = AppThread;
-
-    static constexpr std::uint16_t thread_count =
-        static_cast<std::uint16_t>(AppThread::enum_thread_index_end);
+    static constexpr auto threads =
+        af::thread_layout(af::thread_group<AppLogicThreadTag, 4, af::ThreadKind::Worker, "logic">(),
+                          af::thread_group<AppDbThreadTag, 1, af::ThreadKind::Worker, "db">(),
+                          af::thread_group<AppIoThreadTag, 1, af::ThreadKind::Epoll, "io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
@@ -63,17 +45,36 @@ struct AppRuntimeTraits {
 
 using async = af::AsyncRuntime<AppRuntimeTraits>;
 using Task = async::Task;
+using AppThread = async::Thread;
 
-inline constexpr AppThread player_logic_begin = AppThread::Logic_0;
-inline constexpr std::uint16_t player_logic_shard_count =
-    static_cast<std::uint16_t>(
-        async::thread_index(AppThread::Logic_3) -
-        async::thread_index(player_logic_begin) + 1U);
+inline constexpr auto player_logic_threads = async::thread_group<AppLogicThreadTag>();
+inline constexpr auto app_db_threads = async::thread_group<AppDbThreadTag>();
+inline constexpr auto app_io_threads = async::thread_group<AppIoThreadTag>();
+inline constexpr AppThread player_logic_begin = player_logic_threads.begin();
+inline constexpr std::uint16_t player_logic_shard_count = player_logic_threads.count;
+
+struct AppThreads {
+    static constexpr AppThread Logic_0 = player_logic_threads.template at<0>();
+    static constexpr AppThread Logic_1 = player_logic_threads.template at<1>();
+    static constexpr AppThread Logic_2 = player_logic_threads.template at<2>();
+    static constexpr AppThread Logic_3 = player_logic_threads.template at<3>();
+    static constexpr AppThread DB_0 = app_db_threads.template at<0>();
+    static constexpr AppThread IO_0 = app_io_threads.template at<0>();
+};
 
 inline AppThread player_thread(std::uint64_t player_id) noexcept {
-    return async::shard_by<player_logic_begin, player_logic_shard_count>(player_id);
+    return player_logic_threads.shard(player_id);
 }
 ```
+
+规则：
+
+- `thread_layout(...)` 至少包含一个线程组。
+- 每个 `thread_group<Tag, Count, Kind, Name>()` 的 tag 必须唯一，`Count` 必须大于 0。
+- `Kind` 声明线程能力，例如 `Worker`、`Io`、`Epoll`、`IoUring`、`Log`。
+- `Name` 用于 runtime 启动时调用系统线程命名接口，线程名形如 `af-logic-0`、`af-io-0`，方便 `top`、`ps -L`、`htop`、`lldb/gdb` 定位。
+- `thread_group<Tag>()` 返回编译期轻量视图，`begin()`、`count`、`at<N>()`、`at(index)`、`shard(key)` 都只做整数运算，不引入堆分配。
+- `async::Thread` 本质上保存一个 `uint16_t` index；普通调度热路径直接用该 index 定位 executor 和队列。
 
 ## 3. Runtime Traits
 
@@ -82,8 +83,7 @@ inline AppThread player_thread(std::uint64_t player_id) noexcept {
 必填项：
 
 ```cpp
-using Thread = AppThread;
-static constexpr std::uint16_t thread_count = ...;
+static constexpr auto threads = af::thread_layout(...);
 ```
 
 可选项：
@@ -92,6 +92,8 @@ static constexpr std::uint16_t thread_count = ...;
 static constexpr std::size_t spsc_queue_capacity = 1024;
 static constexpr std::size_t external_queue_capacity = 1024;
 static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
+static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Reject;
+static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Reject;
 static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 ```
 
@@ -100,6 +102,8 @@ static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitFo
 - `spsc_queue_capacity = 1024`
 - `external_queue_capacity = spsc_queue_capacity`
 - `queue_full_policy = QueueFullPolicy::Reject`
+- `runtime_queue_full_policy = queue_full_policy`
+- `external_queue_full_policy = queue_full_policy`
 - `shutdown_policy = ShutdownPolicy::WaitForTasks`
 
 ## 4. Task 模型
@@ -179,8 +183,13 @@ enum class TaskResult : std::uint8_t {
 任务内部可使用的 protected API：
 
 ```cpp
-bool schedule(Thread thread) noexcept;
-TaskResult pending_on(Thread thread) noexcept;
+bool schedule(Thread thread, af::ScheduleMode mode = af::ScheduleMode::Auto) noexcept;
+bool schedule_fast(Thread thread) noexcept;
+bool schedule_ordered(Thread thread) noexcept;
+
+TaskResult pending_on(Thread thread, af::ScheduleMode mode = af::ScheduleMode::Auto) noexcept;
+TaskResult pending_fast(Thread thread) noexcept;
+TaskResult pending_ordered(Thread thread) noexcept;
 
 static TaskResult done() noexcept;
 static TaskResult pending() noexcept;
@@ -200,6 +209,9 @@ std::uint32_t last_parallel_failures() const noexcept;
 - 首次启动函数可命名为 `do_it()`，也可以是业务自定义名称。
 - 启动函数里必须完成首次 `schedule()`。
 - 跨线程继续执行优先使用 `pending_on(thread)`，隐藏 `Runtime::post()` 细节。
+- 默认 `schedule()` / `pending_on()` 使用 `ScheduleMode::Auto`，runtime 线程优先走 local/SPSC 低开销路径。
+- 需要明确低开销 runtime-thread-only 路径时使用 `schedule_fast()` / `pending_fast()`。
+- 需要多个生产者在目标线程上共享统一入队顺序时使用 `schedule_ordered()` / `pending_ordered()`，该模式会强制走目标 MPSC。
 - `run()` 不允许抛异常；debug 下会断言。
 
 ## 5. Runtime API
@@ -223,7 +235,8 @@ bool ok = async::start_task<MyTask>(do_it_args...);
 调度与线程信息：
 
 ```cpp
-bool ok = async::post(AppThread::Logic_0, task);
+bool ok = async::post(AppThreads::Logic_0, task);
+bool ordered = async::post(AppThreads::Logic_0, task, af::ScheduleMode::Ordered);
 AppThread thread = async::current_thread();
 std::uint16_t index = async::current_thread_index();
 bool runtime_thread = async::is_runtime_thread();
@@ -233,14 +246,15 @@ bool stopping = async::is_stopping();
 线程索引转换：
 
 ```cpp
-std::uint16_t index = async::thread_index(AppThread::Logic_0);
+std::uint16_t index = async::thread_index(AppThreads::Logic_0);
 AppThread thread = async::thread_from_index(index);
+auto logic_threads = async::thread_group<AppLogicThreadTag>();
 ```
 
 分片：
 
 ```cpp
-AppThread thread = async::shard_by<player_logic_begin, player_logic_shard_count>(player_id);
+AppThread thread = player_logic_threads.shard(player_id);
 auto sharded = async::split_by_shard(std::move(ops), shard_count, key_fn);
 ```
 
@@ -248,7 +262,7 @@ auto sharded = async::split_by_shard(std::move(ops), shard_count, key_fn);
 
 ```cpp
 std::uint32_t count = async::unfinished_task_count();
-std::uint64_t batch_id = async::ordered_last_applied_batch_id(AppThread::Logic_0);
+std::uint64_t batch_id = async::ordered_last_applied_batch_id(AppThreads::Logic_0);
 ```
 
 ## 6. 调度实现
@@ -259,15 +273,50 @@ std::uint64_t batch_id = async::ordered_last_applied_batch_id(AppThread::Logic_0
 
 ### 6.2 队列结构
 
-调度路径：
+每个 executor 有三类入队路径：
 
-- runtime 线程调度到自己：executor 本地 bounded queue。
-- runtime 线程调度到其它 runtime 线程：`source -> target` 的 bounded SPSC ring。
-- 非 runtime 线程进入 runtime：每个 target 一个 bounded MPSC ingress queue。
+- executor 本地 bounded queue：当前 runtime 线程投递给自身目标时的最低开销路径。
+- `source -> target` bounded SPSC ring：runtime 线程投递给其他 runtime 线程时的一对一路径。
+- target bounded MPSC ingress queue：外部线程进入 runtime，或者 runtime 线程显式要求目标顺序时使用。
 
 SPSC 队列使用 head/tail cache 减少共享 cache line 读取；队列容量会向上取 power-of-two，使用 mask 替代取模。
 
-### 6.3 满队列策略
+### 6.3 调度模式
+
+```cpp
+enum class ScheduleMode : std::uint8_t {
+    Auto,
+    Fast,
+    Ordered,
+};
+```
+
+`ScheduleMode::Auto` 是默认模式：
+
+- runtime 线程投递到自身目标：走 executor 本地 queue。
+- runtime 线程投递到其他 runtime 线程：走 source -> target SPSC。
+- 外部线程投递到 runtime：走目标 MPSC。
+
+`ScheduleMode::Fast` 是 runtime-thread-only 的低开销路径：
+
+- runtime 线程投递到自身目标：走 executor 本地 queue。
+- runtime 线程投递到其他 runtime 线程：走 source -> target SPSC。
+- 外部线程调用会失败，不会隐式 fallback 到 MPSC。
+
+`ScheduleMode::Ordered` 是目标线程统一入队顺序路径：
+
+- runtime 线程投递到自身目标：强制走目标 MPSC。
+- runtime 线程投递到其他 runtime 线程：强制走目标 MPSC。
+- 外部线程投递到 runtime：走目标 MPSC。
+
+因此，runtime 内部线程投递自身目标时也可以显式选择：
+
+- `schedule_fast(thread)` / `pending_fast(thread)`：保持 local queue 快速路径。
+- `schedule_ordered(thread)` / `pending_ordered(thread)`：强制走 MPSC，与其他生产者共享目标线程 admission order。
+
+完整说明见 `docs/runtime_scheduling_semantics.md`。
+
+### 6.4 满队列策略
 
 ```cpp
 enum class QueueFullPolicy : std::uint8_t {
@@ -279,9 +328,11 @@ enum class QueueFullPolicy : std::uint8_t {
 - `Reject`：队列满时调度失败，`schedule()` / `start_task()` 返回 `false`，框架回滚任务状态并释放未启动任务。
 - `Yield`：队列满时让出 CPU 并等待空位，适合业务必须接收任务但可以接受短暂等待的入口。
 
+traits 可以用 `runtime_queue_full_policy` 和 `external_queue_full_policy` 分别配置 runtime 生产者和外部生产者。这样可以让 runtime 内部路径在必要时等待，而外部入口保持失败返回，避免外部生产者在满载时被拖住。
+
 本地队列阻塞入队时，如果目标就是当前 executor，会优先执行本地已有任务，避免固定容量队列满后等待自己。
 
-### 6.4 active post 与 shutdown
+### 6.5 active post 与 shutdown
 
 `shutdown()` 会先把状态切换到 `Stopping`，等待已经进入 `post()` 的外部调度退出，然后根据 shutdown policy 决定是否等待任务完成。
 
@@ -440,7 +491,7 @@ bool handler(std::uint16_t shard, std::vector<Op>& ops, std::uint64_t batch_id);
 
 ```cpp
 bool ok = async::start_ordered_task<PlayerDeltaStream, ApplyPlayerDeltaBatchTask>(
-    AppThread::Logic_0,
+    AppThreads::Logic_0,
     std::move(batch));
 ```
 
@@ -541,28 +592,30 @@ auto sharded = af::split_change_batch(batch, shard_count);
 
 展示内容：
 
-- 使用 enum 定义固定线程。
+- 使用 tag + `thread_layout` 定义固定线程组。
 - 使用 `AppRuntimeTraits` 配置 runtime。
 - 定义 `using async = af::AsyncRuntime<AppRuntimeTraits>`。
 - 计算 `player_logic_shard_count`。
-- 使用 `async::shard_by<Begin, Count>(key)` 实现 player 到 logic shard 的路由。
+- 使用 `thread_group<Tag>().shard(key)` 实现 player 到 logic shard 的路由。
 
 关键代码：
 
 ```cpp
-enum class AppThread : std::int16_t {
-    enum_thread_index_start = -1,
-    Logic_0,
-    Logic_1,
-    Logic_2,
-    Logic_3,
-    DB_0,
-    IO_0,
-    enum_thread_index_end,
+struct AppRuntimeTraits {
+    static constexpr auto threads =
+        af::thread_layout(af::thread_group<AppLogicThreadTag, 4, af::ThreadKind::Worker, "logic">(),
+                          af::thread_group<AppDbThreadTag, 1, af::ThreadKind::Worker, "db">(),
+                          af::thread_group<AppIoThreadTag, 1, af::ThreadKind::Epoll, "io">());
 };
 
 using async = af::AsyncRuntime<AppRuntimeTraits>;
 using Task = async::Task;
+using AppThread = async::Thread;
+
+inline constexpr auto player_logic_threads = async::thread_group<AppLogicThreadTag>();
+inline AppThread player_thread(std::uint64_t player_id) noexcept {
+    return player_logic_threads.shard(player_id);
+}
 ```
 
 ### 11.2 basic.cpp：基础任务与状态机
@@ -641,7 +694,7 @@ async::parallel_shards(
 
 ```cpp
 async::start_ordered_task<PlayerDeltaStream, ApplyPlayerDeltaBatchTask>(
-    AppThread::Logic_0,
+    AppThreads::Logic_0,
     std::move(batch));
 
 async::parallel_shards_ordered(
@@ -873,11 +926,11 @@ async::parallel_shards_ordered(
 
 文件布局：
 
-- `tests/runtime_lifecycle_tests.cpp`：任务生命周期、状态机、背压、shutdown 策略。
-- `tests/runtime_parallel_tests.cpp`：parallel shards、失败汇总、有序 batch、ordered start 边界、retryable ordered apply。
-- `tests/runtime_stress_tests.cpp`：高并发 init/shutdown/start_task stress，可配合 TSAN 拉长运行。
-- `tests/utility_tests.cpp`：SPSC/MPSC/MPMC 队列、对象池、分片工具、CRUD helper、BatchSequencer、ordered retry/skip policy。
-- `tests/runtime_io_*_tests.cpp`：按 setup、epoll、stream/zero-copy、io_uring socket、io_uring file、datagram、shutdown 拆分 IO 覆盖；公共 fixture 和 task helper 放在 `tests/runtime_io_test_support.hpp`。
+- `tests/runtime_lifecycle_basic_tests.cpp`、`tests/runtime_backpressure_tests.cpp`、`tests/runtime_shutdown_policy_tests.cpp`：任务生命周期、状态机、调度模式、背压和 shutdown 策略。
+- `tests/runtime_parallel_shards_tests.cpp`、`tests/runtime_ordered_batch_tests.cpp`、`tests/runtime_ordered_start_tests.cpp`：parallel shards、失败汇总、有序 batch、ordered start 边界、retryable ordered apply。
+- `tests/runtime_*_stress_tests.cpp`：高并发 init/shutdown/start_task、cross-thread hop、running->pending、self-post 等 stress，可配合 TSAN 拉长运行。
+- `tests/queue_tests.cpp`、`tests/pool_tests.cpp`、`tests/batch_utility_tests.cpp`、`tests/io_state_utility_tests.cpp`：SPSC/MPSC/MPMC 队列、对象池、分片工具、CRUD helper、BatchSequencer、ordered retry/skip policy 和 IO state helper。
+- `tests/runtime_io_*_tests.cpp`：按 setup、epoll/kqueue、stream/zero-copy、io_uring socket/file、datagram、shutdown 拆分 IO 覆盖；公共 fixture 和 task helper 主要放在 `tests/support/runtime_io_*`。
 
 重点覆盖：
 
@@ -888,6 +941,7 @@ async::parallel_shards_ordered(
 - `pending_on()` 跨线程恢复和 `again()` 当前线程继续。
 - Reject 策略下队列满返回失败并销毁被拒绝任务。
 - Yield 策略可处理多个外部生产者和同线程 fanout。
+- `ScheduleMode::Fast` 拒绝外部生产者，`ScheduleMode::Ordered` 可强制 self-post 走目标 MPSC。
 - Runtime 未初始化或 stopping 后拒绝外部新任务。
 - `WaitForTasks` shutdown 等待已接收任务完成。
 - `WaitForTasks` stopping 阶段允许 runtime 线程恢复已接收任务。
@@ -968,7 +1022,9 @@ ctest --test-dir build-conan/build/Release --output-on-failure
 - `StopImmediately` 默认只保证 executor 尽快停止；如需完整 pending task 释放，应开启 `enable_task_registry`。
 - 有序 batch 的连续性由 `last_applied_batch_id` 保护；失败后的重试、跳过、补偿策略由业务实现，可使用 `OrderedBatchRetrySkipPolicy` 辅助决策。
 - `parallel_shards()` 必须在 runtime 线程中由 owner task 调用。
-- enum 必须连续递增，真实线程索引从 0 开始。
+- 线程必须通过 `thread_layout` 声明；业务不再手写线程 enum，也不直接维护 `thread_count`。
+- `Fast` 调度模式只允许 runtime 线程使用；外部线程如果需要进入 runtime，应使用默认 `Auto` 或显式 `Ordered`。
+- `Ordered` 调度模式会强制走目标 MPSC，包括 runtime 线程投递给自身目标的场景；不要把它当成本地队列快速路径。
 - 业务跨线程传递应优先传 id、值对象或不可变数据，不应跨 owner thread 直接传可变业务对象引用。
 - `ThreadKind::IoUring` 依赖 Linux 内核和容器权限；不可用时 `io_uring_backend_available()` 返回 false，线程仍可作为 epoll readiness IO 线程使用，TCP/UDP helper 也会自动退回 readiness 路径。
 
@@ -987,7 +1043,7 @@ ctest --test-dir build-conan/build/Release --output-on-failure
 当前热路径设计：
 
 - 固定 runtime 线程之间使用 source -> target 一条 bounded SPSC ring。
-- runtime 线程调度到自身时走 executor 本地无锁 ring，避免同线程投递也走跨线程队列。
+- runtime 线程默认调度到自身时走 executor 本地无锁 queue，避免同线程投递也走跨线程队列；如果调用方选择 `ScheduleMode::Ordered`，即使 self-post 也会走目标 MPSC。
 - 非 runtime 线程进入 executor 使用 bounded MPSC ingress。
 - 每个 task type 使用独立对象池，slot 按 cache line 对齐，并有 TLS 小缓存减少频繁回到共享 free queue。
 - `WaitForTasks` 通过 unfinished task counter 等已接收任务结束；`StopImmediately` 可用 task registry 取消并释放 pending/queued task。
@@ -1000,74 +1056,31 @@ P2：跨线程投递后的 wake 检查仍可减少共享 cacheline 访问。当�
 
 P2：SPSC 队列矩阵目前是 `vector<unique_ptr<SpscQueue>>`，热路径取队列有一层 pointer chase。可改成连续矩阵存储或定制 arena，减少间接寻址并改善预取/TLB locality。
 
-P2：`thread_count > 64` 时 ready source 退化为全扫描。64 线程以内使用 bitmask 很高效；如果业务未来需要超过 64 个固定线程，应改成多 word ready bitmap。
-
 P3：`start_task()` 为通用 handle 生命周期多做一次引用计数增减。可新增无 handle 的 fast path，仅用于立即启动且不暴露 handle 的场景，减少外部投递热路径原子操作。
 
-### 16.3 模块化拆分评估
+### 16.3 模块化现状
 
-当前 `include/af/async_runtime.hpp` 承担了过多职责：public runtime facade、task handle、parallel shards、有序 batch、executor run loop、队列调度、任务 registry、epoll readiness、io_uring setup/SQE submit/completion/cancel、IO fallback 和 shutdown 逻辑都在同一文件中。逻辑高内聚于 runtime，但文件过长，阅读和局部修改成本偏高。
+当前实现已经完成主要目录化整理：
 
-可以拆，而且不需要牺牲性能，前提是保持 header-only、模板可见、热路径函数仍在头文件内联展开。推荐不要用普通 `.cpp` 编译单元隐藏实现，否则会损失模板特化和内联机会。
+- `include/af/async_runtime.hpp` 作为 public facade 和模板入口，当前约 345 行。
+- `include/af/detail/runtime/` 承载 runtime 配置、生命周期、dispatch、executor、parallel、IO backend 等实现片段。
+- `include/af/detail/queue/` 拆分 bounded SPSC/MPSC/MPMC queue family。
+- `include/af/detail/io/` 按 common/types/adapters/socket/file/filesystem/datagram/timeout/uring 分目录管理。
+- `tests/runtime_io_test_support.hpp` 当前约 231 行，大量 IO task/fixture 已迁移到 `tests/support/runtime_io_*` 专用文件。
 
-建议拆分边界：
+后续如果继续整理文件结构，应遵守以下约束：
 
-- `include/af/detail/runtime_common.hpp`：`RuntimeStatus`、`CacheLineAtomic`、小型 traits 派生常量、通用 helper。
-- `include/af/detail/runtime_lifecycle.hpp`：task allocate/destroy、handle release、unfinished counter、task registry、shutdown 边界。
-- `include/af/detail/runtime_dispatch.hpp`：SPSC/MPSC/local queue 投递、ready bitmap、wake/notify、`post()`/`post_blocking()`。
-- `include/af/detail/runtime_executor.hpp`：executor 成员、run loop、`execute()`、`finish_done/pending/again()`。
-- `include/af/detail/runtime_parallel.hpp`：parallel shards、ordered batch、ordered start state。
-- `include/af/detail/runtime_io_epoll.hpp`：epoll readiness wait/cancel/wake、eventfd drain、deferred delete。
-- `include/af/detail/runtime_io_uring.hpp`：io_uring setup/teardown、SQ/CQ ring、operation pool、completion、cancel。
-- `include/af/detail/runtime_io_submit.hpp`：public `io_submit_*` thin forwarding 与分支较多的 SQE builder。后续可继续拆为 socket/file/datagram/filesystem submit helper。
-
-拆分难点：
-
-- `Executor` 当前是 `AsyncRuntime<Traits>` 的 nested class，直接访问大量 private static 状态。低风险拆法不是简单把文本搬到另一个文件，而是先把 helper 下沉到 `detail` 模板类，例如 `RuntimeExecutor<RuntimeT>`、`RuntimeTaskLifecycle<RuntimeT>`、`RuntimeIoUring<RuntimeT>`，再由 `AsyncRuntime` 组合/转发。
-- IO submit API 数量多，直接大拆容易制造签名漂移。优先拆纯内部 helper，不先改 public API。
-- hot path 需要持续 benchmark 守护。每个拆分阶段都要跑 runtime benchmark baseline，避免模块化过程中引入额外 indirection。
-
-建议执行顺序：
-
-1. 先拆无行为变化的 common/parallel/lifecycle helper，保持 `async_runtime.hpp` 作为 facade。
-2. 再拆 dispatch/executor，并同步加入 wake 去重优化的 benchmark 对照。
-3. 最后拆 IO epoll/io_uring，因为这部分状态多、边界复杂，适合在核心调度稳定后单独提交。
-4. 每阶段都运行 `git diff --check`、Debug `ctest`、TSAN 核心测试、Release runtime benchmark 回归检查。
-
-### 16.4 模块化复查补充
-
-本次复查按文件行数和职责边界确认，`include/af/async_runtime.hpp` 约 7900 行，是当前最主要的可维护性风险点。测试侧 `tests/runtime_io_test_support.hpp` 约 6500 行，也已经承担了过多 fixture、task helper、socket/file/datagram/timer/event/uring 边界任务，应和 runtime 拆分同步治理，避免核心代码变清晰但测试支持文件继续膨胀。
-
-`async_runtime.hpp` 当前仍适合作为 public facade 和模板入口，但不适合继续承载全部实现细节。建议保持 header-only，不把热路径挪进 `.cpp`，以免破坏模板实例化、`if constexpr` 裁剪和编译期内联。实现可拆成 detail fragment 或 `detail::Runtime*<RuntimeT>` helper，两种方式都不增加运行时虚调用；初期优先使用低风险 include fragment，后续再把稳定边界提升为真正 helper 类型。
-
-优先拆分点：
-
-- common：`RuntimeStatus`、`CacheLineAtomic`、`OrderedBatchState`、`ExternalPostCounter` 等通用小类型，行为独立，适合第一步移动。
-- parallel：`ParallelGroup`、`ShardTask`、ordered guard、ordered start state，和 executor/IO 的耦合较低，适合第二步移动。
-- lifecycle：task pool、handle release、registry、unfinished counter、StopImmediately cancel，边界清晰，但必须保持任务引用计数和 registry 顺序不变。
-- dispatch：local queue、SPSC/MPSC ingress、ready bitmap、wake/notify，这里是核心热路径，拆分时应同时评估 wake 去重和 SPSC 连续矩阵存储，必须以 benchmark 守护。
-- executor：run loop、execute/finish、sleep/wake 逻辑依赖内部状态多，适合在 common/parallel/lifecycle 拆完后单独提交。
-- IO：epoll readiness、io_uring ring、SQE builder、operation pool、cancel/timeout/fallback 目前耦合最重，最后拆；拆分时应按 `epoll`、`io_uring setup/completion`、`file submit`、`socket submit`、`datagram submit` 分层。
-
-测试、示例、benchmark 也需要按同一原则整理：
-
-- `tests/runtime_io_test_support.hpp` 拆为 `runtime_io_fixture.hpp`、`runtime_io_file_tasks.hpp`、`runtime_io_socket_tasks.hpp`、`runtime_io_datagram_tasks.hpp`、`runtime_io_timer_event_tasks.hpp`、`runtime_io_uring_tasks.hpp`。
-- IO benchmark 已按 adapter/file/filesystem/vectored/zero-copy 分文件，当前结构基本合理；后续新增 benchmark 继续按功能分组，不再回到单一大文件。
-- 示例文件目前大多按业务模板独立，重点是保持每个 task 的 `run()` 状态分派调用成员函数，不把业务状态机继续堆进单个 `switch` 分支。
-
-拆分验收标准：
-
-- public API 不漂移，`async_runtime.hpp` 仍是用户主要 include 入口。
-- 热路径不增加额外堆分配、虚调用或不可内联跳转。
-- 每个拆分提交只移动一个清晰职责块，并跑 `git diff --check`、Debug 关键测试、TSAN 核心测试和 Release runtime benchmark 回归检查。
-- 每次拆分后记录文件行数变化，确保大文件确实变短，而不是把复杂度复制到新位置。
+- 不把热路径挪进普通 `.cpp`，避免损失模板特化、`if constexpr` 裁剪和内联机会。
+- 不把 local/SPSC/MPSC 三条调度路径抽象成一个泛型队列入口；这会掩盖语义并增加性能风险。
+- 每次整理只移动一个清晰职责块，并用 `git diff --check`、Debug 关键测试、TSAN/远端 Linux 测试和 Release benchmark 做验证。
+- 代码拆分不是默认目标；只有当职责边界、可读性或验证成本确实改善时才做。
 
 ## 17. CI 与后续可选增强
 
 当前 CI 覆盖普通测试、TSAN stress 和 runtime benchmark 回归检查：
 
 - `.github/workflows/ci.yml`：Debug 测试、TSAN stress、Release benchmark 三个 job。
-- `tests/runtime_stress_tests.cpp`：高并发反复 `init()` / `shutdown()` / `start_task()`，默认短跑，可通过 `ASYNCFLOW_STRESS_MS` 拉长。
+- `asyncflow_runtime_stress_tests` 目标覆盖 lifecycle、self-post、cross-thread hop、parallel owner resume 和 running->pending 边界，默认短跑，可通过 `ASYNCFLOW_STRESS_MS` 拉长。
 - `benchmarks/perf_baseline.json`：本地 runtime benchmark baseline。
 - `benchmarks/perf_baseline_github_ubuntu.json`：GitHub Ubuntu runner runtime benchmark baseline。
 - `scripts/check_benchmark_regression.py`：读取 Google Benchmark JSON，并按 `default_max_regression` 或单项阈值失败。
