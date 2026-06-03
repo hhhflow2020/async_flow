@@ -19,16 +19,10 @@ struct RuntimeFileIoThreadTag;
 
 inline constexpr std::uint32_t runtime_file_records_per_task = 128;
 
-#if defined(__linux__)
-inline constexpr af::ThreadKind runtime_file_io_kind = af::ThreadKind::IoUring;
-#else
-inline constexpr af::ThreadKind runtime_file_io_kind = af::ThreadKind::Io;
-#endif
-
 struct RuntimeFileTraits {
     static constexpr auto threads = af::thread_layout(
         af::thread_group<RuntimeFileLogicThreadTag, 2, af::ThreadKind::Worker, "file-log-cpu">(),
-        af::thread_group<RuntimeFileIoThreadTag, 1, runtime_file_io_kind, "file-log-io">());
+        af::thread_group<RuntimeFileIoThreadTag, 1, af::preferred_io_thread_kind, "file-log-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;

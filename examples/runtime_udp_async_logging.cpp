@@ -22,16 +22,10 @@ struct RuntimeUdpIoThreadTag;
 
 inline constexpr std::uint32_t runtime_udp_records_per_task = 32;
 
-#if defined(__linux__)
-inline constexpr af::ThreadKind runtime_udp_io_kind = af::ThreadKind::IoUring;
-#else
-inline constexpr af::ThreadKind runtime_udp_io_kind = af::ThreadKind::Io;
-#endif
-
 struct RuntimeUdpTraits {
     static constexpr auto threads = af::thread_layout(
         af::thread_group<RuntimeUdpLogicThreadTag, 2, af::ThreadKind::Worker, "udp-log-cpu">(),
-        af::thread_group<RuntimeUdpIoThreadTag, 1, runtime_udp_io_kind, "udp-log-io">());
+        af::thread_group<RuntimeUdpIoThreadTag, 1, af::preferred_io_thread_kind, "udp-log-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;

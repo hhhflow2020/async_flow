@@ -1,6 +1,7 @@
 #pragma once
 
 #include "af/detail/config.hpp"
+#include "af/thread_kind.hpp"
 
 namespace af {
 
@@ -39,5 +40,9 @@ inline constexpr bool supports_openat2 = platform_linux;
 inline constexpr bool supports_sendfile = platform_linux;
 inline constexpr bool supports_splice = platform_linux;
 inline constexpr bool supports_zero_copy_send = platform_linux;
+inline constexpr ThreadKind native_io_thread_kind =
+    supports_epoll ? ThreadKind::Epoll : (supports_kqueue ? ThreadKind::Kqueue : ThreadKind::Io);
+inline constexpr ThreadKind preferred_io_thread_kind =
+    supports_io_uring ? ThreadKind::IoUring : native_io_thread_kind;
 
 } // namespace af
