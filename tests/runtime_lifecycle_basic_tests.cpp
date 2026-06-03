@@ -1,6 +1,127 @@
 #include "support/runtime_lifecycle_test_support.hpp"
 
+#include <filesystem>
+#include <string>
+#include <utility>
+
+#include <fcntl.h>
+
 namespace af::test::runtime_lifecycle {
+
+namespace {
+
+[[nodiscard]] std::filesystem::path unique_temp_path(const char *name) {
+    const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+    return std::filesystem::temp_directory_path() /
+           (std::string{"asyncflow-"} + name + "-" + std::to_string(now));
+}
+
+class RuntimeFileLifecycleTask final : public Task {
+public:
+    explicit RuntimeFileLifecycleTask(Task::FactoryToken token) : Task(token) {}
+
+    bool do_it(TestThread thread, std::string path, std::atomic<int> *completed,
+               std::atomic<int> *status) {
+        thread_ = thread;
+        path_ = std::move(path);
+        completed_ = completed;
+        status_ = status;
+        return schedule(thread);
+    }
+
+private:
+    af::TaskResult run() override {
+        IoOpState state{};
+        int raw_fd = -1;
+        IoStatus status = af::io_openat(*this, thread_, AT_FDCWD, path_.c_str(),
+                                        O_CREAT | O_TRUNC | O_RDWR, 0600, &raw_fd, state);
+        if (!expect_ready(status)) {
+            return done();
+        }
+
+        UniqueFd fd(raw_fd);
+        const char payload[] = "abc";
+        status = af::io_write_some(*this, thread_, fd.get(), payload, 3, state);
+        if (!expect_ready(status, 3)) {
+            return done();
+        }
+        status = af::io_ftruncate(*this, thread_, fd.get(), 2, state);
+        if (!expect_ready(status)) {
+            return done();
+        }
+        status = af::io_fsync(*this, thread_, fd.get(), 0, state);
+        if (!expect_ready(status)) {
+            return done();
+        }
+        status = af::io_close(*this, thread_, fd, state);
+        if (!expect_ready(status)) {
+            return done();
+        }
+
+        status_->store(0, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    [[nodiscard]] bool expect_ready(IoStatus status, std::size_t bytes = 0) noexcept {
+        if (status.ready() && status.bytes == bytes) {
+            return true;
+        }
+        status_->store(status.failed() ? status.error : EIO, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return false;
+    }
+
+    TestThread thread_{TestThreads::Logic_0};
+    std::string path_{};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *status_{nullptr};
+};
+
+#if defined(__linux__)
+class RuntimeOpenat2Task final : public Task {
+public:
+    explicit RuntimeOpenat2Task(Task::FactoryToken token) : Task(token) {}
+
+    bool do_it(TestThread thread, std::string path, std::atomic<int> *completed,
+               std::atomic<int> *status) {
+        thread_ = thread;
+        path_ = std::move(path);
+        completed_ = completed;
+        status_ = status;
+        return schedule(thread);
+    }
+
+private:
+    af::TaskResult run() override {
+        IoOpState state{};
+        int raw_fd = -1;
+        open_how how{};
+        how.flags = O_CREAT | O_TRUNC | O_RDWR;
+        how.mode = 0600;
+
+        const IoStatus status =
+            af::io_openat2(*this, thread_, AT_FDCWD, path_.c_str(), &how, &raw_fd, state);
+        if (!status.ready()) {
+            status_->store(status.failed() ? status.error : EIO, std::memory_order_release);
+            completed_->fetch_add(1, std::memory_order_release);
+            return done();
+        }
+
+        UniqueFd fd(raw_fd);
+        status_->store(0, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    TestThread thread_{TestThreads::Logic_0};
+    std::string path_{};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *status_{nullptr};
+};
+#endif
+
+} // namespace
 
 TEST_F(RuntimeFixture, OneShotTaskRunsOnRequestedThread) {
     std::atomic<int> completed{0};
@@ -10,6 +131,40 @@ TEST_F(RuntimeFixture, OneShotTaskRunsOnRequestedThread) {
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(ran_on.load(std::memory_order_acquire), Runtime::thread_index(TestThreads::Logic_2));
 }
+
+TEST_F(RuntimeFixture, FileLifecycleSyscallsRunOnTargetRuntimeThread) {
+    const std::filesystem::path path = unique_temp_path("file-lifecycle");
+    std::atomic<int> completed{0};
+    std::atomic<int> status{EIO};
+
+    ASSERT_TRUE(Runtime::start_task<RuntimeFileLifecycleTask>(TestThreads::Logic_0, path.string(),
+                                                              &completed, &status));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(status.load(std::memory_order_acquire), 0);
+    std::error_code ignored;
+    EXPECT_EQ(std::filesystem::file_size(path, ignored), 2U);
+    EXPECT_FALSE(ignored);
+    std::filesystem::remove(path, ignored);
+}
+
+#if defined(__linux__)
+TEST_F(RuntimeFixture, Openat2SyscallRunsOnTargetRuntimeThread) {
+    const std::filesystem::path path = unique_temp_path("openat2");
+    std::atomic<int> completed{0};
+    std::atomic<int> status{EIO};
+
+    ASSERT_TRUE(Runtime::start_task<RuntimeOpenat2Task>(TestThreads::Logic_0, path.string(),
+                                                        &completed, &status));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    const int observed = status.load(std::memory_order_acquire);
+    if (observed == ENOSYS || observed == EPERM) {
+        GTEST_SKIP() << "openat2 is not available in this kernel/container";
+    }
+    EXPECT_EQ(observed, 0);
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+}
+#endif
 
 TEST_F(RuntimeFixture, MakeTaskSupportsCustomStartFunction) {
     std::atomic<int> completed{0};

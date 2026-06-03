@@ -349,32 +349,13 @@ private:
             return FlushResult::Complete;
         }
 
-        if (!TaskBase::Runtime::io_uring_backend_available(state_->thread)) {
-            while (::fsync(state_->fd) != 0) {
-                if (errno == EINTR) {
-                    continue;
-                }
-                state_->last_error.store(errno == 0 ? EIO : errno, std::memory_order_relaxed);
-                state_->last_error_stage.store(5, std::memory_order_relaxed);
-                break;
+        while (::fsync(state_->fd) != 0) {
+            if (errno == EINTR) {
+                continue;
             }
-            state_->flushes.fetch_add(1U, std::memory_order_relaxed);
-            state_->complete_requested_flushes();
-            return FlushResult::Complete;
-        }
-
-        state_->io_waiting = true;
-        const IoStatus status = io_fsync(*this, state_->thread, state_->fd, 0, fsync_state_);
-        if (status.pending()) {
-            return FlushResult::Pending;
-        }
-
-        state_->io_waiting = false;
-        fsync_state_.reset();
-        if (status.failed()) {
-            state_->last_error.store(status.error == 0 ? EIO : status.error,
-                                     std::memory_order_relaxed);
-            state_->last_error_stage.store(6, std::memory_order_relaxed);
+            state_->last_error.store(errno == 0 ? EIO : errno, std::memory_order_relaxed);
+            state_->last_error_stage.store(5, std::memory_order_relaxed);
+            break;
         }
         state_->flushes.fetch_add(1U, std::memory_order_relaxed);
         state_->complete_requested_flushes();
@@ -382,11 +363,10 @@ private:
     }
 
     [[nodiscard]] bool io_wait_ready() const noexcept {
-        return io_wait_result_ready(write_state_) || io_wait_result_ready(fsync_state_);
+        return io_wait_result_ready(write_state_);
     }
 
     IoOpState write_state_{};
-    IoOpState fsync_state_{};
 
     void drop_current_records() noexcept {
         if (current_ != nullptr) {
@@ -401,7 +381,6 @@ private:
         }
         state_->io_waiting = false;
         write_state_.reset();
-        fsync_state_.reset();
         drop_current_records();
         state_->complete_batch(current_);
         current_ = nullptr;

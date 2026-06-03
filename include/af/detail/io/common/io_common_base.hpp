@@ -61,12 +61,6 @@ io_timespec_from_duration(std::chrono::nanoseconds duration) noexcept {
     return timespec{static_cast<time_t>(seconds.count()), static_cast<long>(duration.count())};
 }
 
-struct IoUringRecvmsgOut {
-    std::uint32_t namelen{0};
-    std::uint32_t controllen{0};
-    std::uint32_t payloadlen{0};
-    std::uint32_t flags{0};
-};
 #endif
 
 [[nodiscard]] inline bool io_connect_in_progress(int error) noexcept {

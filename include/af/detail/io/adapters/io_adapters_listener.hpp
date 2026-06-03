@@ -27,26 +27,4 @@ public:
         return af::io_accept_some(task, this->thread_, this->fd_, address, address_size,
                                   accepted_fd, state, flags);
     }
-
-    template <typename TaskT>
-    [[nodiscard]] IoStatus
-    accept_direct(TaskT &task, sockaddr *address, socklen_t *address_size, int file_index,
-                  IoFixedFile<ThreadT> *accepted_file, IoOpState &state,
-                  int flags = detail::io_default_accept_flags()) const noexcept {
-        static_assert(std::is_same_v<typename TaskT::Thread, ThreadT>,
-                      "IoListener thread type must match the task runtime thread type");
-        return af::io_accept_direct(task, this->thread_, this->fd_, address, address_size, flags,
-                                    file_index, accepted_file, state);
-    }
-
-    template <typename TaskT>
-    [[nodiscard]] IoStatus
-    accept_multishot(TaskT &task, sockaddr *address, socklen_t *address_size, int *accepted_fd,
-                     IoOpState &state,
-                     int flags = detail::io_default_accept_flags()) const noexcept {
-        static_assert(std::is_same_v<typename TaskT::Thread, ThreadT>,
-                      "IoListener thread type must match the task runtime thread type");
-        return af::io_accept_multishot(task, this->thread_, this->fd_, address, address_size,
-                                       accepted_fd, state, flags);
-    }
 };

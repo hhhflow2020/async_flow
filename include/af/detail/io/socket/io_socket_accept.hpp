@@ -16,34 +16,7 @@ template <typename TaskT>
     }
     *accepted_fd = -1;
 
-    if (detail::waiting_for_completion(state)) {
-        const IoStatus completion = detail::completed_uring_status(state);
-        if (completion.failed() && detail::io_would_block(completion.error)) {
-            return detail::arm_io_wait(task, thread, fd, io_readable, state);
-        }
-        if (!completion.ready()) {
-            return completion;
-        }
-        if (completion.bytes > static_cast<std::size_t>(INT_MAX)) {
-            return IoStatus::failed(EOVERFLOW);
-        }
-        *accepted_fd = static_cast<int>(completion.bytes);
-        return IoStatus::ready(0);
-    }
-    const bool resumed_from_readiness = state.waiting && state.wait_kind == IoWaitKind::Readiness;
     detail::clear_waiting(state);
-    if (!resumed_from_readiness && TaskT::Runtime::io_uring_backend_available(thread)) {
-        state.wait = IoResult{fd, 0, 0, 0};
-        if (TaskT::Runtime::io_submit_accept(thread, fd, address, address_size, flags, &task,
-                                             &state.wait)) {
-            state.waiting = true;
-            state.wait_kind = IoWaitKind::Completion;
-            return IoStatus::make_pending();
-        }
-        if (!detail::uring_submit_error_can_fallback(state.wait.error)) {
-            return IoStatus::failed(state.wait.error);
-        }
-    }
     for (;;) {
 #if defined(__linux__)
         const int accepted = ::accept4(fd, address, address_size, flags);

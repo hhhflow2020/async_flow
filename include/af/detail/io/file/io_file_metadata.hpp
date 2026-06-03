@@ -8,38 +8,67 @@ template <typename TaskT>
         return IoStatus::failed(EINVAL);
     }
 
-    if (detail::waiting_for_completion(state)) {
-        return detail::completed_uring_status(state);
-    }
     detail::clear_waiting(state);
-
-    state.wait = IoResult{dir_fd, 0, 0, 0};
-    if (TaskT::Runtime::io_submit_statx(thread, dir_fd, path, flags, mask, output, &task,
-                                        &state.wait)) {
-        state.waiting = true;
-        state.wait_kind = IoWaitKind::Completion;
-        return IoStatus::make_pending();
+    static_cast<void>(task);
+    if (!detail::io_on_target_thread<TaskT>(thread)) {
+        return IoStatus::failed(EINVAL);
     }
-    return IoStatus::failed(state.wait.error == 0 ? ENOSYS : state.wait.error);
+
+#if defined(__linux__)
+    for (;;) {
+        if (::syscall(SYS_statx, dir_fd, path, flags, mask, output) == 0) {
+            return IoStatus::ready(0);
+        }
+        const int error = errno == 0 ? EIO : errno;
+        if (error == EINTR) {
+            continue;
+        }
+        return IoStatus::failed(error);
+    }
+#else
+    static_cast<void>(dir_fd);
+    static_cast<void>(flags);
+    static_cast<void>(mask);
+    return IoStatus::failed(ENOSYS);
+#endif
 }
 
 template <typename TaskT>
 [[nodiscard]] IoStatus io_fallocate(TaskT &task, typename TaskT::Thread thread, int fd, int mode,
                                     std::uint64_t offset, std::uint64_t length,
                                     IoOpState &state) noexcept {
-    if (detail::waiting_for_completion(state)) {
-        return detail::completed_uring_status(state);
-    }
     detail::clear_waiting(state);
+    static_cast<void>(task);
+    if (!detail::io_on_target_thread<TaskT>(thread)) {
+        return IoStatus::failed(EINVAL);
+    }
+    if (fd < 0) {
+        return IoStatus::failed(EBADF);
+    }
     if (length == 0U) {
         return IoStatus::ready(0);
     }
-
-    state.wait = IoResult{fd, 0, 0, 0};
-    if (TaskT::Runtime::io_submit_fallocate(thread, fd, mode, offset, length, &task, &state.wait)) {
-        state.waiting = true;
-        state.wait_kind = IoWaitKind::Completion;
-        return IoStatus::make_pending();
+    const auto max_offset = static_cast<std::uint64_t>(std::numeric_limits<off_t>::max());
+    if (offset > max_offset || length > max_offset) {
+        return IoStatus::failed(EOVERFLOW);
     }
-    return IoStatus::failed(state.wait.error == 0 ? ENOSYS : state.wait.error);
+
+#if defined(__linux__)
+    for (;;) {
+        if (::syscall(SYS_fallocate, fd, mode, static_cast<off_t>(offset),
+                      static_cast<off_t>(length)) == 0) {
+            return IoStatus::ready(0);
+        }
+        const int error = errno == 0 ? EIO : errno;
+        if (error == EINTR) {
+            continue;
+        }
+        return IoStatus::failed(error);
+    }
+#else
+    static_cast<void>(mode);
+    static_cast<void>(offset);
+    static_cast<void>(length);
+    return IoStatus::failed(ENOSYS);
+#endif
 }

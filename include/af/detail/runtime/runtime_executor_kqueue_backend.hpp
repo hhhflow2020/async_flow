@@ -121,9 +121,8 @@ void Executor<RuntimeT, TraitsT>::clear_kqueue_timeouts() noexcept {
     KqueueTimeoutRegistration *registration = io_kqueue_timeouts_;
     while (registration != nullptr) {
         KqueueTimeoutRegistration *next = registration->next;
-        if (registration->result != nullptr &&
-            registration->result->completion_token == registration) {
-            registration->result->completion_token = nullptr;
+        if (registration->result != nullptr && registration->result->wait_token == registration) {
+            registration->result->wait_token = nullptr;
         }
         io_kqueue_timeout_pool_.destroy(registration);
         registration = next;
@@ -174,12 +173,12 @@ template <typename RuntimeT, typename TraitsT>
 
 template <typename RuntimeT, typename TraitsT>
 [[nodiscard]] bool
-Executor<RuntimeT, TraitsT>::submit_kqueue_timeout(std::chrono::nanoseconds timeout, Task *task,
-                                                   IoResult *result) noexcept {
+Executor<RuntimeT, TraitsT>::register_kqueue_timeout(std::chrono::nanoseconds timeout, Task *task,
+                                                     IoResult *result) noexcept {
     AF_ASSERT(RuntimeT::current_thread_index_ == index_ &&
-              "kqueue timeout submit must run on its IO thread");
+              "kqueue timeout wait must run on its IO thread");
     if (result != nullptr) {
-        result->completion_token = nullptr;
+        result->wait_token = nullptr;
     }
     if (RuntimeT::current_thread_index_ != index_ || task == nullptr || result == nullptr ||
         timeout.count() <= 0) {
@@ -222,7 +221,7 @@ Executor<RuntimeT, TraitsT>::submit_kqueue_timeout(std::chrono::nanoseconds time
     result->events = 0;
     result->error = 0;
     result->result = 0;
-    result->completion_token = registration;
+    result->wait_token = registration;
     return true;
 }
 
@@ -233,7 +232,7 @@ template <typename RuntimeT, typename TraitsT>
         return false;
     }
 
-    auto *registration = static_cast<KqueueTimeoutRegistration *>(state.wait.completion_token);
+    auto *registration = static_cast<KqueueTimeoutRegistration *>(state.wait.wait_token);
     if (registration == nullptr || registration->result != &state.wait) {
         detail::set_io_result_error(state.wait, state.wait.fd, ENOENT);
         return false;
@@ -267,7 +266,7 @@ Executor<RuntimeT, TraitsT>::complete_kqueue_timeout(KqueueTimeoutRegistration *
     }
 
     IoResult *result = registration->result;
-    if (result->completion_token != registration) {
+    if (result->wait_token != registration) {
         return false;
     }
 

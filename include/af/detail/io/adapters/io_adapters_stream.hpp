@@ -13,16 +13,6 @@ public:
     }
 
     template <typename TaskT>
-    [[nodiscard]] IoStatus recv_multishot(TaskT &task, std::uint16_t buffer_group,
-                                          std::uint16_t *buffer_id, IoOpState &state,
-                                          std::uint32_t flags = 0) const noexcept {
-        static_assert(std::is_same_v<typename TaskT::Thread, ThreadT>,
-                      "IoStream thread type must match the task runtime thread type");
-        return af::io_recv_multishot(task, this->thread_, this->fd_, buffer_group, buffer_id, state,
-                                     flags);
-    }
-
-    template <typename TaskT>
     [[nodiscard]] IoStatus recvv_some(TaskT &task, const iovec *iov, int iov_count,
                                       IoOpState &state) const noexcept {
         static_assert(std::is_same_v<typename TaskT::Thread, ThreadT>,
@@ -38,14 +28,6 @@ public:
     }
 
     template <typename TaskT>
-    [[nodiscard]] IoStatus send_zc_some(TaskT &task, const void *data, std::size_t size,
-                                        IoOpState &state) const noexcept {
-        static_assert(std::is_same_v<typename TaskT::Thread, ThreadT>,
-                      "IoStream thread type must match the task runtime thread type");
-        return af::io_send_zc_some(task, this->thread_, this->fd_, data, size, state);
-    }
-
-    template <typename TaskT>
     [[nodiscard]] IoStatus sendv_some(TaskT &task, const iovec *iov, int iov_count,
                                       IoOpState &state) const noexcept {
         static_assert(std::is_same_v<typename TaskT::Thread, ThreadT>,
@@ -53,13 +35,6 @@ public:
         return af::io_sendv_some(task, this->thread_, this->fd_, iov, iov_count, state);
     }
 
-    template <typename TaskT>
-    [[nodiscard]] IoStatus sendv_zc_some(TaskT &task, const iovec *iov, int iov_count,
-                                         IoOpState &state) const noexcept {
-        static_assert(std::is_same_v<typename TaskT::Thread, ThreadT>,
-                      "IoStream thread type must match the task runtime thread type");
-        return af::io_sendv_zc_some(task, this->thread_, this->fd_, iov, iov_count, state);
-    }
     template <typename TaskT>
     [[nodiscard]] IoStatus sendfile_some(TaskT &task, int file_fd, IoOffset *offset,
                                          std::size_t count, IoOpState &state) const noexcept {
@@ -104,11 +79,5 @@ public:
     [[nodiscard]] IoStatus writev_some(TaskT &task, const iovec *iov, int iov_count,
                                        IoOpState &state) const noexcept {
         return sendv_some(task, iov, iov_count, state);
-    }
-
-    template <typename TaskT>
-    [[nodiscard]] IoStatus writev_zc_some(TaskT &task, const iovec *iov, int iov_count,
-                                          IoOpState &state) const noexcept {
-        return sendv_zc_some(task, iov, iov_count, state);
     }
 };

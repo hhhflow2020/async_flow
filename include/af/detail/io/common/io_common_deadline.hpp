@@ -7,7 +7,7 @@ struct IoDeadline {
     std::uint64_t expirations{0};
     bool armed{false};
     bool cancel_pending{false};
-    bool ring_timeout{false};
+    bool runtime_timer{false};
     bool timeout_cancel_pending{false};
 
     void set_after(std::chrono::nanoseconds timeout) noexcept {
@@ -20,7 +20,7 @@ struct IoDeadline {
         expirations = 0;
         armed = false;
         cancel_pending = false;
-        ring_timeout = false;
+        runtime_timer = false;
         timeout_cancel_pending = false;
     }
 

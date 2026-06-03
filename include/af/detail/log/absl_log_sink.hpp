@@ -104,7 +104,6 @@ namespace detail {
 [[nodiscard]] constexpr bool async_log_consumer_prefers_io_thread_kind(ThreadKind kind) noexcept {
     switch (kind) {
     case ThreadKind::Io:
-    case ThreadKind::IoUring:
     case ThreadKind::Epoll:
     case ThreadKind::Kqueue:
         return true;

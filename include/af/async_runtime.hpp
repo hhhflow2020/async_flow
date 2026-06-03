@@ -22,7 +22,6 @@
 #include "af/detail/config.hpp"
 #include "af/detail/io/filesystem/io_filesystem_platform.hpp"
 #include "af/detail/net/reactor/net_io_channel.hpp"
-#include "af/detail/io/uring/io_uring_support.hpp"
 #include "af/detail/memory/contiguous_object_storage.hpp"
 #include "af/detail/memory/object_pool.hpp"
 #include "af/detail/queue/queue_backoff.hpp"
@@ -99,21 +98,7 @@ public:
     static constexpr std::size_t queue_full_spin_count = Config::queue_full_spin_count;
     static constexpr ShutdownPolicy shutdown_policy = Config::shutdown_policy;
     static constexpr bool task_registry_enabled = Config::task_registry_enabled;
-    static constexpr unsigned io_uring_entries = Config::io_uring_entries;
-    static constexpr unsigned io_uring_submit_batch_threshold =
-        Config::io_uring_submit_batch_threshold;
-    static constexpr unsigned io_uring_cq_entries = Config::io_uring_cq_entries;
-    static constexpr unsigned io_uring_setup_flags = Config::io_uring_setup_flags;
-    static constexpr bool io_uring_setup_sqpoll = Config::io_uring_setup_sqpoll;
-    static constexpr unsigned io_uring_sqpoll_idle_ms = Config::io_uring_sqpoll_idle_ms;
-    static constexpr int io_uring_sqpoll_cpu = Config::io_uring_sqpoll_cpu;
-    static constexpr bool io_uring_setup_submit_all = Config::io_uring_setup_submit_all;
-    static constexpr bool io_uring_setup_coop_taskrun = Config::io_uring_setup_coop_taskrun;
-    static constexpr bool io_uring_setup_single_issuer = Config::io_uring_setup_single_issuer;
-    static constexpr bool io_uring_setup_defer_taskrun = Config::io_uring_setup_defer_taskrun;
     static constexpr std::size_t io_wait_reserve = Config::io_wait_reserve;
-    static constexpr std::size_t io_uring_provided_buffer_group_reserve =
-        Config::io_uring_provided_buffer_group_reserve;
 
     [[nodiscard]] static constexpr ThreadKind thread_kind(Thread thread) noexcept {
         return Config::thread_kind(thread);

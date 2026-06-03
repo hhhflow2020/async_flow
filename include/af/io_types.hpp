@@ -16,7 +16,6 @@
 namespace af {
 
 #include "af/detail/io/types/io_types_base.hpp"
-#include "af/detail/io/types/io_types_provided_buffer.hpp"
 #include "af/detail/io/types/io_types_status.hpp"
 #include "af/detail/io/types/io_types_unique_fd.hpp"
 

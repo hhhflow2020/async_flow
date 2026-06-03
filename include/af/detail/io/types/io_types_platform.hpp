@@ -8,10 +8,12 @@
 #include <unistd.h>
 
 #if defined(__linux__)
+#include <linux/openat2.h>
 #include <poll.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <sys/sendfile.h>
+#include <sys/syscall.h>
 #include <sys/timerfd.h>
 #endif
 

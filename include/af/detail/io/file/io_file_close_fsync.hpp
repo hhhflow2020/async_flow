@@ -3,39 +3,44 @@
 template <typename TaskT>
 [[nodiscard]] IoStatus io_fsync(TaskT &task, typename TaskT::Thread thread, int fd,
                                 std::uint32_t flags, IoOpState &state) noexcept {
-    if (detail::waiting_for_completion(state)) {
-        return detail::completed_uring_status(state);
-    }
     detail::clear_waiting(state);
-
-    state.wait = IoResult{fd, 0, 0, 0};
-    if (TaskT::Runtime::io_submit_fsync(thread, fd, flags, &task, &state.wait)) {
-        state.waiting = true;
-        state.wait_kind = IoWaitKind::Completion;
-        return IoStatus::make_pending();
+    static_cast<void>(task);
+    if (!detail::io_on_target_thread<TaskT>(thread)) {
+        return IoStatus::failed(EINVAL);
     }
-    return IoStatus::failed(state.wait.error == 0 ? ENOSYS : state.wait.error);
+    if (flags != 0U) {
+        return IoStatus::failed(EINVAL);
+    }
+
+    for (;;) {
+        if (::fsync(fd) == 0) {
+            return IoStatus::ready(0);
+        }
+        const int error = errno == 0 ? EIO : errno;
+        if (error == EINTR) {
+            continue;
+        }
+        return IoStatus::failed(error);
+    }
 }
 
 template <typename TaskT>
 [[nodiscard]] IoStatus io_close(TaskT &task, typename TaskT::Thread thread, UniqueFd &fd,
                                 IoOpState &state) noexcept {
-    if (detail::waiting_for_completion(state)) {
-        return detail::completed_uring_status(state);
-    }
     detail::clear_waiting(state);
+    static_cast<void>(task);
+    if (!detail::io_on_target_thread<TaskT>(thread)) {
+        return IoStatus::failed(EINVAL);
+    }
 
     const int raw_fd = fd.get();
     if (raw_fd < 0) {
         return IoStatus::failed(EBADF);
     }
 
-    state.wait = IoResult{raw_fd, 0, 0, 0};
-    if (TaskT::Runtime::io_submit_close(thread, raw_fd, &task, &state.wait)) {
-        static_cast<void>(fd.release());
-        state.waiting = true;
-        state.wait_kind = IoWaitKind::Completion;
-        return IoStatus::make_pending();
+    static_cast<void>(fd.release());
+    if (::close(raw_fd) == 0) {
+        return IoStatus::ready(0);
     }
-    return IoStatus::failed(state.wait.error == 0 ? ENOSYS : state.wait.error);
+    return IoStatus::failed(errno == 0 ? EIO : errno);
 }

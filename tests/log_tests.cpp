@@ -476,11 +476,7 @@ private:
 
 struct LogUdpIoThreadTag;
 
-#if defined(__linux__)
-inline constexpr af::ThreadKind log_udp_io_thread_kind = af::ThreadKind::IoUring;
-#else
 inline constexpr af::ThreadKind log_udp_io_thread_kind = af::ThreadKind::Io;
-#endif
 
 struct LogUdpIoRuntimeTraits {
     static constexpr auto threads = af::thread_layout(

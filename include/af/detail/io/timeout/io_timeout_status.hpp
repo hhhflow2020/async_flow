@@ -11,8 +11,8 @@ namespace detail {
     return error == ETIMEDOUT;
 }
 
-[[nodiscard]] inline IoStatus completed_uring_timeout_status(IoOpState &state) noexcept {
-    if (state.wait.completion_token != nullptr || !io_wait_result_ready(state)) {
+[[nodiscard]] inline IoStatus completed_timeout_status(IoOpState &state) noexcept {
+    if (state.wait.wait_token != nullptr || !io_wait_result_ready(state)) {
         return IoStatus::make_pending();
     }
     clear_waiting(state);

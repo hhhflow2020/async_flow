@@ -111,12 +111,6 @@ void Executor<RuntimeT, TraitsT>::run_loop() noexcept {
             execute(task);
         }
 
-#if defined(__linux__)
-        if (flush_io_uring_submissions_or_fail()) {
-            did_work = true;
-        }
-#endif
-
         if (stop_requested_.load(std::memory_order_acquire)) {
             if (!did_work) {
                 break;

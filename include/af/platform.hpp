@@ -13,7 +13,6 @@ inline constexpr bool platform_posix = detail::platform_posix;
 inline constexpr bool supports_epoll = detail::supports_epoll;
 inline constexpr bool supports_kqueue = detail::supports_kqueue;
 inline constexpr bool supports_native_io_wait = detail::supports_native_io_wait;
-inline constexpr bool supports_io_uring = platform_linux;
 inline constexpr bool supports_eventfd = platform_linux;
 inline constexpr bool supports_timerfd = platform_linux;
 inline constexpr bool supports_openat2 = platform_linux;
@@ -22,16 +21,11 @@ inline constexpr bool supports_splice = platform_linux;
 inline constexpr bool supports_zero_copy_send = platform_linux;
 inline constexpr ThreadKind native_io_thread_kind =
     supports_epoll ? ThreadKind::Epoll : (supports_kqueue ? ThreadKind::Kqueue : ThreadKind::Io);
-inline constexpr ThreadKind preferred_io_thread_kind =
-    supports_io_uring ? ThreadKind::IoUring : native_io_thread_kind;
+inline constexpr ThreadKind preferred_io_thread_kind = native_io_thread_kind;
 
 template <typename RuntimeT>
 [[nodiscard]] const char *runtime_io_backend_name(typename RuntimeT::Thread thread) noexcept {
-    if constexpr (supports_io_uring) {
-        if (RuntimeT::thread_kind(thread) == ThreadKind::IoUring) {
-            return RuntimeT::io_uring_backend_available(thread) ? "io_uring" : "epoll-fallback";
-        }
-    }
+    static_cast<void>(thread);
 
     if constexpr (supports_epoll) {
         return "epoll";

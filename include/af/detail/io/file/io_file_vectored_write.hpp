@@ -4,8 +4,8 @@ template <typename TaskT>
 [[nodiscard]] IoStatus io_writev_at(TaskT &task, typename TaskT::Thread thread, int fd,
                                     const iovec *iov, int iov_count, std::uint64_t offset,
                                     IoOpState &state) noexcept {
-    if (detail::waiting_for_completion(state)) {
-        return detail::completed_uring_status(state);
+    if (detail::cancelled_wait_ready(state)) [[unlikely]] {
+        return detail::consume_cancelled_wait(state);
     }
     detail::clear_waiting(state);
 
@@ -14,16 +14,26 @@ template <typename TaskT>
     if (!detail::io_validate_iov(iov, iov_count, total_size, error)) {
         return IoStatus::failed(error);
     }
+    if (fd < 0) {
+        return IoStatus::failed(EBADF);
+    }
     if (total_size == 0U) {
         return IoStatus::ready(0);
     }
 
-    state.wait = IoResult{fd, 0, 0, 0};
-    if (TaskT::Runtime::io_submit_writev_at(thread, fd, iov, iov_count, offset, &task,
-                                            &state.wait)) {
-        state.waiting = true;
-        state.wait_kind = IoWaitKind::Completion;
-        return IoStatus::make_pending();
+    for (;;) {
+        const ssize_t n = ::pwritev(fd, iov, iov_count, static_cast<off_t>(offset));
+        if (n >= 0) {
+            return IoStatus::ready(static_cast<std::size_t>(n));
+        }
+
+        error = errno;
+        if (error == EINTR) {
+            continue;
+        }
+        if (detail::io_would_block(error)) {
+            return detail::arm_io_wait(task, thread, fd, io_writable, state);
+        }
+        return IoStatus::failed(error);
     }
-    return IoStatus::failed(state.wait.error == 0 ? ENOSYS : state.wait.error);
 }

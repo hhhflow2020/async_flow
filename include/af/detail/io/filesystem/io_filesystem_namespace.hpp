@@ -6,18 +6,22 @@ template <typename TaskT>
     if (path == nullptr) {
         return IoStatus::failed(EINVAL);
     }
-    if (detail::waiting_for_completion(state)) {
-        return detail::completed_uring_status(state);
-    }
     detail::clear_waiting(state);
-
-    state.wait = IoResult{dir_fd, 0, 0, 0};
-    if (TaskT::Runtime::io_submit_mkdirat(thread, dir_fd, path, mode, &task, &state.wait)) {
-        state.waiting = true;
-        state.wait_kind = IoWaitKind::Completion;
-        return IoStatus::make_pending();
+    static_cast<void>(task);
+    if (!detail::io_on_target_thread<TaskT>(thread)) {
+        return IoStatus::failed(EINVAL);
     }
-    return IoStatus::failed(state.wait.error == 0 ? ENOSYS : state.wait.error);
+
+    for (;;) {
+        if (::mkdirat(dir_fd, path, static_cast<mode_t>(mode)) == 0) {
+            return IoStatus::ready(0);
+        }
+        const int error = errno == 0 ? EIO : errno;
+        if (error == EINTR) {
+            continue;
+        }
+        return IoStatus::failed(error);
+    }
 }
 
 template <typename TaskT>
@@ -27,19 +31,22 @@ template <typename TaskT>
     if (target == nullptr || link_path == nullptr) {
         return IoStatus::failed(EINVAL);
     }
-    if (detail::waiting_for_completion(state)) {
-        return detail::completed_uring_status(state);
-    }
     detail::clear_waiting(state);
-
-    state.wait = IoResult{new_dir_fd, 0, 0, 0};
-    if (TaskT::Runtime::io_submit_symlinkat(thread, target, new_dir_fd, link_path, &task,
-                                            &state.wait)) {
-        state.waiting = true;
-        state.wait_kind = IoWaitKind::Completion;
-        return IoStatus::make_pending();
+    static_cast<void>(task);
+    if (!detail::io_on_target_thread<TaskT>(thread)) {
+        return IoStatus::failed(EINVAL);
     }
-    return IoStatus::failed(state.wait.error == 0 ? ENOSYS : state.wait.error);
+
+    for (;;) {
+        if (::symlinkat(target, new_dir_fd, link_path) == 0) {
+            return IoStatus::ready(0);
+        }
+        const int error = errno == 0 ? EIO : errno;
+        if (error == EINTR) {
+            continue;
+        }
+        return IoStatus::failed(error);
+    }
 }
 
 template <typename TaskT>
@@ -49,17 +56,20 @@ template <typename TaskT>
     if (old_path == nullptr || new_path == nullptr) {
         return IoStatus::failed(EINVAL);
     }
-    if (detail::waiting_for_completion(state)) {
-        return detail::completed_uring_status(state);
-    }
     detail::clear_waiting(state);
-
-    state.wait = IoResult{old_dir_fd, 0, 0, 0};
-    if (TaskT::Runtime::io_submit_linkat(thread, old_dir_fd, old_path, new_dir_fd, new_path, flags,
-                                         &task, &state.wait)) {
-        state.waiting = true;
-        state.wait_kind = IoWaitKind::Completion;
-        return IoStatus::make_pending();
+    static_cast<void>(task);
+    if (!detail::io_on_target_thread<TaskT>(thread)) {
+        return IoStatus::failed(EINVAL);
     }
-    return IoStatus::failed(state.wait.error == 0 ? ENOSYS : state.wait.error);
+
+    for (;;) {
+        if (::linkat(old_dir_fd, old_path, new_dir_fd, new_path, flags) == 0) {
+            return IoStatus::ready(0);
+        }
+        const int error = errno == 0 ? EIO : errno;
+        if (error == EINTR) {
+            continue;
+        }
+        return IoStatus::failed(error);
+    }
 }

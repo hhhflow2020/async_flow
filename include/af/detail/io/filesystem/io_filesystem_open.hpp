@@ -9,24 +9,31 @@ template <typename TaskT>
     }
     *opened_fd = -1;
 
-    if (detail::waiting_for_completion(state)) {
-        const IoStatus completion = detail::completed_uring_status(state);
-        if (!completion.ready()) {
-            return completion;
-        }
-        if (completion.bytes > static_cast<std::size_t>(INT_MAX)) {
-            return IoStatus::failed(EOVERFLOW);
-        }
-        *opened_fd = static_cast<int>(completion.bytes);
-        return IoStatus::ready(0);
-    }
     detail::clear_waiting(state);
-
-    state.wait = IoResult{dir_fd, 0, 0, 0};
-    if (TaskT::Runtime::io_submit_openat2(thread, dir_fd, path, how, &task, &state.wait)) {
-        state.waiting = true;
-        state.wait_kind = IoWaitKind::Completion;
-        return IoStatus::make_pending();
+    static_cast<void>(task);
+    if (!detail::io_on_target_thread<TaskT>(thread)) {
+        return IoStatus::failed(EINVAL);
     }
-    return IoStatus::failed(state.wait.error == 0 ? ENOSYS : state.wait.error);
+
+#if defined(__linux__)
+    for (;;) {
+        const long fd = ::syscall(SYS_openat2, dir_fd, path, how, sizeof(*how));
+        if (fd >= 0) {
+            if (fd > INT_MAX) {
+                ::close(static_cast<int>(fd));
+                return IoStatus::failed(EOVERFLOW);
+            }
+            *opened_fd = static_cast<int>(fd);
+            return IoStatus::ready(0);
+        }
+        const int error = errno == 0 ? EIO : errno;
+        if (error == EINTR) {
+            continue;
+        }
+        return IoStatus::failed(error);
+    }
+#else
+    static_cast<void>(dir_fd);
+    return IoStatus::failed(ENOSYS);
+#endif
 }

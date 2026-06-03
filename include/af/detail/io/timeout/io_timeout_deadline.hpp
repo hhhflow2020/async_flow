@@ -8,7 +8,7 @@ template <typename TaskT>
     }
 
     auto consume_deadline_wait = [&]() noexcept -> IoStatus {
-        if (deadline.ring_timeout) {
+        if (deadline.runtime_timer) {
             return io_wait_timeout(task, thread, deadline.delay, deadline.wait);
         }
         return io_wait_timerfd(task, thread, deadline.timer.get(), &deadline.expirations,
@@ -16,7 +16,7 @@ template <typename TaskT>
     };
 
     if (deadline.timeout_cancel_pending) {
-        if (deadline.wait.wait.completion_token != nullptr ||
+        if (deadline.wait.wait.wait_token != nullptr ||
             !detail::io_wait_result_ready(deadline.wait)) {
             return IoStatus::make_pending();
         }
@@ -30,7 +30,7 @@ template <typename TaskT>
     }
 
     if (deadline.cancel_pending) {
-        if (io_state.wait.completion_token != nullptr || !detail::io_wait_result_ready(io_state)) {
+        if (io_state.wait.wait_token != nullptr || !detail::io_wait_result_ready(io_state)) {
             return IoStatus::make_pending();
         }
         detail::clear_waiting(io_state);
@@ -42,14 +42,14 @@ template <typename TaskT>
         if (detail::io_wait_result_ready(deadline.wait)) {
             static_cast<void>(consume_deadline_wait());
         } else if (deadline.wait.waiting) {
-            if (deadline.ring_timeout) {
+            if (deadline.runtime_timer) {
                 if (!TaskT::Runtime::cancel_io(thread, deadline.wait)) {
                     const int error =
                         deadline.wait.wait.error == 0 ? EIO : deadline.wait.wait.error;
                     deadline.reset_runtime();
                     return IoStatus::failed(error);
                 }
-                if (deadline.wait.wait.completion_token == nullptr &&
+                if (deadline.wait.wait.wait_token == nullptr &&
                     detail::io_wait_result_ready(deadline.wait)) {
                     const IoStatus timeout = consume_deadline_wait();
                     if (timeout.failed() && timeout.error != ECANCELED) {
@@ -66,7 +66,7 @@ template <typename TaskT>
             static_cast<void>(TaskT::Runtime::cancel_io(thread, deadline.wait));
         }
 #if defined(__linux__)
-        if (!deadline.ring_timeout) {
+        if (!deadline.runtime_timer) {
             int error = 0;
             static_cast<void>(disarm_timerfd(deadline.timer.get(), error));
         }
@@ -89,7 +89,7 @@ template <typename TaskT>
             return IoStatus::failed(error);
         }
 
-        if (io_kind == IoWaitKind::Completion) {
+        if (io_kind == IoWaitKind::Timer) {
             deadline.cancel_pending = true;
             deadline.armed = false;
             return IoStatus::make_pending();
@@ -113,7 +113,7 @@ template <typename TaskT>
         const IoStatus status = io_wait_timeout(task, thread, deadline.delay, deadline.wait);
         if (status.pending()) {
             deadline.armed = true;
-            deadline.ring_timeout = true;
+            deadline.runtime_timer = true;
             return status;
         }
         if (status.failed() && status.error != ENOSYS && status.error != EBUSY) {
@@ -141,7 +141,7 @@ template <typename TaskT>
         io_wait_timerfd(task, thread, deadline.timer.get(), &deadline.expirations, deadline.wait);
     if (status.pending()) {
         deadline.armed = true;
-        deadline.ring_timeout = false;
+        deadline.runtime_timer = false;
     }
     return status;
 #endif

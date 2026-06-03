@@ -6,16 +6,24 @@ template <typename TaskT>
     if (fd < 0) {
         return IoStatus::failed(EBADF);
     }
-    if (detail::waiting_for_completion(state)) {
-        return detail::completed_uring_status(state);
-    }
     detail::clear_waiting(state);
-
-    state.wait = IoResult{fd, 0, 0, 0};
-    if (TaskT::Runtime::io_submit_ftruncate(thread, fd, length, &task, &state.wait)) {
-        state.waiting = true;
-        state.wait_kind = IoWaitKind::Completion;
-        return IoStatus::make_pending();
+    static_cast<void>(task);
+    if (!detail::io_on_target_thread<TaskT>(thread)) {
+        return IoStatus::failed(EINVAL);
     }
-    return IoStatus::failed(state.wait.error == 0 ? ENOSYS : state.wait.error);
+    const auto max_length = static_cast<std::uint64_t>(std::numeric_limits<off_t>::max());
+    if (length > max_length) {
+        return IoStatus::failed(EOVERFLOW);
+    }
+
+    for (;;) {
+        if (::ftruncate(fd, static_cast<off_t>(length)) == 0) {
+            return IoStatus::ready(0);
+        }
+        const int error = errno == 0 ? EIO : errno;
+        if (error == EINTR) {
+            continue;
+        }
+        return IoStatus::failed(error);
+    }
 }

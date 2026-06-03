@@ -1,213 +1,36 @@
-# Runtime-bound logging design notes
+# Runtime 绑定日志设计
 
-## Current state
+异步日志消费者默认绑定到 runtime 线程，不创建独立消费线程。
 
-- The public async logging entry point is runtime-bound:
-  `start_async_logging_for_runtime<RuntimeT>()` binds the consumer drain loop to
-  a configured `RuntimeT::Thread` instead of creating an extra logging thread.
-- `AsyncLogger` no longer owns a private consumer thread. Its consumer lifecycle
-  is driven by `RuntimeAsyncLogConsumerController`, so production logging stays
-  inside the framework thread layout.
-- `AsyncLogConfig::ordering` defaults to `LogOrdering::Ordered`: runtime and
-  external producers publish to one bounded MPSC queue, so the runtime-bound
-  consumer observes the queue's enqueue linearization order. `LogOrdering::Relaxed`
-  switches to per-runtime-thread SPSC lanes plus external sharded MPSC queues for
-  higher producer throughput when strict global ordering is not required.
-- `AsyncLogConfig::ordered()`, `AsyncLogConfig::ordered(producer_shard_count)`,
-  `AsyncLogConfig::relaxed()`, and
-  `AsyncLogConfig::relaxed(runtime_thread_count, external_shard_count)` are the
-  preferred user-facing strategy factories. Existing configs can switch strategy with
-  `use_ordered(producer_shard_count)` or
-  `use_relaxed(runtime_thread_count, external_shard_count)`. For runtime-bound
-  logging, `runtime_thread_count == 0` means auto-fill from
-  `RuntimeT::thread_count`. `runtime_lane_capacity` only applies to relaxed
-  runtime SPSC lanes; ordered logging uses `queue_capacity` for the single
-  backend-visible MPSC queue.
-- Ordered logging keeps only the enqueue position as the required global
-  serialization point. Producer record pools and accepted/dropped counters are
-  sharded and cache-line isolated so unrelated producer-side state does not
-  bounce between cores.
-- `FileLogBackend`, `UdpLogBackend`, and `TcpLogBackend` execute synchronously on
-  the runtime-bound consumer task when used directly as async logger backends.
-- `RuntimeFileLogBackend`, `RuntimeUdpLogBackend`, and `RuntimeTcpLogBackend`
-  bind their backend IO task to a configured runtime thread. When they are used
-  with `start_async_logging_for_runtime<RuntimeT>()`, batching and backend
-  enqueue both run from the runtime-bound consumer task, so the logging path does
-  not create a private consumer thread.
-- The three runtime backends now share a `RuntimeLogQueueState` drain component
-  for batch pooling, ready/free SPSC queues, pending counters, wake flags, and
-  bounded flush waits. File, UDP, and TCP keep only their backend-specific IO
-  strategy state.
-- Runtime backend task binding is now shared through `RuntimeLogTaskBinding`.
-  File, UDP, and TCP no longer each own duplicate task-handle, first-start,
-  wake, and shutdown-wait logic. They keep backend-specific IO state machines,
-  while framework-thread binding stays centralized in the common runtime log
-  component.
-- Runtime backend batch objects are now allocated in contiguous storage owned by
-  `RuntimeLogQueueState`. Ready/free queues still pass stable batch pointers, but
-  the batch headers themselves no longer require one heap allocation and pointer
-  chase per slot.
-- Runtime-bound log consumers are lazy-started: registering the Abseil sink does
-  not create a permanent pending runtime task. The consumer task is scheduled
-  only when the first record transitions the pending count from zero to non-zero.
-- File, UDP, and TCP all skip ordinary producer wakeups while their bound task is
-  waiting on runtime IO readiness, so producer notifications do not masquerade as
-  IO completions.
-- Ordered producer shards and relaxed external producer shards use lock-free MPSC
-  record pools. Relaxed runtime-thread log lanes use an SPSC record pool matching
-  their SPSC submission queue.
-- Log record pool ownership is now split into `async_log_record_pool.hpp`.
-  `AsyncLogger` wires queues, counters, and consumer draining, while the MPSC
-  producer-shard record pools and relaxed runtime SPSC record pools live in a
-  focused internal module.
-- Producer lane ownership is now split into `async_log_lanes.hpp`. External
-  producer shards, ordered producer shards, runtime SPSC lanes, and their
-  cache-line-isolated counters are grouped with the queue and record-pool
-  topology they protect.
-- Flush drain waiting is now split into `async_log_drain_waiter.hpp`.
-  `AsyncLogger` no longer directly includes `<thread>`, `<mutex>`, or
-  `<condition_variable>` and keeps the timed blocking wait out of the producer
-  and consumer hot-path implementation.
-- Hardware thread discovery for default shard sizing is isolated in
-  `hardware_threads.hpp`, so the logger does not mix runtime lifecycle code with
-  platform thread queries.
+## 线程选择
 
-This keeps the default logging path ordered without adding private logging
-threads, while still allowing runtime SPSC submission and external MPSC sharding
-when callers explicitly choose relaxed ordering. Runtime deployments should keep
-the log consumer inside the framework thread layout.
+优先级：
 
-`start_async_logging_for_runtime<RuntimeT>(config)` now selects a default
-consumer thread from the runtime layout instead of blindly using index 0. The
-selection prefers the first `ThreadKind::Log` thread, then the first IO-capable
-thread (`Io`, `IoUring`, `Epoll`, or `Kqueue`), and falls back to index 0 only
-when the layout has neither. Callers can still pass an explicit consumer thread
-when they want a different placement.
+1. 显式配置的 consumer thread。
+2. `ThreadKind::Log`。
+3. `ThreadKind::Io` / `Epoll` / `Kqueue`。
+4. thread index 0。
 
-## Recommended direction
+## 数据路径
 
-Keep a single explicit consumer placement:
+- runtime 线程生产日志：进入该线程对应的 SPSC lane。
+- 外部线程生产日志：进入 bounded MPSC ingress。
+- consumer task 在绑定线程上批量 drain。
+- record pool 批量回收，减少逐条分配。
+- 文件、UDP、TCP 后端由 consumer task 调用。
 
-- Runtime-bound consumer task: the drain loop runs on a configured
-  `RuntimeT::Thread`, so logging does not add another framework-external thread.
+## 顺序策略
 
-The runtime-bound mode is a consumer placement choice, not a property of each
-backend. File, UDP, and TCP backends stay batch IO strategies that can be driven
-by the same runtime-bound drain task.
+默认 ordered 策略使用单 MPSC 队列，尽量保持全局到达顺序。高吞吐 relaxed 策略可使用分片队列，降低多生产者竞争，但只保证每个生产者内部 FIFO。
 
-## Backend binding model
+## 后端
 
-- File backend: open the file on the bound IO thread and write batches through
-  `io_writev_some()` or io_uring `writev` when available. Keep append/truncate
-  policy in the backend config, but keep queueing and wakeup in the shared drain
-  task.
-- UDP backend: keep pre-batched datagrams and use `sendmmsg` on Linux when
-  ready; if the socket is not writable, wait on the bound runtime IO thread.
-- TCP backend: connect and send on the bound runtime IO thread, with reconnect
-  policy owned by the TCP strategy and queue/flush/shutdown owned by the shared
-  drain task.
+- 文件后端：批量 `writev` 或等价聚合写。
+- UDP 后端：批量构造 datagram 后在绑定 IO 线程发送。
+- TCP 后端：维护连接状态和写队列，在绑定 IO 线程 flush。
 
-## Correctness constraints
+## 正确性
 
-- Runtime-thread log submission mode must stay explicit: ordered logging uses the
-  single global MPSC, while relaxed logging uses runtime SPSC lanes and external
-  MPSC shards.
-- Flush must wait for both the producer-to-consumer queues and backend IO
-  completion counters. The pending-record wait must use a predicate and bounded
-  retry wakeups so a notify that races with the waiter going to sleep cannot
-  turn into a full-timeout flush.
-- Shutdown must stop admission before draining, then wake the bound consumer
-  task, then shut down backends after all pending records are released. The
-  runtime-bound shutdown path retries the consumer wake while waiting so a
-  running-to-pending race cannot strand the consumer task until the timeout.
-- Runtime-bound consumer tasks must not call backend flush/shutdown from the
-  bound runtime thread, because file/TCP/UDP runtime backends may need that same
-  thread to complete their own IO tasks. Backend shutdown is driven by the
-  external `AsyncLogHandle::stop()` path after the consumer task has drained and
-  finished.
-- A backend waiting for IO readiness must not be woken by ordinary producer
-  notifications as if the IO had completed. This is now enforced consistently
-  for file, UDP, and TCP runtime-bound backends. Flush and shutdown waits still
-  force a runtime-task wake so a synchronous waiter is not stranded behind a
-  stale IO-wait wake bit.
-
-## Performance constraints
-
-- Producer hot paths should not take locks.
-- Ordered logging should avoid an additional global sequence counter and consumer
-  sort. The MPSC queue reservation is the ordering point.
-- Ordered producer-side record allocation and accepted/dropped accounting should
-  stay sharded so the MPSC enqueue cursor is the only unavoidable high-contention
-  cache line.
-- Relaxed runtime-thread producers should remain SPSC and avoid cross-thread MPMC
-  hops.
-- Relaxed runtime-thread producer record allocation should also stay SPSC,
-  avoiding the shared free-list CAS pair used by external producer shards.
-- Runtime-bound consumers should wake only on empty-to-nonempty transitions so
-  ordinary logging does not schedule a framework task for every record.
-- Runtime-bound consumers should cap drain batches per run so one logging burst
-  does not monopolize the bound runtime thread.
-- AsyncLogger keeps separate `pending` and `ready` counters. `pending` tracks
-  accepted records that are not fully drained yet, including producer
-  reservations that have not reached a queue cell. `ready` tracks records that
-  were successfully published into a queue and may be consumed; consumers drain
-  only against the ready budget. This keeps flush/shutdown accounting exact
-  without making a runtime-bound consumer spin when a producer is preempted
-  between reservation and queue publication.
-- Runtime backend flush and shutdown waits should block on completion
-  notifications instead of spinning/yielding while bound IO tasks make progress.
-- The runtime-bound async log consumer uses a cache-line-isolated
-  `WakeState { Idle, Active, Parking }`. Producers only schedule the task when
-  the previous state was `Idle`; `Active` coalesces queued/running work, and
-  `Parking` lets a producer mark new work while the consumer is doing its final
-  no-work check. The consumer converts `Parking` to `Idle` only after rechecking
-  ready records and stop state, so a wake cannot be stranded between drain and
-  `pending()`, and a queued task is not scheduled twice.
-- Runtime backend flush and shutdown paths should not use the ordinary
-  producer-wakeup skip while a backend task is parked on IO. A waiter may need to
-  prod the bound task to observe a completed IO result, a flush request, or a
-  stop request.
-- The consumer releases drained log records in contiguous owner/kind groups.
-  Ordered producer-shard records and relaxed external shard records therefore
-  return to their owning record free-list with one tagged-stack CAS per drained
-  group instead of one CAS per record; relaxed runtime SPSC lane records return
-  to their queue-local pool in fixed-size chunks so a release group publishes the
-  free queue with far fewer tail updates than one push per record.
-- Record pool changes should stay isolated from the consumer drain loop so the
-  MPSC producer-shard pools and runtime SPSC pools can be tuned independently.
-- Lane topology changes should stay isolated from consumer lifecycle code so
-  cache layout and false-sharing tuning can be done without touching backend
-  flush/shutdown behavior.
-- Timed flush waiting should stay isolated from `AsyncLogger` hot-path logic.
-  The wait path may use blocking primitives because it is called by explicit
-  flush/shutdown callers, but producer enqueue and runtime consumer drain must
-  remain lock-free.
-- Backend batches should be preallocated and recycled through SPSC free/ready
-  queues or a shared runtime drain pool.
-- Runtime backend batch pools should keep batch headers contiguous so the
-  consumer thread and bound IO task reduce avoidable cache misses while rotating
-  through ready/free batches.
-- Counters and queue cursors that are touched by different threads should stay
-  cache-line isolated.
-- Drop policy should remain configurable so bounded queues do not force producer
-  threads to block under overload.
-
-## Migration plan
-
-1. Remove the dedicated consumer thread and the non-runtime async logging entry
-   point so public async logging cannot create framework-external consumer
-   threads.
-2. Bind `start_async_logging_for_runtime<RuntimeT>()` to a runtime consumer task
-   by default, selecting a `Log` or IO-capable layout thread when available,
-   with an overload for explicitly selecting the consumer thread.
-3. Add runtime-bound TCP logging so network logs can use framework IO threads.
-4. Add runtime-bound file logging so file writes and flushes can use framework IO
-   threads.
-5. Factor the duplicate file/UDP/TCP runtime backend queue, wake, flush, and
-   shutdown state into a common runtime log drain component. The queue, batch
-   pool, pending, wake state, task binding, and shutdown wait are now shared;
-   backend-specific flush semantics and IO state machines remain local to each
-   backend.
-6. Continue converging file/UDP/TCP backend strategies toward the shared
-   runtime-bound drain component so backend IO and log consumer placement remain
-   independently configurable.
+- 日志等级过滤在前端完成，不匹配等级不格式化用户消息。
+- runtime task id 插入用户日志字段开头，不改变整行统一前缀。
+- consumer 停止前需要 drain 已接受 record。

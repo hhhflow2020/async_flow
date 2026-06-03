@@ -14,7 +14,7 @@ struct IoResult {
     std::uint32_t events{0};
     int error{0};
     std::int64_t result{0};
-    void *completion_token{nullptr};
+    void *wait_token{nullptr};
 
     [[nodiscard]] bool readable() const noexcept {
         return (events & io_readable) != 0U;
@@ -45,7 +45,7 @@ inline void set_io_result_error(IoResult &result, int fd, int error) noexcept {
     result.events = io_error;
     result.error = normalized_error;
     result.result = -static_cast<std::int64_t>(normalized_error);
-    result.completion_token = nullptr;
+    result.wait_token = nullptr;
 }
 
 } // namespace detail
@@ -53,7 +53,7 @@ inline void set_io_result_error(IoResult &result, int fd, int error) noexcept {
 enum class IoWaitKind : std::uint8_t {
     None,
     Readiness,
-    Completion,
+    Timer,
 };
 
 struct IoOpState {

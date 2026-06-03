@@ -11,13 +11,6 @@ template <typename TaskT>
         return IoStatus::failed(EINVAL);
     }
 
-    if (detail::waiting_for_completion(state)) {
-        const IoStatus completion = detail::completed_uring_status(state);
-        if (completion.failed() && detail::io_connect_in_progress(completion.error)) {
-            return detail::arm_io_wait(task, thread, fd, io_writable, state);
-        }
-        return completion.ready() ? IoStatus::ready(0) : completion;
-    }
     const bool resumed_from_readiness = state.waiting && state.wait_kind == IoWaitKind::Readiness;
     detail::clear_waiting(state);
     if (resumed_from_readiness) {
@@ -29,18 +22,6 @@ template <typename TaskT>
             return detail::arm_io_wait(task, thread, fd, io_writable, state);
         }
         return IoStatus::failed(error);
-    }
-    if (TaskT::Runtime::io_uring_backend_available(thread)) {
-        state.wait = IoResult{fd, 0, 0, 0};
-        if (TaskT::Runtime::io_submit_connect(thread, fd, address, address_size, &task,
-                                              &state.wait)) {
-            state.waiting = true;
-            state.wait_kind = IoWaitKind::Completion;
-            return IoStatus::make_pending();
-        }
-        if (!detail::uring_submit_error_can_fallback(state.wait.error)) {
-            return IoStatus::failed(state.wait.error);
-        }
     }
     for (;;) {
         if (::connect(fd, address, address_size) == 0) {

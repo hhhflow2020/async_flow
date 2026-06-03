@@ -14,27 +14,7 @@ template <typename TaskT>
         return IoStatus::failed(EINVAL);
     }
 
-    if (detail::waiting_for_completion(state)) {
-        const IoStatus completion = detail::completed_uring_status(state);
-        if (completion.failed() && detail::io_would_block(completion.error)) {
-            return detail::arm_io_wait(task, thread, fd, io_writable, state);
-        }
-        return completion;
-    }
-    const bool resumed_from_readiness = state.waiting && state.wait_kind == IoWaitKind::Readiness;
     detail::clear_waiting(state);
-    if (!resumed_from_readiness && TaskT::Runtime::io_uring_backend_available(thread)) {
-        state.wait = IoResult{fd, 0, 0, 0};
-        if (TaskT::Runtime::io_submit_write_at(thread, fd, data, size, detail::io_current_offset,
-                                               &task, &state.wait)) {
-            state.waiting = true;
-            state.wait_kind = IoWaitKind::Completion;
-            return IoStatus::make_pending();
-        }
-        if (!detail::uring_submit_error_can_fallback(state.wait.error)) {
-            return IoStatus::failed(state.wait.error);
-        }
-    }
     for (;;) {
         const ssize_t n = ::write(fd, data, size);
         if (n >= 0) {
@@ -67,27 +47,7 @@ template <typename TaskT>
         return IoStatus::ready(0);
     }
 
-    if (detail::waiting_for_completion(state)) {
-        const IoStatus completion = detail::completed_uring_status(state);
-        if (completion.failed() && detail::io_would_block(completion.error)) {
-            return detail::arm_io_wait(task, thread, fd, io_writable, state);
-        }
-        return completion;
-    }
-    const bool resumed_from_readiness = state.waiting && state.wait_kind == IoWaitKind::Readiness;
     detail::clear_waiting(state);
-    if (!resumed_from_readiness && TaskT::Runtime::io_uring_backend_available(thread)) {
-        state.wait = IoResult{fd, 0, 0, 0};
-        if (TaskT::Runtime::io_submit_writev_at(thread, fd, iov, iov_count,
-                                                detail::io_current_offset, &task, &state.wait)) {
-            state.waiting = true;
-            state.wait_kind = IoWaitKind::Completion;
-            return IoStatus::make_pending();
-        }
-        if (!detail::uring_submit_error_can_fallback(state.wait.error)) {
-            return IoStatus::failed(state.wait.error);
-        }
-    }
     for (;;) {
         const ssize_t n = ::writev(fd, iov, iov_count);
         if (n >= 0) {
