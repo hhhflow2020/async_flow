@@ -185,8 +185,8 @@ public:
     }
 
     [[nodiscard]] bool has_pending_flush() const noexcept {
-        return completed_flushes.load(std::memory_order_acquire) <
-               flush_requests.load(std::memory_order_acquire);
+        return completed_flushes.load(std::memory_order_relaxed) <
+               flush_requests.load(std::memory_order_relaxed);
     }
 
     Thread thread;
