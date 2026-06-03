@@ -158,4 +158,17 @@ TEST(RuntimeShutdownTests, StopImmediatelyTaskRegistryCancelsAndDestroysPendingT
     FastShutdownRuntime::shutdown();
     EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
 }
+
+TEST(RuntimeShutdownTests, StopImmediatelyPolicyEnablesTaskRegistryByDefault) {
+    AutoRegistryShutdownRuntime::init();
+
+    std::atomic<int> entered{0};
+    std::atomic<int> destroyed{0};
+    ASSERT_TRUE(AutoRegistryShutdownRuntime::start_task<AutoRegistryShutdownPendingTask>(
+        &entered, &destroyed));
+    ASSERT_TRUE(wait_until_at_least(entered, 1));
+
+    AutoRegistryShutdownRuntime::shutdown();
+    EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
+}
 } // namespace af::test::runtime_lifecycle

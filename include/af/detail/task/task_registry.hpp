@@ -17,10 +17,18 @@ inline constexpr std::uint64_t no_requested_thread = 0;
 
 template <typename RuntimeT>
 inline constexpr bool task_registry_enabled_v = [] {
-    if constexpr (requires { RuntimeT::Traits::enable_task_registry; }) {
-        return static_cast<bool>(RuntimeT::Traits::enable_task_registry);
+    constexpr bool explicitly_enabled = [] {
+        if constexpr (requires { RuntimeT::Traits::enable_task_registry; }) {
+            return static_cast<bool>(RuntimeT::Traits::enable_task_registry);
+        } else {
+            return false;
+        }
+    }();
+    if constexpr (requires { RuntimeT::Traits::shutdown_policy; }) {
+        return explicitly_enabled ||
+               RuntimeT::Traits::shutdown_policy == ShutdownPolicy::StopImmediately;
     } else {
-        return false;
+        return explicitly_enabled;
     }
 }();
 

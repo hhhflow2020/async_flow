@@ -65,10 +65,17 @@ template <typename TraitsT> struct RuntimeTraitsConfig {
     }();
 
     static constexpr bool task_registry_enabled = [] {
-        if constexpr (requires { TraitsT::enable_task_registry; }) {
-            return static_cast<bool>(TraitsT::enable_task_registry);
+        constexpr bool explicitly_enabled = [] {
+            if constexpr (requires { TraitsT::enable_task_registry; }) {
+                return static_cast<bool>(TraitsT::enable_task_registry);
+            } else {
+                return false;
+            }
+        }();
+        if constexpr (shutdown_policy == ShutdownPolicy::StopImmediately) {
+            return true;
         } else {
-            return false;
+            return explicitly_enabled;
         }
     }();
 

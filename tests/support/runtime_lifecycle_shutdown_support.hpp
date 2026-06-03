@@ -206,4 +206,50 @@ private:
     std::atomic<int> *destroyed_{nullptr};
 };
 
+struct AutoRegistryShutdownThreadTag;
+
+struct AutoRegistryShutdownRuntimeTraits {
+    static constexpr auto threads =
+        af::thread_layout(af::thread_group<AutoRegistryShutdownThreadTag, 1>());
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::StopImmediately;
+};
+
+using AutoRegistryShutdownRuntime = af::AsyncRuntime<AutoRegistryShutdownRuntimeTraits>;
+using AutoRegistryShutdownTaskBase = AutoRegistryShutdownRuntime::Task;
+using AutoRegistryShutdownThread = AutoRegistryShutdownRuntime::Thread;
+
+struct AutoRegistryShutdownThreads {
+    static constexpr AutoRegistryShutdownThread Logic_0 =
+        AutoRegistryShutdownRuntime::thread_group<AutoRegistryShutdownThreadTag>().template at<0>();
+};
+
+class AutoRegistryShutdownPendingTask final : public AutoRegistryShutdownTaskBase {
+public:
+    explicit AutoRegistryShutdownPendingTask(AutoRegistryShutdownTaskBase::FactoryToken token)
+        : AutoRegistryShutdownTaskBase(token) {}
+
+    bool do_it(std::atomic<int> *entered, std::atomic<int> *destroyed) {
+        entered_ = entered;
+        destroyed_ = destroyed;
+        return schedule(AutoRegistryShutdownThreads::Logic_0);
+    }
+
+    ~AutoRegistryShutdownPendingTask() override {
+        destroyed_->fetch_add(1, std::memory_order_release);
+    }
+
+private:
+    af::TaskResult run() override {
+        entered_->fetch_add(1, std::memory_order_release);
+        entered_->notify_one();
+        return pending();
+    }
+
+    std::atomic<int> *entered_{nullptr};
+    std::atomic<int> *destroyed_{nullptr};
+};
+
+static_assert(!WaitShutdownRuntime::task_registry_enabled);
+static_assert(FastShutdownRuntime::task_registry_enabled);
+static_assert(AutoRegistryShutdownRuntime::task_registry_enabled);
 static_assert(!std::is_default_constructible_v<NoInitTask>);
