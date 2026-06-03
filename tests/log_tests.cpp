@@ -61,6 +61,14 @@ static_assert(sizeof(af::detail::CacheLineAtomic<std::uint64_t>) >=
     return newline == std::string_view::npos ? 0U : newline + 1U;
 }
 
+[[nodiscard]] std::string_view line_for_position(std::string_view text,
+                                                 std::size_t position) noexcept {
+    const std::size_t begin = line_begin_for_position(text, position);
+    const std::size_t newline = text.find('\n', begin);
+    const std::size_t end = newline == std::string_view::npos ? text.size() : newline + 1U;
+    return text.substr(begin, end - begin);
+}
+
 TEST(LogTests, TaskIdTagIsInsertedAtFirstUserLogField) {
     const std::string message = "I0603 10:31:40.550430 123 log_tests.cpp:42] user first\nsecond\n";
     const std::string user_message = "user first\nsecond\n";
@@ -72,6 +80,15 @@ TEST(LogTests, TaskIdTagIsInsertedAtFirstUserLogField) {
     EXPECT_EQ(count_substring_occurrences(tagged, "[task=1025] "), 2U);
     EXPECT_EQ(tagged.find("[task=1025] "), message.size() - user_message.size());
     EXPECT_EQ(tagged.find("\n[task=1025] "), std::string::npos);
+
+    const std::string_view first_line = line_for_position(tagged, tagged.find("user first"));
+    const std::string_view second_line = line_for_position(tagged, tagged.find("second"));
+    const std::size_t first_task_tag_pos = first_line.find("[task=1025] ");
+    const std::size_t second_task_tag_pos = second_line.find("[task=1025] ");
+    ASSERT_NE(first_task_tag_pos, std::string_view::npos);
+    ASSERT_NE(second_task_tag_pos, std::string_view::npos);
+    EXPECT_NE(second_task_tag_pos, 0U);
+    EXPECT_EQ(first_line.substr(0, first_task_tag_pos), second_line.substr(0, second_task_tag_pos));
 }
 
 TEST(LogTests, TaskIdTagUsesSharedLogEntryUserFieldStart) {
@@ -1222,6 +1239,17 @@ TEST(LogTests, RuntimeAwareSinkTagsEachUserLogLineAfterPrefix) {
     ASSERT_NE(second_prefix_end, std::string::npos);
     EXPECT_EQ(second_task_tag_pos, second_prefix_end + 2U);
     EXPECT_LT(second_line_begin + 1U, second_task_tag_pos);
+
+    const std::string_view first_line = line_for_position(contents, first_user_line_pos);
+    const std::string_view second_line = line_for_position(contents, second_user_line_pos);
+    const std::size_t first_line_task_tag_pos = first_line.find(task_tag);
+    const std::size_t second_line_task_tag_pos = second_line.find(task_tag);
+    ASSERT_NE(first_line_task_tag_pos, std::string_view::npos);
+    ASSERT_NE(second_line_task_tag_pos, std::string_view::npos);
+    EXPECT_NE(first_line_task_tag_pos, 0U);
+    EXPECT_NE(second_line_task_tag_pos, 0U);
+    EXPECT_EQ(first_line.substr(0, first_line_task_tag_pos),
+              second_line.substr(0, second_line_task_tag_pos));
 }
 
 TEST(LogTests, BlockOverflowWaitsForQueueCapacity) {
