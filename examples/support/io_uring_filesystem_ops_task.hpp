@@ -244,4 +244,30 @@ private:
 
 } // namespace io_uring_filesystem_ops_example
 
+#else
+
+namespace io_uring_filesystem_ops_example {
+
+class FilesystemOpsTask final : public FsTaskBase {
+public:
+    explicit FilesystemOpsTask(FsTaskBase::FactoryToken token) : FsTaskBase(token) {}
+
+    bool do_it(const char *dir_path, const char *file_path, const char *hardlink_path,
+               const char *symlink_path, FsResult *result) {
+        static_cast<void>(dir_path);
+        static_cast<void>(file_path);
+        static_cast<void>(hardlink_path);
+        static_cast<void>(symlink_path);
+        static_cast<void>(result);
+        return false;
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
+};
+
+} // namespace io_uring_filesystem_ops_example
+
 #endif

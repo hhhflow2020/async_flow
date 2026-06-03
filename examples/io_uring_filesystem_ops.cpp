@@ -5,10 +5,11 @@
 #include "support/io_uring_filesystem_ops_task.hpp"
 
 int main() {
-#if !defined(__linux__)
-    std::cout << "io_uring filesystem ops example is Linux-only\n";
-    return 0;
-#else
+    if constexpr (!af::supports_io_uring) {
+        std::cout << "io_uring filesystem ops example is Linux-only\n";
+        return 0;
+    }
+
     using namespace io_uring_filesystem_ops_example;
 
     fs_async::init();
@@ -50,5 +51,4 @@ int main() {
 
     std::cout << "filesystem lifecycle complete, statx size=" << result.observed_size << "\n";
     return result.observed_size == 1U ? 0 : 1;
-#endif
 }
