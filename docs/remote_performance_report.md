@@ -3050,3 +3050,48 @@ Interpretation:
 - The example now demonstrates the intended adapter API shape: application code
   uses public stream/datagram adapter views and lets AsyncFlow select the
   platform backend internally.
+
+## 2026-06-03 POSIX Pollable Client Example
+
+This pass makes the pollable-client adapter example run on the supported POSIX
+native readiness backend set instead of exiting on non-Linux platforms. The
+third-party-style pollable state machine and AsyncFlow readiness adapter task
+keep the same behavior; only Linux-only guards/stubs and socket setup were
+removed.
+
+Changes under validation:
+
+- Removed the main-program `supports_epoll` early return from
+  `io_pollable_client.cpp`.
+- Removed `__linux__` guards and non-Linux stubs from the pollable peer,
+  client, and task support headers.
+- Replaced Linux-only `socketpair(..., SOCK_NONBLOCK | SOCK_CLOEXEC, ...)`
+  setup with POSIX `socketpair` plus portable `fcntl` nonblocking and
+  close-on-exec handling.
+- Replaced hard `MSG_NOSIGNAL` usage with a capability-checked send flag and
+  `SO_NOSIGPIPE` socket option where available.
+
+Correctness checks:
+
+- Local macOS Debug built `asyncflow_io_pollable_client_example`.
+- Local macOS Debug `asyncflow_io_pollable_client_example` ran successfully
+  with `backend=kqueue` and `pollable client response=PING`.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: built and ran
+  `asyncflow_io_pollable_client_example` successfully with `backend=epoll` and
+  `pollable client response=PING`.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: built and ran
+  `asyncflow_io_pollable_client_example` successfully with `backend=epoll` and
+  `pollable client response=PING`.
+
+Interpretation:
+
+- This is an example portability cleanup only. It does not change runtime
+  scheduler routing, local/SPSC/MPSC queue topology, IO wait state transitions,
+  locks, atomics, allocations, memory ordering, or cache layout.
+- The example now demonstrates the intended pollable-client API shape:
+  third-party readiness-oriented code can be adapted to AsyncFlow's portable
+  native IO thread without application-level `__linux__` guards.

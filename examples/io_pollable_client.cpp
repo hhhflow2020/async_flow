@@ -6,17 +6,14 @@
 int main() {
     using namespace io_pollable_client_example;
 
-    if constexpr (!af::supports_epoll) {
-        std::cout << "pollable client example is Linux-only\n";
-        return 0;
-    }
-
     client_async::init();
     if (!client_async::io_backend_available(ClientThreads::IO_0)) {
-        std::cout << "epoll backend unavailable\n";
+        std::cout << "IO backend unavailable\n";
         client_async::shutdown();
         return 0;
     }
+    std::cout << "pollable client backend="
+              << af::runtime_io_backend_name<client_async>(ClientThreads::IO_0) << '\n';
 
     PollableSocketPair sockets{};
     if (!sockets.create()) {

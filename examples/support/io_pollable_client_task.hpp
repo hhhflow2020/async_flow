@@ -7,8 +7,6 @@
 
 namespace io_pollable_client_example {
 
-#if defined(__linux__)
-
 class PollableClientTask final : public PollableTaskBase {
 public:
     explicit PollableClientTask(PollableTaskBase::FactoryToken token) : PollableTaskBase(token) {}
@@ -68,24 +66,5 @@ private:
     PollableEchoClient client_{};
     af::IoOpState wait_{};
 };
-
-#else
-
-class PollableClientTask final : public PollableTaskBase {
-public:
-    explicit PollableClientTask(PollableTaskBase::FactoryToken token) : PollableTaskBase(token) {}
-
-    bool do_it(int fd) {
-        static_cast<void>(fd);
-        return false;
-    }
-
-private:
-    af::TaskResult run() override {
-        return failed();
-    }
-};
-
-#endif
 
 } // namespace io_pollable_client_example

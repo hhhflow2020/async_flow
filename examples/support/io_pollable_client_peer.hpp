@@ -3,27 +3,47 @@
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
+#include <fcntl.h>
+#include <sys/socket.h>
 #include <thread>
+#include <unistd.h>
 
 #include "io_pollable_client_runtime.hpp"
 
-#if defined(__linux__)
-#include <sys/socket.h>
-#include <unistd.h>
-#endif
-
 namespace io_pollable_client_example {
 
-#if defined(__linux__)
+[[nodiscard]] inline bool apply_pollable_socket_flags(int fd) noexcept {
+    const int status_flags = ::fcntl(fd, F_GETFL, 0);
+    if (status_flags < 0 || ::fcntl(fd, F_SETFL, status_flags | O_NONBLOCK) != 0) {
+        return false;
+    }
+
+    const int descriptor_flags = ::fcntl(fd, F_GETFD, 0);
+    if (descriptor_flags < 0 || ::fcntl(fd, F_SETFD, descriptor_flags | FD_CLOEXEC) != 0) {
+        return false;
+    }
+
+#if defined(SO_NOSIGPIPE)
+    const int on = 1;
+    if (::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on)) != 0) {
+        return false;
+    }
+#endif
+    return true;
+}
 
 struct PollableSocketPair {
     [[nodiscard]] bool create() noexcept {
         int fds[2]{-1, -1};
-        if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds) != 0) {
+        if (::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0) {
             return false;
         }
         client.reset(fds[0]);
         peer.reset(fds[1]);
+        if (!apply_pollable_socket_flags(client.get()) ||
+            !apply_pollable_socket_flags(peer.get())) {
+            return false;
+        }
         return true;
     }
 
@@ -79,22 +99,5 @@ inline void echo_peer_once(int fd) {
         static_cast<void>(write_exact_until(fd, request, sizeof(request)));
     }
 }
-
-#else
-
-struct PollableSocketPair {
-    [[nodiscard]] bool create() noexcept {
-        return false;
-    }
-
-    af::UniqueFd client{};
-    af::UniqueFd peer{};
-};
-
-inline void echo_peer_once(int fd) {
-    static_cast<void>(fd);
-}
-
-#endif
 
 } // namespace io_pollable_client_example

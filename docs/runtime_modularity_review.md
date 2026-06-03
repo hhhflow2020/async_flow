@@ -90,6 +90,10 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - The io_uring UDP recv multishot example is now split into runtime/wait helpers, UDP socket setup helpers, a cohesive provided-buffer recv task class, and a thin executable entry point.
 - The io_uring file-lifecycle example is now split into runtime traits, temporary path lifecycle helpers, a cohesive lifecycle task class, and a thin executable entry point.
 - The pollable-client adapter example is now split into runtime traits, a third-party-style pollable echo client, the AsyncFlow readiness adapter task, peer echo helpers, and a thin executable entry point.
+- The pollable-client adapter example is no longer Linux-only. It now uses
+  `af::native_io_thread_kind`, POSIX socketpair setup, portable fd flag
+  handling, and capability-based no-SIGPIPE handling, so it runs through epoll
+  on Linux and kqueue on macOS/BSD without user-visible platform guards.
 - The io_uring stream recv multishot example is now split into runtime/wait helpers, socketpair setup helpers, a cohesive provided-buffer recv task class, and a thin executable entry point.
 - The TCP connect/accept example is now split into runtime traits, portable loopback socket setup, server/client state-machine tasks, and a thin executable entry point. It uses the unified `ThreadKind::Io`/`ThreadKind::IoUring` API so Linux can prefer io_uring while macOS/BSD uses the native kqueue readiness backend.
 - The TCP echo server example demonstrates a fully asynchronous 2-IO-thread/1-compute-thread flow: accept/read on IO threads, uppercase-to-lowercase transform on the compute thread, then send on the owning IO thread. Its runtime traits, socket setup, server acceptor, session state machine, client driver, and executable entry point are split into focused headers.

@@ -4,16 +4,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <sys/socket.h>
 
 #include "io_pollable_client_runtime.hpp"
 
-#if defined(__linux__)
-#include <sys/socket.h>
-#endif
-
 namespace io_pollable_client_example {
-
-#if defined(__linux__)
 
 struct PollableStep {
     std::uint32_t want{0};
@@ -73,9 +68,17 @@ private:
         Error,
     };
 
+    [[nodiscard]] static int send_flags() noexcept {
+#if defined(MSG_NOSIGNAL)
+        return MSG_NOSIGNAL;
+#else
+        return 0;
+#endif
+    }
+
     PollableStep step_send() noexcept {
         while (sent_ < sizeof(request_)) {
-            const ssize_t n = ::send(fd_, request_ + sent_, sizeof(request_) - sent_, MSG_NOSIGNAL);
+            const ssize_t n = ::send(fd_, request_ + sent_, sizeof(request_) - sent_, send_flags());
             if (n > 0) {
                 sent_ += static_cast<std::size_t>(n);
                 continue;
@@ -139,7 +142,5 @@ private:
     char response_[4]{};
     static constexpr char request_[4] = {'P', 'I', 'N', 'G'};
 };
-
-#endif
 
 } // namespace io_pollable_client_example
