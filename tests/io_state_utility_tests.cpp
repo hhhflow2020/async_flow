@@ -74,6 +74,20 @@ TEST(UtilityTests, PublicIoTimeoutRejectClearsStaleResultState) {
     EXPECT_EQ(result.completion_token, nullptr);
 }
 
+TEST(UtilityTests, PublicIoFixedFileRejectClearsStaleResultState) {
+    int token = 0;
+    af::IoResult result{7, af::io_readable, 0, 64, &token};
+    const auto thread = UtilityIoRuntime::thread_group<UtilityIoThreadTag>().template at<0>();
+
+    EXPECT_FALSE(UtilityIoRuntime::io_submit_fsync_fixed_file(thread, 5, 0, nullptr, &result));
+
+    EXPECT_EQ(result.fd, 5);
+    EXPECT_EQ(result.events, af::io_error);
+    EXPECT_EQ(result.error, EINVAL);
+    EXPECT_EQ(result.result, -EINVAL);
+    EXPECT_EQ(result.completion_token, nullptr);
+}
+
 TEST(UtilityTests, IoUringSubmitFallbackKeepsInvalidArgumentsFatal) {
     EXPECT_TRUE(af::detail::uring_submit_error_can_fallback(ENOSYS));
     EXPECT_TRUE(af::detail::uring_submit_error_can_fallback(EBUSY));
