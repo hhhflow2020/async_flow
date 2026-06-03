@@ -184,4 +184,28 @@ private:
 
 } // namespace io_uring_udp_recv_multishot_example
 
+#else
+
+namespace io_uring_udp_recv_multishot_example {
+
+class UdpRecvMultishotTask final : public UdpRecvTaskBase {
+public:
+    explicit UdpRecvMultishotTask(UdpRecvTaskBase::FactoryToken token) : UdpRecvTaskBase(token) {}
+
+    bool do_it(int fd, std::atomic<int> *armed, int *packed_read, std::atomic<int> *error) {
+        static_cast<void>(fd);
+        static_cast<void>(armed);
+        static_cast<void>(packed_read);
+        static_cast<void>(error);
+        return false;
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
+};
+
+} // namespace io_uring_udp_recv_multishot_example
+
 #endif

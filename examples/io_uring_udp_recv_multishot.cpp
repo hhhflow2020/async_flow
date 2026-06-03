@@ -5,8 +5,12 @@
 #include "support/io_uring_udp_recv_multishot_task.hpp"
 
 int main() {
-#if defined(__linux__)
     using namespace io_uring_udp_recv_multishot_example;
+
+    if constexpr (!af::supports_io_uring) {
+        std::cout << "io_uring UDP recv_multishot example is Linux-only\n";
+        return 0;
+    }
 
     udp_recv_async::init();
     if (!udp_recv_async::io_uring_backend_available(UdpRecvThreads::IO_0)) {
@@ -15,24 +19,8 @@ int main() {
         return 0;
     }
 
-    af::UniqueFd receiver(::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
-    af::UniqueFd sender(::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
-    if (!receiver || !sender) {
-        std::cout << "socket failed\n";
-        udp_recv_async::shutdown();
-        return 1;
-    }
-
-    sockaddr_in receiver_address{};
-    socklen_t receiver_address_size = sizeof(receiver_address);
-    sockaddr_in sender_address{};
-    socklen_t sender_address_size = sizeof(sender_address);
-    if (!bind_loopback(receiver.get(), receiver_address, receiver_address_size) ||
-        !bind_loopback(sender.get(), sender_address, sender_address_size) ||
-        ::connect(receiver.get(), reinterpret_cast<sockaddr *>(&sender_address),
-                  sender_address_size) != 0 ||
-        ::connect(sender.get(), reinterpret_cast<sockaddr *>(&receiver_address),
-                  receiver_address_size) != 0) {
+    UdpRecvMultishotSockets sockets{};
+    if (!sockets.connect_loopback()) {
         std::cout << "udp bind/connect failed\n";
         udp_recv_async::shutdown();
         return 1;
@@ -41,8 +29,8 @@ int main() {
     std::atomic<int> armed{0};
     int packed_read = 0;
     std::atomic<int> error{0};
-    const bool started = udp_recv_async::start_task<UdpRecvMultishotTask>(receiver.get(), &armed,
-                                                                          &packed_read, &error);
+    const bool started = udp_recv_async::start_task<UdpRecvMultishotTask>(
+        sockets.receiver.get(), &armed, &packed_read, &error);
     AF_ASSERT(started);
 
     if (!started || !wait_until_armed_or_error(armed, error)) {
@@ -63,7 +51,7 @@ int main() {
     }
 
     const char payload[] = {'U', 'M'};
-    if (::send(sender.get(), payload, 1, 0) != 1 || ::send(sender.get(), payload + 1, 1, 0) != 1) {
+    if (!sockets.send_payload(payload, sizeof(payload))) {
         std::cout << "send payload failed\n";
         udp_recv_async::shutdown();
         return 1;
@@ -81,8 +69,4 @@ int main() {
     std::cout << "io_uring UDP recv_multishot bytes=" << static_cast<char>((packed >> 8) & 0xff)
               << static_cast<char>(packed & 0xff) << '\n';
     return 0;
-#else
-    std::cout << "io_uring UDP recv_multishot example is Linux-only\n";
-    return 0;
-#endif
 }
