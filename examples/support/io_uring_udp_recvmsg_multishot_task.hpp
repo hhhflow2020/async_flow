@@ -213,4 +213,32 @@ private:
 
 } // namespace io_uring_udp_recvmsg_multishot_example
 
+#else
+
+namespace io_uring_udp_recvmsg_multishot_example {
+
+class UdpRecvmsgMultishotTask final : public UdpRecvmsgTaskBase {
+public:
+    explicit UdpRecvmsgMultishotTask(UdpRecvmsgTaskBase::FactoryToken token)
+        : UdpRecvmsgTaskBase(token) {}
+
+    bool do_it(int fd, std::uint16_t expected_port, std::atomic<int> *armed, int *packed_read,
+               int *peer_count, std::atomic<int> *error) {
+        static_cast<void>(fd);
+        static_cast<void>(expected_port);
+        static_cast<void>(armed);
+        static_cast<void>(packed_read);
+        static_cast<void>(peer_count);
+        static_cast<void>(error);
+        return false;
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
+};
+
+} // namespace io_uring_udp_recvmsg_multishot_example
+
 #endif
