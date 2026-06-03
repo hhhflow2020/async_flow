@@ -237,7 +237,8 @@ struct EpollReadinessRuntimeTraits {
         af::thread_group<EpollReadinessIoThreadTag, 1, af::ThreadKind::Epoll, "readiness">());
     static constexpr std::size_t spsc_queue_capacity = readiness_queue_capacity;
     static constexpr std::size_t external_queue_capacity = readiness_queue_capacity;
-    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 };
 
@@ -267,7 +268,8 @@ struct KqueueReadinessRuntimeTraits {
         af::thread_group<KqueueReadinessIoThreadTag, 1, af::ThreadKind::Kqueue, "readiness">());
     static constexpr std::size_t spsc_queue_capacity = readiness_queue_capacity;
     static constexpr std::size_t external_queue_capacity = readiness_queue_capacity;
-    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 };
 

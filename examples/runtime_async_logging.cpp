@@ -18,7 +18,8 @@ struct RuntimeLogTraits {
         af::thread_group<RuntimeLogThreadTag, 2, af::ThreadKind::Worker, "logic">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
-    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
 };
 
 using runtime_async = af::AsyncRuntime<RuntimeLogTraits>;
@@ -70,9 +71,9 @@ bool wait_for_completion(std::atomic<int> &completed, int expected) {
 int main(int argc, char **argv) {
     using namespace std::chrono_literals;
 
-    af::AsyncLogConfig config = af::AsyncLogConfig::relaxed();
+    af::AsyncLogConfig config = af::AsyncLogConfig::relaxed(runtime_async::thread_count);
     config.queue_capacity = 1U << 15U;
-    config.runtime_queue_capacity = 1U << 15U;
+    config.runtime_lane_capacity = 1U << 15U;
     config.max_batch_size = 512;
     config.overflow_spin_count = 128;
     config.overflow_policy = af::LogOverflowPolicy::DropNewest;

@@ -114,7 +114,7 @@ struct AsyncLogConfig {
     std::size_t queue_capacity{default_queue_capacity};
     std::size_t queue_shard_count{0};
     std::size_t runtime_thread_count{0};
-    std::size_t runtime_queue_capacity{0};
+    std::size_t runtime_lane_capacity{0};
     std::size_t max_batch_size{256};
     std::size_t max_consumer_batches_per_run{64};
     std::size_t overflow_spin_count{64};
@@ -122,7 +122,6 @@ struct AsyncLogConfig {
     LogOrdering ordering{LogOrdering::Ordered};
     std::chrono::milliseconds flush_poll_interval{std::chrono::milliseconds(1)};
     std::chrono::milliseconds fatal_flush_timeout{std::chrono::milliseconds(200)};
-    bool initialize_absl_log{true};
     std::vector<std::unique_ptr<LogBackend>> backends;
 };
 
@@ -158,9 +157,9 @@ public:
               config.max_batch_size)),
           runtime_lanes_(make_runtime_lanes(
               runtime_thread_count_,
-              queue_capacity_per_runtime_thread(config.runtime_queue_capacity == 0U
+              queue_capacity_per_runtime_thread(config.runtime_lane_capacity == 0U
                                                     ? config.queue_capacity
-                                                    : config.runtime_queue_capacity,
+                                                    : config.runtime_lane_capacity,
                                                 runtime_thread_count_),
               config.max_batch_size)),
           max_batch_size_(config.max_batch_size == 0U ? 1U : config.max_batch_size),

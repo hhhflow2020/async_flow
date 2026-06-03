@@ -92,7 +92,6 @@ public:
     static constexpr TaskId invalid_task_id = Task::invalid_task_id;
     static constexpr std::size_t spsc_queue_capacity = Config::spsc_queue_capacity;
     static constexpr std::size_t external_queue_capacity = Config::external_queue_capacity;
-    static constexpr QueueFullPolicy queue_full_policy = Config::queue_full_policy;
     static constexpr QueueFullPolicy runtime_queue_full_policy = Config::runtime_queue_full_policy;
     static constexpr QueueFullPolicy external_queue_full_policy =
         Config::external_queue_full_policy;

@@ -39,7 +39,8 @@ struct AppRuntimeTraits {
                           af::thread_group<AppIoThreadTag, 1, af::ThreadKind::Epoll, "io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
-    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
+    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Reject;
+    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Reject;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 };
 
@@ -91,7 +92,6 @@ static constexpr auto threads = af::thread_layout(...);
 ```cpp
 static constexpr std::size_t spsc_queue_capacity = 1024;
 static constexpr std::size_t external_queue_capacity = 1024;
-static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
 static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Reject;
 static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Reject;
 static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
@@ -100,11 +100,12 @@ static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitFo
 默认值：
 
 - `spsc_queue_capacity = 1024`
-- `external_queue_capacity = spsc_queue_capacity`
-- `queue_full_policy = QueueFullPolicy::Reject`
-- `runtime_queue_full_policy = queue_full_policy`
-- `external_queue_full_policy = queue_full_policy`
+- `external_queue_capacity = 1024`
+- `runtime_queue_full_policy = QueueFullPolicy::Reject`
+- `external_queue_full_policy = QueueFullPolicy::Reject`
 - `shutdown_policy = ShutdownPolicy::WaitForTasks`
+
+旧的单一 `queue_full_policy` 已移除。runtime 内部生产者和外部生产者必须分别通过 `runtime_queue_full_policy` / `external_queue_full_policy` 声明满队列策略，避免一个总开关隐式影响两条语义不同的热路径。
 
 ## 4. Task 模型
 
@@ -575,7 +576,7 @@ auto sharded = af::split_change_batch(batch, shard_count);
 - `af::IoEvent` 使用 Linux `eventfd` readiness，适合业务侧异步通知、轻量计数器和跨组件唤醒，`ThreadKind::IoUring` 线程也可复用 epoll fallback。
 - `af::IoTimer` 使用 Linux `timerfd` readiness，适合超时、重试、心跳和连接保活，`ThreadKind::IoUring` 线程也可复用 epoll fallback。
 - `af::IoFile` / `af::TcpListener` / `af::TcpStream` / `af::UdpSocket` / `af::IoEvent` / `af::IoTimer` 仅保存 `thread + fd`，内联转发到 IO helper，不拥有 fd、不分配堆内存、不增加额外分支表；`af::TcpStream::sendfile_some()` 只是 thin adapter，不接管文件 fd 或 socket fd 所有权。
-- 异步日志提供 `LogOrdering::Ordered` 与 `LogOrdering::Relaxed` 两种生产者队列策略。用户可用 `AsyncLogConfig::ordered()` / `AsyncLogConfig::ordered(producer_shard_count)` / `AsyncLogConfig::relaxed()` / `AsyncLogConfig::relaxed(runtime_thread_count, external_shard_count)` 直接创建推荐策略配置，也可在已有配置上调用 `use_ordered(producer_shard_count)` / `use_relaxed(runtime_thread_count, external_shard_count)` 切换策略；`runtime_thread_count == 0` 在 runtime-bound 入口表示自动使用 `RuntimeT::thread_count`。默认 `Ordered` 使用单个 bounded MPSC，让消费者按入队线性化顺序批量写后端；ordered 的 record pool 与 accepted/dropped 计数按 producer shard 分散，避免除 MPSC enqueue 序列点之外的共享 cache line 热点；`Relaxed` 用 runtime 线程 SPSC lane + 外部 sharded MPSC 换取更低争用，但只保证每个 lane/shard 内 FIFO。日志等级过滤使用 Abseil 前端 `SetMinLogLevel()`，低于等级的 `LOG(...) << ...` 不会进入格式化和异步入队路径。
+- 异步日志提供 `LogOrdering::Ordered` 与 `LogOrdering::Relaxed` 两种生产者队列策略。用户可用 `AsyncLogConfig::ordered()` / `AsyncLogConfig::ordered(producer_shard_count)` / `AsyncLogConfig::relaxed()` / `AsyncLogConfig::relaxed(runtime_thread_count, external_shard_count)` 直接创建推荐策略配置，也可在已有配置上调用 `use_ordered(producer_shard_count)` / `use_relaxed(runtime_thread_count, external_shard_count)` 切换策略；`runtime_thread_count == 0` 在 runtime-bound 入口表示自动使用 `RuntimeT::thread_count`。默认 `Ordered` 使用单个 bounded MPSC，让消费者按入队线性化顺序批量写后端；ordered 的 record pool 与 accepted/dropped 计数按 producer shard 分散，避免除 MPSC enqueue 序列点之外的共享 cache line 热点；`Relaxed` 用 runtime 线程 SPSC lane + 外部 sharded MPSC 换取更低争用，但只保证每个 lane/shard 内 FIFO。`runtime_lane_capacity` 只在 `Relaxed` 下控制 runtime SPSC lane 的容量，ordered 场景只需要设置 `queue_capacity`。日志等级过滤使用 Abseil 前端 `SetMinLogLevel()`，低于等级的 `LOG(...) << ...` 不会进入格式化和异步入队路径。
 
 仍需注意：
 

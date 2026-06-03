@@ -26,7 +26,8 @@ struct IoTestRuntimeTraits {
     static constexpr auto threads = io_test_threads;
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
-    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
 };
 
 using IoRuntime = af::AsyncRuntime<IoTestRuntimeTraits>;
@@ -44,7 +45,8 @@ struct FastIoRuntimeTraits {
     static constexpr auto threads = io_test_threads;
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
-    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::StopImmediately;
     static constexpr bool enable_task_registry = true;
 };
@@ -56,7 +58,8 @@ struct UringIoRuntimeTraits {
     static constexpr auto threads = uring_io_test_threads;
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
-    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
 };
 
 using UringIoRuntime = af::AsyncRuntime<UringIoRuntimeTraits>;

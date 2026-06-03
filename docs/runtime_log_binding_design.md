@@ -20,7 +20,9 @@
   `use_ordered(producer_shard_count)` or
   `use_relaxed(runtime_thread_count, external_shard_count)`. For runtime-bound
   logging, `runtime_thread_count == 0` means auto-fill from
-  `RuntimeT::thread_count`.
+  `RuntimeT::thread_count`. `runtime_lane_capacity` only applies to relaxed
+  runtime SPSC lanes; ordered logging uses `queue_capacity` for the single
+  backend-visible MPSC queue.
 - Ordered logging keeps only the enqueue position as the required global
   serialization point. Producer record pools and accepted/dropped counters are
   sharded and cache-line isolated so unrelated producer-side state does not

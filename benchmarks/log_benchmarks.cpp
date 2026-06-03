@@ -42,14 +42,14 @@ void run_async_logger_external_producer_benchmark(benchmark::State &state,
     auto backend = std::make_unique<CountingLogBackend>();
     auto *counting_backend = backend.get();
 
-    af::AsyncLogConfig config;
+    const auto producer_shard_count = static_cast<std::size_t>(producer_count);
+    af::AsyncLogConfig config = ordering == af::LogOrdering::Ordered
+                                    ? af::AsyncLogConfig::ordered(producer_shard_count)
+                                    : af::AsyncLogConfig::relaxed(0U, producer_shard_count);
     config.queue_capacity = static_cast<std::size_t>(total_records + 1024U);
-    config.queue_shard_count = static_cast<std::size_t>(producer_count);
     config.max_batch_size = 256;
     config.max_consumer_batches_per_run = 1024;
     config.overflow_policy = af::LogOverflowPolicy::DropNewest;
-    config.ordering = ordering;
-    config.initialize_absl_log = false;
     config.backends.push_back(std::move(backend));
 
     auto logger = std::make_shared<af::AsyncLogger>(std::move(config));

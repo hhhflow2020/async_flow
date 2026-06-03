@@ -21,7 +21,8 @@ struct BatchRuntimeTraits {
     static constexpr std::size_t task_pool_local_cache_set_size = TaskPoolLocalCacheSetSize;
     static constexpr std::size_t task_pool_direct_release_set_size = TaskPoolDirectReleaseSetSize;
     static constexpr std::size_t task_pool_local_cache_capacity = TaskPoolLocalCacheCapacity;
-    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
 };
 
 template <typename RuntimeT> class BatchHopTask final : public RuntimeT::Task {

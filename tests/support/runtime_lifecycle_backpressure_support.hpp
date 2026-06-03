@@ -6,7 +6,8 @@ struct TinyRuntimeTraits {
     static constexpr auto threads = af::thread_layout(af::thread_group<TinyThreadTag, 1>());
     static constexpr std::size_t spsc_queue_capacity = 2;
     static constexpr std::size_t external_queue_capacity = 2;
-    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
+    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Reject;
+    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Reject;
 };
 
 using TinyRuntime = af::AsyncRuntime<TinyRuntimeTraits>;
@@ -115,7 +116,8 @@ struct YieldRuntimeTraits {
     static constexpr auto threads = af::thread_layout(af::thread_group<YieldThreadTag, 2>());
     static constexpr std::size_t spsc_queue_capacity = 64;
     static constexpr std::size_t external_queue_capacity = 64;
-    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
 };
 
 using YieldRuntime = af::AsyncRuntime<YieldRuntimeTraits>;
@@ -181,7 +183,6 @@ struct SplitPolicyRuntimeTraits {
     static constexpr auto threads = af::thread_layout(af::thread_group<SplitPolicyThreadTag, 1>());
     static constexpr std::size_t spsc_queue_capacity = 2;
     static constexpr std::size_t external_queue_capacity = 2;
-    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Reject;
 };

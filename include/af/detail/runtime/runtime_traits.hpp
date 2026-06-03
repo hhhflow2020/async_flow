@@ -8,6 +8,11 @@
 namespace af::detail {
 
 template <typename TraitsT> struct RuntimeTraitsConfig {
+    static_assert(
+        !requires { TraitsT::queue_full_policy; },
+        "queue_full_policy has been removed; define runtime_queue_full_policy "
+        "and external_queue_full_policy explicitly");
+
     static constexpr std::size_t spsc_queue_capacity = [] {
         if constexpr (requires { TraitsT::spsc_queue_capacity; }) {
             return static_cast<std::size_t>(TraitsT::spsc_queue_capacity);
@@ -20,15 +25,7 @@ template <typename TraitsT> struct RuntimeTraitsConfig {
         if constexpr (requires { TraitsT::external_queue_capacity; }) {
             return static_cast<std::size_t>(TraitsT::external_queue_capacity);
         } else {
-            return spsc_queue_capacity;
-        }
-    }();
-
-    static constexpr QueueFullPolicy queue_full_policy = [] {
-        if constexpr (requires { TraitsT::queue_full_policy; }) {
-            return TraitsT::queue_full_policy;
-        } else {
-            return QueueFullPolicy::Reject;
+            return static_cast<std::size_t>(1024);
         }
     }();
 
@@ -36,7 +33,7 @@ template <typename TraitsT> struct RuntimeTraitsConfig {
         if constexpr (requires { TraitsT::runtime_queue_full_policy; }) {
             return TraitsT::runtime_queue_full_policy;
         } else {
-            return queue_full_policy;
+            return QueueFullPolicy::Reject;
         }
     }();
 
@@ -44,7 +41,7 @@ template <typename TraitsT> struct RuntimeTraitsConfig {
         if constexpr (requires { TraitsT::external_queue_full_policy; }) {
             return TraitsT::external_queue_full_policy;
         } else {
-            return queue_full_policy;
+            return QueueFullPolicy::Reject;
         }
     }();
 

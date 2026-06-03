@@ -18,7 +18,8 @@ struct BenchRuntimeTraits {
         af::thread_group<BenchIoThreadTag, 1, af::ThreadKind::Epoll, "bench-io">());
     static constexpr std::size_t spsc_queue_capacity = 65536;
     static constexpr std::size_t external_queue_capacity = 65536;
-    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
 };
 
 using Runtime = af::AsyncRuntime<BenchRuntimeTraits>;

@@ -13,7 +13,8 @@ struct TunedSetupRuntimeTraits {
         af::thread_group<TunedSetupIoThreadTag, 1, af::ThreadKind::IoUring, "tuned-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
-    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
 
     static constexpr unsigned io_uring_entries = 1024;
     static constexpr unsigned io_uring_cq_entries = 2048;
@@ -31,7 +32,8 @@ struct FallbackSetupRuntimeTraits {
         af::thread_group<TunedSetupIoThreadTag, 1, af::ThreadKind::IoUring, "fallback-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
-    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
 
     static constexpr unsigned io_uring_entries = 1024;
     static constexpr unsigned io_uring_cq_entries = 2048;

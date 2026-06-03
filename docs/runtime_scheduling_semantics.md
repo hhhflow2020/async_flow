@@ -85,7 +85,7 @@ return schedule_ordered(TargetThread);  // 强制目标 MPSC 顺序路径
 - `Reject`：入队失败时立即返回 `false`，不会阻塞生产者。
 - `Yield`：生产者等待空位，等待过程会执行 CPU relax / yield backoff。
 
-也可以分别配置：
+满队列策略需要按生产者类型分别配置，旧的单一 `queue_full_policy` 不再作为 traits 入口：
 
 - `runtime_queue_full_policy`：runtime 线程生产者策略。
 - `external_queue_full_policy`：外部线程生产者策略。

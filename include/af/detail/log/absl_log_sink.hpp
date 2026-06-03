@@ -248,7 +248,6 @@ inline void initialize_absl_log_once() {
 template <typename RuntimeT>
 [[nodiscard]] inline std::unique_ptr<AsyncLogHandle>
 start_async_logging_for_runtime(AsyncLogConfig config, typename RuntimeT::Thread consumer_thread) {
-    const bool initialize_absl_log = config.initialize_absl_log;
     if (config.runtime_thread_count == 0U) {
         config.runtime_thread_count = RuntimeT::thread_count;
     }
@@ -261,9 +260,7 @@ start_async_logging_for_runtime(AsyncLogConfig config, typename RuntimeT::Thread
     if (!consumer_controller->start()) {
         throw std::runtime_error("failed to start runtime async log consumer");
     }
-    if (initialize_absl_log) {
-        initialize_absl_log_once();
-    }
+    initialize_absl_log_once();
 
     auto handle = std::make_unique<AsyncLogHandle>(
         logger, std::make_unique<RuntimeAbslAsyncLogSink<RuntimeT>>(logger),
