@@ -4,30 +4,12 @@
 #include <chrono>
 #include <initializer_list>
 
-#if !defined(_WIN32)
 #include <pthread.h>
 #include <signal.h>
 #include <time.h>
-#endif
 
 namespace af::detail {
 
-#if !defined(_WIN32) &&                                                                            \
-    (defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__))
-inline constexpr bool signal_has_sigtimedwait = true;
-#else
-inline constexpr bool signal_has_sigtimedwait = false;
-#endif
-
-[[nodiscard]] inline constexpr int unsupported_signal_error() noexcept {
-#if defined(ENOSYS)
-    return ENOSYS;
-#else
-    return EINVAL;
-#endif
-}
-
-#if !defined(_WIN32)
 [[nodiscard]] inline timespec
 signal_timespec_from_nanoseconds(std::chrono::nanoseconds timeout) noexcept {
     if (timeout.count() < 0) {
@@ -98,15 +80,10 @@ signal_remaining_timeout(std::chrono::steady_clock::time_point deadline) noexcep
 #endif
     return true;
 }
-#endif
 
 class SignalSetImpl {
 public:
     explicit SignalSetImpl(std::initializer_list<int> signals) noexcept {
-#if defined(_WIN32)
-        static_cast<void>(signals);
-        error_ = unsupported_signal_error();
-#else
         if (signals.size() == 0U) {
             error_ = EINVAL;
             return;
@@ -132,18 +109,15 @@ public:
             return;
         }
         blocked_ = true;
-#endif
     }
 
     SignalSetImpl(const SignalSetImpl &) = delete;
     SignalSetImpl &operator=(const SignalSetImpl &) = delete;
 
     ~SignalSetImpl() {
-#if !defined(_WIN32)
         if (blocked_) {
             static_cast<void>(::pthread_sigmask(SIG_SETMASK, &previous_set_, nullptr));
         }
-#endif
     }
 
     [[nodiscard]] bool valid() const noexcept {
@@ -159,10 +133,6 @@ public:
             return SignalWaitResult{0, error_ == 0 ? EINVAL : error_};
         }
 
-#if defined(_WIN32)
-        static_cast<void>(timeout);
-        return SignalWaitResult{0, unsupported_signal_error()};
-#else
         const auto deadline = std::chrono::steady_clock::now() + timeout;
 #if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
         siginfo_t info{};
@@ -206,7 +176,6 @@ public:
             }
         }
 #endif
-#endif
     }
 
     [[nodiscard]] SignalWaitResult wait() noexcept {
@@ -214,9 +183,6 @@ public:
             return SignalWaitResult{0, error_ == 0 ? EINVAL : error_};
         }
 
-#if defined(_WIN32)
-        return SignalWaitResult{0, unsupported_signal_error()};
-#else
         int signal = 0;
         int error = 0;
         do {
@@ -227,30 +193,22 @@ public:
             return SignalWaitResult{0, error};
         }
         return SignalWaitResult{signal, 0};
-#endif
     }
 
 private:
     int error_{0};
-#if !defined(_WIN32)
     sigset_t set_{};
     sigset_t previous_set_{};
     bool blocked_{false};
-#endif
 };
 
 [[nodiscard]] inline bool ignore_process_signal_impl(int signal) noexcept {
-#if defined(_WIN32)
-    static_cast<void>(signal);
-    return false;
-#else
     struct sigaction action{};
     action.sa_handler = SIG_IGN;
     if (sigemptyset(&action.sa_mask) != 0) {
         return false;
     }
     return ::sigaction(signal, &action, nullptr) == 0;
-#endif
 }
 
 } // namespace af::detail

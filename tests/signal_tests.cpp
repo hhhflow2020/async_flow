@@ -6,7 +6,6 @@
 
 #include "af/signal.hpp"
 
-#if !defined(_WIN32)
 TEST(SignalTests, SignalSetWaitConsumesBlockedRaisedSignal) {
     af::SignalSet signals({SIGUSR1});
     ASSERT_TRUE(signals.valid()) << signals.error();
@@ -99,4 +98,3 @@ TEST(SignalTests, UncatchableSignalsAreInvalid) {
     EXPECT_FALSE(stop_signals.valid());
     EXPECT_EQ(stop_signals.error(), EINVAL);
 }
-#endif

@@ -2467,3 +2467,45 @@ Interpretation:
 - The remaining platform branches in detail code should correspond to real
   backend/syscall capability differences such as Linux epoll/io_uring and
   macOS/BSD kqueue.
+
+## 2026-06-03 POSIX-Only Signal Detail Cleanup
+
+This pass removes the remaining Windows fallback logic from the signal detail
+implementation and its tests. The public `af::SignalSet` API remains unchanged,
+but the implementation is now explicitly POSIX-only.
+
+Changes under validation:
+
+- `detail/signal/signal_platform.hpp` includes POSIX signal/pthread headers
+  directly.
+- Removed the unused Windows unsupported-error path and the unused
+  `signal_has_sigtimedwait` constant.
+- `SignalSetImpl` now always stores `sigset_t` state, blocks with
+  `pthread_sigmask`, waits with `sigwait`/`sigtimedwait` where available, and
+  restores the previous signal mask in its destructor.
+- `tests/signal_tests.cpp` now runs SignalTests directly instead of wrapping the
+  whole file in a Windows skip guard.
+- Rechecked `signal_platform.hpp` and `signal_tests.cpp` for `_WIN32`/Windows
+  spellings: no matches remained.
+
+Correctness checks:
+
+- Local macOS Debug `asyncflow_runtime_tests` build: passed.
+- Local macOS Debug `SignalTests`: 9/9 passed.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: `asyncflow_runtime_tests` built; `SignalTests`: 9/9
+  passed.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: `asyncflow_runtime_tests` built; `SignalTests`: 9/9
+  passed.
+
+Interpretation:
+
+- This removes another public-header-adjacent Windows fallback without changing
+  the signal API surface.
+- Linux/BSD still use the `sigtimedwait` fast path; macOS keeps the existing
+  POSIX pending-signal polling fallback for timed waits.
+- No scheduler, queue, IO backend, logging, locking, atomic, allocation, or
+  memory-ordering behavior changed.
