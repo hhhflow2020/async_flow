@@ -3416,6 +3416,59 @@ Interpretation:
 - The shared helper preserves the same fast path on platforms that support
   socket creation flags and the same `fcntl` fallback on platforms that do not.
 
+## 2026-06-03 Extended POSIX Example Socket Flags
+
+This pass extends the shared example socket flag helper to the remaining
+portable socketpair-heavy examples. It also centralizes socketpair creation so
+platform capability differences stay in one support header instead of being
+reimplemented per example.
+
+Changes under validation:
+
+- Added `apply_socket_flags(fd, error)` for callers that need the existing
+  errno-to-error reporting shape.
+- Added `socket_pair_with_flags(domain, type, protocol, fds)`, which prefers
+  creation-time nonblocking/close-on-exec flags and falls back to plain
+  `socketpair` plus `fcntl` if the flagged type is not accepted.
+- Migrated socket lifecycle, IO shutdown, IO timeout, pollable client, and
+  native readiness example support headers to the shared helper.
+- Removed repeated local `fcntl(F_GETFL/F_SETFL)` and
+  `fcntl(F_GETFD/F_SETFD)` helper code from those support headers. Pollable
+  client keeps only its example-specific `SO_NOSIGPIPE` option handling.
+
+Correctness checks:
+
+- Local macOS Debug built:
+  `asyncflow_io_socket_lifecycle_example`, `asyncflow_io_shutdown_example`,
+  `asyncflow_io_timeout_example`, `asyncflow_io_pollable_client_example`,
+  `asyncflow_io_native_readiness_example`, and `asyncflow_runtime_tests`.
+- Local macOS Debug ctest selection
+  `IoRuntimeKqueueFixture|IoRuntimeStreamFixture|RuntimeIo|RuntimeConfig|RuntimePublicIo|IoRuntimeNativeReadiness`:
+  26 tests selected, 0 failures; Linux-only cases in that selection were
+  skipped by platform capability checks.
+- Local macOS Debug ran the five affected example binaries successfully.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: built the same targets; ctest selection
+  `IoRuntimeEpollFixture|IoRuntimeStreamFixture|RuntimeIo|RuntimeConfig|RuntimePublicIo|IoRuntimeNativeReadiness`
+  reported 41 tests selected, 0 failures, with the non-Linux-only public IO
+  test skipped by capability checks. The five affected example binaries also
+  ran successfully.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: built the same targets; the same ctest selection
+  reported 41 tests selected, 0 failures, with the same capability skip. The
+  five affected example binaries also ran successfully.
+
+Interpretation:
+
+- This is an example support modularity cleanup. It does not change runtime
+  scheduling, SPSC/MPSC routing, queue ownership, locks, atomics, IO completion
+  state, or cache layout.
+- The helper keeps the preferred fast setup path on Linux while retaining a
+  centralized POSIX fallback for platforms or libc variants that reject
+  creation-time socketpair flags.
+
 ## 2026-06-03 Scheduling Mode Convenience API
 
 This pass makes the SPSC/MPSC scheduling semantics explicit at the task API

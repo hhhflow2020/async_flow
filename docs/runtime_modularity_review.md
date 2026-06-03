@@ -133,6 +133,10 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
   length-prefixed, IO adapters, vectored IO, and io_uring datagram examples no
   longer carry duplicate `SOCK_NONBLOCK`/`SOCK_CLOEXEC` fallback code in their
   own support headers.
+- Socket lifecycle, IO shutdown, IO timeout, pollable client, and native
+  readiness examples now use the same POSIX socket flag helper. Socketpair setup
+  is centralized through a helper that prefers creation-time flags and falls
+  back to plain `socketpair` plus `fcntl` when needed.
 - The datagram round-trip example is now split into runtime traits, portable UDP loopback socket setup, server/client state-machine tasks, and a thin executable entry point. It uses the same unified API shape as TCP: Linux prefers io_uring with epoll fallback and macOS/BSD uses kqueue readiness.
 - The socket lifecycle example is now split into runtime traits, an async listener lifecycle task, an async client connect task, and a thin executable entry point. The example no longer uses main-thread atomic polling to wait for listener readiness; the server task starts the client task after `getsockname`, and `ShutdownPolicy::WaitForTasks` drives completion.
 - The io_uring multishot accept example is now split into runtime traits, listener/client socket helpers, the multishot accept state machine, and a thin executable entry point. It no longer polls task arm state with main-thread atomics; clients are queued before the accept task starts and completion is read after `ShutdownPolicy::WaitForTasks` shutdown.

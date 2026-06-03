@@ -1,40 +1,24 @@
 #pragma once
 
 #include "io_shutdown_runtime.hpp"
+#include "posix_socket_flags.hpp"
 
 #include <cerrno>
 #include <chrono>
-#include <fcntl.h>
 #include <sys/socket.h>
 #include <thread>
 #include <unistd.h>
 
 namespace io_shutdown_example {
 
-[[nodiscard]] inline bool apply_shutdown_socket_flags(int fd) noexcept {
-    const int status_flags = ::fcntl(fd, F_GETFL, 0);
-    if (status_flags < 0 || ::fcntl(fd, F_SETFL, status_flags | O_NONBLOCK) != 0) {
-        return false;
-    }
-
-    const int descriptor_flags = ::fcntl(fd, F_GETFD, 0);
-    if (descriptor_flags < 0 || ::fcntl(fd, F_SETFD, descriptor_flags | FD_CLOEXEC) != 0) {
-        return false;
-    }
-    return true;
-}
-
 struct ShutdownSocketPair {
     [[nodiscard]] bool create() noexcept {
         int fds[2]{-1, -1};
-        if (::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0) {
+        if (!asyncflow_examples::socket_pair_with_flags(AF_UNIX, SOCK_STREAM, 0, fds)) {
             return false;
         }
         local.reset(fds[0]);
         peer.reset(fds[1]);
-        if (!apply_shutdown_socket_flags(local.get()) || !apply_shutdown_socket_flags(peer.get())) {
-            return false;
-        }
         return true;
     }
 
