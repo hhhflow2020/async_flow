@@ -5,8 +5,12 @@
 #include "support/io_adapters_udp_tasks.hpp"
 
 int main() {
-#if defined(__linux__)
     using namespace io_adapters_example;
+
+    if constexpr (!af::supports_epoll) {
+        std::cout << "IO adapter example is Linux-only\n";
+        return 0;
+    }
 
     async::init();
     if (!async::io_backend_available(AppThreads::IO_0)) {
@@ -41,7 +45,7 @@ int main() {
     const bool udp_receive_started =
         async::start_task<UdpReceiveTask>(udp.receiver.get(), &udp_receive);
     const bool udp_send_started =
-        async::start_task<UdpSendTask>(udp.sender.get(), udp.address, udp.address_size, &udp_send);
+        async::start_task<UdpSendTask>(udp.sender.get(), udp.endpoint(), &udp_send);
     AF_ASSERT(stream_echo_started && stream_peer_started && udp_receive_started &&
               udp_send_started);
     if (!stream_echo_started || !stream_peer_started || !udp_receive_started || !udp_send_started) {
@@ -65,8 +69,4 @@ int main() {
               << " peer_received=" << stream_peer.response << '\n';
     std::cout << "udp datagram=" << udp_receive.value << " sent=" << udp_send.value << '\n';
     return 0;
-#else
-    std::cout << "IO adapter example is Linux-only\n";
-    return 0;
-#endif
 }

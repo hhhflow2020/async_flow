@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "io_adapters_results.hpp"
+#include "io_adapters_socket_helpers.hpp"
 #include "../app_runtime.hpp"
 
 #if defined(__linux__)
@@ -62,13 +63,12 @@ class UdpSendTask final : public Task {
 public:
     explicit UdpSendTask(Task::FactoryToken token) : Task(token) {}
 
-    bool do_it(int fd, sockaddr_in address, socklen_t address_size, UdpSendResult *result) {
-        if (fd < 0 || address_size == 0U || result == nullptr) {
+    bool do_it(int fd, const UdpLoopbackEndpoint &endpoint, UdpSendResult *result) {
+        if (fd < 0 || endpoint.address_size == 0U || result == nullptr) {
             return false;
         }
         socket_.reset(AppThreads::IO_0, fd);
-        address_ = address;
-        address_size_ = address_size;
+        endpoint_ = endpoint;
         result_ = result;
         return schedule(AppThreads::IO_0);
     }
@@ -76,8 +76,8 @@ public:
 private:
     af::TaskResult run() override {
         const af::IoStatus status = socket_.send_to_some(
-            *this, &value_, sizeof(value_), reinterpret_cast<const sockaddr *>(&address_),
-            address_size_, send_);
+            *this, &value_, sizeof(value_), reinterpret_cast<const sockaddr *>(&endpoint_.address),
+            endpoint_.address_size, send_);
         if (status.pending()) {
             return pending();
         }
@@ -98,11 +98,49 @@ private:
     }
 
     af::UdpSocket<AppThread> socket_{};
-    sockaddr_in address_{};
-    socklen_t address_size_{sizeof(address_)};
+    UdpLoopbackEndpoint endpoint_{};
     char value_{'U'};
     af::IoOpState send_{};
     UdpSendResult *result_{nullptr};
+};
+
+} // namespace io_adapters_example
+
+#else
+
+namespace io_adapters_example {
+
+class UdpReceiveTask final : public Task {
+public:
+    explicit UdpReceiveTask(Task::FactoryToken token) : Task(token) {}
+
+    bool do_it(int fd, UdpReceiveResult *result) {
+        static_cast<void>(fd);
+        static_cast<void>(result);
+        return false;
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
+};
+
+class UdpSendTask final : public Task {
+public:
+    explicit UdpSendTask(Task::FactoryToken token) : Task(token) {}
+
+    bool do_it(int fd, const UdpLoopbackEndpoint &endpoint, UdpSendResult *result) {
+        static_cast<void>(fd);
+        static_cast<void>(endpoint);
+        static_cast<void>(result);
+        return false;
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
 };
 
 } // namespace io_adapters_example

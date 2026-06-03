@@ -158,4 +158,42 @@ private:
 
 } // namespace io_adapters_example
 
+#else
+
+namespace io_adapters_example {
+
+class StreamEchoTask final : public Task {
+public:
+    explicit StreamEchoTask(Task::FactoryToken token) : Task(token) {}
+
+    bool do_it(int fd, StreamEchoResult *result) {
+        static_cast<void>(fd);
+        static_cast<void>(result);
+        return false;
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
+};
+
+class StreamPeerTask final : public Task {
+public:
+    explicit StreamPeerTask(Task::FactoryToken token) : Task(token) {}
+
+    bool do_it(int fd, StreamPeerResult *result) {
+        static_cast<void>(fd);
+        static_cast<void>(result);
+        return false;
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
+};
+
+} // namespace io_adapters_example
+
 #endif
