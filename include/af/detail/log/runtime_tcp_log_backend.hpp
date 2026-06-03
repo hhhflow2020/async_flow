@@ -92,7 +92,7 @@ public:
                      normalize_max_batch_records(config.max_batch_records),
                      config.max_batches_per_run),
           thread(config.thread), reconnect_interval(config.reconnect_interval), sent_records(0),
-          last_error(0), last_error_stage(0), io_waiting(false) {
+          last_error(0), last_error_stage(0) {
         resolve(config.host, config.port);
     }
 
@@ -168,7 +168,7 @@ public:
     CacheLineAtomic<std::uint64_t> sent_records;
     CacheLineAtomic<int> last_error;
     CacheLineAtomic<int> last_error_stage;
-    CacheLineAtomic<bool> io_waiting;
+    bool io_waiting{false};
 
 #if !defined(_WIN32)
     sockaddr_storage address{};
@@ -248,7 +248,7 @@ private:
             return finish();
         }
 #if !defined(_WIN32)
-        if (state_->io_waiting.load(std::memory_order_acquire) && !io_wait_ready()) {
+        if (state_->io_waiting && !io_wait_ready()) {
             return io_pending();
         }
 #endif
@@ -324,14 +324,14 @@ private:
         while (current_byte_ < current_->payload.size()) {
             const char *data = current_->payload.data() + current_byte_;
             const std::size_t size = current_->payload.size() - current_byte_;
-            state_->io_waiting.store(true, std::memory_order_release);
+            state_->io_waiting = true;
             const IoStatus status =
                 io_send_some(*this, state_->thread, state_->fd, data, size, send_state_);
             if (status.pending()) {
                 return SendResult::Pending;
             }
 
-            state_->io_waiting.store(false, std::memory_order_release);
+            state_->io_waiting = false;
             send_state_.reset();
             if (status.ready() && status.bytes > 0U) {
                 current_byte_ += status.bytes;
@@ -371,7 +371,7 @@ private:
             return State::ConnectResult::Failed;
         }
 
-        state_->io_waiting.store(true, std::memory_order_release);
+        state_->io_waiting = true;
         const IoStatus status = io_connect(*this, state_->thread, state_->fd,
                                            reinterpret_cast<const sockaddr *>(&state_->address),
                                            state_->address_size, connect_state_);
@@ -379,7 +379,7 @@ private:
             return State::ConnectResult::Pending;
         }
 
-        state_->io_waiting.store(false, std::memory_order_release);
+        state_->io_waiting = false;
         connect_state_.reset();
         if (status.ready()) {
             connected_ = true;
@@ -395,7 +395,7 @@ private:
 
     void close_socket() noexcept {
         connected_ = false;
-        state_->io_waiting.store(false, std::memory_order_release);
+        state_->io_waiting = false;
         state_->close_socket();
         connect_state_.reset();
         send_state_.reset();
@@ -453,7 +453,7 @@ public:
     }
 
     void write_batch(std::span<detail::LogRecord *const> records) noexcept override {
-        static_cast<void>(binding_.enqueue_and_wake(records, true));
+        static_cast<void>(binding_.enqueue_and_wake(records));
     }
 
     void flush() noexcept override {
@@ -465,7 +465,7 @@ public:
         if (state.pending_batches.load(std::memory_order_acquire) == 0U) {
             return true;
         }
-        if (!binding_.wake(false)) {
+        if (!binding_.wake()) {
             return false;
         }
         return state.flush_until(std::chrono::steady_clock::now() + timeout);
@@ -479,7 +479,7 @@ public:
         }
 
         static_cast<void>(flush(std::chrono::seconds(5)));
-        binding_.stop_and_wait(std::chrono::steady_clock::now() + std::chrono::seconds(5), false);
+        binding_.stop_and_wait(std::chrono::steady_clock::now() + std::chrono::seconds(5));
     }
 
     [[nodiscard]] RuntimeTcpLogBackendStats stats() const noexcept {

@@ -105,7 +105,7 @@ public:
         : QueueState(
               config.batch_queue_capacity, normalize_max_batch_records(config.max_batch_records),
               config.max_batches_per_run, normalize_max_datagram_size(config.max_datagram_size)),
-          thread(config.thread), sent_records(0), io_waiting(false) {
+          thread(config.thread), sent_records(0) {
         resolve(config.host, config.port);
     }
 
@@ -158,7 +158,7 @@ public:
 
     Thread thread;
     CacheLineAtomic<std::uint64_t> sent_records;
-    CacheLineAtomic<bool> io_waiting;
+    bool io_waiting{false};
 
 #if !defined(_WIN32)
     sockaddr_storage address{};
@@ -242,16 +242,16 @@ private:
             drop_current();
             drop_ready_batches();
 #if !defined(_WIN32)
-            state_->io_waiting.store(false, std::memory_order_release);
+            state_->io_waiting = false;
             state_->close_socket();
 #endif
             return finish();
         }
 #if !defined(_WIN32)
-        if (state_->io_waiting.load(std::memory_order_acquire) && !io_wait_ready()) {
+        if (state_->io_waiting && !io_wait_ready()) {
             return io_pending();
         }
-        state_->io_waiting.store(false, std::memory_order_release);
+        state_->io_waiting = false;
 #endif
         std::size_t drained_batches = 0;
         for (;;) {
@@ -336,12 +336,12 @@ private:
 #if !defined(_WIN32)
     [[nodiscard]] SendResult arm_writable_wait() noexcept {
         wait_result_ = IoResult{};
-        state_->io_waiting.store(true, std::memory_order_release);
+        state_->io_waiting = true;
         if (this->wait_io(state_->thread, state_->fd, io_writable, &wait_result_)) {
             return SendResult::Pending;
         }
 
-        state_->io_waiting.store(false, std::memory_order_release);
+        state_->io_waiting = false;
         state_->close_socket();
         state_->dropped_records.fetch_add(current_->messages.size() - current_message_,
                                           std::memory_order_relaxed);
@@ -432,7 +432,7 @@ private:
             return;
         }
 #if !defined(_WIN32)
-        state_->io_waiting.store(false, std::memory_order_release);
+        state_->io_waiting = false;
         wait_result_ = IoResult{};
         state_->close_socket();
 #endif
@@ -471,7 +471,7 @@ public:
     }
 
     void write_batch(std::span<detail::LogRecord *const> records) noexcept override {
-        static_cast<void>(binding_.enqueue_and_wake(records, true));
+        static_cast<void>(binding_.enqueue_and_wake(records));
     }
 
     void flush() noexcept override {
@@ -483,7 +483,7 @@ public:
         if (state.pending_batches.load(std::memory_order_acquire) == 0U) {
             return true;
         }
-        if (!binding_.wake(false)) {
+        if (!binding_.wake()) {
             return false;
         }
         return state.flush_until(std::chrono::steady_clock::now() + timeout);
@@ -497,7 +497,7 @@ public:
         }
 
         static_cast<void>(flush(std::chrono::seconds(5)));
-        binding_.stop_and_wait(std::chrono::steady_clock::now() + std::chrono::seconds(5), false);
+        binding_.stop_and_wait(std::chrono::steady_clock::now() + std::chrono::seconds(5));
     }
 
     [[nodiscard]] RuntimeUdpLogBackendStats stats() const noexcept {

@@ -96,7 +96,7 @@ public:
           thread(config.thread), path(config.path.string()), append(config.append),
           close_on_exec(config.close_on_exec), fsync_on_flush(config.fsync_on_flush),
           written_records(0), flushes(0), last_error(0), last_error_stage(0), flush_requests(0),
-          completed_flushes(0), io_waiting(false) {}
+          completed_flushes(0) {}
 
     RuntimeFileLogState(const RuntimeFileLogState &) = delete;
     RuntimeFileLogState &operator=(const RuntimeFileLogState &) = delete;
@@ -200,7 +200,7 @@ public:
     CacheLineAtomic<int> last_error_stage;
     CacheLineAtomic<std::uint64_t> flush_requests;
     CacheLineAtomic<std::uint64_t> completed_flushes;
-    CacheLineAtomic<bool> io_waiting;
+    bool io_waiting{false};
 
 #if !defined(_WIN32)
     int fd{-1};
@@ -252,7 +252,7 @@ private:
             return finish();
         }
 #if !defined(_WIN32)
-        if (state_->io_waiting.load(std::memory_order_acquire) && !io_wait_ready()) {
+        if (state_->io_waiting && !io_wait_ready()) {
             return io_pending();
         }
 #endif
@@ -333,14 +333,14 @@ private:
         while (current_byte_ < current_->payload.size()) {
             const char *data = current_->payload.data() + current_byte_;
             const std::size_t size = current_->payload.size() - current_byte_;
-            state_->io_waiting.store(true, std::memory_order_release);
+            state_->io_waiting = true;
             const IoStatus status =
                 io_write_some(*this, state_->thread, state_->fd, data, size, write_state_);
             if (status.pending()) {
                 return WriteResult::Pending;
             }
 
-            state_->io_waiting.store(false, std::memory_order_release);
+            state_->io_waiting = false;
             write_state_.reset();
             if (status.ready() && status.bytes > 0U) {
                 current_byte_ += status.bytes;
@@ -392,13 +392,13 @@ private:
             return FlushResult::Complete;
         }
 
-        state_->io_waiting.store(true, std::memory_order_release);
+        state_->io_waiting = true;
         const IoStatus status = io_fsync(*this, state_->thread, state_->fd, 0, fsync_state_);
         if (status.pending()) {
             return FlushResult::Pending;
         }
 
-        state_->io_waiting.store(false, std::memory_order_release);
+        state_->io_waiting = false;
         fsync_state_.reset();
         if (status.failed()) {
             state_->last_error.store(status.error == 0 ? EIO : status.error,
@@ -432,7 +432,7 @@ private:
             return;
         }
 #if !defined(_WIN32)
-        state_->io_waiting.store(false, std::memory_order_release);
+        state_->io_waiting = false;
         write_state_.reset();
         fsync_state_.reset();
 #endif
@@ -469,7 +469,7 @@ public:
     }
 
     void write_batch(std::span<detail::LogRecord *const> records) noexcept override {
-        static_cast<void>(binding_.enqueue_and_wake(records, true));
+        static_cast<void>(binding_.enqueue_and_wake(records));
     }
 
     void flush() noexcept override {
@@ -479,7 +479,7 @@ public:
     [[nodiscard]] bool flush(std::chrono::milliseconds timeout) noexcept override {
         State &state = binding_.state();
         const std::uint64_t target = state.request_flush();
-        if (!binding_.wake(false)) {
+        if (!binding_.wake()) {
             return false;
         }
         return state.flush_until(target, std::chrono::steady_clock::now() + timeout);
@@ -493,7 +493,7 @@ public:
         }
 
         static_cast<void>(flush(std::chrono::seconds(5)));
-        binding_.stop_and_wait(std::chrono::steady_clock::now() + std::chrono::seconds(5), false);
+        binding_.stop_and_wait(std::chrono::steady_clock::now() + std::chrono::seconds(5));
     }
 
     [[nodiscard]] RuntimeFileLogBackendStats stats() const noexcept {

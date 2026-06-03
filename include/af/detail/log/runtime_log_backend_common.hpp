@@ -211,19 +211,17 @@ private:
 
 template <typename StateT, typename TaskHandleT, typename TaskStartedAtomicT>
 [[nodiscard]] bool wake_runtime_log_task(StateT *state, TaskHandleT &task,
-                                         TaskStartedAtomicT &task_started,
-                                         bool skip_when_io_waiting) noexcept {
+                                         TaskStartedAtomicT &task_started) noexcept {
     if (!task) {
         return false;
     }
     if (state->finished.load(std::memory_order_acquire)) {
         return true;
     }
-    if (skip_when_io_waiting && state->io_waiting.load(std::memory_order_acquire) &&
-        !state->stopping.load(std::memory_order_acquire)) {
-        return true;
-    }
 
+    // wake_queued deduplicates producer wakeups, including the period where the
+    // task is waiting for async IO. Avoid cross-thread IO-wait hints here: a
+    // stale hint can otherwise strand records after the task has gone idle.
     bool wake_expected = false;
     if (!state->wake_queued.compare_exchange_strong(wake_expected, true, std::memory_order_acq_rel,
                                                     std::memory_order_acquire)) {
@@ -270,17 +268,15 @@ public:
         return *state_;
     }
 
-    [[nodiscard]] bool enqueue_and_wake(std::span<LogRecord *const> records,
-                                        bool skip_when_io_waiting) noexcept {
-        return state_->enqueue(records) && wake(skip_when_io_waiting);
+    [[nodiscard]] bool enqueue_and_wake(std::span<LogRecord *const> records) noexcept {
+        return state_->enqueue(records) && wake();
     }
 
-    [[nodiscard]] bool wake(bool skip_when_io_waiting) noexcept {
-        return wake_runtime_log_task(state_.get(), task_, task_started_, skip_when_io_waiting);
+    [[nodiscard]] bool wake() noexcept {
+        return wake_runtime_log_task(state_.get(), task_, task_started_);
     }
 
-    void stop_and_wait(std::chrono::steady_clock::time_point deadline,
-                       bool skip_when_io_waiting) noexcept {
+    void stop_and_wait(std::chrono::steady_clock::time_point deadline) noexcept {
         state_->stopping.store(true, std::memory_order_release);
         if (!task_started_.load(std::memory_order_acquire) &&
             state_->pending_batches.load(std::memory_order_acquire) == 0U) {
@@ -289,7 +285,7 @@ public:
             return;
         }
 
-        if (wake(skip_when_io_waiting)) {
+        if (wake()) {
             static_cast<void>(state_->wait_until_finished(deadline));
         }
         task_.reset();
