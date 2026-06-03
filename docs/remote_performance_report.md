@@ -3370,6 +3370,52 @@ Interpretation:
   notification pipe. That path runs during setup, not per connection or per IO
   operation.
 
+## 2026-06-03 Shared POSIX Example Socket Flags
+
+This pass removes duplicated platform-flag helper logic from several example
+support headers. The platform capability checks remain local to one shared
+example helper, while the individual examples now read as ordinary socket setup
+code.
+
+Changes under validation:
+
+- Added `examples/support/posix_socket_flags.hpp` with
+  `socket_type_with_flags(base)` and `apply_socket_flags(fd)`.
+- Migrated TCP echo, TCP connect/accept, RPC length-prefixed, IO adapters,
+  vectored IO, and io_uring datagram support headers to the shared helper.
+- Removed repeated local `SOCK_NONBLOCK` / `SOCK_CLOEXEC` fallback functions
+  from those six support headers.
+
+Correctness checks:
+
+- Local macOS Debug built:
+  `asyncflow_io_tcp_echo_server_example`,
+  `asyncflow_io_tcp_connect_accept_example`,
+  `asyncflow_io_rpc_length_prefixed_example`,
+  `asyncflow_io_adapters_example`,
+  `asyncflow_io_vectored_example`,
+  `asyncflow_io_uring_datagram_example`, and `asyncflow_runtime_tests`.
+- Local macOS Debug ctest selection
+  `TcpEcho|RuntimeConfig|IoRuntimeStreamFixture|IoRuntimeDatagramFixture|IoAdapterTraits|RuntimePublicIo`:
+  29 tests, 0 failures.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: built the same six example targets plus
+  `asyncflow_runtime_tests`; the same ctest selection reported 29 tests, 0
+  failures.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: built the same targets; the same ctest selection
+  reported 29 tests, 0 failures.
+
+Interpretation:
+
+- This is an example maintainability and readability cleanup. It does not
+  change async runtime scheduling, queue topology, IO state ownership, locks,
+  atomics, or memory ordering.
+- The shared helper preserves the same fast path on platforms that support
+  socket creation flags and the same `fcntl` fallback on platforms that do not.
+
 ## 2026-06-03 Scheduling Mode Convenience API
 
 This pass makes the SPSC/MPSC scheduling semantics explicit at the task API

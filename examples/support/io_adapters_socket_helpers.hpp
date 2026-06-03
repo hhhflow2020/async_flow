@@ -1,12 +1,11 @@
 #pragma once
 
 #include "io_adapters_runtime.hpp"
+#include "posix_socket_flags.hpp"
 
 #include <arpa/inet.h>
-#include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
-#include <unistd.h>
 
 namespace io_adapters_example {
 
@@ -15,46 +14,20 @@ struct UdpLoopbackEndpoint {
     socklen_t address_size{sizeof(address)};
 };
 
-inline bool apply_adapter_socket_flags(int fd) noexcept {
-#if !defined(SOCK_NONBLOCK)
-    const int status_flags = ::fcntl(fd, F_GETFL, 0);
-    if (status_flags < 0 || ::fcntl(fd, F_SETFL, status_flags | O_NONBLOCK) != 0) {
-        return false;
-    }
-#endif
-
-#if !defined(SOCK_CLOEXEC)
-    const int descriptor_flags = ::fcntl(fd, F_GETFD, 0);
-    if (descriptor_flags < 0 || ::fcntl(fd, F_SETFD, descriptor_flags | FD_CLOEXEC) != 0) {
-        return false;
-    }
-#endif
-    return true;
-}
-
-[[nodiscard]] inline int adapter_socket_type(int base) noexcept {
-#if defined(SOCK_NONBLOCK)
-    base |= SOCK_NONBLOCK;
-#endif
-#if defined(SOCK_CLOEXEC)
-    base |= SOCK_CLOEXEC;
-#endif
-    return base;
-}
-
 struct StreamSocketPair {
     af::UniqueFd server{};
     af::UniqueFd client{};
 
     bool create() noexcept {
         int fds[2]{-1, -1};
-        if (::socketpair(AF_UNIX, adapter_socket_type(SOCK_STREAM), 0, fds) != 0) {
+        if (::socketpair(AF_UNIX, asyncflow_examples::socket_type_with_flags(SOCK_STREAM), 0,
+                         fds) != 0) {
             return false;
         }
         server.reset(fds[0]);
         client.reset(fds[1]);
-        if (!apply_adapter_socket_flags(server.get()) ||
-            !apply_adapter_socket_flags(client.get())) {
+        if (!asyncflow_examples::apply_socket_flags(server.get()) ||
+            !asyncflow_examples::apply_socket_flags(client.get())) {
             return false;
         }
         return true;
@@ -66,10 +39,11 @@ struct UdpLoopbackSockets {
     af::UniqueFd sender{};
 
     bool create() noexcept {
-        receiver.reset(::socket(AF_INET, adapter_socket_type(SOCK_DGRAM), 0));
-        sender.reset(::socket(AF_INET, adapter_socket_type(SOCK_DGRAM), 0));
-        if (!receiver || !sender || !apply_adapter_socket_flags(receiver.get()) ||
-            !apply_adapter_socket_flags(sender.get())) {
+        receiver.reset(
+            ::socket(AF_INET, asyncflow_examples::socket_type_with_flags(SOCK_DGRAM), 0));
+        sender.reset(::socket(AF_INET, asyncflow_examples::socket_type_with_flags(SOCK_DGRAM), 0));
+        if (!receiver || !sender || !asyncflow_examples::apply_socket_flags(receiver.get()) ||
+            !asyncflow_examples::apply_socket_flags(sender.get())) {
             return false;
         }
 

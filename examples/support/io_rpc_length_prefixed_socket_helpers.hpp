@@ -1,12 +1,11 @@
 #pragma once
 
 #include "io_rpc_length_prefixed_runtime.hpp"
+#include "posix_socket_flags.hpp"
 
 #include <arpa/inet.h>
-#include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
-#include <unistd.h>
 
 namespace io_rpc_length_prefixed_example {
 
@@ -15,37 +14,9 @@ struct RpcLoopbackEndpoint {
     socklen_t address_size{sizeof(address)};
 };
 
-inline bool apply_rpc_socket_flags(int fd) noexcept {
-#if !defined(SOCK_NONBLOCK)
-    const int status_flags = ::fcntl(fd, F_GETFL, 0);
-    if (status_flags < 0 || ::fcntl(fd, F_SETFL, status_flags | O_NONBLOCK) != 0) {
-        return false;
-    }
-#endif
-
-#if !defined(SOCK_CLOEXEC)
-    const int descriptor_flags = ::fcntl(fd, F_GETFD, 0);
-    if (descriptor_flags < 0 || ::fcntl(fd, F_SETFD, descriptor_flags | FD_CLOEXEC) != 0) {
-        return false;
-    }
-#endif
-    return true;
-}
-
-[[nodiscard]] inline int rpc_socket_type() noexcept {
-    int type = SOCK_STREAM;
-#if defined(SOCK_NONBLOCK)
-    type |= SOCK_NONBLOCK;
-#endif
-#if defined(SOCK_CLOEXEC)
-    type |= SOCK_CLOEXEC;
-#endif
-    return type;
-}
-
 [[nodiscard]] inline af::UniqueFd make_rpc_socket() noexcept {
-    af::UniqueFd fd(::socket(AF_INET, rpc_socket_type(), 0));
-    if (!fd || !apply_rpc_socket_flags(fd.get())) {
+    af::UniqueFd fd(::socket(AF_INET, asyncflow_examples::socket_type_with_flags(SOCK_STREAM), 0));
+    if (!fd || !asyncflow_examples::apply_socket_flags(fd.get())) {
         return {};
     }
     return fd;
