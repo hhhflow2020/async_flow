@@ -24,6 +24,20 @@ template <typename RuntimeT, typename TraitsT> struct RuntimePublicIo {
     using Thread = typename RuntimeConfig<TraitsT>::Thread;
     using Task = BasicTask<RuntimeT>;
 
+private:
+    [[nodiscard]] static bool fail_io_result(IoResult *result, int fd, int error) noexcept {
+        if (result != nullptr) {
+            detail::set_io_result_error(*result, fd, error);
+        }
+        return false;
+    }
+
+    [[nodiscard]] static bool fail_io_state(IoOpState &state, int fd, int error) noexcept {
+        detail::set_io_result_error(state.wait, fd, error);
+        return false;
+    }
+
+public:
     [[nodiscard]] static bool io_backend_available(Thread thread) noexcept {
         const std::uint16_t index = RuntimeT::thread_index(thread);
         if (index >= RuntimeT::executors_.size()) {
@@ -203,20 +217,12 @@ template <typename RuntimeT, typename TraitsT> struct RuntimePublicIo {
     [[nodiscard]] static bool io_wait(Thread thread, int fd, std::uint32_t events, Task *task,
                                       IoResult *result, bool prefer_rearm = false) noexcept {
         if (task == nullptr || result == nullptr || fd < 0 || events == 0U) {
-            if (result != nullptr) {
-                result->fd = fd;
-                result->events = io_error;
-                result->error = fd < 0 ? EBADF : EINVAL;
-            }
-            return false;
+            return fail_io_result(result, fd, fd < 0 ? EBADF : EINVAL);
         }
 
         const std::uint16_t index = RuntimeT::thread_index(thread);
         if (index >= RuntimeT::executors_.size()) {
-            result->fd = fd;
-            result->events = io_error;
-            result->error = EINVAL;
-            return false;
+            return fail_io_result(result, fd, EINVAL);
         }
         return RuntimeT::executors_[index]->register_io_wait(fd, events, task, result,
                                                              prefer_rearm);
@@ -225,11 +231,7 @@ template <typename RuntimeT, typename TraitsT> struct RuntimePublicIo {
     [[nodiscard]] static bool cancel_io(Thread thread, IoOpState &state) noexcept {
         const std::uint16_t index = RuntimeT::thread_index(thread);
         if (index >= RuntimeT::executors_.size()) {
-            state.wait.fd = -1;
-            state.wait.events = io_error;
-            state.wait.error = EINVAL;
-            state.wait.result = -EINVAL;
-            return false;
+            return fail_io_state(state, -1, EINVAL);
         }
         return RuntimeT::executors_[index]->cancel_io(state);
     }
@@ -237,24 +239,12 @@ template <typename RuntimeT, typename TraitsT> struct RuntimePublicIo {
     [[nodiscard]] static bool io_submit_timeout(Thread thread, std::chrono::nanoseconds timeout,
                                                 Task *task, IoResult *result) noexcept {
         if (task == nullptr || result == nullptr || timeout.count() <= 0) {
-            if (result != nullptr) {
-                result->fd = -1;
-                result->events = io_error;
-                result->error = EINVAL;
-                result->result = -EINVAL;
-                result->completion_token = nullptr;
-            }
-            return false;
+            return fail_io_result(result, -1, EINVAL);
         }
 
         const std::uint16_t index = RuntimeT::thread_index(thread);
         if (index >= RuntimeT::executors_.size()) {
-            result->fd = -1;
-            result->events = io_error;
-            result->error = EINVAL;
-            result->result = -EINVAL;
-            result->completion_token = nullptr;
-            return false;
+            return fail_io_result(result, -1, EINVAL);
         }
         return RuntimeT::executors_[index]->submit_io_timeout(timeout, task, result);
     }
@@ -263,20 +253,12 @@ template <typename RuntimeT, typename TraitsT> struct RuntimePublicIo {
                                                 std::uint64_t offset, Task *task,
                                                 IoResult *result) noexcept {
         if (task == nullptr || result == nullptr || fd < 0 || data == nullptr) {
-            if (result != nullptr) {
-                result->fd = fd;
-                result->events = io_error;
-                result->error = fd < 0 ? EBADF : EINVAL;
-            }
-            return false;
+            return fail_io_result(result, fd, fd < 0 ? EBADF : EINVAL);
         }
 
         const std::uint16_t index = RuntimeT::thread_index(thread);
         if (index >= RuntimeT::executors_.size()) {
-            result->fd = fd;
-            result->events = io_error;
-            result->error = EINVAL;
-            return false;
+            return fail_io_result(result, fd, EINVAL);
         }
         return RuntimeT::executors_[index]->submit_io_uring_read(fd, data, size, offset, task,
                                                                  result);
@@ -286,20 +268,12 @@ template <typename RuntimeT, typename TraitsT> struct RuntimePublicIo {
                                                  std::size_t size, std::uint64_t offset, Task *task,
                                                  IoResult *result) noexcept {
         if (task == nullptr || result == nullptr || fd < 0 || data == nullptr) {
-            if (result != nullptr) {
-                result->fd = fd;
-                result->events = io_error;
-                result->error = fd < 0 ? EBADF : EINVAL;
-            }
-            return false;
+            return fail_io_result(result, fd, fd < 0 ? EBADF : EINVAL);
         }
 
         const std::uint16_t index = RuntimeT::thread_index(thread);
         if (index >= RuntimeT::executors_.size()) {
-            result->fd = fd;
-            result->events = io_error;
-            result->error = EINVAL;
-            return false;
+            return fail_io_result(result, fd, EINVAL);
         }
         return RuntimeT::executors_[index]->submit_io_uring_write(fd, data, size, offset, task,
                                                                   result);
@@ -308,20 +282,12 @@ template <typename RuntimeT, typename TraitsT> struct RuntimePublicIo {
     [[nodiscard]] static bool io_submit_fsync(Thread thread, int fd, std::uint32_t flags,
                                               Task *task, IoResult *result) noexcept {
         if (task == nullptr || result == nullptr || fd < 0) {
-            if (result != nullptr) {
-                result->fd = fd;
-                result->events = io_error;
-                result->error = fd < 0 ? EBADF : EINVAL;
-            }
-            return false;
+            return fail_io_result(result, fd, fd < 0 ? EBADF : EINVAL);
         }
 
         const std::uint16_t index = RuntimeT::thread_index(thread);
         if (index >= RuntimeT::executors_.size()) {
-            result->fd = fd;
-            result->events = io_error;
-            result->error = EINVAL;
-            return false;
+            return fail_io_result(result, fd, EINVAL);
         }
         return RuntimeT::executors_[index]->submit_io_uring_fsync(fd, flags, task, result);
     }
