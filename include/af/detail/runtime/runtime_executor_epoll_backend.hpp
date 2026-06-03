@@ -38,7 +38,7 @@ template <typename RuntimeT, typename TraitsT>
     if (io_wake_pending_.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
                                                  std::memory_order_acquire)) {
         if (!detail::write_epoll_wake_eventfd(io_wake_fd_)) {
-            io_wake_pending_.store(false, std::memory_order_release);
+            io_wake_pending_.store(false, std::memory_order_relaxed);
             return false;
         }
     }

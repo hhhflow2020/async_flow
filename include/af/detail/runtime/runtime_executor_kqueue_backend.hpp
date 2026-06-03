@@ -26,7 +26,7 @@ template <typename RuntimeT, typename TraitsT>
     struct kevent event{};
     EV_SET(&event, kqueue_wake_ident, EVFILT_USER, 0, NOTE_TRIGGER, 0, nullptr);
     if (::kevent(io_kqueue_fd_, &event, 1, nullptr, 0, nullptr) != 0) {
-        io_wake_pending_.store(false, std::memory_order_release);
+        io_wake_pending_.store(false, std::memory_order_relaxed);
         return false;
     }
     return true;
@@ -328,7 +328,7 @@ template <typename RuntimeT, typename TraitsT>
     for (int i = 0; i < count; ++i) {
         const struct kevent &event = events[static_cast<std::size_t>(i)];
         if (event.filter == EVFILT_USER) {
-            io_wake_pending_.store(false, std::memory_order_release);
+            io_wake_pending_.store(false, std::memory_order_relaxed);
             did_work = true;
             continue;
         }

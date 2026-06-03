@@ -1958,7 +1958,7 @@ private:
         std::uint64_t value = 0;
         while (::read(io_wake_fd_, &value, sizeof(value)) == sizeof(value)) {
         }
-        io_wake_pending_.store(false, std::memory_order_release);
+        io_wake_pending_.store(false, std::memory_order_relaxed);
     }
 
     [[nodiscard]] static std::uint32_t native_poll_events(std::uint32_t events) noexcept {
