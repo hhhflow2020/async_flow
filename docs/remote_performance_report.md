@@ -1881,3 +1881,43 @@ Correctness checks:
 Interpretation:
 
 - This reduces preprocessor coupling for normal internal headers. No queue algorithm, IO behavior, task state transition, lock, allocation, memory ordering, cache-line layout, benchmark stub return value, or public API behavior changed.
+
+## 2026-06-03 MPSC Producer Contention Benchmark Coverage
+
+This pass adds a live contention benchmark for the bounded MPSC queue used by
+framework-external producers. The existing queue benchmark only measured the
+single-threaded push/pop path, so it could not expose the tail-side atomic
+contention that matters when multiple external threads submit work concurrently.
+
+Changes under validation:
+
+- Added `BM_MpscQueueConcurrentProducers` with four producer threads and one
+  consumer thread.
+- The benchmark reuses preallocated payload storage, measures only queue
+  publication/drain work inside the benchmark loop, and reports real time for
+  cross-thread contention.
+- The benchmark keeps each iteration bounded below queue capacity to avoid
+  turning the measurement into a full-queue backpressure test.
+- No production queue algorithm, memory ordering, lock, allocation, task routing,
+  or runtime scheduling behavior changed in this pass.
+
+Correctness and benchmark checks:
+
+- Local macOS Debug `asyncflow_log_tests` task-tag focused run: 5/5 passed. This
+  confirms the existing `[task=...]` formatting keeps the tag after the Abseil
+  line prefix on every user-log line, not at whole-line start.
+- Local macOS Debug `asyncflow_runtime_benchmarks` build: passed.
+- Local macOS Debug `BM_MpscQueueConcurrentProducers --benchmark_min_time=1x`:
+  `/256` 167 us real time, `/4096` 2652 us real time.
+- Remote GCC Debug `asyncflow_runtime_benchmarks` clean build: passed.
+- Remote GCC Debug `BM_MpscQueueConcurrentProducers --benchmark_min_time=1x`:
+  `/256` 120 us real time, `/4096` 1841 us real time.
+- Remote Clang Debug `asyncflow_runtime_benchmarks` clean build: passed.
+- Remote Clang Debug `BM_MpscQueueConcurrentProducers --benchmark_min_time=1x`:
+  `/256` 93.7 us real time, `/4096` 1496 us real time.
+
+Interpretation:
+
+- The framework now has a repeatable canary for MPSC producer-side contention.
+  This gives future queue/layout changes a concrete comparison point instead of
+  relying on single-threaded queue microbenchmarks.

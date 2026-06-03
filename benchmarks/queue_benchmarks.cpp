@@ -57,6 +57,86 @@ void BM_MpscQueuePushPop(benchmark::State &state) {
     state.SetItemsProcessed(state.iterations() * state.range(0));
 }
 
+void BM_MpscQueueConcurrentProducers(benchmark::State &state) {
+    constexpr int producer_count = 4;
+    const int values_per_producer = static_cast<int>(state.range(0));
+    const int total_values = producer_count * values_per_producer;
+
+    af::detail::BoundedMpscQueue<int> queue(65536);
+    std::vector<std::vector<int>> values(
+        producer_count, std::vector<int>(static_cast<std::size_t>(values_per_producer)));
+    for (int producer = 0; producer < producer_count; ++producer) {
+        for (int i = 0; i < values_per_producer; ++i) {
+            values[static_cast<std::size_t>(producer)][static_cast<std::size_t>(i)] =
+                producer * values_per_producer + i;
+        }
+    }
+
+    std::atomic<int> ready{0};
+    std::atomic<int> start_epoch{0};
+    std::atomic<int> finished_producers{0};
+    std::atomic<bool> stop{false};
+    std::array<std::thread, producer_count> producers;
+
+    for (int producer = 0; producer < producer_count; ++producer) {
+        producers[static_cast<std::size_t>(producer)] = std::thread([&, producer] {
+            int seen_epoch = 0;
+            ready.fetch_add(1, std::memory_order_release);
+            for (;;) {
+                int target_epoch = start_epoch.load(std::memory_order_acquire);
+                while (target_epoch == seen_epoch && !stop.load(std::memory_order_acquire)) {
+                    std::this_thread::yield();
+                    target_epoch = start_epoch.load(std::memory_order_acquire);
+                }
+                if (stop.load(std::memory_order_acquire)) {
+                    break;
+                }
+
+                seen_epoch = target_epoch;
+                auto &producer_values = values[static_cast<std::size_t>(producer)];
+                for (int i = 0; i < values_per_producer; ++i) {
+                    int *value = &producer_values[static_cast<std::size_t>(i)];
+                    while (!queue.try_push(value)) {
+                        std::this_thread::yield();
+                    }
+                }
+                finished_producers.fetch_add(1, std::memory_order_release);
+            }
+        });
+    }
+
+    while (ready.load(std::memory_order_acquire) != producer_count) {
+        std::this_thread::yield();
+    }
+
+    int epoch = 0;
+    for (auto _ : state) {
+        finished_producers.store(0, std::memory_order_relaxed);
+        start_epoch.store(++epoch, std::memory_order_release);
+
+        int popped = 0;
+        while (popped < total_values) {
+            if (queue.try_pop() != nullptr) {
+                ++popped;
+            } else {
+                std::this_thread::yield();
+            }
+        }
+
+        while (finished_producers.load(std::memory_order_acquire) != producer_count) {
+            std::this_thread::yield();
+        }
+    }
+
+    stop.store(true, std::memory_order_release);
+    start_epoch.store(epoch + 1, std::memory_order_release);
+    for (std::thread &producer : producers) {
+        producer.join();
+    }
+
+    state.SetItemsProcessed(state.iterations() * total_values);
+}
+
 void BM_ObjectPoolCreateDestroy(benchmark::State &state) {
     struct Payload {
         std::uint64_t values[8]{};
@@ -714,6 +794,11 @@ void BM_ObjectPoolReverseAlternatingPoolSet(benchmark::State &state) {
 
 BENCHMARK(BM_SpscQueuePushPop)->Arg(1024)->Arg(16384);
 BENCHMARK(BM_MpscQueuePushPop)->Arg(1024)->Arg(16384);
+BENCHMARK(BM_MpscQueueConcurrentProducers)
+    ->Arg(256)
+    ->Arg(4096)
+    ->UseRealTime()
+    ->Unit(benchmark::kMicrosecond);
 BENCHMARK(BM_ObjectPoolCreateDestroy)->Arg(1024)->Arg(16384);
 BENCHMARK_TEMPLATE(BM_ObjectPoolTunedChunkCreateDestroy, 256)->Arg(1024)->Arg(16384);
 BENCHMARK_TEMPLATE(BM_ObjectPoolTunedChunkCreateDestroy, 128)->Arg(1024)->Arg(16384);
