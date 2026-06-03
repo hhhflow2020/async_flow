@@ -1,5 +1,7 @@
 #pragma once
 
+#include "af/platform.hpp"
+
 #include "af/io_types.hpp"
 #include "af/io_common.hpp"
 #include "af/io_socket.hpp"

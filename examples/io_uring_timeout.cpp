@@ -53,7 +53,11 @@ private:
 } // namespace
 
 int main() {
-#if defined(__linux__)
+    if constexpr (!af::supports_io_uring) {
+        std::cout << "io_uring timeout example is Linux-only\n";
+        return 0;
+    }
+
     timeout_async::init();
     if (!timeout_async::io_uring_backend_available(TimeoutThreads::IO_0)) {
         std::cout << "io_uring timeout backend unavailable\n";
@@ -75,8 +79,4 @@ int main() {
     }
     std::cout << "io_uring timeout unsupported error=" << error << '\n';
     return 0;
-#else
-    std::cout << "io_uring timeout example is Linux-only\n";
-    return 0;
-#endif
 }

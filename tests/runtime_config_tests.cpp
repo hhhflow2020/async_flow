@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include "af/async_runtime.hpp"
+#include "af/platform.hpp"
 
 #if !defined(_WIN32)
 #include "../examples/support/io_tcp_echo_server_cli.hpp"
@@ -84,6 +85,15 @@ static_assert(SplitQueuePolicyRuntime::Config::runtime_queue_full_policy ==
               af::QueueFullPolicy::Yield);
 static_assert(SplitQueuePolicyRuntime::Config::external_queue_full_policy ==
               af::QueueFullPolicy::Reject);
+static_assert(af::supports_native_io_wait == (af::supports_epoll || af::supports_kqueue));
+static_assert(af::supports_io_uring == af::platform_linux);
+static_assert(af::supports_eventfd == af::platform_linux);
+static_assert(af::supports_timerfd == af::platform_linux);
+static_assert(af::supports_openat2 == af::platform_linux);
+static_assert(af::supports_sendfile == af::platform_linux);
+static_assert(af::supports_splice == af::platform_linux);
+static_assert(af::supports_zero_copy_send == af::platform_linux);
+static_assert(af::platform_posix != af::platform_windows);
 
 } // namespace
 
