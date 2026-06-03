@@ -119,6 +119,10 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
   accept/connect, basic recv/send, vectored recv/send, and io_uring accept
   helper headers now rely on the supported POSIX baseline directly while
   preserving Linux/macOS/BSD backend capability branches.
+- `include/af/detail/io/datagram` no longer carries Windows fallback branches.
+  Basic UDP recv/send, vectored recv/send, and vectored zero-copy send helpers
+  now use the supported POSIX baseline directly while keeping Linux-only
+  zero-copy capability branches explicit.
 - `IoFixedFile`, `IoFile`, `IoStream`, and `IoDatagramSocket` are now cohesive thin adapter class definitions in normally named internal headers. The previous class-body method-fragment split has been reverted because it made each adapter harder to audit without creating an independent abstraction boundary.
 - Public file read helpers are now split into current-offset read/readv and positioned read/readv headers, with `io_file_read.hpp` kept as a small inline umbrella.
 - `include/af/io_file.hpp` is now a small public umbrella over current-offset read, positioned write/read, fixed-file/registered-buffer/vectored write, lifecycle/open/close/fsync, metadata, namespace, and current-offset write headers with normal module names instead of `*_fragment.hpp`.

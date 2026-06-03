@@ -1,6 +1,5 @@
 #pragma once
 
-#if !defined(_WIN32)
 template <typename TaskT>
 [[nodiscard]] IoStatus io_recvv_from_some(TaskT &task, typename TaskT::Thread thread, int fd,
                                           const iovec *iov, int iov_count, sockaddr *address,
@@ -124,4 +123,3 @@ template <typename TaskT>
         return IoStatus::failed(error);
     }
 }
-#endif

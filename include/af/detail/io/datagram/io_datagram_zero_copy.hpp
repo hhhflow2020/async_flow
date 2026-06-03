@@ -73,7 +73,6 @@ template <typename TaskT>
 #endif
 }
 
-#if !defined(_WIN32)
 template <typename TaskT>
 [[nodiscard]] IoStatus io_sendv_zc_to_some(TaskT &task, typename TaskT::Thread thread, int fd,
                                            const iovec *iov, int iov_count, const sockaddr *address,
@@ -152,4 +151,3 @@ template <typename TaskT>
     }
 #endif
 }
-#endif

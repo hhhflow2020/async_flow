@@ -2558,3 +2558,50 @@ Interpretation:
   ordering, or cache layout.
 - Remaining socket-platform branches now correspond to actual backend/syscall
   capability differences instead of unsupported Windows compatibility.
+
+## 2026-06-03 POSIX-Only Datagram Helper Cleanup
+
+This pass removes Windows fallback branches from the UDP/datagram helper family
+under `include/af/detail/io/datagram`. The public datagram API shape is
+unchanged; the implementation now assumes the supported POSIX baseline directly
+and keeps Linux-only zero-copy branches as capability checks.
+
+Changes under validation:
+
+- Removed `ENOSYS` Windows fallbacks from basic datagram recv/send helpers.
+- Removed outer `_WIN32` guards from vectored datagram recv/send and vectored
+  zero-copy send helpers.
+- Preserved io_uring submit/completion paths, readiness fallback paths,
+  POSIX `recvfrom`/`sendto`/`recvmsg`/`sendmsg` fallbacks, and non-Linux
+  zero-copy `ENOSYS` behavior.
+- Rechecked `include/af/detail/io/datagram` for `_WIN32`/Windows spellings: no
+  matches remained.
+
+Correctness checks:
+
+- Local macOS Debug `asyncflow_runtime_tests` and
+  `asyncflow_io_uring_datagram_example` build: passed.
+- Local macOS Debug datagram-targeted ctest
+  `Datagram|Udp|UDP|Recvmsg|recvmsg`: 20 tests, 0 failures; Linux-only
+  datagram tests were skipped by platform/capability logic.
+- Local macOS Debug `asyncflow_io_uring_datagram_example` smoke passed with the
+  kqueue backend.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: `asyncflow_runtime_tests` and
+  `asyncflow_io_uring_datagram_example` built; datagram-targeted ctest reported
+  20 tests, 0 failures; datagram example smoke passed with io_uring.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: `asyncflow_runtime_tests` and
+  `asyncflow_io_uring_datagram_example` built; datagram-targeted ctest reported
+  20 tests, 0 failures; datagram example smoke passed with io_uring.
+
+Interpretation:
+
+- This is a platform-scope cleanup only. It does not change scheduler routing,
+  local/SPSC/MPSC queue topology, IO wait state transitions, io_uring SQE
+  arguments, readiness fallback behavior, locks, atomics, allocations, memory
+  ordering, or cache layout.
+- Remaining datagram platform branches now correspond to actual zero-copy or
+  backend capability differences instead of unsupported Windows compatibility.
