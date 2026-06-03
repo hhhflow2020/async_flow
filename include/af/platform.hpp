@@ -5,34 +5,14 @@
 
 namespace af {
 
-#if defined(_WIN32)
-inline constexpr bool platform_windows = true;
-#else
-inline constexpr bool platform_windows = false;
-#endif
-
-#if defined(__linux__)
-inline constexpr bool platform_linux = true;
-#else
-inline constexpr bool platform_linux = false;
-#endif
-
-#if defined(__APPLE__)
-inline constexpr bool platform_apple = true;
-#else
-inline constexpr bool platform_apple = false;
-#endif
-
-#if defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
-inline constexpr bool platform_bsd = true;
-#else
-inline constexpr bool platform_bsd = false;
-#endif
-
-inline constexpr bool platform_posix = !platform_windows;
-inline constexpr bool supports_epoll = AF_DETAIL_HAS_EPOLL != 0;
-inline constexpr bool supports_kqueue = AF_DETAIL_HAS_KQUEUE != 0;
-inline constexpr bool supports_native_io_wait = AF_DETAIL_HAS_NATIVE_IO_WAIT != 0;
+inline constexpr bool platform_windows = detail::platform_windows;
+inline constexpr bool platform_linux = detail::platform_linux;
+inline constexpr bool platform_apple = detail::platform_apple;
+inline constexpr bool platform_bsd = detail::platform_bsd;
+inline constexpr bool platform_posix = detail::platform_posix;
+inline constexpr bool supports_epoll = detail::supports_epoll;
+inline constexpr bool supports_kqueue = detail::supports_kqueue;
+inline constexpr bool supports_native_io_wait = detail::supports_native_io_wait;
 inline constexpr bool supports_io_uring = platform_linux;
 inline constexpr bool supports_eventfd = platform_linux;
 inline constexpr bool supports_timerfd = platform_linux;

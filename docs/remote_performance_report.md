@@ -2225,7 +2225,7 @@ Changes under validation:
 - Simplified `io_types.hpp`, `io_filesystem.hpp`, `runtime_public_io.hpp`, and
   `async_runtime.hpp` to include those detail headers instead of spelling
   repeated platform branches in public-facing headers.
-- Rechecked public headers: after this pass the remaining platform macros are
+- Rechecked public headers at this point: the remaining platform macros were
   concentrated in `platform.hpp` capability constants and `signal.hpp` signal
   handling support.
 
@@ -2252,3 +2252,51 @@ Interpretation:
   IO/runtime headers.
 - This is an include-boundary cleanup only; it does not add locks, atomics,
   allocations, scheduler branches, or syscall-path behavior changes.
+
+## 2026-06-03 Platform And Signal Public Header Cleanup
+
+This pass removes the remaining public platform preprocessor branches from
+`platform.hpp` and `signal.hpp` while preserving the same public constants and
+signal-waiting API.
+
+Changes under validation:
+
+- Added detail platform constexpr values in `config.hpp`; `platform.hpp` now
+  exports `af::platform_*` and `af::supports_*` as simple public constants
+  without spelling platform preprocessor branches.
+- Added `detail/signal/signal_platform.hpp` and moved POSIX/Windows signal
+  storage, `pthread_sigmask`, `sigwait`, `sigtimedwait`, fallback polling, and
+  signal-ignore implementation into detail.
+- Reduced `signal.hpp` to a small public API shell: `SignalWaitResult`,
+  `SignalSet`, `make_termination_signal_set()`, and
+  `ignore_process_signal()`.
+- Rechecked public headers with a platform-macro scan under `include/af`
+  excluding `include/af/detail`: no matches remained for the project platform
+  macro patterns.
+
+Correctness checks:
+
+- Local macOS Debug full `all` build: passed.
+- Local macOS Debug full `asyncflow_runtime_tests`: 193 tests, 107 passed,
+  86 skipped, 0 failed.
+- Local macOS Debug `asyncflow_runtime_stress_tests`: 9/9 passed.
+- Local macOS Debug `SignalTests.*`: 9/9 passed.
+- Remote GCC Debug, `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: full `all` build passed.
+- Remote GCC Debug full `asyncflow_runtime_tests`: 187 tests, 183 passed,
+  4 skipped, 0 failed.
+- Remote GCC Debug `asyncflow_runtime_stress_tests`: 9/9 passed.
+- Remote GCC Debug `SignalTests.*`: 9/9 passed.
+- Remote Clang Debug, `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: full `all` build passed.
+- Remote Clang Debug full `asyncflow_runtime_tests`: 187 tests, 183 passed,
+  4 skipped, 0 failed.
+- Remote Clang Debug `asyncflow_runtime_stress_tests`: 9/9 passed.
+- Remote Clang Debug `SignalTests.*`: 9/9 passed.
+
+Interpretation:
+
+- Users including public framework headers no longer need to read through raw
+  platform branches for platform capability constants or signal support.
+- The change does not alter scheduler queues, IO submission paths, locking,
+  atomics, allocation behavior, or signal API semantics.
