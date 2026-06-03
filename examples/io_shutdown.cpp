@@ -6,11 +6,6 @@
 int main() {
     using namespace io_shutdown_example;
 
-    if constexpr (!af::supports_io_uring) {
-        std::cout << "io shutdown example is Linux-only\n";
-        return 0;
-    }
-
     shutdown_async::init();
     if (!shutdown_async::io_backend_available(ShutdownThreads::IO_0)) {
         std::cout << "io shutdown backend unavailable\n";
@@ -44,8 +39,6 @@ int main() {
     }
 
     std::cout << "io shutdown backend="
-              << (shutdown_async::io_uring_backend_available(ShutdownThreads::IO_0) ? "io_uring"
-                                                                                    : "fallback")
-              << " eof=1\n";
+              << af::runtime_io_backend_name<shutdown_async>(ShutdownThreads::IO_0) << " eof=1\n";
     return 0;
 }

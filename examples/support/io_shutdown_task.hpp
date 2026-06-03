@@ -2,13 +2,9 @@
 
 #include "io_shutdown_runtime.hpp"
 
-#if defined(__linux__)
 #include <sys/socket.h>
-#endif
 
 namespace io_shutdown_example {
-
-#if defined(__linux__)
 
 class ShutdownWriteTask final : public ShutdownTaskBase {
 public:
@@ -34,25 +30,5 @@ private:
     af::IoOpState shutdown_{};
     int *error_{nullptr};
 };
-
-#else
-
-class ShutdownWriteTask final : public ShutdownTaskBase {
-public:
-    explicit ShutdownWriteTask(ShutdownTaskBase::FactoryToken token) : ShutdownTaskBase(token) {}
-
-    bool do_it(int fd, int *error) {
-        static_cast<void>(fd);
-        static_cast<void>(error);
-        return false;
-    }
-
-private:
-    af::TaskResult run() override {
-        return failed();
-    }
-};
-
-#endif
 
 } // namespace io_shutdown_example

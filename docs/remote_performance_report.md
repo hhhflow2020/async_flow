@@ -3144,3 +3144,54 @@ Interpretation:
   cache layout.
 - The example now demonstrates AsyncFlow's portable native readiness timeout
   path without application-level `__linux__` guards.
+
+## 2026-06-03 POSIX IO Shutdown API And Example
+
+This pass makes the public stream shutdown helper usable on the supported POSIX
+backend set instead of returning `ENOSYS` on non-Linux platforms. Linux keeps
+the existing io_uring shutdown submit path; non-Linux now uses POSIX
+`::shutdown` directly.
+
+Changes under validation:
+
+- Changed `af::io_shutdown` to keep Linux io_uring completion handling under
+  the Linux capability path and fall back to POSIX `::shutdown` elsewhere.
+- Removed the main-program `supports_io_uring` early return from
+  `io_shutdown.cpp`.
+- Removed `__linux__` guards and non-Linux stubs from the shutdown socket pair
+  and task support headers.
+- Replaced Linux-only `socketpair(..., SOCK_NONBLOCK | SOCK_CLOEXEC, ...)`
+  setup with POSIX `socketpair` plus portable `fcntl` nonblocking and
+  close-on-exec handling.
+- Added a kqueue runtime test that calls `af::io_shutdown` from an IO thread
+  and verifies the peer observes EOF.
+
+Correctness checks:
+
+- Local macOS Debug built `asyncflow_io_shutdown_example` and
+  `asyncflow_runtime_tests`.
+- Local macOS Debug `asyncflow_io_shutdown_example` ran successfully with
+  `backend=kqueue` and `eof=1`.
+- Local macOS Debug ctest
+  `Kqueue.*Shutdown|StreamAdapterShutdown|IoRuntimeKqueue`: 9 tests selected,
+  0 failures; the old Linux-only stream adapter shutdown test was skipped by
+  its existing platform guard, while the new kqueue shutdown test passed.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: built `asyncflow_io_shutdown_example` and
+  `asyncflow_runtime_tests`; the shutdown example ran successfully with
+  `backend=epoll-fallback` and `eof=1`; ctest
+  `Shutdown|StreamAdapterShutdown|UringIoRuntimeSocketStreamFixture.IoUringThreadShutdown`
+  reported 11 tests, 0 failures.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: same build, example, and ctest checks passed with 11
+  tests, 0 failures.
+
+Interpretation:
+
+- This improves the public POSIX IO API surface: users no longer need
+  application-level `__linux__` guards for stream shutdown.
+- The Linux io_uring path, scheduler routing, local/SPSC/MPSC queue topology,
+  wait state transitions for other operations, locks, atomics, allocations,
+  memory ordering, and cache layout were not changed.

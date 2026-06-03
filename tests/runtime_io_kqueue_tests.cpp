@@ -41,6 +41,35 @@ void close_pair_local(int fds[2]) {
     }
 }
 
+class KqueueShutdownWriteTask final : public IoTaskBase {
+public:
+    explicit KqueueShutdownWriteTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
+
+    bool do_it(int fd, std::atomic<int> *completed, std::atomic<int> *error) {
+        fd_ = fd;
+        completed_ = completed;
+        error_ = error;
+        return schedule(IoTestThreads::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        const af::IoStatus status =
+            af::io_shutdown(*this, IoTestThreads::IO_0, fd_, SHUT_WR, shutdown_);
+        if (status.pending()) {
+            return pending();
+        }
+        error_->store(status.ready() ? 0 : status.error, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    int fd_{-1};
+    af::IoOpState shutdown_{};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *error_{nullptr};
+};
+
 bool fill_until_blocked_local(int fd) {
     char data[4096]{};
     bool blocked = false;
@@ -215,6 +244,24 @@ TEST_F(IoRuntimeKqueueFixture, KqueueIoThreadTimesOutPendingRead) {
     ASSERT_TRUE(wait_until_at_least(armed, 1));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(error.load(std::memory_order_acquire), ETIMEDOUT);
+
+    close_pair_local(fds);
+}
+
+TEST_F(IoRuntimeKqueueFixture, KqueueIoThreadShutdownWriteHalfClosesPeer) {
+    ASSERT_TRUE(IoRuntime::io_backend_available(IoTestThreads::IO_0));
+
+    int fds[2]{-1, -1};
+    ASSERT_TRUE(make_socket_pair(fds));
+
+    std::atomic<int> completed{0};
+    std::atomic<int> error{0};
+    ASSERT_TRUE(IoRuntime::start_task<KqueueShutdownWriteTask>(fds[0], &completed, &error));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(error.load(std::memory_order_acquire), 0);
+
+    char ignored = 0;
+    EXPECT_EQ(::read(fds[1], &ignored, sizeof(ignored)), 0);
 
     close_pair_local(fds);
 }
