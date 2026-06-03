@@ -1,15 +1,11 @@
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <sstream>
 #include <type_traits>
 
 #include <gtest/gtest.h>
 
 #include "af/async_runtime.hpp"
 #include "af/platform.hpp"
-
-#include "../examples/support/io_tcp_echo_server_cli.hpp"
 
 namespace {
 
@@ -150,15 +146,4 @@ TEST(RuntimeConfigTests, DefaultsAndOverridesTaskPoolRemoteReleaseBatchSize) {
               af::QueueFullPolicy::Yield);
     EXPECT_EQ(SplitQueuePolicyRuntime::Config::external_queue_full_policy,
               af::QueueFullPolicy::Reject);
-}
-
-TEST(TcpEchoServerCliTests, ParsesShutdownGraceEqualsValue) {
-    char program[] = "asyncflow_io_tcp_echo_server_example";
-    char shutdown_grace[] = "--shutdown-grace-ms=1000";
-    char *argv[]{program, shutdown_grace};
-    io_tcp_echo_example::EchoServerOptions options;
-    std::ostringstream errors;
-
-    ASSERT_TRUE(io_tcp_echo_example::echo_parse_server_options(2, argv, &options, errors));
-    EXPECT_EQ(options.shutdown_grace, std::chrono::milliseconds(1000));
 }

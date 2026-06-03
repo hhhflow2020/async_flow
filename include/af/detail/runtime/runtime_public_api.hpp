@@ -155,6 +155,36 @@ bool AsyncRuntime<TraitsT>::post(Thread thread, Task *task, ScheduleMode mode) n
 }
 
 template <typename TraitsT>
+bool AsyncRuntime<TraitsT>::net_register_channel(Thread thread, detail::NetIoChannel *channel,
+                                                 std::uint32_t events) noexcept {
+    const std::uint16_t index = thread_index(thread);
+    if (index >= executors_.size()) {
+        return false;
+    }
+    return executors_[index]->register_net_channel(channel, events);
+}
+
+template <typename TraitsT>
+bool AsyncRuntime<TraitsT>::net_update_channel(Thread thread, detail::NetIoChannel *channel,
+                                               std::uint32_t events) noexcept {
+    const std::uint16_t index = thread_index(thread);
+    if (index >= executors_.size()) {
+        return false;
+    }
+    return executors_[index]->update_net_channel(channel, events);
+}
+
+template <typename TraitsT>
+bool AsyncRuntime<TraitsT>::net_unregister_channel(Thread thread,
+                                                   detail::NetIoChannel *channel) noexcept {
+    const std::uint16_t index = thread_index(thread);
+    if (index >= executors_.size()) {
+        return false;
+    }
+    return executors_[index]->unregister_net_channel(channel);
+}
+
+template <typename TraitsT>
 auto AsyncRuntime<TraitsT>::current_thread() noexcept -> typename AsyncRuntime<TraitsT>::Thread {
     return thread_from_index(current_thread_index_);
 }

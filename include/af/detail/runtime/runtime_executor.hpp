@@ -119,6 +119,12 @@ public:
     [[nodiscard]] bool register_io_wait(int fd, std::uint32_t events, Task *task, IoResult *result,
                                         bool prefer_rearm = false) noexcept;
 
+    [[nodiscard]] bool register_net_channel(detail::NetIoChannel *channel,
+                                            std::uint32_t events) noexcept;
+    [[nodiscard]] bool update_net_channel(detail::NetIoChannel *channel,
+                                          std::uint32_t events) noexcept;
+    [[nodiscard]] bool unregister_net_channel(detail::NetIoChannel *channel) noexcept;
+
 #if defined(__linux__)
     [[nodiscard]] bool cancel_io_completion(IoOpState &state) noexcept;
 #endif
@@ -1563,6 +1569,18 @@ private:
 #endif
 
 #if AF_DETAIL_HAS_EPOLL
+    [[nodiscard]] static std::uint64_t epoll_wait_token(int fd) noexcept;
+    [[nodiscard]] static std::uint64_t epoll_wake_token() noexcept;
+    [[nodiscard]] static std::uint64_t epoll_channel_token(detail::NetIoChannel *channel) noexcept;
+    [[nodiscard]] static bool epoll_token_is_wake(std::uint64_t token) noexcept;
+    [[nodiscard]] static bool epoll_token_is_channel(std::uint64_t token) noexcept;
+    [[nodiscard]] static int epoll_token_fd(std::uint64_t token) noexcept;
+    [[nodiscard]] static detail::NetIoChannel *epoll_token_channel(std::uint64_t token) noexcept;
+    [[nodiscard]] static std::uint32_t
+    epoll_events_for_net_channel(const detail::NetIoChannel &channel,
+                                 std::uint32_t events) noexcept;
+    [[nodiscard]] bool update_net_channel_interest(detail::NetIoChannel *channel,
+                                                   std::uint32_t events) noexcept;
     [[nodiscard]] bool native_io_backend_available() const noexcept;
     [[nodiscard]] bool notify_native_io_backend() noexcept;
     [[nodiscard]] bool init_native_io_backend() noexcept;
@@ -1631,6 +1649,13 @@ private:
         static_cast<void>(task);
         static_cast<void>(prefer_rearm);
         return fail_io_result(result, fd, fd < 0 ? EBADF : ENOSYS);
+    }
+
+    [[nodiscard]] bool update_net_channel_interest(detail::NetIoChannel *channel,
+                                                   std::uint32_t events) noexcept {
+        static_cast<void>(channel);
+        static_cast<void>(events);
+        return false;
     }
 #endif
 
@@ -1728,6 +1753,9 @@ private:
     IoObjectPool<IoWaitRegistration> io_wait_pool_;
 #endif
 #if AF_DETAIL_HAS_EPOLL
+    absl::flat_hash_map<int, detail::NetIoChannel *> net_channels_;
+#endif
+#if AF_DETAIL_HAS_EPOLL
     int io_epoll_fd_{-1};
     int io_wake_fd_{-1};
 #endif
@@ -1792,4 +1820,5 @@ private:
 #include "af/detail/runtime/runtime_executor_io_resources.hpp"
 #include "af/detail/runtime/runtime_executor_io_submit_core.hpp"
 #include "af/detail/runtime/runtime_executor_lifecycle.hpp"
+#include "af/detail/runtime/runtime_executor_net_channel.hpp"
 #include "af/detail/runtime/runtime_executor_scheduler.hpp"

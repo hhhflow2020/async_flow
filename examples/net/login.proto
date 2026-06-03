@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package asyncflow.examples.net;
+
+message LoginRequest {
+  string user_id = 1;
+  string token = 2;
+}
+
+message LoginResponse {
+  bool ok = 1;
+  string message = 2;
+}

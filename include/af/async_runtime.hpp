@@ -21,6 +21,7 @@
 #include "af/detail/queue/bounded_queues.hpp"
 #include "af/detail/config.hpp"
 #include "af/detail/io/filesystem/io_filesystem_platform.hpp"
+#include "af/detail/net/reactor/net_io_channel.hpp"
 #include "af/detail/io/uring/io_uring_support.hpp"
 #include "af/detail/memory/contiguous_object_storage.hpp"
 #include "af/detail/memory/object_pool.hpp"
@@ -147,6 +148,13 @@ public:
     [[nodiscard]] static bool start_task(Args &&...args);
 
     static bool post(Thread thread, Task *task, ScheduleMode mode = ScheduleMode::Auto) noexcept;
+
+    [[nodiscard]] static bool net_register_channel(Thread thread, detail::NetIoChannel *channel,
+                                                   std::uint32_t events) noexcept;
+    [[nodiscard]] static bool net_update_channel(Thread thread, detail::NetIoChannel *channel,
+                                                 std::uint32_t events) noexcept;
+    [[nodiscard]] static bool net_unregister_channel(Thread thread,
+                                                     detail::NetIoChannel *channel) noexcept;
 
     [[nodiscard]] static Thread current_thread() noexcept;
     [[nodiscard]] static bool is_runtime_thread() noexcept;

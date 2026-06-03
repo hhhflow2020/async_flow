@@ -23,6 +23,25 @@ AsyncRuntime + Fixed Threads + Task + Scheduler + Shard + Ordered Batch
 - 使用模板静态绑定 handler 和任务类型，减少虚函数之外的间接调用、分支和动态分配。
 - 使用现代 CMake + Conan 管理构建、测试和 benchmark。
 
+网络层目标补充：
+
+- 新 `af::net` 主路径采用 reactor-driven 设计，IO 线程直接管理 fd、事件、
+  buffer 和连接状态，不再把每个 socket readiness 绑定到普通 task 的
+  pending/resume 热路径。
+- Linux 网络主路径采用 epoll LT，事件触发后 drain 到 `EAGAIN` 或预算耗尽；
+  `epoll_ctl` 只发生在 fd 注册、interest 变化和关闭时。
+- `TcpServer`、`UdpServer`、Unix socket server/client 都是绑定框架 IO 线程的网络服务
+  抽象；业务 task 只处理业务计算和跨线程流程。
+- `TcpConnectionHandle` 由 `io_thread + slot + generation` 组成，允许业务层安全地
+  管理 `user_id -> connection`，并防止 fd/slot 复用导致旧任务误发。
+- TCP 核心 API 只提供字节流 `on_read`，UDP 提供 `on_datagram`；packet id、包长度、
+  protobuf/json 解析和分发由用户业务层决定。框架可提供可选 parser/router 工具，
+  但不强制 codec/dispatcher 进入核心。
+- protobuf 仅用于示例 `tcp_login_server`，不进入 `af::net` 核心库依赖。
+- 旧 task-driven IO examples/tests/benchmarks 已从本分支移除；底层 `io_*` helper
+  作为日志、timer、filesystem 等内部兼容层暂时保留，后续逐步替换到 reactor/channel
+  抽象。
+
 ## 2. 线程定义
 
 业务使用 tag + `thread_layout` 定义固定线程。不再要求业务手写连续递增 enum；runtime 会根据 layout 在编译期生成连续线程索引，并保留线程组的 begin/count/at()/shard() 视图。
@@ -730,196 +749,40 @@ async::parallel_shards_ordered(
 ./build-conan/build/Release/asyncflow_crud_apply_example
 ```
 
-### 11.6 io_adapters.cpp：TCP/UDP IO adapter 业务模板
+### 11.6 net_tcp_echo_server.cpp：Reactor TCP echo server
 
-文件：`examples/io_adapters.cpp`
-
-展示内容：
-
-- `af::TcpStream<AppThread>` 封装 stream socket 的 `recv/send` 状态机。
-- `af::UdpSocket<AppThread>` 封装 datagram socket 的 `recvmsg/sendmsg`、`recvv_from/sendv_to` 或 `recvfrom/sendto` fallback 状态机。
-- fd readiness、syscall、io_uring submit/completion 和任务恢复都发生在绑定的 IO executor 上。
-
-运行方式：
-
-```sh
-./build-conan/build/Release/asyncflow_io_adapters_example
-```
-
-### 11.7 io_uring_file.cpp：文件异步 IO 业务模板
-
-文件：`examples/io_uring_file.cpp`
+文件：`examples/net_tcp_echo_server.cpp`
 
 展示内容：
 
-- 使用 `ThreadKind::IoUring` 声明文件 IO 线程。
-- 使用 `af::IoFile<FileThread>::write_at()` / `fsync()` / `read_at()` 完成文件写入、落盘和读取。
-- io_uring 不可用时通过 `io_uring_backend_available()` 做显式降级。
-
-运行方式：
-
-```sh
-./build-conan/build/Release/asyncflow_io_uring_file_example
-```
-
-### 11.8 io_uring_openat.cpp：异步 openat 文件业务模板
-
-文件：`examples/io_uring_openat.cpp`
-
-该示例展示：
-
-- `af::io_openat()` 在指定 `ThreadKind::IoUring` 线程上提交 `IORING_OP_OPENAT`。
-- path 保存为 task 成员，保证 pending open 恢复前仍然有效。
-- 打开 fd 后继续使用 `af::IoFile::write_at()` / `fsync()` / `read_at()` 完成文件 round trip。
+- 使用 `af::net::TcpServer<Runtime, Handler>` 绑定多个 `ThreadKind::Epoll` IO 线程。
+- Linux 下每个 IO 线程一个 listener，并通过 `SO_REUSEPORT` 绑定同一地址，连接从 accept 开始归属对应 owner IO 线程。
+- `on_read(conn, BufferView)` 只处理字节流，示例直接 `conn.send(bytes)` 原样回包。
+- 建连和断连日志包含 connection slot / generation，方便观察连接生命周期。
+- `SIGINT` / `SIGTERM` 触发停止标记，主线程负责关闭 runtime。
 
 运行：
 
 ```sh
-./build-conan/build/Release/asyncflow_io_uring_openat_example
+./build-conan/build/Release/asyncflow_net_tcp_echo_server_example 9090
 ```
 
-### 11.9 io_uring_file_lifecycle.cpp：文件生命周期业务模板
+### 11.7 net_tcp_login_server.cpp：长度 + 包 id + protobuf 登录示例
 
-文件：`examples/io_uring_file_lifecycle.cpp`
+文件：`examples/net_tcp_login_server.cpp`
 
-该示例展示：
+展示内容：
 
-- `af::io_openat()` / `io_fallocate()` / `io_statx()` / `io_renameat()` / `io_unlinkat()` / `io_close()` 在指定 IO 线程上完成文件生命周期操作。
-- `io_close()` 接收 `af::UniqueFd&`，提交成功后立即 release，避免 pending close 期间重复关闭 fd。
-- 文件 path 保存为 task 成员，保证 pending rename/unlink/statx 恢复前仍然有效。
+- TCP 包格式为 `uint32 length + uint16 packet_id + packet_content`，其中 `length` 覆盖 `packet_id + content`。
+- 示例层维护 stream parser 和 `packet_id` 分发逻辑，框架核心不强制 codec / dispatcher。
+- 登录包 content 使用 `examples/net/login.proto` 中的 `LoginRequest`，protobuf 只作为示例依赖，不进入 `af::net` 核心库。
+- IO 线程解析登录包后启动 `LoginTask`，任务切到计算线程打日志并构造 `LoginResponse`，再通过 `TcpConnectionHandle::send()` 回到连接 owner IO 线程发送响应。
+- 连接状态用 `slot + generation` 做 key，断连时清理 parser 状态。
 
 运行：
 
 ```sh
-./build-conan/build/Release/asyncflow_io_uring_file_lifecycle_example
-```
-
-### 11.10 io_uring_filesystem_ops.cpp：目录和文件生命周期业务模板
-
-文件：`examples/io_uring_filesystem_ops.cpp`
-
-该示例展示：
-
-- `af::io_openat2()` / `io_mkdirat()` / `io_ftruncate()` / `io_linkat()` / `io_symlinkat()` / `io_unlinkat()` 在指定 IO 线程上完成目录和文件操作。
-- 新增 filesystem helper 通过独立 `af/io_filesystem.hpp` 暴露，公共 API 仍由 `af/io.hpp` 引入，runtime 侧使用窄 SQE submit 路径减少无关分支。
-- 示例 task 的每个状态拆成成员函数，完成等待交给 `ShutdownPolicy::WaitForTasks` 下的 `runtime::shutdown()`；需要在 shutdown 前继续派发子任务的示例先用 `runtime::wait_for_idle()` 自然清空，避免示例层显式定义 atomic 只为了判断 task 是否完成。
-
-运行：
-
-```sh
-./build-conan/build/Release/asyncflow_io_uring_filesystem_ops_example
-```
-
-### 11.10 io_sendfile_static.cpp：TCP 静态文件少拷贝发送模板
-
-文件：`examples/io_sendfile_static.cpp`
-
-该示例展示：
-
-- `af::TcpStream::sendfile_some()` 在指定 IO 线程上通过 `sendfile(2)` 把文件内容发送到 TCP peer。
-- sendfile offset 保存为 task 成员；offset 为 `nullptr` 时使用文件当前偏移，业务需要自己保证文件 offset 正确。
-- socket buffer 满时 helper 返回 pending，runtime 等待 out fd writable 后恢复同一个 task 继续推进。
-
-运行：
-
-```sh
-./build-conan/build/Release/asyncflow_io_sendfile_static_example
-```
-
-### 11.11 io_uring_send_zc.cpp：TCP 发送侧 zero-copy 模板
-
-文件：`examples/io_uring_send_zc.cpp`
-
-该示例展示：
-
-- `ThreadKind::IoUring` 线程上用 `af::TcpStream::send_zc_some()` 发送 TCP payload。
-- 内核支持 `IORING_OP_SEND_ZC` 时走 io_uring zero-copy send；不支持或 socket 返回不支持时退回普通非阻塞 `send` + readiness。
-- 发送状态保存 offset 和 `IoOpState` 为 task 成员，每个状态拆成成员函数。
-
-运行：
-
-```sh
-./build-conan/build/Release/asyncflow_io_uring_send_zc_example
-```
-
-### 11.12 io_uring_datagram.cpp：UDP io_uring 业务模板
-
-文件：`examples/io_uring_datagram.cpp`
-
-该示例展示：
-
-- `ThreadKind::IoUring` 线程上用 `af::UdpSocket` 完成 client/server round trip。
-- `recv_from_some()` / `send_to_some()` 优先走 `recvmsg/sendmsg` completion，不可用时自动退回 epoll readiness。
-- 每个状态拆成成员函数，避免把业务流程揉在一个 `switch` 分支里。
-
-运行：
-
-```sh
-./build-conan/build/Release/asyncflow_io_uring_datagram_example
-```
-
-### 11.13 io_tcp_connect_accept.cpp：TCP accept/connect 业务模板
-
-文件：`examples/io_tcp_connect_accept.cpp`
-
-该示例展示：
-
-- `ThreadKind::IoUring` 线程上用 `af::TcpListener` 和 `af::TcpStream` 完成 TCP server/client round trip。
-- `accept_some()` / `connect()` 优先走 `IORING_OP_ACCEPT` / `IORING_OP_CONNECT`，不可用时自动退回 epoll readiness。
-- server/client 每个状态拆成成员函数，覆盖 accept、connect、send 和 recv 的常见业务骨架。
-
-运行：
-
-```sh
-./build-conan/build/Release/asyncflow_io_tcp_connect_accept_example
-```
-
-### 11.14 io_vectored.cpp：scatter/gather stream/datagram 业务模板
-
-文件：`examples/io_vectored.cpp`
-
-该示例展示：
-
-- `ThreadKind::IoUring` 线程上用 `af::TcpStream::sendv_some()` / `recvv_some()` 完成两段 buffer 的 stream round trip，并用 `af::UdpSocket::sendv_to_some()` / `recvv_from_some()` 完成 datagram round trip。
-- 协议头、正文或日志片段可以直接作为 `iovec` 数组发送，避免先拼到连续临时 buffer。
-- `iovec` 数组和其指向的 buffer 在 pending IO 完成前必须保持有效，因此示例将它们保存为 task 成员。
-
-运行：
-
-```sh
-./build-conan/build/Release/asyncflow_io_vectored_example
-```
-
-### 11.15 io_timer.cpp：timerfd 异步定时器业务模板
-
-文件：`examples/io_timer.cpp`
-
-该示例展示：
-
-- `af::make_timerfd()` 创建非阻塞 timer fd，fd 生命周期仍由 `af::UniqueFd` 管理。
-- `af::IoTimer::wait()` 在绑定 IO 线程上等待 timerfd readable，并在到期后恢复原 task。
-- `af::arm_timerfd_after()` 可用于超时、重试、心跳和连接保活。
-
-运行：
-
-```sh
-./build-conan/build/Release/asyncflow_io_timer_example
-```
-
-### 11.16 io_event.cpp：eventfd 异步通知业务模板
-
-文件：`examples/io_event.cpp`
-
-该示例展示：
-
-- `af::make_eventfd()` 创建非阻塞 event fd，fd 生命周期仍由 `af::UniqueFd` 管理。
-- `af::IoEvent::wait()` 在绑定 IO 线程上等待 eventfd readable，并在收到通知后恢复原 task。
-- `af::write_eventfd()` 可用于业务侧异步通知、轻量计数器和跨组件唤醒。
-
-运行：
-
-```sh
-./build-conan/build/Release/asyncflow_io_event_example
+./build-conan/build/Release/asyncflow_net_tcp_login_server_example 9091
 ```
 
 ## 12. 测试覆盖
@@ -931,9 +794,10 @@ async::parallel_shards_ordered(
 - `tests/runtime_lifecycle_basic_tests.cpp`、`tests/runtime_backpressure_tests.cpp`、`tests/runtime_shutdown_policy_tests.cpp`：任务生命周期、状态机、调度模式、背压和 shutdown 策略。
 - `tests/runtime_parallel_shards_tests.cpp`、`tests/runtime_ordered_batch_tests.cpp`、`tests/runtime_ordered_start_tests.cpp`：parallel shards、失败汇总、有序 batch、ordered start 边界、retryable ordered apply。
 - `tests/runtime_*_stress_tests.cpp`：高并发 init/shutdown/start_task、cross-thread hop、running->pending、self-post 等 stress，可配合 TSAN 拉长运行。
-- `tests/queue_tests.cpp`、`tests/pool_tests.cpp`、`tests/batch_utility_tests.cpp`、`tests/io_state_utility_tests.cpp`：SPSC/MPSC/MPMC 队列、对象池、分片工具、CRUD helper、BatchSequencer、ordered retry/skip policy 和 IO state helper。
+- `tests/queue_tests.cpp`、`tests/pool_tests.cpp`、`tests/batch_utility_tests.cpp`：SPSC/MPSC/MPMC 队列、对象池、分片工具、CRUD helper、BatchSequencer 和 ordered retry/skip policy。
 - `tests/log_tests.cpp`：异步日志格式、runtime-bound consumer、文件/TCP/UDP 后端、ordered/relaxed 队列策略、flush/shutdown、无丢失/无重复和单 producer FIFO 边界。
-- `tests/runtime_io_*_tests.cpp`：按 setup、epoll/kqueue、stream/zero-copy、io_uring socket/file、datagram、shutdown 拆分 IO 覆盖；公共 fixture 和 task helper 主要放在 `tests/support/runtime_io_*`。
+- `tests/net_buffer_tests.cpp`：`af::Buffer`、`BufferView`、`BufferChain` 基础覆盖。
+- 旧 task-driven IO tests 已从本分支移除；新的网络服务路径通过 `af::net` 示例、buffer tests、本地 macOS CTest 和远端 Linux epoll smoke 覆盖。
 
 重点覆盖：
 
@@ -1077,7 +941,7 @@ P3：`start_task()` 为通用 handle 生命周期多做一次引用计数增减�
 - `include/af/detail/runtime/` 承载 runtime 配置、生命周期、dispatch、executor、parallel、IO backend 等实现片段。
 - `include/af/detail/queue/` 拆分 bounded SPSC/MPSC/MPMC queue family。
 - `include/af/detail/io/` 按 common/types/adapters/socket/file/filesystem/datagram/timeout/uring 分目录管理。
-- `tests/runtime_io_test_support.hpp` 当前约 231 行，大量 IO task/fixture 已迁移到 `tests/support/runtime_io_*` 专用文件。
+- 旧 task-driven IO examples/tests/benchmarks 已移除；新网络层文档见 `docs/net_reactor_design.md`，当前落地代码集中在 `include/af/net/`、`include/af/buffer/` 和 `include/af/detail/net/`。
 
 后续如果继续整理文件结构，应遵守以下约束：
 

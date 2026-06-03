@@ -7,6 +7,43 @@
 namespace af::detail {
 
 #if AF_DETAIL_HAS_EPOLL
+template <typename RuntimeT, typename TraitsT>
+std::uint64_t Executor<RuntimeT, TraitsT>::epoll_wait_token(int fd) noexcept {
+    return static_cast<std::uint64_t>(static_cast<std::uint32_t>(fd)) << 2U;
+}
+
+template <typename RuntimeT, typename TraitsT>
+std::uint64_t Executor<RuntimeT, TraitsT>::epoll_wake_token() noexcept {
+    return 1U;
+}
+
+template <typename RuntimeT, typename TraitsT>
+std::uint64_t
+Executor<RuntimeT, TraitsT>::epoll_channel_token(detail::NetIoChannel *channel) noexcept {
+    return (static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(channel)) & ~3ULL) | 2ULL;
+}
+
+template <typename RuntimeT, typename TraitsT>
+bool Executor<RuntimeT, TraitsT>::epoll_token_is_wake(std::uint64_t token) noexcept {
+    return token == epoll_wake_token();
+}
+
+template <typename RuntimeT, typename TraitsT>
+bool Executor<RuntimeT, TraitsT>::epoll_token_is_channel(std::uint64_t token) noexcept {
+    return (token & 3ULL) == 2ULL;
+}
+
+template <typename RuntimeT, typename TraitsT>
+int Executor<RuntimeT, TraitsT>::epoll_token_fd(std::uint64_t token) noexcept {
+    return static_cast<int>(static_cast<std::uint32_t>(token >> 2U));
+}
+
+template <typename RuntimeT, typename TraitsT>
+detail::NetIoChannel *
+Executor<RuntimeT, TraitsT>::epoll_token_channel(std::uint64_t token) noexcept {
+    return reinterpret_cast<detail::NetIoChannel *>(static_cast<std::uintptr_t>(token & ~3ULL));
+}
+
 [[nodiscard]] inline bool write_epoll_wake_eventfd(int fd) noexcept {
     const std::uint64_t value = 1;
     for (;;) {
@@ -85,6 +122,11 @@ Executor<RuntimeT, TraitsT>::io_events_from_native(std::uint32_t events) noexcep
     if ((events & EPOLLHUP) != 0U) {
         result |= io_hangup;
     }
+#ifdef EPOLLRDHUP
+    if ((events & EPOLLRDHUP) != 0U) {
+        result |= io_hangup;
+    }
+#endif
     return result;
 }
 
@@ -132,7 +174,7 @@ template <typename RuntimeT, typename TraitsT>
 
     epoll_event event{};
     event.events = EPOLLIN;
-    event.data.fd = -1;
+    event.data.u64 = epoll_wake_token();
     if (::epoll_ctl(io_epoll_fd_, EPOLL_CTL_ADD, io_wake_fd_, &event) != 0) {
         close_native_io_backend();
         return false;
@@ -143,6 +185,13 @@ template <typename RuntimeT, typename TraitsT>
 template <typename RuntimeT, typename TraitsT>
 void Executor<RuntimeT, TraitsT>::close_native_io_backend() noexcept {
     clear_io_waits();
+    for (auto &entry : net_channels_) {
+        if (entry.second != nullptr) {
+            entry.second->active = false;
+            entry.second->interests = 0;
+        }
+    }
+    net_channels_.clear();
     if (io_wake_fd_ >= 0) {
         ::close(io_wake_fd_);
         io_wake_fd_ = -1;
@@ -185,8 +234,9 @@ template <typename RuntimeT, typename TraitsT>
     }
 
     for (int i = 0; i < count; ++i) {
-        const int fd = events[static_cast<std::size_t>(i)].data.fd;
-        if (fd < 0) {
+        const epoll_event &event = events[static_cast<std::size_t>(i)];
+        const std::uint64_t token = event.data.u64;
+        if (epoll_token_is_wake(token)) {
             drain_io_wake();
             if (poll_io_uring_completions()) {
                 did_work = true;
@@ -194,7 +244,16 @@ template <typename RuntimeT, typename TraitsT>
             did_work = true;
             continue;
         }
+        if (epoll_token_is_channel(token)) {
+            detail::NetIoChannel *channel = epoll_token_channel(token);
+            if (channel != nullptr && channel->active && channel->on_event != nullptr) {
+                channel->on_event(channel->owner, io_events_from_native(event.events));
+                did_work = true;
+            }
+            continue;
+        }
 
+        const int fd = epoll_token_fd(token);
         auto it = io_waits_.find(fd);
         if (it == io_waits_.end()) {
             static_cast<void>(::epoll_ctl(io_epoll_fd_, EPOLL_CTL_DEL, fd, nullptr));
@@ -259,6 +318,56 @@ Executor<RuntimeT, TraitsT>::epoll_events_for_entry(const IoWaitEntry &entry) no
 }
 
 template <typename RuntimeT, typename TraitsT>
+std::uint32_t
+Executor<RuntimeT, TraitsT>::epoll_events_for_net_channel(const detail::NetIoChannel &channel,
+                                                          std::uint32_t events) noexcept {
+    static_cast<void>(channel);
+    std::uint32_t native_events = EPOLLERR | EPOLLHUP;
+#ifdef EPOLLRDHUP
+    native_events |= EPOLLRDHUP;
+#endif
+    if ((events & detail::net_io_readable) != 0U) {
+        native_events |= EPOLLIN;
+    }
+    if ((events & detail::net_io_writable) != 0U) {
+        native_events |= EPOLLOUT;
+    }
+    return native_events;
+}
+
+template <typename RuntimeT, typename TraitsT>
+bool Executor<RuntimeT, TraitsT>::update_net_channel_interest(detail::NetIoChannel *channel,
+                                                              std::uint32_t events) noexcept {
+    if (io_epoll_fd_ < 0 || channel == nullptr || channel->fd < 0) {
+        return false;
+    }
+    if ((events & (detail::net_io_readable | detail::net_io_writable)) == 0U) {
+        if (channel->active) {
+            static_cast<void>(::epoll_ctl(io_epoll_fd_, EPOLL_CTL_DEL, channel->fd, nullptr));
+        }
+        channel->active = false;
+        channel->interests = 0;
+        return true;
+    }
+
+    epoll_event event{};
+    event.events = epoll_events_for_net_channel(*channel, events);
+    event.data.u64 = epoll_channel_token(channel);
+    if (channel->active) {
+        if (::epoll_ctl(io_epoll_fd_, EPOLL_CTL_MOD, channel->fd, &event) != 0) {
+            return false;
+        }
+    } else if (::epoll_ctl(io_epoll_fd_, EPOLL_CTL_ADD, channel->fd, &event) != 0) {
+        if (errno != EEXIST || ::epoll_ctl(io_epoll_fd_, EPOLL_CTL_MOD, channel->fd, &event) != 0) {
+            return false;
+        }
+    }
+    channel->active = true;
+    channel->interests = events;
+    return true;
+}
+
+template <typename RuntimeT, typename TraitsT>
 [[nodiscard]] bool
 Executor<RuntimeT, TraitsT>::update_epoll_interest(int fd, const IoWaitEntry &entry) noexcept {
     const std::uint32_t native_events = epoll_events_for_entry(entry);
@@ -269,7 +378,7 @@ Executor<RuntimeT, TraitsT>::update_epoll_interest(int fd, const IoWaitEntry &en
 
     epoll_event event{};
     event.events = native_events;
-    event.data.fd = fd;
+    event.data.u64 = epoll_wait_token(fd);
     if (::epoll_ctl(io_epoll_fd_, EPOLL_CTL_MOD, fd, &event) == 0) {
         return true;
     }
@@ -293,7 +402,8 @@ Executor<RuntimeT, TraitsT>::register_native_io_wait(int fd, std::uint32_t event
     const bool unsupported_events = (events & (io_readable | io_writable)) == 0U;
     auto existing = io_waits_.find(fd);
     if (io_epoll_fd_ < 0 || fd < 0 || events == 0U || unsupported_events ||
-        (existing != io_waits_.end() && io_wait_events_conflict(existing->second, events))) {
+        (existing != io_waits_.end() && io_wait_events_conflict(existing->second, events)) ||
+        net_channels_.find(fd) != net_channels_.end()) {
         int error = 0;
         if (fd < 0) {
             error = EBADF;

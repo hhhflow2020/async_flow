@@ -66,98 +66,82 @@ if(ASYNCFLOW_BUILD_EXAMPLES)
                    examples/runtime_tcp_async_logging.cpp)
     target_link_libraries(asyncflow_runtime_tcp_async_logging_example PRIVATE AsyncFlow::AsyncFlow)
 
-    add_executable(asyncflow_io_epoll_example examples/io_epoll.cpp)
-    target_link_libraries(asyncflow_io_epoll_example PRIVATE AsyncFlow::AsyncFlow)
+    add_executable(asyncflow_net_tcp_echo_server_example examples/net_tcp_echo_server.cpp)
+    target_link_libraries(asyncflow_net_tcp_echo_server_example PRIVATE AsyncFlow::AsyncFlow)
 
-    add_executable(asyncflow_io_native_readiness_example examples/io_native_readiness.cpp)
-    target_link_libraries(asyncflow_io_native_readiness_example PRIVATE AsyncFlow::AsyncFlow)
+    find_package(Protobuf QUIET)
+    if(Protobuf_FOUND)
+        set(ASYNCFLOW_LOGIN_PROTOC_HINTS)
+        foreach(ASYNCFLOW_PROTOBUF_INCLUDE_DIR IN LISTS Protobuf_INCLUDE_DIRS protobuf_INCLUDE_DIRS)
+            get_filename_component(ASYNCFLOW_PROTOBUF_PACKAGE_ROOT
+                                   "${ASYNCFLOW_PROTOBUF_INCLUDE_DIR}" DIRECTORY)
+            list(APPEND ASYNCFLOW_LOGIN_PROTOC_HINTS "${ASYNCFLOW_PROTOBUF_PACKAGE_ROOT}/bin")
+        endforeach()
+        find_program(
+            ASYNCFLOW_LOGIN_PROTOC_PROGRAM
+            NAMES protoc
+            HINTS ${ASYNCFLOW_LOGIN_PROTOC_HINTS}
+            NO_CACHE
+        )
+        if(ASYNCFLOW_LOGIN_PROTOC_PROGRAM)
+            set(
+                Protobuf_PROTOC_EXECUTABLE
+                "${ASYNCFLOW_LOGIN_PROTOC_PROGRAM}"
+                CACHE FILEPATH "The protoc compiler" FORCE
+            )
+        endif()
 
-    add_executable(asyncflow_io_timer_example examples/io_timer.cpp)
-    target_link_libraries(asyncflow_io_timer_example PRIVATE AsyncFlow::AsyncFlow)
+        set(ASYNCFLOW_LOGIN_PROTOC_EXE)
+        if(Protobuf_PROTOC_EXECUTABLE)
+            set(ASYNCFLOW_LOGIN_PROTOC_EXE ${Protobuf_PROTOC_EXECUTABLE})
+        elseif(TARGET protobuf::protoc)
+            set(ASYNCFLOW_LOGIN_PROTOC_EXE protobuf::protoc)
+        elseif(TARGET Protobuf::protoc)
+            set(ASYNCFLOW_LOGIN_PROTOC_EXE Protobuf::protoc)
+        endif()
+        if(ASYNCFLOW_LOGIN_PROTOC_EXE)
+            set(ASYNCFLOW_LOGIN_PROTOC_ARGS PROTOC_EXE ${ASYNCFLOW_LOGIN_PROTOC_EXE})
+        else()
+            set(ASYNCFLOW_LOGIN_PROTOC_ARGS)
+        endif()
 
-    add_executable(asyncflow_io_timeout_example examples/io_timeout.cpp)
-    target_link_libraries(asyncflow_io_timeout_example PRIVATE AsyncFlow::AsyncFlow)
+        protobuf_generate(
+            LANGUAGE cpp
+            OUT_VAR ASYNCFLOW_LOGIN_PROTO_SRCS
+            PROTOS examples/net/login.proto
+            IMPORT_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/examples/net
+            PROTOC_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR}
+            ${ASYNCFLOW_LOGIN_PROTOC_ARGS}
+        )
+        add_executable(
+            asyncflow_net_tcp_login_server_example
+            examples/net_tcp_login_server.cpp
+            ${ASYNCFLOW_LOGIN_PROTO_SRCS}
+        )
+        target_include_directories(
+            asyncflow_net_tcp_login_server_example
+            PRIVATE
+                ${CMAKE_CURRENT_BINARY_DIR}
+        )
+        target_link_libraries(asyncflow_net_tcp_login_server_example PRIVATE AsyncFlow::AsyncFlow)
+        if(TARGET protobuf::libprotobuf)
+            target_link_libraries(asyncflow_net_tcp_login_server_example PRIVATE protobuf::libprotobuf)
+        elseif(TARGET Protobuf::libprotobuf)
+            target_link_libraries(asyncflow_net_tcp_login_server_example PRIVATE Protobuf::libprotobuf)
+        else()
+            target_include_directories(
+                asyncflow_net_tcp_login_server_example
+                PRIVATE
+                    ${Protobuf_INCLUDE_DIRS}
+            )
+            target_link_libraries(
+                asyncflow_net_tcp_login_server_example
+                PRIVATE
+                    ${Protobuf_LIBRARIES}
+            )
+        endif()
+    endif()
 
-    add_executable(asyncflow_io_event_example examples/io_event.cpp)
-    target_link_libraries(asyncflow_io_event_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_sendfile_static_example examples/io_sendfile_static.cpp)
-    target_link_libraries(asyncflow_io_sendfile_static_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_shutdown_example examples/io_shutdown.cpp)
-    target_link_libraries(asyncflow_io_shutdown_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_socket_lifecycle_example examples/io_socket_lifecycle.cpp)
-    target_link_libraries(asyncflow_io_socket_lifecycle_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_adapters_example examples/io_adapters.cpp)
-    target_link_libraries(asyncflow_io_adapters_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_pollable_client_example examples/io_pollable_client.cpp)
-    target_link_libraries(asyncflow_io_pollable_client_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_rpc_length_prefixed_example examples/io_rpc_length_prefixed.cpp)
-    target_link_libraries(asyncflow_io_rpc_length_prefixed_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_uring_file_example examples/io_uring_file.cpp)
-    target_link_libraries(asyncflow_io_uring_file_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_uring_file_lifecycle_example examples/io_uring_file_lifecycle.cpp)
-    target_link_libraries(asyncflow_io_uring_file_lifecycle_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_uring_filesystem_ops_example examples/io_uring_filesystem_ops.cpp)
-    target_link_libraries(asyncflow_io_uring_filesystem_ops_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_uring_tuned_setup_example examples/io_uring_tuned_setup.cpp)
-    target_link_libraries(asyncflow_io_uring_tuned_setup_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_uring_fixed_buffer_example examples/io_uring_fixed_buffer.cpp)
-    target_link_libraries(asyncflow_io_uring_fixed_buffer_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_uring_fixed_file_example examples/io_uring_fixed_file.cpp)
-    target_link_libraries(asyncflow_io_uring_fixed_file_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_uring_multishot_accept_example examples/io_uring_multishot_accept.cpp)
-    target_link_libraries(asyncflow_io_uring_multishot_accept_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_uring_recv_multishot_example examples/io_uring_recv_multishot.cpp)
-    target_link_libraries(asyncflow_io_uring_recv_multishot_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_uring_udp_recv_multishot_example examples/io_uring_udp_recv_multishot.cpp)
-    target_link_libraries(asyncflow_io_uring_udp_recv_multishot_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_uring_udp_recvmsg_multishot_example examples/io_uring_udp_recvmsg_multishot.cpp)
-    target_link_libraries(asyncflow_io_uring_udp_recvmsg_multishot_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_uring_openat_example examples/io_uring_openat.cpp)
-    target_link_libraries(asyncflow_io_uring_openat_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_uring_openat_direct_example examples/io_uring_openat_direct.cpp)
-    target_link_libraries(asyncflow_io_uring_openat_direct_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_uring_accept_direct_example examples/io_uring_accept_direct.cpp)
-    target_link_libraries(asyncflow_io_uring_accept_direct_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_uring_datagram_example examples/io_uring_datagram.cpp)
-    target_link_libraries(asyncflow_io_uring_datagram_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_uring_send_zc_example examples/io_uring_send_zc.cpp)
-    target_link_libraries(asyncflow_io_uring_send_zc_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_uring_sendmsg_zc_example examples/io_uring_sendmsg_zc.cpp)
-    target_link_libraries(asyncflow_io_uring_sendmsg_zc_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_uring_timeout_example examples/io_uring_timeout.cpp)
-    target_link_libraries(asyncflow_io_uring_timeout_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_tcp_connect_accept_example examples/io_tcp_connect_accept.cpp)
-    target_link_libraries(asyncflow_io_tcp_connect_accept_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_tcp_echo_server_example examples/io_tcp_echo_server.cpp)
-    target_link_libraries(asyncflow_io_tcp_echo_server_example PRIVATE AsyncFlow::AsyncFlow)
-
-    add_executable(asyncflow_io_vectored_example examples/io_vectored.cpp)
-    target_link_libraries(asyncflow_io_vectored_example PRIVATE AsyncFlow::AsyncFlow)
 endif()
 
 if(ASYNCFLOW_BUILD_TESTS)
@@ -171,42 +155,14 @@ if(ASYNCFLOW_BUILD_TESTS)
         tests/runtime_config_tests.cpp
         tests/runtime_backpressure_tests.cpp
         tests/runtime_shutdown_policy_tests.cpp
-        tests/runtime_io_setup_tests.cpp
-        tests/runtime_io_epoll_tests.cpp
-        tests/runtime_io_epoll_readiness_tests.cpp
-        tests/runtime_io_epoll_cancel_timeout_tests.cpp
-        tests/runtime_io_epoll_boundary_tests.cpp
-        tests/runtime_io_epoll_socket_lifecycle_tests.cpp
-        tests/runtime_io_epoll_event_timer_tests.cpp
-        tests/runtime_io_kqueue_tests.cpp
-        tests/runtime_io_stream_tests.cpp
-        tests/runtime_io_stream_vectored_tests.cpp
-        tests/runtime_io_stream_zero_copy_tests.cpp
-        tests/runtime_io_stream_transfer_tests.cpp
-        tests/runtime_io_stream_connect_accept_tests.cpp
-        tests/runtime_io_uring_socket_tests.cpp
-        tests/runtime_io_uring_socket_accept_tests.cpp
-        tests/runtime_io_uring_socket_datagram_tests.cpp
-        tests/runtime_io_uring_socket_stream_multishot_tests.cpp
-        tests/runtime_io_uring_socket_udp_multishot_tests.cpp
-        tests/runtime_io_uring_socket_recvmsg_multishot_tests.cpp
-        tests/runtime_io_uring_socket_stream_tests.cpp
-        tests/runtime_io_uring_file_batch_tests.cpp
-        tests/runtime_io_uring_file_fixed_tests.cpp
-        tests/runtime_io_uring_file_lifecycle_tests.cpp
-        tests/runtime_io_uring_file_tests.cpp
-        tests/runtime_io_datagram_tests.cpp
-        tests/runtime_io_datagram_readiness_tests.cpp
-        tests/runtime_io_datagram_send_tests.cpp
-        tests/runtime_io_shutdown_tests.cpp
         tests/runtime_parallel_shards_tests.cpp
         tests/runtime_ordered_start_tests.cpp
         tests/runtime_ordered_batch_tests.cpp
         tests/queue_tests.cpp
         tests/pool_tests.cpp
         tests/signal_tests.cpp
-        tests/io_state_utility_tests.cpp
         tests/batch_utility_tests.cpp
+        tests/net_buffer_tests.cpp
     )
     target_link_libraries(asyncflow_runtime_tests PRIVATE AsyncFlow::AsyncFlow GTest::gtest_main)
 
@@ -245,14 +201,6 @@ if(ASYNCFLOW_BUILD_BENCHMARKS)
     add_executable(
         asyncflow_runtime_benchmarks
         benchmarks/benchmark_main.cpp
-        benchmarks/io_adapter_datagram_benchmarks.cpp
-        benchmarks/io_adapter_resource_benchmarks.cpp
-        benchmarks/io_adapter_stream_benchmarks.cpp
-        benchmarks/io_filesystem_benchmarks.cpp
-        benchmarks/io_readiness_benchmarks.cpp
-        benchmarks/io_zero_copy_benchmarks.cpp
-        benchmarks/io_file_benchmarks.cpp
-        benchmarks/io_vectored_benchmarks.cpp
         benchmarks/log_benchmarks.cpp
         benchmarks/queue_benchmarks.cpp
         benchmarks/runtime_external_start_benchmarks.cpp
