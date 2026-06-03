@@ -7,11 +7,6 @@
 int main() {
     using namespace io_rpc_length_prefixed_example;
 
-    if constexpr (!af::supports_io_uring) {
-        std::cout << "rpc length-prefixed example is Linux-only\n";
-        return 0;
-    }
-
     rpc_async::init();
     if (!rpc_async::io_backend_available(RpcThreads::IO_0)) {
         std::cout << "IO backend unavailable\n";

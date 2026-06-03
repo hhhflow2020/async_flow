@@ -2959,3 +2959,45 @@ Interpretation:
   `af::preferred_io_thread_kind`, use public adapters, and let the framework
   select io_uring/epoll/kqueue internally instead of writing platform guards in
   application code.
+
+## 2026-06-03 POSIX Length-Prefixed RPC Example
+
+This pass makes the length-prefixed RPC example run on the supported POSIX
+backend set instead of exiting on non-Linux platforms. The protocol state
+machines are unchanged; only the example's platform guard/stub layer was
+removed.
+
+Changes under validation:
+
+- Removed the main-program `supports_io_uring` early return from
+  `io_rpc_length_prefixed.cpp`.
+- Removed `__linux__` guards and non-Linux stubs from the RPC runtime, socket
+  helper, client task, and server task umbrella headers.
+- Replaced Linux-only socket creation with POSIX socket creation plus portable
+  nonblocking/close-on-exec flag handling.
+
+Correctness checks:
+
+- Local macOS Debug built `asyncflow_io_rpc_length_prefixed_example`.
+- Local macOS Debug `asyncflow_io_rpc_length_prefixed_example` ran successfully
+  with `backend=kqueue` and `rpc response_ok=1`.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: built and ran
+  `asyncflow_io_rpc_length_prefixed_example` successfully with
+  `backend=io_uring` and `rpc response_ok=1`.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: built and ran
+  `asyncflow_io_rpc_length_prefixed_example` successfully with
+  `backend=io_uring` and `rpc response_ok=1`.
+
+Interpretation:
+
+- This is an example portability cleanup only. It does not change runtime
+  scheduler routing, local/SPSC/MPSC queue topology, IO wait state transitions,
+  io_uring SQE arguments, readiness fallback behavior, locks, atomics,
+  allocations, memory ordering, or cache layout.
+- The example now demonstrates the intended public API shape: application code
+  declares `af::preferred_io_thread_kind`, uses public stream/listener adapters,
+  and lets AsyncFlow choose the platform backend internally.

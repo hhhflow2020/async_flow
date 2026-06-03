@@ -5,12 +5,10 @@
 
 #include "af/async_flow.hpp"
 
-#if defined(__linux__)
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#endif
 
 namespace io_rpc_length_prefixed_example {
 

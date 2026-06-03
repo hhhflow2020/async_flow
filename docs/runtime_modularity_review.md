@@ -74,6 +74,10 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Runtime benchmarks are now split into shared runtime benchmark task support, external-start, thread-hop, and parallel-shard benchmark families. This keeps benchmark harness changes separate from the task/state-machine fixtures they measure.
 - Test support and benchmark support detail headers now use normal `*.hpp` names and no detail include gate macros instead of `*_fragment.hpp` filenames or `FRAGMENT_INCLUDE`/`DETAIL_INCLUDE` gates. The remaining benchmark `FakeRuntime` class-body include splice was replaced with operation-family base structs.
 - The length-prefixed RPC example is now split into runtime traits, server/process task fragments, a cohesive client state-machine task, and a thin executable entry point.
+- The length-prefixed RPC example is no longer Linux-only. Its loopback TCP
+  setup now uses POSIX sockets with portable nonblocking/close-on-exec flag
+  handling, and the same client/server state machines run through io_uring on
+  Linux and kqueue on macOS/BSD without user-visible platform guards.
 - The vectored IO example is now split into runtime/common helpers, stream readv/writev tasks, datagram recvmsg/sendmsg tasks, and a thin executable entry point.
 - The vectored IO example is no longer Linux-only. It uses POSIX socket setup
   with portable nonblocking/close-on-exec flag handling and the framework's

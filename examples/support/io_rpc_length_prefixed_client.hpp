@@ -8,8 +8,6 @@
 #include "io_rpc_length_prefixed_runtime.hpp"
 #include "io_rpc_length_prefixed_socket_helpers.hpp"
 
-#if defined(__linux__)
-
 namespace io_rpc_length_prefixed_example {
 
 class RpcClientTask final : public RpcTask {
@@ -190,30 +188,3 @@ private:
 };
 
 } // namespace io_rpc_length_prefixed_example
-
-#else
-
-namespace io_rpc_length_prefixed_example {
-
-class RpcClientTask final : public RpcTask {
-public:
-    explicit RpcClientTask(RpcTask::FactoryToken token) : RpcTask(token) {}
-
-    bool do_it(int fd, const RpcLoopbackEndpoint &server, bool *ok, int *error, bool *response_ok) {
-        static_cast<void>(fd);
-        static_cast<void>(server);
-        static_cast<void>(ok);
-        static_cast<void>(error);
-        static_cast<void>(response_ok);
-        return false;
-    }
-
-private:
-    af::TaskResult run() override {
-        return failed();
-    }
-};
-
-} // namespace io_rpc_length_prefixed_example
-
-#endif
