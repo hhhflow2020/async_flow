@@ -112,19 +112,27 @@ class CancelIdleIoStateTask final : public IoTaskBase {
 public:
     explicit CancelIdleIoStateTask(IoTaskBase::FactoryToken token) : IoTaskBase(token) {}
 
-    bool do_it(std::atomic<int> *completed, std::atomic<int> *result, std::atomic<int> *error) {
+    bool do_it(std::atomic<int> *completed, std::atomic<int> *result, std::atomic<int> *error,
+               std::atomic<int> *token_cleared = nullptr) {
         completed_ = completed;
         result_ = result;
         error_ = error;
+        token_cleared_ = token_cleared;
         return schedule(IoTestThreads::IO_0);
     }
 
 private:
     af::TaskResult run() override {
         af::IoOpState state{};
+        int stale_token = 0;
+        state.wait = af::IoResult{123, af::io_readable, 0, 64, &stale_token};
         const bool ok = IoRuntime::cancel_io(IoTestThreads::IO_0, state);
         result_->store(ok ? 1 : 0, std::memory_order_release);
         error_->store(state.wait.error, std::memory_order_release);
+        if (token_cleared_ != nullptr) {
+            token_cleared_->store(state.wait.completion_token == nullptr ? 1 : 0,
+                                  std::memory_order_release);
+        }
         completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
@@ -132,4 +140,5 @@ private:
     std::atomic<int> *completed_{nullptr};
     std::atomic<int> *result_{nullptr};
     std::atomic<int> *error_{nullptr};
+    std::atomic<int> *token_cleared_{nullptr};
 };

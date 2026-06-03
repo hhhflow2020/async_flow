@@ -50,10 +50,13 @@ TEST_F(IoRuntimeEpollFixture, EpollIoThreadRejectsCancelForIdleState) {
     std::atomic<int> completed{0};
     std::atomic<int> result{-1};
     std::atomic<int> error{0};
-    ASSERT_TRUE(IoRuntime::start_task<CancelIdleIoStateTask>(&completed, &result, &error));
+    std::atomic<int> token_cleared{0};
+    ASSERT_TRUE(
+        IoRuntime::start_task<CancelIdleIoStateTask>(&completed, &result, &error, &token_cleared));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(result.load(std::memory_order_acquire), 0);
     EXPECT_EQ(error.load(std::memory_order_acquire), ENOENT);
+    EXPECT_EQ(token_cleared.load(std::memory_order_acquire), 1);
 #else
     GTEST_SKIP() << "epoll backend is Linux-only";
 #endif

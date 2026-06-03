@@ -182,9 +182,7 @@ public:
             return false;
         }
         if (!state.waiting) {
-            state.wait.events = io_error;
-            state.wait.error = ENOENT;
-            state.wait.result = -ENOENT;
+            detail::set_io_result_error(state.wait, state.wait.fd, ENOENT);
             return false;
         }
 
