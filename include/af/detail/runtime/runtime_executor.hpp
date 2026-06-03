@@ -102,11 +102,9 @@ public:
     [[nodiscard]] int io_uring_backend_error() const noexcept;
     [[nodiscard]] bool io_uring_poll_available() const noexcept;
 
-#if !defined(_WIN32)
     [[nodiscard]] bool register_io_uring_buffers(const iovec *buffers, unsigned buffer_count,
                                                  int *error) noexcept;
     [[nodiscard]] bool unregister_io_uring_buffers(int *error) noexcept;
-#endif
     [[nodiscard]] bool register_io_uring_provided_buffer_ring(void *ring, unsigned ring_entries,
                                                               std::uint16_t buffer_group,
                                                               int *error) noexcept;
@@ -382,7 +380,6 @@ public:
         return fail_io_result(result, file_index, ENOSYS);
 #endif
     }
-#if !defined(_WIN32)
     [[nodiscard]] bool submit_io_uring_readv_fixed_file(int file_index, const iovec *iov,
                                                         int iov_count, std::uint64_t offset,
                                                         Task *task, IoResult *result) noexcept {
@@ -417,8 +414,6 @@ public:
 #endif
     }
 
-#endif
-#if !defined(_WIN32)
     [[nodiscard]] bool submit_io_uring_read_fixed_file(int file_index, void *data, std::size_t size,
                                                        std::uint64_t offset,
                                                        std::uint16_t buffer_index, Task *task,
@@ -456,8 +451,6 @@ public:
 #endif
     }
 
-#endif
-#if !defined(_WIN32)
     [[nodiscard]] bool submit_io_uring_read_fixed(int fd, void *data, std::size_t size,
                                                   std::uint64_t offset, std::uint16_t buffer_index,
                                                   Task *task, IoResult *result) noexcept {
@@ -494,8 +487,6 @@ public:
 #endif
     }
 
-#endif
-#if !defined(_WIN32)
     [[nodiscard]] bool submit_io_uring_readv(int fd, const iovec *iov, int iov_count,
                                              std::uint64_t offset, Task *task,
                                              IoResult *result) noexcept {
@@ -529,7 +520,6 @@ public:
         return fail_io_result(result, fd, ENOSYS);
 #endif
     }
-#endif
     [[nodiscard]] bool submit_io_uring_fsync(int fd, std::uint32_t flags, Task *task,
                                              IoResult *result) noexcept {
 #if defined(__linux__)
@@ -956,7 +946,6 @@ public:
             iov, static_cast<std::size_t>(iov_count), 0, -1, 0, false, false, true);
     }
 #endif
-#if !defined(_WIN32)
     [[nodiscard]] bool submit_io_uring_recvmsg_fixed_file_iov(int file_index, const iovec *iov,
                                                               int iov_count, std::uint32_t flags,
                                                               Task *task,
@@ -1016,8 +1005,6 @@ public:
 #endif
     }
 
-#endif
-#if !defined(_WIN32)
     [[nodiscard]] bool submit_io_uring_sendmsg_fixed_file_iov(int file_index, const iovec *iov,
                                                               int iov_count, std::uint32_t flags,
                                                               Task *task,
@@ -1077,8 +1064,6 @@ public:
 #endif
     }
 
-#endif
-#if !defined(_WIN32)
     [[nodiscard]] bool submit_io_uring_accept(int fd, sockaddr *address, socklen_t *address_size,
                                               int flags, Task *task, IoResult *result) noexcept {
 #if defined(__linux__)
@@ -1132,8 +1117,7 @@ public:
         return fail_io_result(result, fd, ENOSYS);
 #endif
     }
-#endif
-#if !defined(_WIN32)
+
     [[nodiscard]] bool submit_io_uring_connect(int fd, const sockaddr *address,
                                                socklen_t address_size, Task *task,
                                                IoResult *result) noexcept {
@@ -1149,7 +1133,6 @@ public:
         return fail_io_result(result, fd, ENOSYS);
 #endif
     }
-#endif
     [[nodiscard]] bool submit_io_uring_socket(int domain, int type, int protocol,
                                               std::uint32_t flags, Task *task,
                                               IoResult *result) noexcept {

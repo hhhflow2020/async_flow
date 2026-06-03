@@ -131,6 +131,10 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - `include/af/detail/io/adapters` no longer carries Windows fallback guards.
   Descriptor, file, stream, datagram, listener, and fixed-file adapter wrappers
   expose their POSIX methods directly over the already POSIX-only helper layer.
+- Runtime public IO wrappers and executor IO resource declarations no longer
+  carry Windows fallback guards. The runtime layer now exposes POSIX socket and
+  `iovec`-based helpers directly while keeping real Linux/io_uring and
+  macOS/BSD capability branches explicit.
 - `IoFixedFile`, `IoFile`, `IoStream`, and `IoDatagramSocket` are now cohesive thin adapter class definitions in normally named internal headers. The previous class-body method-fragment split has been reverted because it made each adapter harder to audit without creating an independent abstraction boundary.
 - Public file read helpers are now split into current-offset read/readv and positioned read/readv headers, with `io_file_read.hpp` kept as a small inline umbrella.
 - `include/af/io_file.hpp` is now a small public umbrella over current-offset read, positioned write/read, fixed-file/registered-buffer/vectored write, lifecycle/open/close/fsync, metadata, namespace, and current-offset write headers with normal module names instead of `*_fragment.hpp`.

@@ -5,10 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 
-#if !defined(_WIN32)
 #include <sys/socket.h>
 #include <sys/uio.h>
-#endif
 
 #include "af/detail/io/filesystem/io_filesystem_platform.hpp"
 
@@ -64,7 +62,6 @@ public:
         return RuntimeT::executors_[index]->io_uring_poll_available();
     }
 
-#if !defined(_WIN32)
     [[nodiscard]] static bool io_register_buffers(Thread thread, const iovec *buffers,
                                                   unsigned buffer_count,
                                                   int *error = nullptr) noexcept {
@@ -102,7 +99,6 @@ public:
         }
         return RuntimeT::executors_[index]->unregister_io_uring_buffers(error);
     }
-#endif
 
     [[nodiscard]] static bool io_register_provided_buffer_ring(Thread thread, void *ring,
                                                                unsigned ring_entries,
@@ -286,7 +282,6 @@ public:
         return RuntimeT::executors_[index]->submit_io_uring_fsync(fd, flags, task, result);
     }
 
-#if !defined(_WIN32)
     [[nodiscard]] static bool io_submit_read_fixed_file_at(Thread thread, int file_index,
                                                            void *data, std::size_t size,
                                                            std::uint64_t offset,
@@ -352,7 +347,6 @@ public:
         return RuntimeT::executors_[index]->submit_io_uring_write_fixed(fd, data, size, offset,
                                                                         buffer_index, task, result);
     }
-#endif
 
     [[nodiscard]] static bool io_submit_read_fixed_file_at(Thread thread, int file_index,
                                                            void *data, std::size_t size,
@@ -401,7 +395,6 @@ public:
                                                                              task, result);
     }
 
-#if !defined(_WIN32)
     [[nodiscard]] static bool io_submit_readv_fixed_file_at(Thread thread, int file_index,
                                                             const iovec *iov, int iov_count,
                                                             std::uint64_t offset, Task *task,
@@ -465,7 +458,6 @@ public:
         return RuntimeT::executors_[index]->submit_io_uring_writev(fd, iov, iov_count, offset, task,
                                                                    result);
     }
-#endif
 
     [[nodiscard]] static bool io_submit_openat(Thread thread, int dir_fd, const char *path,
                                                int flags, std::uint32_t mode, Task *task,
@@ -749,7 +741,6 @@ public:
                                                                             flags, task, result);
     }
 
-#if !defined(_WIN32)
     [[nodiscard]] static bool io_submit_accept(Thread thread, int fd, sockaddr *address,
                                                socklen_t *address_size, int flags, Task *task,
                                                IoResult *result) noexcept {
@@ -845,7 +836,6 @@ public:
         return fail_io_result(result, fd, ENOSYS);
 #endif
     }
-#endif
 
 #if defined(__linux__)
     [[nodiscard]] static bool io_submit_recv_multishot(Thread thread, int fd,
@@ -928,7 +918,6 @@ public:
     }
 #endif
 
-#if !defined(_WIN32)
     [[nodiscard]] static bool io_submit_recvmsg_fixed_file_iov(Thread thread, int file_index,
                                                                const iovec *iov, int iov_count,
                                                                std::uint32_t flags, Task *task,
@@ -1072,7 +1061,6 @@ public:
         return fail_io_result(result, fd, ENOSYS);
 #endif
     }
-#endif
 };
 
 } // namespace af::detail

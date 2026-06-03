@@ -39,7 +39,6 @@ template <typename RuntimeT, typename TraitsT>
 #endif
 }
 
-#if !defined(_WIN32)
 template <typename RuntimeT, typename TraitsT>
 [[nodiscard]] bool Executor<RuntimeT, TraitsT>::register_io_uring_buffers(const iovec *buffers,
                                                                           unsigned buffer_count,
@@ -156,7 +155,6 @@ template <typename RuntimeT, typename TraitsT>
     return false;
 #endif
 }
-#endif
 
 template <typename RuntimeT, typename TraitsT>
 [[nodiscard]] bool Executor<RuntimeT, TraitsT>::register_io_uring_provided_buffer_ring(

@@ -2703,3 +2703,58 @@ Interpretation:
   routing, local/SPSC/MPSC queue topology, IO wait state transitions, io_uring
   SQE arguments, readiness fallback behavior, locks, atomics, allocations,
   memory ordering, cache layout, or log formatting.
+
+## 2026-06-03 POSIX-Only Runtime IO Wrapper Cleanup
+
+This pass removes Windows fallback guards from runtime-level public IO wrappers
+and matching executor IO resource declarations/definitions. The runtime layer
+now assumes the supported POSIX baseline directly for socket and `iovec` types,
+while Linux-only io_uring behavior and macOS/BSD fallback behavior remain behind
+their real capability branches.
+
+Changes under validation:
+
+- Removed `_WIN32` include guards around POSIX socket/vector headers in
+  `runtime_public_io.hpp`.
+- Removed `_WIN32` guards from public runtime buffer registration, fixed-buffer
+  IO, vectored IO, accept/connect, recvmsg, and sendmsg wrapper methods.
+- Removed matching `_WIN32` guards from executor declarations and
+  `runtime_executor_io_resources.hpp` definitions for io_uring buffer
+  registration.
+- Rechecked `include/af/detail/runtime`, `include/af/detail/io`, and public
+  `include/af/*.hpp` headers for `_WIN32`/Windows spellings: no non-log
+  framework runtime/IO matches remained.
+
+Correctness checks:
+
+- Local macOS Debug `asyncflow_runtime_tests` and runtime/IO example targets
+  built.
+- Local macOS Debug runtime/IO-targeted ctest
+  `Runtime|IoRuntime|RuntimeIo|Adapter|Stream|Datagram|File|Vectored|Fixed|Signal`:
+  176 tests, 0 failures; Linux-only epoll/io_uring cases were skipped by
+  platform/capability logic, and kqueue cases ran.
+- Local macOS Debug example smoke passed for kqueue-capable TCP/socket/datagram
+  examples; Linux-only io_uring file/vector examples exited through expected
+  platform paths.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: `asyncflow_runtime_tests` and runtime/IO examples
+  built; runtime/IO-targeted ctest reported 170 tests, 0 failures, 4 skipped;
+  example smoke passed with io_uring for file, vectored, TCP connect/accept,
+  TCP echo self-test, and datagram paths.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: `asyncflow_runtime_tests` and runtime/IO examples
+  built; runtime/IO-targeted ctest reported 170 tests, 0 failures, 4 skipped;
+  example smoke passed with io_uring for file, vectored, TCP connect/accept,
+  TCP echo self-test, and datagram paths.
+
+Interpretation:
+
+- This is a platform-scope cleanup only. It does not change scheduler routing,
+  local/SPSC/MPSC queue topology, IO wait state transitions, io_uring SQE
+  arguments, readiness fallback behavior, locks, atomics, allocations, memory
+  ordering, or cache layout.
+- Remaining runtime platform branches now correspond to actual Linux io_uring
+  or macOS/BSD native-readiness capability differences rather than unsupported
+  Windows compatibility.
