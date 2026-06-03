@@ -47,4 +47,21 @@ struct FixedFileTempFiles {
 
 } // namespace io_uring_fixed_file_example
 
+#else
+
+namespace io_uring_fixed_file_example {
+
+struct FixedFileTempFiles {
+    af::UniqueFd file{};
+    af::UniqueFd updated_file{};
+
+    bool create() noexcept {
+        return false;
+    }
+
+    void cleanup() noexcept {}
+};
+
+} // namespace io_uring_fixed_file_example
+
 #endif

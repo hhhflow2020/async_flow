@@ -216,4 +216,27 @@ private:
 
 } // namespace io_uring_file_lifecycle_example
 
+#else
+
+namespace io_uring_file_lifecycle_example {
+
+class FileLifecycleTask final : public LifecycleTaskBase {
+public:
+    explicit FileLifecycleTask(LifecycleTaskBase::FactoryToken token) : LifecycleTaskBase(token) {}
+
+    bool do_it(const char *path, const char *renamed_path, std::uint64_t *observed_size) {
+        static_cast<void>(path);
+        static_cast<void>(renamed_path);
+        static_cast<void>(observed_size);
+        return false;
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
+};
+
+} // namespace io_uring_file_lifecycle_example
+
 #endif

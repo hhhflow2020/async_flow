@@ -5,7 +5,11 @@
 #include "support/io_uring_file_lifecycle_task.hpp"
 
 int main() {
-#if defined(__linux__)
+    if constexpr (!af::supports_io_uring) {
+        std::cout << "io_uring lifecycle example is Linux-only\n";
+        return 0;
+    }
+
     using namespace io_uring_file_lifecycle_example;
 
     lifecycle_async::init();
@@ -35,8 +39,4 @@ int main() {
     lifecycle_async::shutdown();
     std::cout << "io_uring lifecycle size=" << observed_size << '\n';
     return 0;
-#else
-    std::cout << "io_uring lifecycle example is Linux-only\n";
-    return 0;
-#endif
 }

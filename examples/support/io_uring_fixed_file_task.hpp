@@ -224,4 +224,31 @@ private:
 
 } // namespace io_uring_fixed_file_example
 
+#else
+
+namespace io_uring_fixed_file_example {
+
+class FixedFileRoundTripTask final : public FixedFileTask {
+public:
+    explicit FixedFileRoundTripTask(FixedFileTask::FactoryToken token) : FixedFileTask(token) {}
+
+    bool do_it(int fd, int updated_fd, int *error, char *byte_read, int *vectored_read,
+               char *updated_byte_read) {
+        static_cast<void>(fd);
+        static_cast<void>(updated_fd);
+        static_cast<void>(error);
+        static_cast<void>(byte_read);
+        static_cast<void>(vectored_read);
+        static_cast<void>(updated_byte_read);
+        return false;
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
+};
+
+} // namespace io_uring_fixed_file_example
+
 #endif

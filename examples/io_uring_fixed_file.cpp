@@ -4,7 +4,11 @@
 #include "support/io_uring_fixed_file_temp_files.hpp"
 
 int main() {
-#if defined(__linux__)
+    if constexpr (!af::supports_io_uring) {
+        std::cout << "io_uring fixed file example is Linux-only\n";
+        return 0;
+    }
+
     using namespace io_uring_fixed_file_example;
 
     fixed_file_async::init();
@@ -51,8 +55,4 @@ int main() {
               << static_cast<char>(vectored & 0xff) << " updated=" << updated_byte_read << '\n';
     temp_files.cleanup();
     return 0;
-#else
-    std::cout << "io_uring fixed file example is Linux-only\n";
-    return 0;
-#endif
 }
