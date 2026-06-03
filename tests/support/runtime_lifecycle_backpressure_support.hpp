@@ -49,10 +49,11 @@ class TinyNoopTask final : public TinyTask {
 public:
     explicit TinyNoopTask(TinyTask::FactoryToken token) : TinyTask(token) {}
 
-    bool do_it(std::atomic<int> *completed, std::atomic<int> *destroyed) {
+    bool do_it(std::atomic<int> *completed, std::atomic<int> *destroyed,
+               af::ScheduleMode mode = af::ScheduleMode::Auto) {
         completed_ = completed;
         destroyed_ = destroyed;
-        return schedule(TinyThreads::Logic_0);
+        return schedule(TinyThreads::Logic_0, mode);
     }
 
     ~TinyNoopTask() override {
@@ -66,6 +67,45 @@ private:
     }
 
     std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *destroyed_{nullptr};
+};
+
+class TinySelfOrderedRouteTask final : public TinyTask {
+public:
+    explicit TinySelfOrderedRouteTask(TinyTask::FactoryToken token) : TinyTask(token) {}
+
+    bool do_it(std::atomic<int> *child_completed, std::atomic<int> *parent_completed,
+               std::atomic<int> *auto_rejected, std::atomic<int> *ordered_accepted,
+               std::atomic<int> *destroyed) {
+        child_completed_ = child_completed;
+        parent_completed_ = parent_completed;
+        auto_rejected_ = auto_rejected;
+        ordered_accepted_ = ordered_accepted;
+        destroyed_ = destroyed;
+        return schedule(TinyThreads::Logic_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        static_cast<void>(TinyRuntime::start_task<TinyNoopTask>(child_completed_, destroyed_));
+        static_cast<void>(TinyRuntime::start_task<TinyNoopTask>(child_completed_, destroyed_));
+
+        if (!TinyRuntime::start_task<TinyNoopTask>(child_completed_, destroyed_)) {
+            auto_rejected_->fetch_add(1, std::memory_order_release);
+        }
+        if (TinyRuntime::start_task<TinyNoopTask>(child_completed_, destroyed_,
+                                                  af::ScheduleMode::Ordered)) {
+            ordered_accepted_->fetch_add(1, std::memory_order_release);
+        }
+
+        parent_completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int> *child_completed_{nullptr};
+    std::atomic<int> *parent_completed_{nullptr};
+    std::atomic<int> *auto_rejected_{nullptr};
+    std::atomic<int> *ordered_accepted_{nullptr};
     std::atomic<int> *destroyed_{nullptr};
 };
 

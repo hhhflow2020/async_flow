@@ -28,6 +28,27 @@ TEST(RuntimeBackpressureTests, RejectPolicyReturnsFalseAndDeletesRejectedTask) {
     TinyRuntime::shutdown();
 }
 
+TEST(RuntimeBackpressureTests, OrderedSelfPostUsesMpscWhenLocalQueueIsFull) {
+    TinyRuntime::init();
+
+    std::atomic<int> child_completed{0};
+    std::atomic<int> parent_completed{0};
+    std::atomic<int> auto_rejected{0};
+    std::atomic<int> ordered_accepted{0};
+    std::atomic<int> destroyed{0};
+
+    ASSERT_TRUE(TinyRuntime::start_task<TinySelfOrderedRouteTask>(
+        &child_completed, &parent_completed, &auto_rejected, &ordered_accepted, &destroyed));
+    ASSERT_TRUE(wait_until_at_least(parent_completed, 1));
+
+    EXPECT_EQ(auto_rejected.load(std::memory_order_acquire), 1);
+    EXPECT_EQ(ordered_accepted.load(std::memory_order_acquire), 1);
+    EXPECT_TRUE(wait_until_at_least(child_completed, 3));
+    EXPECT_TRUE(wait_until_at_least(destroyed, 4));
+
+    TinyRuntime::shutdown();
+}
+
 TEST(RuntimeBackpressureTests, YieldPolicyAllowsManyExternalProducers) {
     YieldRuntime::init();
 
