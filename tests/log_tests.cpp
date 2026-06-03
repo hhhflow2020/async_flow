@@ -22,13 +22,11 @@
 #include "af/async_runtime.hpp"
 #include "af/log.hpp"
 
-#if !defined(_WIN32)
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#endif
 
 namespace {
 
@@ -114,11 +112,9 @@ TEST(LogTests, TaskIdTagKeepsOriginalMessageWhenUserLogFieldCannotBeLocated) {
     EXPECT_EQ(tagged, message);
 }
 
-#if !defined(_WIN32)
 TEST(LogTests, LogSocketNonblockingHelperReportsInvalidFd) {
     EXPECT_FALSE(af::detail::set_log_socket_nonblocking(-1));
 }
-#endif
 
 class BlockingLogBackend final : public af::LogBackend {
 public:
@@ -494,7 +490,6 @@ public:
     }
 };
 
-#if !defined(_WIN32)
 void close_fd(int &fd) noexcept {
     if (fd >= 0) {
         static_cast<void>(::close(fd));
@@ -635,7 +630,6 @@ template <std::size_t Count>
     }
     return count;
 }
-#endif
 
 } // namespace
 
@@ -1416,9 +1410,6 @@ TEST(LogTests, RecordPoolReusesSlotsAcrossFlushes) {
 }
 
 TEST(LogTests, TcpBackendWritesBatchedRecordsToLoopbackStream) {
-#if defined(_WIN32)
-    GTEST_SKIP() << "tcp log backend loopback test is POSIX-only";
-#else
     std::uint16_t port = 0;
     int listener = make_loopback_tcp_listener(port);
     ASSERT_GE(listener, 0) << std::strerror(errno);
@@ -1468,13 +1459,9 @@ TEST(LogTests, TcpBackendWritesBatchedRecordsToLoopbackStream) {
     EXPECT_NE(received.find("tcp backend two\n"), std::string::npos);
     EXPECT_NE(received.find("tcp backend three\n"), std::string::npos);
     EXPECT_NE(received.find("tcp backend four\n"), std::string::npos);
-#endif
 }
 
 TEST(LogTests, UdpBackendWritesBatchedRecordsToLoopbackDatagrams) {
-#if defined(_WIN32)
-    GTEST_SKIP() << "udp log backend loopback test is POSIX-only";
-#else
     std::uint16_t port = 0;
     int socket_fd = make_loopback_udp_socket(port);
     ASSERT_GE(socket_fd, 0) << std::strerror(errno);
@@ -1512,13 +1499,9 @@ TEST(LogTests, UdpBackendWritesBatchedRecordsToLoopbackDatagrams) {
     EXPECT_NE(combined.find("udp backend two\n"), std::string::npos);
     EXPECT_NE(combined.find("udp backend three\n"), std::string::npos);
     EXPECT_NE(combined.find("udp backend four\n"), std::string::npos);
-#endif
 }
 
 TEST(LogTests, RuntimeUdpBackendSendsBatchesOnIoThread) {
-#if defined(_WIN32)
-    GTEST_SKIP() << "runtime udp log backend loopback test is POSIX-only";
-#else
     std::uint16_t port = 0;
     int socket_fd = make_loopback_udp_socket(port);
     ASSERT_GE(socket_fd, 0) << std::strerror(errno);
@@ -1569,13 +1552,9 @@ TEST(LogTests, RuntimeUdpBackendSendsBatchesOnIoThread) {
     EXPECT_NE(combined.find("runtime udp backend two\n"), std::string::npos);
     EXPECT_NE(combined.find("runtime udp backend three\n"), std::string::npos);
     EXPECT_NE(combined.find("runtime udp backend four\n"), std::string::npos);
-#endif
 }
 
 TEST(LogTests, RuntimeTcpBackendSendsBatchesOnIoThread) {
-#if defined(_WIN32)
-    GTEST_SKIP() << "runtime tcp log backend loopback test is POSIX-only";
-#else
     std::uint16_t port = 0;
     int listener = make_loopback_tcp_listener(port);
     ASSERT_GE(listener, 0) << std::strerror(errno);
@@ -1642,13 +1621,9 @@ TEST(LogTests, RuntimeTcpBackendSendsBatchesOnIoThread) {
     EXPECT_NE(received.find("runtime tcp backend two\n"), std::string::npos);
     EXPECT_NE(received.find("runtime tcp backend three\n"), std::string::npos);
     EXPECT_NE(received.find("runtime tcp backend four\n"), std::string::npos);
-#endif
 }
 
 TEST(LogTests, RuntimeTcpAsyncLoggerBackendSendsOnIoThread) {
-#if defined(_WIN32)
-    GTEST_SKIP() << "runtime tcp async logger backend loopback test is POSIX-only";
-#else
     std::uint16_t port = 0;
     int listener = make_loopback_tcp_listener(port);
     ASSERT_GE(listener, 0) << std::strerror(errno);
@@ -1716,5 +1691,4 @@ TEST(LogTests, RuntimeTcpAsyncLoggerBackendSendsOnIoThread) {
     EXPECT_NE(received.find("runtime tcp async logger two"), std::string::npos);
     EXPECT_NE(received.find("runtime tcp async logger three"), std::string::npos);
     EXPECT_NE(received.find("runtime tcp async logger four"), std::string::npos);
-#endif
 }

@@ -56,7 +56,6 @@ void BM_IoSocketNullOutput(benchmark::State &state) {
     }
 }
 
-#if !defined(_WIN32)
 void BM_IoSocketNameNullOutput(benchmark::State &state) {
     FakeTask task;
     socklen_t size = 0;
@@ -64,7 +63,6 @@ void BM_IoSocketNameNullOutput(benchmark::State &state) {
         benchmark::DoNotOptimize(af::io_getsockname(task, BenchIoThreads::IO_0, 0, nullptr, &size));
     }
 }
-#endif
 
 void BM_IoOpenAtDirectInvalidIndex(benchmark::State &state) {
     FakeTask task;
@@ -83,9 +81,7 @@ BENCHMARK(BM_IoEventAdapterNullValue);
 BENCHMARK(BM_IoTimeoutInvalidDelay);
 BENCHMARK(BM_IoOpenAtNullPath);
 BENCHMARK(BM_IoSocketNullOutput);
-#if !defined(_WIN32)
 BENCHMARK(BM_IoSocketNameNullOutput);
-#endif
 BENCHMARK(BM_IoOpenAtDirectInvalidIndex);
 
 } // namespace

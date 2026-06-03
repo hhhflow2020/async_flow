@@ -9,9 +9,7 @@
 #include "af/async_runtime.hpp"
 #include "af/platform.hpp"
 
-#if !defined(_WIN32)
 #include "../examples/support/io_tcp_echo_server_cli.hpp"
-#endif
 
 namespace {
 
@@ -157,7 +155,6 @@ TEST(RuntimeConfigTests, DefaultsAndOverridesTaskPoolRemoteReleaseBatchSize) {
               af::QueueFullPolicy::Reject);
 }
 
-#if !defined(_WIN32)
 TEST(TcpEchoServerCliTests, ParsesShutdownGraceEqualsValue) {
     char program[] = "asyncflow_io_tcp_echo_server_example";
     char shutdown_grace[] = "--shutdown-grace-ms=1000";
@@ -168,4 +165,3 @@ TEST(TcpEchoServerCliTests, ParsesShutdownGraceEqualsValue) {
     ASSERT_TRUE(io_tcp_echo_example::echo_parse_server_options(2, argv, &options, errors));
     EXPECT_EQ(options.shutdown_grace, std::chrono::milliseconds(1000));
 }
-#endif

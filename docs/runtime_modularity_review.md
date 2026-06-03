@@ -139,6 +139,10 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
   file, UDP/TCP, and runtime-bound file/UDP/TCP backend implementations. The
   logging backend layer now relies on the supported POSIX baseline directly
   while keeping Linux-only batching capabilities such as `sendmmsg` explicit.
+- Runtime/log tests and IO benchmark support no longer carry unsupported
+  Windows fallback/skip guards. Remaining platform branches in tests and
+  benchmarks now describe real Linux io_uring, macOS/BSD kqueue, or syscall
+  capability differences.
 - `IoFixedFile`, `IoFile`, `IoStream`, and `IoDatagramSocket` are now cohesive thin adapter class definitions in normally named internal headers. The previous class-body method-fragment split has been reverted because it made each adapter harder to audit without creating an independent abstraction boundary.
 - Public file read helpers are now split into current-offset read/readv and positioned read/readv headers, with `io_file_read.hpp` kept as a small inline umbrella.
 - `include/af/io_file.hpp` is now a small public umbrella over current-offset read, positioned write/read, fixed-file/registered-buffer/vectored write, lifecycle/open/close/fsync, metadata, namespace, and current-offset write headers with normal module names instead of `*_fragment.hpp`.

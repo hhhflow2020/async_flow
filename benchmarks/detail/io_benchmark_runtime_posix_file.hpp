@@ -1,7 +1,6 @@
 #pragma once
 
 struct FakeRuntimePosixFileOps {
-#if !defined(_WIN32)
     static bool io_submit_read_fixed_at(BenchIoThread, int, void *, std::size_t, std::uint64_t,
                                         std::uint16_t, void *, af::IoResult *) noexcept {
         return false;
@@ -58,5 +57,4 @@ struct FakeRuntimePosixFileOps {
                                     af::IoResult *) noexcept {
         return false;
     }
-#endif
 };

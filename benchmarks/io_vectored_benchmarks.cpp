@@ -2,7 +2,6 @@
 
 namespace {
 
-#if !defined(_WIN32)
 void BM_IoStreamAdapterZeroIovSendv(benchmark::State &state) {
     FakeTask task;
     af::TcpStream<BenchIoThread> stream(BenchIoThreads::IO_0, -1);
@@ -52,6 +51,5 @@ BENCHMARK(BM_IoStreamAdapterZeroIovSendvZc);
 BENCHMARK(BM_IoDatagramAdapterZeroIovRecvvFrom);
 BENCHMARK(BM_IoDatagramAdapterZeroIovSendvTo);
 BENCHMARK(BM_IoDatagramAdapterZeroIovSendvZcTo);
-#endif
 
 } // namespace

@@ -1,7 +1,6 @@
 #pragma once
 
 struct FakeRuntimePosixMessageOps {
-#if !defined(_WIN32)
     static bool io_submit_recvmsg(BenchIoThread, int, void *, std::size_t, sockaddr *, socklen_t *,
                                   std::uint32_t, void *, af::IoResult *) noexcept {
         return false;
@@ -31,5 +30,4 @@ struct FakeRuntimePosixMessageOps {
                                                  std::uint32_t, void *, af::IoResult *) noexcept {
         return false;
     }
-#endif
 };

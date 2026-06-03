@@ -1,7 +1,6 @@
 #pragma once
 
 struct FakeRuntimePosixAcceptOps {
-#if !defined(_WIN32)
     static bool io_submit_accept(BenchIoThread, int, sockaddr *, socklen_t *, int, void *,
                                  af::IoResult *) noexcept {
         return false;
@@ -21,5 +20,4 @@ struct FakeRuntimePosixAcceptOps {
                                   af::IoResult *) noexcept {
         return false;
     }
-#endif
 };

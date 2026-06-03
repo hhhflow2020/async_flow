@@ -15,17 +15,13 @@
 
 #include "af/async_flow.hpp"
 
-#if !defined(_WIN32)
 #include <sys/uio.h>
-#endif
 
-#if !defined(_WIN32)
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#endif
 
 #if defined(__linux__)
 #include <linux/openat2.h>
@@ -37,11 +33,9 @@ namespace {
 
 #include "support/runtime_io_basic_tasks.hpp"
 
-#if !defined(_WIN32)
 #include "support/runtime_io_basic_socket_tasks.hpp"
 
 #include "support/runtime_io_wait_cancel_tasks.hpp"
-#endif
 
 #if defined(__linux__)
 #include "support/runtime_io_accept_tasks.hpp"

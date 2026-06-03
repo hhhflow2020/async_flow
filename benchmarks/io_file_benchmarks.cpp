@@ -2,7 +2,6 @@
 
 namespace {
 
-#if !defined(_WIN32)
 void BM_IoFileAdapterZeroIovReadvAt(benchmark::State &state) {
     FakeTask task;
     af::IoFile<BenchIoThread> file(BenchIoThreads::IO_0, -1);
@@ -134,6 +133,5 @@ BENCHMARK(BM_IoFixedFileAdapterZeroIovRecvv);
 BENCHMARK(BM_IoFixedFileAdapterZeroIovSendv);
 BENCHMARK(BM_IoFixedFileAdapterZeroByteReadFixedAt);
 BENCHMARK(BM_IoFixedFileAdapterZeroByteWriteFixedAt);
-#endif
 
 } // namespace

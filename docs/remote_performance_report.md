@@ -2812,3 +2812,56 @@ Interpretation:
   locks, atomics, allocations, memory ordering, or cache layout.
 - Remaining log backend platform branches now correspond to real POSIX/Linux
   capability differences rather than unsupported Windows compatibility.
+
+## 2026-06-03 POSIX-Only Test And Benchmark Guard Cleanup
+
+This pass removes remaining unsupported Windows guard/skip shells from runtime
+configuration tests, log tests, runtime IO test support, and IO benchmark
+fixtures/registrations. Capability checks for Linux io_uring, macOS/BSD kqueue,
+and kernel-specific syscalls are intentionally preserved.
+
+Changes under validation:
+
+- Removed `_WIN32` skip guards from runtime configuration tests and log tests.
+- Removed the Windows-only no-test shell from runtime IO test support.
+- Removed Windows guard shells from POSIX IO benchmark fake-runtime helpers for
+  message, file, accept/connect, adapter-resource, file, and vectored benchmark
+  families.
+- Rechecked `include`, `examples`, `tests`, `benchmarks`, and active docs for
+  `_WIN32`/Windows spellings, excluding historical report sections: no matches
+  remained.
+
+Correctness checks:
+
+- Local macOS Debug built `asyncflow_runtime_tests`, `asyncflow_log_tests`, and
+  `asyncflow_runtime_benchmarks`.
+- Local macOS Debug ctest
+  `LogTests|RuntimeConfigTests|TcpEchoServerCliTests`: 36 tests, 0 failures
+  when run serially.
+- Local macOS Debug ctest
+  `Runtime|IoRuntime|RuntimeIo|Adapter|Stream|Datagram|File|Vectored|Fixed`:
+  167 tests, 0 failures; Linux-only epoll/io_uring cases were skipped by
+  platform/capability logic and kqueue cases ran.
+- Local macOS Debug benchmark smoke
+  `BM_Io(File|Stream|Datagram|SocketName).*`: passed.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: runtime/log tests and runtime benchmarks built;
+  log/config/TCP-echo CLI ctest reported 36 tests, 0 failures; runtime/IO ctest
+  reported 161 tests, 0 failures, 4 skipped; IO benchmark smoke passed.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: runtime/log tests and runtime benchmarks built;
+  log/config/TCP-echo CLI ctest reported 36 tests, 0 failures; runtime/IO ctest
+  reported 161 tests, 0 failures, 4 skipped; IO benchmark smoke passed.
+
+Interpretation:
+
+- This is a test/benchmark platform-scope cleanup only. It does not change
+  scheduler routing, local/SPSC/MPSC queue topology, IO wait state transitions,
+  io_uring SQE arguments, readiness fallback behavior, logging format, locks,
+  atomics, allocations, memory ordering, or cache layout.
+- The remaining skipped Linux tests are capability-specific: macOS/BSD kqueue is
+  not expected to run on Linux; direct fixed-file accept/openat coverage depends
+  on kernel/io_uring support; non-Linux fallback coverage is intentionally not
+  executed on Linux.
