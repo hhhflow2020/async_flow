@@ -3095,3 +3095,52 @@ Interpretation:
 - The example now demonstrates the intended pollable-client API shape:
   third-party readiness-oriented code can be adapted to AsyncFlow's portable
   native IO thread without application-level `__linux__` guards.
+
+## 2026-06-03 POSIX IO Timeout Example
+
+This pass makes the IO timeout example run on the supported POSIX native
+readiness backend set instead of exiting on non-Linux platforms. The timeout
+state machine keeps the same behavior; only the example runtime/socket
+guard/stub layer was removed.
+
+Changes under validation:
+
+- Added a small `io_timeout_runtime.hpp` using `af::native_io_thread_kind`
+  instead of the shared epoll-specific app runtime.
+- Removed the main-program `supports_epoll` early return from
+  `io_timeout.cpp`.
+- Removed `__linux__` guards and non-Linux stubs from the timeout socket pair
+  and read task support headers.
+- Replaced Linux-only `socketpair(..., SOCK_NONBLOCK | SOCK_CLOEXEC, ...)`
+  setup with POSIX `socketpair` plus portable `fcntl` nonblocking and
+  close-on-exec handling.
+
+Correctness checks:
+
+- Local macOS Debug built `asyncflow_io_timeout_example`.
+- Local macOS Debug `asyncflow_io_timeout_example` ran successfully with
+  `backend=kqueue` and `read timeout error=60`, the local `ETIMEDOUT` value.
+- Local macOS Debug ctest `Timeout|Kqueue`: 12 tests selected, 0 failures;
+  Linux-only epoll/io_uring timeout tests were skipped by capability logic.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: built and ran `asyncflow_io_timeout_example`
+  successfully with `backend=epoll` and `read timeout error=110`, the Linux
+  `ETIMEDOUT` value; ctest
+  `Timeout|Epoll|UringIoRuntimeSocketCoreFixture.IoUringTimeout` reported 48
+  tests, 0 failures.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: built and ran `asyncflow_io_timeout_example`
+  successfully with `backend=epoll` and `read timeout error=110`; ctest
+  `Timeout|Epoll|UringIoRuntimeSocketCoreFixture.IoUringTimeout` reported 48
+  tests, 0 failures.
+
+Interpretation:
+
+- This is an example portability cleanup only. It does not change runtime
+  scheduler routing, local/SPSC/MPSC queue topology, IO wait state transitions,
+  timeout state semantics, locks, atomics, allocations, memory ordering, or
+  cache layout.
+- The example now demonstrates AsyncFlow's portable native readiness timeout
+  path without application-level `__linux__` guards.

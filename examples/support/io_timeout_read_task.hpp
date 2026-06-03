@@ -3,11 +3,9 @@
 #include <chrono>
 #include <cstdint>
 
-#include "../app_runtime.hpp"
+#include "io_timeout_runtime.hpp"
 
 namespace io_timeout_example {
-
-#if defined(__linux__)
 
 class ReadWithTimeoutTask final : public Task {
 public:
@@ -80,26 +78,5 @@ private:
     af::IoDeadline deadline_{};
     int *error_{nullptr};
 };
-
-#else
-
-class ReadWithTimeoutTask final : public Task {
-public:
-    explicit ReadWithTimeoutTask(Task::FactoryToken token) : Task(token) {}
-
-    bool do_it(int fd, std::chrono::nanoseconds timeout, int *error) {
-        static_cast<void>(fd);
-        static_cast<void>(timeout);
-        static_cast<void>(error);
-        return false;
-    }
-
-private:
-    af::TaskResult run() override {
-        return failed();
-    }
-};
-
-#endif
 
 } // namespace io_timeout_example

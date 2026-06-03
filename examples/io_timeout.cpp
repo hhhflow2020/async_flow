@@ -8,17 +8,14 @@
 int main() {
     using namespace io_timeout_example;
 
-    if constexpr (!af::supports_epoll) {
-        std::cout << "IO timeout example is Linux-only\n";
-        return 0;
-    }
-
     async::init();
     if (!async::io_backend_available(AppThreads::IO_0)) {
         std::cout << "IO backend unavailable\n";
         async::shutdown();
         return 0;
     }
+    std::cout << "IO timeout backend=" << af::runtime_io_backend_name<async>(AppThreads::IO_0)
+              << '\n';
 
     TimeoutSocketPair sockets{};
     if (!sockets.create()) {
