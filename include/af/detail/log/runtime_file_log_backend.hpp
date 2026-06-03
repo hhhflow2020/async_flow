@@ -108,7 +108,7 @@ public:
     }
 
     [[nodiscard]] std::uint64_t request_flush() noexcept {
-        return flush_requests.fetch_add(1U, std::memory_order_acq_rel) + 1U;
+        return flush_requests.fetch_add(1U, std::memory_order_relaxed) + 1U;
     }
 
     [[nodiscard]] bool flush_until(std::uint64_t target,
@@ -178,7 +178,7 @@ public:
 #endif
 
     void complete_requested_flushes() noexcept {
-        const std::uint64_t requested = flush_requests.load(std::memory_order_acquire);
+        const std::uint64_t requested = flush_requests.load(std::memory_order_relaxed);
         completed_flushes.store(requested, std::memory_order_release);
         completed_flushes.notify_all();
         flush_cv_.notify_all();

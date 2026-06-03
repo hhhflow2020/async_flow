@@ -39,6 +39,9 @@ was run against Boost.Asio, libuv, Seastar, or Go in this pass.
 - Runtime-bound file/TCP/UDP log backend batch counters keep acquire loads for
   flush waiters, but their enqueue/complete RMW operations now avoid unnecessary
   acquire fences.
+- Runtime file-log flush requests use a relaxed sequence counter; the flush
+  completion edge is carried by `completed_flushes` release/acquire, not by the
+  request counter.
 - `ReadySourceSet` stores each 64-bit ready-source word on its own cache line.
   The executor also rotates multi-word scans, so thread counts above 64 do not
   permanently bias ready-source word zero. Ready-source bit clearing is a
