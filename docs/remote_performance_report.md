@@ -3327,6 +3327,49 @@ Interpretation:
 - Keeping the non-Linux fallback as `ENOSYS` before executor lookup preserves the
   existing public API semantics for Linux-only capabilities.
 
+## 2026-06-03 TCP Echo Shutdown Notifier Portability
+
+This pass removes a remaining Linux-specific branch from the TCP echo server
+support code. The shutdown notifier is not on the accept/read/compute/send hot
+path, so it now uses one portable POSIX implementation for all supported
+platforms.
+
+Changes under validation:
+
+- Removed the Linux-only `pipe2(O_NONBLOCK | O_CLOEXEC)` branch from
+  `EchoShutdownNotifier`.
+- Kept the existing `pipe` + `fcntl(F_SETFL/O_NONBLOCK)` +
+  `fcntl(F_SETFD/FD_CLOEXEC)` path and use it on every supported POSIX platform.
+- Rechecked `examples/support/io_tcp_echo_server_state.hpp`: no `__linux__` or
+  `pipe2` references remain.
+
+Correctness checks:
+
+- Local macOS Debug built `asyncflow_io_tcp_echo_server_example`.
+- Local macOS Debug built `asyncflow_runtime_tests`.
+- Local macOS Debug ctest selection
+  `TcpEcho|RuntimeConfig|RuntimePublicIo|IoRuntimeStreamFixture|IoRuntimeDatagramFixture`:
+  28 tests, 0 failures.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: built `asyncflow_io_tcp_echo_server_example` and
+  `asyncflow_runtime_tests`; ctest selection
+  `TcpEcho|RuntimeConfig|IoRuntimeStreamFixture|IoRuntimeDatagramFixture`
+  reported 27 tests, 0 failures.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: built the same targets; the same ctest selection
+  reported 27 tests, 0 failures.
+
+Interpretation:
+
+- This removes user-visible example platform branching without changing the TCP
+  echo server runtime task flow, IO ownership, scheduling, locks, atomics, or
+  cache layout.
+- The only Linux-specific optimization removed was for creating a shutdown
+  notification pipe. That path runs during setup, not per connection or per IO
+  operation.
+
 ## 2026-06-03 Scheduling Mode Convenience API
 
 This pass makes the SPSC/MPSC scheduling semantics explicit at the task API

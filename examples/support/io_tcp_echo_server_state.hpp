@@ -76,12 +76,6 @@ struct EchoShutdownNotifier {
     [[nodiscard]] bool open() noexcept {
         error = 0;
         int fds[2]{-1, -1};
-#if defined(__linux__) && defined(O_NONBLOCK) && defined(O_CLOEXEC)
-        if (::pipe2(fds, O_NONBLOCK | O_CLOEXEC) != 0) {
-            error = errno == 0 ? EIO : errno;
-            return false;
-        }
-#else
         if (::pipe(fds) != 0) {
             error = errno == 0 ? EIO : errno;
             return false;
@@ -94,11 +88,6 @@ struct EchoShutdownNotifier {
         }
         read_fd = std::move(read);
         write_fd = std::move(write);
-        return true;
-#endif
-
-        read_fd.reset(fds[0]);
-        write_fd.reset(fds[1]);
         return true;
     }
 };
