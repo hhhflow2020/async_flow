@@ -20,11 +20,9 @@
 #include "af/io_socket.hpp"
 #include "af/task.hpp"
 
-#if !defined(_WIN32)
 #include <netdb.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#endif
 
 namespace af {
 
@@ -100,9 +98,7 @@ public:
     RuntimeTcpLogState &operator=(const RuntimeTcpLogState &) = delete;
 
     ~RuntimeTcpLogState() {
-#if !defined(_WIN32)
         close_socket();
-#endif
     }
 
     [[nodiscard]] RuntimeTcpLogBackendStats stats() const noexcept {
@@ -115,7 +111,6 @@ public:
         };
     }
 
-#if !defined(_WIN32)
     enum class ConnectResult : std::uint8_t {
         Connected,
         Pending,
@@ -161,7 +156,6 @@ public:
     void close_socket() noexcept {
         close_log_socket(fd);
     }
-#endif
 
     Thread thread;
     const std::chrono::milliseconds reconnect_interval;
@@ -170,14 +164,12 @@ public:
     CacheLineAtomic<int> last_error_stage;
     bool io_waiting{false};
 
-#if !defined(_WIN32)
     sockaddr_storage address{};
     socklen_t address_size{0};
     int protocol{0};
     int fd{-1};
     bool resolved{false};
     std::chrono::steady_clock::time_point next_connect_time{};
-#endif
 
 private:
     [[nodiscard]] static std::size_t normalize_max_batch_records(std::size_t requested) noexcept {
@@ -189,10 +181,6 @@ private:
     }
 
     void resolve(const std::string &host, std::uint16_t port) noexcept {
-#if defined(_WIN32)
-        static_cast<void>(host);
-        static_cast<void>(port);
-#else
         addrinfo hints{};
         hints.ai_socktype = SOCK_STREAM;
         hints.ai_family = AF_UNSPEC;
@@ -215,7 +203,6 @@ private:
         }
 
         ::freeaddrinfo(result);
-#endif
     }
 };
 
@@ -247,11 +234,9 @@ private:
             drop_ready_batches();
             return finish();
         }
-#if !defined(_WIN32)
         if (state_->io_waiting && !io_wait_ready()) {
             return io_pending();
         }
-#endif
 
         std::size_t drained_batches = 0;
         for (;;) {
@@ -306,11 +291,6 @@ private:
     };
 
     [[nodiscard]] SendResult send_current() noexcept {
-#if defined(_WIN32)
-        state_->dropped_records.fetch_add(current_->record_count, std::memory_order_relaxed);
-        current_byte_ = current_->payload.size();
-        return SendResult::Complete;
-#else
         const typename State::ConnectResult connect_result = ensure_connected();
         if (connect_result == State::ConnectResult::Pending) {
             return SendResult::Pending;
@@ -355,10 +335,8 @@ private:
 
         state_->sent_records.fetch_add(current_->record_count, std::memory_order_relaxed);
         return SendResult::Complete;
-#endif
     }
 
-#if !defined(_WIN32)
     [[nodiscard]] bool io_wait_ready() const noexcept {
         return io_wait_result_ready(connect_state_) || io_wait_result_ready(send_state_);
     }
@@ -404,7 +382,6 @@ private:
     IoOpState connect_state_{};
     IoOpState send_state_{};
     bool connected_{false};
-#endif
 
     void drop_current_records() noexcept {
         if (current_ != nullptr) {
@@ -417,9 +394,7 @@ private:
         if (current_ == nullptr) {
             return;
         }
-#if !defined(_WIN32)
         close_socket();
-#endif
         drop_current_records();
         state_->complete_batch(current_);
         current_ = nullptr;

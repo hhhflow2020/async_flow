@@ -19,12 +19,10 @@
 #include "af/detail/log/runtime_log_backend_common.hpp"
 #include "af/task.hpp"
 
-#if !defined(_WIN32)
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <unistd.h>
-#endif
 
 namespace af {
 
@@ -113,9 +111,7 @@ public:
     RuntimeUdpLogState &operator=(const RuntimeUdpLogState &) = delete;
 
     ~RuntimeUdpLogState() {
-#if !defined(_WIN32)
         close_socket();
-#endif
     }
 
     [[nodiscard]] RuntimeUdpLogBackendStats stats() const noexcept {
@@ -126,7 +122,6 @@ public:
         };
     }
 
-#if !defined(_WIN32)
     [[nodiscard]] bool ensure_socket() noexcept {
         if (fd >= 0) {
             return true;
@@ -154,19 +149,16 @@ public:
     void close_socket() noexcept {
         close_log_socket(fd);
     }
-#endif
 
     Thread thread;
     CacheLineAtomic<std::uint64_t> sent_records;
     bool io_waiting{false};
 
-#if !defined(_WIN32)
     sockaddr_storage address{};
     socklen_t address_size{0};
     int protocol{0};
     int fd{-1};
     bool resolved{false};
-#endif
 
 private:
     [[nodiscard]] static std::size_t normalize_max_batch_records(std::size_t requested) noexcept {
@@ -186,10 +178,6 @@ private:
     }
 
     void resolve(const std::string &host, std::uint16_t port) noexcept {
-#if defined(_WIN32)
-        static_cast<void>(host);
-        static_cast<void>(port);
-#else
         addrinfo hints{};
         hints.ai_socktype = SOCK_DGRAM;
         hints.ai_family = AF_UNSPEC;
@@ -212,7 +200,6 @@ private:
         }
 
         ::freeaddrinfo(result);
-#endif
     }
 };
 
@@ -241,18 +228,14 @@ private:
         if (state_->stopping.load(std::memory_order_relaxed)) {
             drop_current();
             drop_ready_batches();
-#if !defined(_WIN32)
             state_->io_waiting = false;
             state_->close_socket();
-#endif
             return finish();
         }
-#if !defined(_WIN32)
         if (state_->io_waiting && !io_wait_ready()) {
             return io_pending();
         }
         state_->io_waiting = false;
-#endif
         std::size_t drained_batches = 0;
         for (;;) {
             if (current_ == nullptr) {
@@ -306,12 +289,6 @@ private:
     };
 
     [[nodiscard]] SendResult send_current() noexcept {
-#if defined(_WIN32)
-        state_->dropped_records.fetch_add(current_->messages.size() - current_message_,
-                                          std::memory_order_relaxed);
-        current_message_ = current_->messages.size();
-        return SendResult::Complete;
-#else
         if (!state_->ensure_socket()) {
             state_->dropped_records.fetch_add(current_->messages.size() - current_message_,
                                               std::memory_order_relaxed);
@@ -330,10 +307,8 @@ private:
             }
         }
         return SendResult::Complete;
-#endif
     }
 
-#if !defined(_WIN32)
     [[nodiscard]] SendResult arm_writable_wait() noexcept {
         wait_result_ = IoResult{};
         state_->io_waiting = true;
@@ -425,17 +400,14 @@ private:
 #endif
 
     IoResult wait_result_{};
-#endif
 
     void drop_current() noexcept {
         if (current_ == nullptr) {
             return;
         }
-#if !defined(_WIN32)
         state_->io_waiting = false;
         wait_result_ = IoResult{};
         state_->close_socket();
-#endif
         state_->dropped_records.fetch_add(current_->messages.size() - current_message_,
                                           std::memory_order_relaxed);
         state_->complete_batch(current_);

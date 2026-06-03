@@ -11,11 +11,9 @@
 
 #include "af/detail/log/log_backend.hpp"
 
-#if !defined(_WIN32)
 #include <fcntl.h>
 #include <sys/uio.h>
 #include <unistd.h>
-#endif
 
 namespace af {
 
@@ -39,9 +37,6 @@ public:
     }
 
     void write_batch(std::span<detail::LogRecord *const> records) noexcept override {
-#if defined(_WIN32)
-        static_cast<void>(records);
-#else
         if (records.empty() || !open_if_needed()) {
             return;
         }
@@ -58,19 +53,15 @@ public:
             }
             writev_all(iovecs_.data(), count);
         }
-#endif
     }
 
     void flush() noexcept override {
-#if !defined(_WIN32)
         if (fd_ >= 0) {
             static_cast<void>(::fsync(fd_));
         }
-#endif
     }
 
 private:
-#if !defined(_WIN32)
     static constexpr std::size_t max_iov_count = 64;
 
     [[nodiscard]] bool open_if_needed() noexcept {
@@ -122,17 +113,12 @@ private:
             fd_ = -1;
         }
     }
-#else
-    void close_file() noexcept {}
-#endif
 
     std::string path_;
     bool append_{true};
     bool close_on_exec_{true};
-#if !defined(_WIN32)
     int fd_{-1};
     std::array<iovec, max_iov_count> iovecs_{};
-#endif
 };
 
 [[nodiscard]] inline std::unique_ptr<LogBackend>

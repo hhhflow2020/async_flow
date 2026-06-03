@@ -19,10 +19,8 @@
 #include "af/io_file.hpp"
 #include "af/task.hpp"
 
-#if !defined(_WIN32)
 #include <fcntl.h>
 #include <unistd.h>
-#endif
 
 namespace af {
 
@@ -100,9 +98,7 @@ public:
     RuntimeFileLogState &operator=(const RuntimeFileLogState &) = delete;
 
     ~RuntimeFileLogState() {
-#if !defined(_WIN32)
         close_file();
-#endif
     }
 
     [[nodiscard]] std::uint64_t request_flush() noexcept {
@@ -131,7 +127,6 @@ public:
         };
     }
 
-#if !defined(_WIN32)
     [[nodiscard]] bool open_file() noexcept {
         if (fd >= 0) {
             return true;
@@ -172,7 +167,6 @@ public:
             fd = -1;
         }
     }
-#endif
 
     void complete_requested_flushes() noexcept {
         const std::uint64_t requested = flush_requests.load(std::memory_order_relaxed);
@@ -198,10 +192,8 @@ public:
     CacheLineAtomic<std::uint64_t> completed_flushes;
     bool io_waiting{false};
 
-#if !defined(_WIN32)
     int fd{-1};
     bool opened_once{false};
-#endif
 
 private:
     [[nodiscard]] static std::size_t normalize_max_batch_records(std::size_t requested) noexcept {
@@ -239,16 +231,12 @@ private:
         if (state_->stopping.load(std::memory_order_relaxed)) {
             drop_current();
             drop_ready_batches();
-#if !defined(_WIN32)
             state_->close_file();
-#endif
             return finish();
         }
-#if !defined(_WIN32)
         if (state_->io_waiting && !io_wait_ready()) {
             return io_pending();
         }
-#endif
 
         std::size_t drained_batches = 0;
         for (;;) {
@@ -313,11 +301,6 @@ private:
     };
 
     [[nodiscard]] WriteResult write_current() noexcept {
-#if defined(_WIN32)
-        state_->dropped_records.fetch_add(current_->record_count, std::memory_order_relaxed);
-        current_byte_ = current_->payload.size();
-        return WriteResult::Complete;
-#else
         if (!state_->open_file()) {
             drop_current_records();
             return WriteResult::Complete;
@@ -354,17 +337,12 @@ private:
 
         state_->written_records.fetch_add(current_->record_count, std::memory_order_relaxed);
         return WriteResult::Complete;
-#endif
     }
 
     [[nodiscard]] FlushResult flush_if_requested() noexcept {
         if (!state_->has_pending_flush()) {
             return FlushResult::Complete;
         }
-#if defined(_WIN32)
-        state_->complete_requested_flushes();
-        return FlushResult::Complete;
-#else
         if (!state_->fsync_on_flush || state_->fd < 0) {
             state_->flushes.fetch_add(1U, std::memory_order_relaxed);
             state_->complete_requested_flushes();
@@ -401,17 +379,14 @@ private:
         state_->flushes.fetch_add(1U, std::memory_order_relaxed);
         state_->complete_requested_flushes();
         return FlushResult::Complete;
-#endif
     }
 
-#if !defined(_WIN32)
     [[nodiscard]] bool io_wait_ready() const noexcept {
         return io_wait_result_ready(write_state_) || io_wait_result_ready(fsync_state_);
     }
 
     IoOpState write_state_{};
     IoOpState fsync_state_{};
-#endif
 
     void drop_current_records() noexcept {
         if (current_ != nullptr) {
@@ -424,11 +399,9 @@ private:
         if (current_ == nullptr) {
             return;
         }
-#if !defined(_WIN32)
         state_->io_waiting = false;
         write_state_.reset();
         fsync_state_.reset();
-#endif
         drop_current_records();
         state_->complete_batch(current_);
         current_ = nullptr;

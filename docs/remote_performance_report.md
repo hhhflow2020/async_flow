@@ -2758,3 +2758,57 @@ Interpretation:
 - Remaining runtime platform branches now correspond to actual Linux io_uring
   or macOS/BSD native-readiness capability differences rather than unsupported
   Windows compatibility.
+
+## 2026-06-03 POSIX-Only Log Backend Cleanup
+
+This pass removes Windows fallback guards from the file and network log backend
+implementation layer. It does not change log message formatting, Abseil prefix
+handling, runtime task tagging, queue topology, or backend binding semantics.
+
+Changes under validation:
+
+- Removed `_WIN32` guards and no-op fallback paths from `FileLogBackend`.
+- Removed `_WIN32` guards and no-op fallback paths from synchronous UDP/TCP log
+  backends while preserving the Linux `sendmmsg` batching path and non-Linux
+  single-datagram path.
+- Removed `_WIN32` guards and no-op fallback/drop paths from
+  `RuntimeFileLogBackend`, `RuntimeUdpLogBackend`, and
+  `RuntimeTcpLogBackend`.
+- Rechecked `include/af/detail/log` for `_WIN32`/Windows spellings: no matches
+  remained.
+- Updated the async IO audit wording to describe the support matrix as
+  POSIX-only rather than Windows-without-IOCP.
+
+Correctness checks:
+
+- Local macOS Debug built `asyncflow_log_tests`,
+  `asyncflow_runtime_async_logging_example`,
+  `asyncflow_runtime_file_async_logging_example`,
+  `asyncflow_runtime_udp_async_logging_example`,
+  `asyncflow_runtime_tcp_async_logging_example`, and
+  `asyncflow_io_tcp_echo_server_example`.
+- Local macOS Debug `ctest -R LogTests`: 32 tests, 0 failures.
+- Local macOS Debug smoke passed for runtime async logging, runtime file
+  logging, runtime UDP/TCP logging, and TCP echo server self-test.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: log tests and runtime logging examples built;
+  `ctest -R LogTests` reported 32 tests, 0 failures; runtime logging and TCP
+  echo example smoke passed.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: log tests and runtime logging examples built;
+  `ctest -R LogTests` reported 32 tests, 0 failures; runtime logging and TCP
+  echo example smoke passed.
+- Remote example file outputs were written under `/build`, which is a writable
+  `/data`-backed mount for the container user. The rsynced `/work` source mount
+  is not writable by the container user and is not a valid file-output target
+  for smoke tests.
+
+Interpretation:
+
+- This is a platform-scope cleanup only. It does not change log formatting,
+  queue admission, runtime-bound backend scheduling, IO wait state transitions,
+  locks, atomics, allocations, memory ordering, or cache layout.
+- Remaining log backend platform branches now correspond to real POSIX/Linux
+  capability differences rather than unsupported Windows compatibility.

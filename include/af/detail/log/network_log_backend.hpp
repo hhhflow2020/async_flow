@@ -12,7 +12,6 @@
 
 #include "af/detail/log/log_backend.hpp"
 
-#if !defined(_WIN32)
 #include <fcntl.h>
 #include <netdb.h>
 #include <poll.h>
@@ -22,7 +21,6 @@
 #endif
 #include <sys/uio.h>
 #include <unistd.h>
-#endif
 
 namespace af {
 
@@ -40,7 +38,6 @@ struct TcpLogBackendConfig {
 
 namespace detail {
 
-#if !defined(_WIN32)
 [[nodiscard]] inline int log_send_flags() noexcept {
 #if defined(MSG_NOSIGNAL)
     return MSG_NOSIGNAL;
@@ -79,7 +76,6 @@ struct LogMmsgHeader {
     return static_cast<int>(::syscall(SYS_sendmmsg, fd, messages, count, flags));
 }
 #endif
-#endif
 
 } // namespace detail
 
@@ -88,15 +84,10 @@ public:
     explicit UdpLogBackend(UdpLogBackendConfig config) : config_(std::move(config)) {}
 
     ~UdpLogBackend() override {
-#if !defined(_WIN32)
         detail::close_log_socket(fd_);
-#endif
     }
 
     void write_batch(std::span<detail::LogRecord *const> records) noexcept override {
-#if defined(_WIN32)
-        static_cast<void>(records);
-#else
         if (records.empty() || !ensure_socket()) {
             return;
         }
@@ -109,11 +100,9 @@ public:
             send_best_effort(message.data(), size);
         }
 #endif
-#endif
     }
 
 private:
-#if !defined(_WIN32)
     static constexpr std::size_t max_message_count = 64;
 
     [[nodiscard]] bool ensure_socket() noexcept {
@@ -221,15 +210,12 @@ private:
         return count == 0U;
     }
 #endif
-#endif
 
     UdpLogBackendConfig config_;
-#if !defined(_WIN32)
     int fd_{-1};
 #if defined(__linux__)
     std::array<iovec, max_message_count> iovecs_{};
     std::array<detail::LogMmsgHeader, max_message_count> messages_{};
-#endif
 #endif
 };
 
@@ -238,24 +224,17 @@ public:
     explicit TcpLogBackend(TcpLogBackendConfig config) : config_(std::move(config)) {}
 
     ~TcpLogBackend() override {
-#if !defined(_WIN32)
         detail::close_log_socket(fd_);
-#endif
     }
 
     void write_batch(std::span<detail::LogRecord *const> records) noexcept override {
-#if defined(_WIN32)
-        static_cast<void>(records);
-#else
         if (records.empty() || !ensure_socket()) {
             return;
         }
         send_batch_best_effort(records);
-#endif
     }
 
 private:
-#if !defined(_WIN32)
     static constexpr std::size_t max_iov_count = 64;
 
     [[nodiscard]] bool ensure_socket() noexcept {
@@ -399,15 +378,12 @@ private:
         detail::close_log_socket(fd_);
         connect_pending_ = false;
     }
-#endif
 
     TcpLogBackendConfig config_;
-#if !defined(_WIN32)
     int fd_{-1};
     bool connect_pending_{false};
     std::chrono::steady_clock::time_point next_connect_time_{};
     std::array<iovec, max_iov_count> iovecs_{};
-#endif
 };
 
 [[nodiscard]] inline std::unique_ptr<LogBackend> make_udp_log_backend(UdpLogBackendConfig config) {

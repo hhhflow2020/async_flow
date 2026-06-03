@@ -16,10 +16,10 @@ file/socket/datagram/event/timer adapters, cancellation helpers, deadlines,
 zero-copy send helpers, fixed buffers/files, and multishot receive/accept
 coverage.
 
-It is not yet "complete" in the absolute sense. Windows has no IOCP backend,
-kqueue is narrower and needs regular macOS/BSD CI coverage, io_uring runtime
-coverage depends on host/container capabilities, and native readiness currently
-allows only one active wait registration per fd.
+It is not yet "complete" in the absolute sense. The supported platform matrix
+is POSIX-only; kqueue is narrower and needs regular macOS/BSD CI coverage,
+io_uring runtime coverage depends on host/container capabilities, and native
+readiness currently allows only one active wait registration per fd.
 
 ## Backend Model
 
@@ -34,8 +34,9 @@ allows only one active wait registration per fd.
   readiness-based helpers can still run through epoll fallback.
 - `ThreadKind::Io` / `ThreadKind::Kqueue` on macOS/BSD: kqueue readiness and
   timeout support.
-- Other platforms: public IO helpers report unavailable/`ENOSYS` rather than
-  silently pretending to support async IO.
+- Unsupported platforms are out of scope. POSIX helpers still report
+  unavailable/`ENOSYS` for backend-specific capabilities that are absent on the
+  current OS.
 
 The design intentionally requires IO submit/cancel/resource-registration calls
 to run on the owning IO thread. That keeps backend state single-thread-owned and
@@ -105,8 +106,8 @@ Remaining correctness and completeness gaps:
 - io_uring-heavy tests can be skipped when the host/container blocks
   `io_uring_setup`. A dedicated real-io_uring CI lane is required before calling
   the ring backend fully validated.
-- There is no Windows IOCP backend. The current behavior is explicit
-  unavailability, not cross-platform async IO completeness.
+- The framework targets POSIX platforms only; remaining completeness work
+  should focus on Linux io_uring/epoll and macOS/BSD kqueue coverage.
 
 ## Performance Assessment
 
