@@ -67,21 +67,21 @@ template <typename TraitsT> void AsyncRuntime<TraitsT>::release_task_handle(Task
 
 template <typename TraitsT> void AsyncRuntime<TraitsT>::reset_task_registry() noexcept {
     if constexpr (task_registry_enabled) {
-        std::lock_guard<std::mutex> lock(task_registry_mutex_);
-        task_registry_head_ = nullptr;
+        std::lock_guard<std::mutex> lock(task_registry_.mutex);
+        task_registry_.head = nullptr;
     }
 }
 
 template <typename TraitsT> void AsyncRuntime<TraitsT>::register_task(Task *task) noexcept {
     if constexpr (task_registry_enabled) {
-        std::lock_guard<std::mutex> lock(task_registry_mutex_);
+        std::lock_guard<std::mutex> lock(task_registry_.mutex);
         AF_ASSERT(!task->registry_.registered);
         task->registry_.prev = nullptr;
-        task->registry_.next = task_registry_head_;
-        if (task_registry_head_ != nullptr) {
-            task_registry_head_->registry_.prev = task;
+        task->registry_.next = task_registry_.head;
+        if (task_registry_.head != nullptr) {
+            task_registry_.head->registry_.prev = task;
         }
-        task_registry_head_ = task;
+        task_registry_.head = task;
         task->registry_.registered = true;
     } else {
         static_cast<void>(task);
@@ -90,7 +90,7 @@ template <typename TraitsT> void AsyncRuntime<TraitsT>::register_task(Task *task
 
 template <typename TraitsT> void AsyncRuntime<TraitsT>::unregister_task(Task *task) noexcept {
     if constexpr (task_registry_enabled) {
-        std::lock_guard<std::mutex> lock(task_registry_mutex_);
+        std::lock_guard<std::mutex> lock(task_registry_.mutex);
         if (!task->registry_.registered) {
             AF_ASSERT(false && "task was not registered");
             return;
@@ -99,7 +99,7 @@ template <typename TraitsT> void AsyncRuntime<TraitsT>::unregister_task(Task *ta
         if (task->registry_.prev != nullptr) {
             task->registry_.prev->registry_.next = task->registry_.next;
         } else {
-            task_registry_head_ = task->registry_.next;
+            task_registry_.head = task->registry_.next;
         }
         if (task->registry_.next != nullptr) {
             task->registry_.next->registry_.prev = task->registry_.prev;
@@ -117,9 +117,9 @@ template <typename TraitsT> void AsyncRuntime<TraitsT>::cancel_registered_tasks(
     if constexpr (task_registry_enabled) {
         Task *task = nullptr;
         {
-            std::lock_guard<std::mutex> lock(task_registry_mutex_);
-            task = task_registry_head_;
-            task_registry_head_ = nullptr;
+            std::lock_guard<std::mutex> lock(task_registry_.mutex);
+            task = task_registry_.head;
+            task_registry_.head = nullptr;
         }
 
         while (task != nullptr) {

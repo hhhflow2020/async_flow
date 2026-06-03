@@ -65,6 +65,13 @@ namespace af {
 
 namespace detail {
 template <typename RuntimeT, typename TraitsT> class Executor;
+
+template <typename TaskT, bool Enabled> struct RuntimeTaskRegistryState {};
+
+template <typename TaskT> struct RuntimeTaskRegistryState<TaskT, true> {
+    std::mutex mutex;
+    TaskT *head{nullptr};
+};
 } // namespace detail
 
 enum class ParallelMode : std::uint8_t {
@@ -236,6 +243,7 @@ private:
     using ParallelGroup = detail::RuntimeParallelGroup<AsyncRuntime>;
     using SpscQueue = detail::BoundedSpscQueue<Task>;
     using ExternalQueue = detail::BoundedMpscQueue<Task>;
+    using TaskRegistryState = detail::RuntimeTaskRegistryState<Task, task_registry_enabled>;
     template <typename TaskT>
     using TaskPool = detail::ObjectPool<
         TaskT, Config::task_pool_chunk_size, Config::task_pool_remote_release_batch_size,
@@ -350,8 +358,7 @@ private:
     static inline detail::ContiguousObjectStorage<SpscQueue> spsc_queues_;
     static inline detail::ContiguousObjectStorage<ExternalQueue> external_queues_;
     static inline std::vector<OrderedBatchState> ordered_batch_state_;
-    static inline std::mutex task_registry_mutex_;
-    static inline Task *task_registry_head_{nullptr};
+    static inline TaskRegistryState task_registry_;
     static inline thread_local std::uint16_t current_thread_index_ = invalid_thread_index;
     static inline thread_local TaskId current_task_id_ = invalid_task_id;
 };
