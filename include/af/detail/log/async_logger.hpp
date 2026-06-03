@@ -23,6 +23,8 @@
 
 namespace af {
 
+template <typename RuntimeT> class RuntimeAbslAsyncLogSink;
+
 namespace detail {
 
 class AsyncLogConsumerWakeTarget {
@@ -110,16 +112,6 @@ public:
         return try_log_on_lane(shard, message);
     }
 
-    [[nodiscard]] bool try_log_from_runtime_thread(std::uint16_t thread_index,
-                                                   std::string_view message) noexcept {
-        if (thread_index >= runtime_thread_count_) [[unlikely]] {
-            return try_log(message);
-        }
-
-        detail::AsyncLogRuntimeLane &lane = *runtime_lanes_[thread_index];
-        return try_log_on_lane(lane, message);
-    }
-
     [[nodiscard]] bool flush(std::chrono::milliseconds timeout) noexcept {
         const auto deadline = std::chrono::steady_clock::now() + timeout;
         if (!drain_waiter_.wait_until_drained(pending_, deadline, flush_poll_interval_,
@@ -148,6 +140,17 @@ public:
 
 private:
     template <typename RuntimeT> friend class detail::RuntimeAsyncLogConsumerController;
+    template <typename RuntimeT> friend class RuntimeAbslAsyncLogSink;
+
+    [[nodiscard]] bool try_log_from_runtime_thread(std::uint16_t thread_index,
+                                                   std::string_view message) noexcept {
+        if (thread_index >= runtime_thread_count_) [[unlikely]] {
+            return try_log(message);
+        }
+
+        detail::AsyncLogRuntimeLane &lane = *runtime_lanes_[thread_index];
+        return try_log_on_lane(lane, message);
+    }
 
     template <typename Lane>
     [[nodiscard]] bool try_log_on_lane(Lane &lane, std::string_view message) noexcept {

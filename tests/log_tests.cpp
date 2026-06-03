@@ -1045,21 +1045,22 @@ TEST(LogTests, RuntimeLaneRecordPoolReusesSlotsAcrossFlushes) {
     config.backends.push_back(std::move(backend));
 
     LogTestRuntimeGuard runtime_guard;
-    auto logger = std::make_shared<af::AsyncLogger>(std::move(config));
-    ScopedRuntimeLogConsumer<LogTestRuntime> consumer(logger, LogTestThreads::Runtime_1, 64);
-    ASSERT_TRUE(consumer.start());
+    auto logging = af::start_async_logging_for_runtime<LogTestRuntime>(std::move(config),
+                                                                       LogTestThreads::Runtime_1);
 
     constexpr int record_count = 32;
     for (int i = 0; i < record_count; ++i) {
-        ASSERT_TRUE(logger->try_log_from_runtime_thread(0, "runtime pooled log record\n"));
-        ASSERT_TRUE(logger->flush(std::chrono::seconds(2)));
+        std::atomic<int> completed{0};
+        ASSERT_TRUE(LogTestRuntime::start_task<RuntimeLogTask>(&completed));
+        ASSERT_TRUE(wait_until_at_least(completed, 1));
+        ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
     }
 
-    const af::AsyncLogStats stats = logger->stats();
+    const af::AsyncLogStats stats = logging->stats();
     EXPECT_EQ(stats.accepted, static_cast<std::uint64_t>(record_count));
     EXPECT_EQ(stats.dropped, 0U);
     EXPECT_EQ(counting_backend->record_count(), static_cast<std::size_t>(record_count));
-    consumer.shutdown();
+    logging->stop();
 }
 
 TEST(LogTests, SharedRecordPoolBatchReleaseReusesSlots) {
