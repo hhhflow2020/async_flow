@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -108,6 +109,29 @@ struct EchoTcpListener {
     return address;
 }
 
+[[nodiscard]] inline bool echo_wait_connected(int fd) noexcept {
+    pollfd descriptor{fd, POLLOUT, 0};
+    for (;;) {
+        const int ready = ::poll(&descriptor, 1, 100);
+        if (ready > 0) {
+            break;
+        }
+        if (ready == 0) {
+            return false;
+        }
+        if (errno != EINTR) {
+            return false;
+        }
+    }
+
+    int error = 0;
+    socklen_t error_size = sizeof(error);
+    if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &error_size) != 0) {
+        return false;
+    }
+    return error == 0 || error == EISCONN;
+}
+
 inline bool echo_wake_listener(sockaddr_in address) noexcept {
     af::UniqueFd fd = echo_make_tcp_socket();
     if (!fd) {
@@ -115,12 +139,20 @@ inline bool echo_wake_listener(sockaddr_in address) noexcept {
     }
 
     const sockaddr_in target = echo_loopback_target(address);
-    if (::connect(fd.get(), reinterpret_cast<const sockaddr *>(&target), sizeof(target)) == 0) {
-        return true;
-    }
+    for (;;) {
+        if (::connect(fd.get(), reinterpret_cast<const sockaddr *>(&target), sizeof(target)) == 0) {
+            return true;
+        }
 
-    const int error = errno;
-    return error == EINPROGRESS || error == EALREADY || error == EWOULDBLOCK;
+        const int error = errno;
+        if (error == EINTR) {
+            continue;
+        }
+        if (error == EINPROGRESS || error == EALREADY || error == EWOULDBLOCK) {
+            return echo_wait_connected(fd.get());
+        }
+        return false;
+    }
 }
 
 } // namespace io_tcp_echo_example

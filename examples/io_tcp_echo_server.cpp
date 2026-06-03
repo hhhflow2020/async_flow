@@ -88,6 +88,14 @@ int main(int argc, char **argv) {
     }
 
     EchoServerState server_state{};
+    EchoShutdownNotifier shutdown_notifier;
+    if (!shutdown_notifier.open()) {
+        LOG(ERROR) << "tcp echo shutdown notifier failed error=" << shutdown_notifier.error;
+        std::cout << "tcp echo shutdown notifier failed error=" << shutdown_notifier.error << '\n';
+        return stop_runtime() ? 1 : 2;
+    }
+    server_state.shutdown_notify_fd = shutdown_notifier.write_fd.get();
+
     const std::uint64_t max_accepts = options.self_test ? echo_self_test_client_count : 0U;
     LOG(INFO) << "tcp echo accept task starting io_thread="
               << echo_async::thread_index(EchoThreads::IO_0) << " max_accepts=" << max_accepts;
@@ -108,15 +116,7 @@ int main(int argc, char **argv) {
               << " io1=" << echo_backend_name(EchoThreads::IO_1);
 
     auto wait_for_shutdown = [&](std::chrono::steady_clock::time_point deadline) {
-        while (std::chrono::steady_clock::now() < deadline) {
-            if (server_state.accept_stopped.load(std::memory_order_acquire) &&
-                server_state.active_sessions.load(std::memory_order_acquire) == 0U) {
-                return true;
-            }
-            std::this_thread::sleep_for(10ms);
-        }
-        return server_state.accept_stopped.load(std::memory_order_acquire) &&
-               server_state.active_sessions.load(std::memory_order_acquire) == 0U;
+        return echo_wait_for_shutdown(server_state, shutdown_notifier.read_fd.get(), deadline);
     };
 
     if (options.self_test) {

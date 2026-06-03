@@ -158,8 +158,9 @@ inline void echo_print_server_usage(std::ostream &out) {
             continue;
         }
         if (arg.starts_with("--shutdown-grace-ms=")) {
-            if (!echo_parse_u64(arg.substr(21), 600000, &parsed)) {
-                error_stream << "invalid shutdown grace: " << arg.substr(21) << '\n';
+            constexpr std::string_view prefix = "--shutdown-grace-ms=";
+            if (!echo_parse_u64(arg.substr(prefix.size()), 600000, &parsed)) {
+                error_stream << "invalid shutdown grace: " << arg.substr(prefix.size()) << '\n';
                 return false;
             }
             options->shutdown_grace = std::chrono::milliseconds(parsed);
