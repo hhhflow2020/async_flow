@@ -127,6 +127,11 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
   class body. `runtime_executor.hpp` keeps declarations only, preserving inline
   template code generation while keeping epoll-specific syscall details with the
   epoll backend.
+- Native IO wait entry/registration helper bodies now live in
+  `runtime_executor_io_backend.hpp` instead of the core executor class body.
+  `runtime_executor.hpp` keeps only the wait entry types and helper
+  declarations, while epoll/kqueue-specific files continue to use the same
+  inline template helpers.
 - The io_uring stream recv multishot example is now split into runtime/wait helpers, socketpair setup helpers, a cohesive provided-buffer recv task class, and a thin executable entry point.
 - The TCP connect/accept example is now split into runtime traits, portable loopback socket setup, server/client state-machine tasks, and a thin executable entry point. It uses the unified `ThreadKind::Io`/`ThreadKind::IoUring` API so Linux can prefer io_uring while macOS/BSD uses the native kqueue readiness backend.
 - The TCP echo server example demonstrates a fully asynchronous 2-IO-thread/1-compute-thread flow: accept/read on IO threads, uppercase-to-lowercase transform on the compute thread, then send on the owning IO thread. Its runtime traits, socket setup, server acceptor, session state machine, client driver, and executable entry point are split into focused headers.

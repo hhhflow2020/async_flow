@@ -1232,70 +1232,22 @@ private:
         IoWaitRegistration *write{nullptr};
     };
 
-    [[nodiscard]] static bool io_wait_entry_empty(const IoWaitEntry &entry) noexcept {
-        return entry.read == nullptr && entry.write == nullptr;
-    }
-
+    [[nodiscard]] static bool io_wait_entry_empty(const IoWaitEntry &entry) noexcept;
     [[nodiscard]] static bool
     io_wait_entry_contains(const IoWaitEntry &entry,
-                           const IoWaitRegistration *registration) noexcept {
-        return entry.read == registration || entry.write == registration;
-    }
-
+                           const IoWaitRegistration *registration) noexcept;
     [[nodiscard]] static bool io_wait_events_conflict(const IoWaitEntry &entry,
-                                                      std::uint32_t events) noexcept {
-        return ((events & io_readable) != 0U && entry.read != nullptr) ||
-               ((events & io_writable) != 0U && entry.write != nullptr);
-    }
-
+                                                      std::uint32_t events) noexcept;
     static void add_io_wait_registration(IoWaitEntry &entry,
-                                         IoWaitRegistration *registration) noexcept {
-        if ((registration->events & io_readable) != 0U) {
-            entry.read = registration;
-        }
-        if ((registration->events & io_writable) != 0U) {
-            entry.write = registration;
-        }
-    }
-
+                                         IoWaitRegistration *registration) noexcept;
     static void remove_io_wait_registration(IoWaitEntry &entry,
-                                            const IoWaitRegistration *registration) noexcept {
-        if (entry.read == registration) {
-            entry.read = nullptr;
-        }
-        if (entry.write == registration) {
-            entry.write = nullptr;
-        }
-    }
-
+                                            const IoWaitRegistration *registration) noexcept;
     [[nodiscard]] static IoWaitRegistration *
-    find_io_wait_registration(IoWaitEntry &entry, const IoResult *result) noexcept {
-        if (entry.read != nullptr && entry.read->result == result) {
-            return entry.read;
-        }
-        if (entry.write != nullptr && entry.write != entry.read && entry.write->result == result) {
-            return entry.write;
-        }
-        return nullptr;
-    }
-
+    find_io_wait_registration(IoWaitEntry &entry, const IoResult *result) noexcept;
     [[nodiscard]] static bool io_wait_registration_ready(const IoWaitRegistration &registration,
-                                                         std::uint32_t ready_events) noexcept {
-        if ((ready_events & (io_error | io_hangup)) != 0U) {
-            return true;
-        }
-        return (registration.events & ready_events & (io_readable | io_writable)) != 0U;
-    }
-
+                                                         std::uint32_t ready_events) noexcept;
     [[nodiscard]] static bool
-    io_wait_registration_uses_native_backend(const IoWaitRegistration *registration) noexcept {
-#if defined(__linux__)
-        return registration != nullptr && registration->poll_operation == nullptr;
-#else
-        return registration != nullptr;
-#endif
-    }
-
+    io_wait_registration_uses_native_backend(const IoWaitRegistration *registration) noexcept;
 #endif
 
 #if AF_DETAIL_HAS_KQUEUE

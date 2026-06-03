@@ -6,6 +6,83 @@
 
 namespace af::detail {
 
+#if AF_DETAIL_HAS_NATIVE_IO_WAIT
+template <typename RuntimeT, typename TraitsT>
+[[nodiscard]] bool
+Executor<RuntimeT, TraitsT>::io_wait_entry_empty(const IoWaitEntry &entry) noexcept {
+    return entry.read == nullptr && entry.write == nullptr;
+}
+
+template <typename RuntimeT, typename TraitsT>
+[[nodiscard]] bool Executor<RuntimeT, TraitsT>::io_wait_entry_contains(
+    const IoWaitEntry &entry, const IoWaitRegistration *registration) noexcept {
+    return entry.read == registration || entry.write == registration;
+}
+
+template <typename RuntimeT, typename TraitsT>
+[[nodiscard]] bool
+Executor<RuntimeT, TraitsT>::io_wait_events_conflict(const IoWaitEntry &entry,
+                                                     std::uint32_t events) noexcept {
+    return ((events & io_readable) != 0U && entry.read != nullptr) ||
+           ((events & io_writable) != 0U && entry.write != nullptr);
+}
+
+template <typename RuntimeT, typename TraitsT>
+void Executor<RuntimeT, TraitsT>::add_io_wait_registration(
+    IoWaitEntry &entry, IoWaitRegistration *registration) noexcept {
+    if ((registration->events & io_readable) != 0U) {
+        entry.read = registration;
+    }
+    if ((registration->events & io_writable) != 0U) {
+        entry.write = registration;
+    }
+}
+
+template <typename RuntimeT, typename TraitsT>
+void Executor<RuntimeT, TraitsT>::remove_io_wait_registration(
+    IoWaitEntry &entry, const IoWaitRegistration *registration) noexcept {
+    if (entry.read == registration) {
+        entry.read = nullptr;
+    }
+    if (entry.write == registration) {
+        entry.write = nullptr;
+    }
+}
+
+template <typename RuntimeT, typename TraitsT>
+[[nodiscard]] typename Executor<RuntimeT, TraitsT>::IoWaitRegistration *
+Executor<RuntimeT, TraitsT>::find_io_wait_registration(IoWaitEntry &entry,
+                                                       const IoResult *result) noexcept {
+    if (entry.read != nullptr && entry.read->result == result) {
+        return entry.read;
+    }
+    if (entry.write != nullptr && entry.write != entry.read && entry.write->result == result) {
+        return entry.write;
+    }
+    return nullptr;
+}
+
+template <typename RuntimeT, typename TraitsT>
+[[nodiscard]] bool
+Executor<RuntimeT, TraitsT>::io_wait_registration_ready(const IoWaitRegistration &registration,
+                                                        std::uint32_t ready_events) noexcept {
+    if ((ready_events & (io_error | io_hangup)) != 0U) {
+        return true;
+    }
+    return (registration.events & ready_events & (io_readable | io_writable)) != 0U;
+}
+
+template <typename RuntimeT, typename TraitsT>
+[[nodiscard]] bool Executor<RuntimeT, TraitsT>::io_wait_registration_uses_native_backend(
+    const IoWaitRegistration *registration) noexcept {
+#if defined(__linux__)
+    return registration != nullptr && registration->poll_operation == nullptr;
+#else
+    return registration != nullptr;
+#endif
+}
+#endif
+
 template <typename RuntimeT, typename TraitsT>
 void Executor<RuntimeT, TraitsT>::init_io_backend() noexcept {
     if (!io_thread() || native_io_backend_available()) {
