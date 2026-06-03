@@ -1,6 +1,5 @@
 #pragma once
 
-#if !defined(_WIN32)
 [[nodiscard]] inline int io_max_iov() noexcept {
 #if defined(IOV_MAX)
     return IOV_MAX;
@@ -39,4 +38,3 @@
     }
     return true;
 }
-#endif

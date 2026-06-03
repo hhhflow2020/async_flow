@@ -1,6 +1,5 @@
 #pragma once
 
-#if !defined(_WIN32)
 template <typename TaskT>
 [[nodiscard]] IoStatus io_writev_at(TaskT &task, typename TaskT::Thread thread, int fd,
                                     const iovec *iov, int iov_count, std::uint64_t offset,
@@ -28,4 +27,3 @@ template <typename TaskT>
     }
     return IoStatus::failed(state.wait.error == 0 ? ENOSYS : state.wait.error);
 }
-#endif

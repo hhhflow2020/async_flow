@@ -2605,3 +2605,53 @@ Interpretation:
   ordering, or cache layout.
 - Remaining datagram platform branches now correspond to actual zero-copy or
   backend capability differences instead of unsupported Windows compatibility.
+
+## 2026-06-03 POSIX-Only File Helper Cleanup
+
+This pass removes Windows fallback branches from file IO helpers under
+`include/af/detail/io/file` and adjacent vectored/fixed-file helpers under
+`include/af/detail/io/common`. The public file API shape is unchanged; the
+implementation now assumes the supported POSIX baseline directly.
+
+Changes under validation:
+
+- Removed `ENOSYS` Windows fallbacks from current-offset file read/write
+  helpers.
+- Removed outer `_WIN32` guards from current-offset readv/writev,
+  positioned readv/writev, fixed-file vectored IO, registered-buffer fixed IO,
+  fixed-file registered-buffer IO, common fixed-file vectored socket helpers,
+  and shared iovec validation.
+- Rechecked `include/af/detail/io/file` and `include/af/detail/io/common` for
+  `_WIN32`/Windows spellings: no matches remained.
+
+Correctness checks:
+
+- Local macOS Debug `asyncflow_runtime_tests` plus file/vector example targets
+  built: `asyncflow_io_uring_file_example`,
+  `asyncflow_io_uring_fixed_buffer_example`,
+  `asyncflow_io_uring_fixed_file_example`, and `asyncflow_io_vectored_example`.
+- Local macOS Debug file/vector-targeted ctest
+  `File|Vectored|FixedBuffer|FixedFile|ReadWrite|Filesystem`: 32 tests, 0
+  failures; Linux-only file/io_uring cases were skipped by
+  platform/capability logic.
+- Local macOS Debug file/vector example smoke exited through the expected
+  Linux-only paths.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: `asyncflow_runtime_tests` and file/vector examples
+  built; file/vector-targeted ctest reported 32 tests, 0 failures, 3 skipped;
+  file, fixed-buffer, fixed-file, and vectored example smoke runs passed.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: `asyncflow_runtime_tests` and file/vector examples
+  built; file/vector-targeted ctest reported 32 tests, 0 failures, 3 skipped;
+  file, fixed-buffer, fixed-file, and vectored example smoke runs passed.
+
+Interpretation:
+
+- This is a platform-scope cleanup only. It does not change scheduler routing,
+  local/SPSC/MPSC queue topology, IO wait state transitions, io_uring SQE
+  arguments, readiness fallback behavior, locks, atomics, allocations, memory
+  ordering, or cache layout.
+- Remaining file IO platform branches now correspond to real backend/syscall
+  capability differences rather than unsupported Windows compatibility.

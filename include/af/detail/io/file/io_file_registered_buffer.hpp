@@ -1,6 +1,5 @@
 #pragma once
 
-#if !defined(_WIN32)
 template <typename TaskT>
 [[nodiscard]] IoStatus io_read_fixed_at(TaskT &task, typename TaskT::Thread thread, int fd,
                                         void *data, std::size_t size, std::uint64_t offset,
@@ -66,4 +65,3 @@ template <typename TaskT>
     return io_write_fixed_at(task, thread, fd, buffer.data, buffer.size, offset, buffer.index,
                              state);
 }
-#endif

@@ -18,7 +18,6 @@ template <typename TaskT>
     return IoStatus::failed(state.wait.error == 0 ? ENOSYS : state.wait.error);
 }
 
-#if !defined(_WIN32)
 template <typename TaskT>
 [[nodiscard]] IoStatus io_read_fixed_file_at(TaskT &task, typename TaskT::Thread thread,
                                              int file_index, void *data, std::size_t size,
@@ -86,4 +85,3 @@ template <typename TaskT>
     return io_write_fixed_file_at(task, thread, file_index, buffer.data, buffer.size, offset,
                                   buffer.index, state);
 }
-#endif

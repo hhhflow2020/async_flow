@@ -123,6 +123,11 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
   Basic UDP recv/send, vectored recv/send, and vectored zero-copy send helpers
   now use the supported POSIX baseline directly while keeping Linux-only
   zero-copy capability branches explicit.
+- `include/af/detail/io/file` and shared `include/af/detail/io/common`
+  vectored/fixed-file helpers no longer carry Windows fallback branches.
+  Current-offset file read/write, vectored file IO, positioned vectored IO,
+  registered-buffer helpers, fixed-file helpers, and iovec validation now use
+  the supported POSIX baseline directly.
 - `IoFixedFile`, `IoFile`, `IoStream`, and `IoDatagramSocket` are now cohesive thin adapter class definitions in normally named internal headers. The previous class-body method-fragment split has been reverted because it made each adapter harder to audit without creating an independent abstraction boundary.
 - Public file read helpers are now split into current-offset read/readv and positioned read/readv headers, with `io_file_read.hpp` kept as a small inline umbrella.
 - `include/af/io_file.hpp` is now a small public umbrella over current-offset read, positioned write/read, fixed-file/registered-buffer/vectored write, lifecycle/open/close/fsync, metadata, namespace, and current-offset write headers with normal module names instead of `*_fragment.hpp`.
