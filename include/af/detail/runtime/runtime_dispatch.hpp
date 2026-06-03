@@ -207,8 +207,8 @@ void AsyncRuntime<TraitsT>::enqueue_pending_blocking(std::uint16_t index, Task *
 
 template <typename TraitsT>
 bool AsyncRuntime<TraitsT>::try_enter_post(std::uint16_t target) noexcept {
-    const RuntimeStatus status = status_.load(std::memory_order_acquire);
     if (current_thread_index_ < thread_count) {
+        const RuntimeStatus status = status_.load(std::memory_order_acquire);
         if (status == RuntimeStatus::Running) {
             return true;
         }
@@ -220,9 +220,12 @@ bool AsyncRuntime<TraitsT>::try_enter_post(std::uint16_t target) noexcept {
         return false;
     }
 
+    const std::uint64_t generation = generation_.load(std::memory_order_acquire);
+    const RuntimeStatus status = status_.load(std::memory_order_acquire);
     if (status == RuntimeStatus::Running) {
-        active_external_posts_[target].value.fetch_add(1, std::memory_order_acq_rel);
-        if (status_.load(std::memory_order_acquire) == RuntimeStatus::Running) {
+        active_external_posts_[target].value.fetch_add(1, std::memory_order_relaxed);
+        if (status_.load(std::memory_order_acquire) == RuntimeStatus::Running &&
+            generation_.load(std::memory_order_acquire) == generation) {
             return true;
         }
 
@@ -239,7 +242,7 @@ template <typename TraitsT> void AsyncRuntime<TraitsT>::leave_post(std::uint16_t
     }
 
     AF_ASSERT(target < thread_count);
-    if (active_external_posts_[target].value.fetch_sub(1, std::memory_order_acq_rel) == 1U) {
+    if (active_external_posts_[target].value.fetch_sub(1, std::memory_order_release) == 1U) {
         active_external_posts_[target].value.notify_all();
     }
 }

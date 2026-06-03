@@ -30,6 +30,9 @@ was run against Boost.Asio, libuv, Seastar, or Go in this pass.
 - Runtime global counters that are touched from multiple threads use
   `CacheLineAtomic`, including runtime status, unfinished-task count, generation,
   external post counters, executor wake flags, and stop/sleep flags.
+- External post admission checks the runtime generation after entering the
+  active-post counter, so a delayed external producer cannot enqueue work into a
+  restarted runtime generation.
 - Runtime-bound async logging control flags now use `CacheLineAtomic` for
   consumer wake/task/shutdown/finish state and file/TCP/UDP backend shutdown
   state, keeping cross-thread wake and shutdown traffic off adjacent cold fields.
