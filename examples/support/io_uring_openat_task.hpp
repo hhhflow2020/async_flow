@@ -1,0 +1,142 @@
+#pragma once
+
+#include <array>
+#include <cstdio>
+#include <cstdint>
+
+#include "io_uring_openat_runtime.hpp"
+
+#if defined(__linux__)
+#include <fcntl.h>
+
+namespace io_uring_openat_example {
+
+class OpenAtRoundTripTask final : public OpenAtTaskBase {
+public:
+    explicit OpenAtRoundTripTask(OpenAtTaskBase::FactoryToken token) : OpenAtTaskBase(token) {}
+
+    bool do_it(const char *path, char *byte_read) {
+        const int written = std::snprintf(path_.data(), path_.size(), "%s", path);
+        if (written < 0 || static_cast<std::size_t>(written) >= path_.size()) {
+            return false;
+        }
+        byte_read_ = byte_read;
+        return schedule(OpenAtThreads::IO_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Open,
+        Write,
+        Fsync,
+        Read,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Open:
+            return open_file();
+
+        case State::Write:
+            return write_value();
+
+        case State::Fsync:
+            return fsync_value();
+
+        case State::Read:
+            return read_value();
+        }
+        return failed();
+    }
+
+    af::TaskResult open_file() {
+        int fd = -1;
+        const af::IoStatus status =
+            af::io_openat(*this, OpenAtThreads::IO_0, AT_FDCWD, path_.data(),
+                          O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC, 0600U, &fd, open_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || fd < 0) {
+            return failed();
+        }
+        owned_.reset(fd);
+        file_.reset(OpenAtThreads::IO_0, owned_.get());
+        state_ = State::Write;
+        return again();
+    }
+
+    af::TaskResult write_value() {
+        const af::IoStatus status = file_.write_at(*this, &value_, sizeof(value_), 0, write_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(value_)) {
+            return failed();
+        }
+        state_ = State::Fsync;
+        return again();
+    }
+
+    af::TaskResult fsync_value() {
+        const af::IoStatus status = file_.fsync(*this, fsync_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready()) {
+            return failed();
+        }
+        state_ = State::Read;
+        return again();
+    }
+
+    af::TaskResult read_value() {
+        const af::IoStatus status = file_.read_at(*this, &read_, sizeof(read_), 0, read_state_);
+        if (status.pending()) {
+            return pending();
+        }
+        if (!status.ready() || status.bytes != sizeof(read_) || read_ != value_) {
+            return failed();
+        }
+        *byte_read_ = read_;
+        return done();
+    }
+
+    State state_{State::Open};
+    std::array<char, 160> path_{};
+    af::UniqueFd owned_{};
+    af::IoFile<OpenAtThread> file_{};
+    char value_{'O'};
+    char read_{0};
+    af::IoOpState open_{};
+    af::IoOpState write_{};
+    af::IoOpState fsync_{};
+    af::IoOpState read_state_{};
+    char *byte_read_{nullptr};
+};
+
+} // namespace io_uring_openat_example
+
+#else
+
+namespace io_uring_openat_example {
+
+class OpenAtRoundTripTask final : public OpenAtTaskBase {
+public:
+    explicit OpenAtRoundTripTask(OpenAtTaskBase::FactoryToken token) : OpenAtTaskBase(token) {}
+
+    bool do_it(const char *path, char *byte_read) {
+        static_cast<void>(path);
+        static_cast<void>(byte_read);
+        return false;
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
+};
+
+} // namespace io_uring_openat_example
+
+#endif
