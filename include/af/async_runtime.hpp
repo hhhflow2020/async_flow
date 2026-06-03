@@ -10,7 +10,6 @@
 #include <cstring>
 #include <limits>
 #include <memory>
-#include <mutex>
 #include <new>
 #include <string_view>
 #include <thread>
@@ -29,6 +28,7 @@
 #include "af/detail/runtime/runtime_config.hpp"
 #include "af/detail/runtime/runtime_public_io.hpp"
 #include "af/detail/runtime/runtime_ready_source_set.hpp"
+#include "af/detail/runtime/runtime_task_registry.hpp"
 #include "af/detail/runtime/runtime_task_handle.hpp"
 #include "af/task.hpp"
 
@@ -65,13 +65,6 @@ namespace af {
 
 namespace detail {
 template <typename RuntimeT, typename TraitsT> class Executor;
-
-template <typename TaskT, bool Enabled> struct RuntimeTaskRegistryState {};
-
-template <typename TaskT> struct RuntimeTaskRegistryState<TaskT, true> {
-    std::mutex mutex;
-    TaskT *head{nullptr};
-};
 } // namespace detail
 
 enum class ParallelMode : std::uint8_t {
