@@ -4,6 +4,7 @@
 #include <cstddef>
 
 #include "io_uring_multishot_accept_runtime.hpp"
+#include "posix_socket_flags.hpp"
 
 #if defined(__linux__)
 #include <cerrno>
@@ -14,7 +15,7 @@
 namespace io_uring_multishot_accept_example {
 
 inline af::UniqueFd make_accept_tcp_socket() noexcept {
-    return af::UniqueFd(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
+    return af::UniqueFd(asyncflow_examples::socket_with_flags(AF_INET, SOCK_STREAM, 0));
 }
 
 struct MultishotAcceptListener {

@@ -6,6 +6,7 @@
 #include <thread>
 
 #include "io_uring_sendmsg_zc_runtime.hpp"
+#include "posix_socket_flags.hpp"
 
 #if defined(__linux__)
 #include <cerrno>
@@ -20,7 +21,7 @@ namespace io_uring_sendmsg_zc_example {
 struct SendmsgZcSocketPair {
     [[nodiscard]] bool create() noexcept {
         int fds[2]{-1, -1};
-        if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds) != 0) {
+        if (!asyncflow_examples::socket_pair_with_flags(AF_UNIX, SOCK_STREAM, 0, fds)) {
             return false;
         }
         sender.reset(fds[0]);

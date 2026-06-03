@@ -4,13 +4,14 @@
 #include <cstdint>
 
 #include "io_uring_udp_recvmsg_multishot_runtime.hpp"
+#include "posix_socket_flags.hpp"
 
 #if defined(__linux__)
 
 namespace io_uring_udp_recvmsg_multishot_example {
 
 [[nodiscard]] inline af::UniqueFd make_udp_socket() noexcept {
-    return af::UniqueFd(::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
+    return af::UniqueFd(asyncflow_examples::socket_with_flags(AF_INET, SOCK_DGRAM, 0));
 }
 
 inline bool bind_loopback(int fd, sockaddr_in &address, socklen_t &address_size) {

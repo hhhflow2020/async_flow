@@ -58,6 +58,13 @@ namespace detail {
     return true;
 }
 
+inline void close_socket_after_failure(int fd, int error) noexcept {
+    if (fd >= 0) {
+        static_cast<void>(::close(fd));
+    }
+    errno = error;
+}
+
 inline void close_socket_pair_after_failure(int fds[2], int error) noexcept {
     for (int index = 0; index < 2; ++index) {
         if (fds[index] >= 0) {
@@ -69,6 +76,48 @@ inline void close_socket_pair_after_failure(int fds[2], int error) noexcept {
 }
 
 } // namespace detail
+
+[[nodiscard]] inline int socket_with_flags(int domain, int type, int protocol) noexcept {
+    const int flagged_type = socket_type_with_flags(type);
+    for (;;) {
+        const int fd = ::socket(domain, flagged_type, protocol);
+        if (fd >= 0) {
+            if (apply_socket_flags(fd)) {
+                return fd;
+            }
+            detail::close_socket_after_failure(fd, errno == 0 ? EIO : errno);
+            return -1;
+        }
+
+        const int error = errno == 0 ? EIO : errno;
+        if (error == EINTR) {
+            continue;
+        }
+        if (flagged_type == type) {
+            errno = error;
+            return -1;
+        }
+        break;
+    }
+
+    for (;;) {
+        const int fd = ::socket(domain, type, protocol);
+        if (fd >= 0) {
+            if (detail::set_socket_flags(fd)) {
+                return fd;
+            }
+            detail::close_socket_after_failure(fd, errno == 0 ? EIO : errno);
+            return -1;
+        }
+
+        const int error = errno == 0 ? EIO : errno;
+        if (error == EINTR) {
+            continue;
+        }
+        errno = error;
+        return -1;
+    }
+}
 
 [[nodiscard]] inline bool socket_pair_with_flags(int domain, int type, int protocol,
                                                  int fds[2]) noexcept {

@@ -3469,6 +3469,64 @@ Interpretation:
   centralized POSIX fallback for platforms or libc variants that reject
   creation-time socketpair flags.
 
+## 2026-06-03 Linux Example Socket Flag Cleanup
+
+This pass extends the shared example socket flag helper to Linux-focused epoll,
+sendfile, and io_uring examples. The affected examples still demonstrate their
+Linux-only IO operations, but their socket setup no longer repeats raw
+`SOCK_NONBLOCK | SOCK_CLOEXEC` expressions across support headers.
+
+Changes under validation:
+
+- Added `socket_with_flags(domain, type, protocol)` to
+  `examples/support/posix_socket_flags.hpp`. It prefers creation-time
+  nonblocking/close-on-exec flags and falls back to ordinary `socket` plus
+  `fcntl` if the flagged type is rejected.
+- Migrated epoll socketpair, sendfile listener/client socket creation,
+  multishot accept sockets, UDP recv/recvmsg multishot sockets, zero-copy send
+  listener/client sockets, accept-direct peer sockets, recv-multishot
+  socketpair, and sendmsg-zc socketpair setup to the shared helper.
+- Replaced raw `SOCK_NONBLOCK | SOCK_CLOEXEC` arguments in example
+  `af::io_socket` calls with `socket_type_with_flags(SOCK_STREAM)`.
+
+Correctness checks:
+
+- Local macOS Debug built:
+  `asyncflow_io_epoll_example`, `asyncflow_io_sendfile_static_example`,
+  `asyncflow_io_uring_multishot_accept_example`,
+  `asyncflow_io_uring_udp_recv_multishot_example`,
+  `asyncflow_io_uring_udp_recvmsg_multishot_example`,
+  `asyncflow_io_uring_send_zc_example`,
+  `asyncflow_io_uring_accept_direct_example`,
+  `asyncflow_io_uring_recv_multishot_example`,
+  `asyncflow_io_uring_sendmsg_zc_example`, and `asyncflow_runtime_tests`.
+- Local macOS Debug ctest selection
+  `IoRuntimeKqueueFixture|IoRuntimeStreamFixture|RuntimePublicIo|RuntimeConfig`:
+  25 tests selected, 0 failures; Linux-only cases in that selection were
+  skipped by platform capability checks.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: built the same targets; ctest selection
+  `IoRuntimeEpollFixture|IoRuntimeStreamFixture|IoRuntimeDatagramFixture|RuntimePublicIo|RuntimeConfig`
+  reported 50 tests selected, 0 failures, with the non-Linux-only public IO
+  test skipped by capability checks. The nine affected example binaries also
+  ran successfully; accept-direct reported its existing unsupported-capability
+  path with process success.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: built the same targets; the same ctest selection
+  reported 50 tests selected, 0 failures, with the same capability skip. The
+  nine affected example binaries also ran successfully.
+
+Interpretation:
+
+- This is a support-layer cleanup for examples. It does not alter runtime
+  scheduling, SPSC/MPSC routing, queue ownership, locks, atomics, IO completion
+  state, or cache layout.
+- Synchronous example socket creation now has the same centralized fallback
+  semantics as socketpair setup. `af::io_socket` state machines remain
+  unchanged; only their type flag expression is centralized.
+
 ## 2026-06-03 Scheduling Mode Convenience API
 
 This pass makes the SPSC/MPSC scheduling semantics explicit at the task API

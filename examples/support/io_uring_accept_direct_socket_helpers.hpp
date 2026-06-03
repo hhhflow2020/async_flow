@@ -6,6 +6,7 @@
 #include <thread>
 
 #include "io_uring_accept_direct_runtime.hpp"
+#include "posix_socket_flags.hpp"
 
 namespace io_uring_accept_direct_example {
 
@@ -26,7 +27,7 @@ namespace io_uring_accept_direct_example {
 #if defined(__linux__)
 
 inline bool create_loopback_listener(af::UniqueFd &listener, sockaddr_in &address) {
-    listener.reset(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
+    listener.reset(asyncflow_examples::socket_with_flags(AF_INET, SOCK_STREAM, 0));
     if (!listener) {
         return false;
     }
@@ -103,7 +104,7 @@ struct DirectAcceptLoopbackPeer {
     }
 
     [[nodiscard]] bool connect_client() noexcept {
-        client.reset(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
+        client.reset(asyncflow_examples::socket_with_flags(AF_INET, SOCK_STREAM, 0));
         if (!client) {
             return false;
         }

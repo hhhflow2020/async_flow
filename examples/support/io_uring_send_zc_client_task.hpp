@@ -6,6 +6,7 @@
 
 #include "io_uring_send_zc_endpoint.hpp"
 #include "io_uring_send_zc_runtime.hpp"
+#include "posix_socket_flags.hpp"
 
 #if defined(__linux__)
 #include <netinet/in.h>
@@ -50,15 +51,15 @@ private:
 
     af::TaskResult create_socket() {
         state_ = State::FinishSocket;
-        return consume_socket_status(af::io_socket(*this, SendZcThreads::IO_0, AF_INET,
-                                                   SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0,
-                                                   &fd_, socket_));
+        return consume_socket_status(af::io_socket(
+            *this, SendZcThreads::IO_0, AF_INET,
+            asyncflow_examples::socket_type_with_flags(SOCK_STREAM), 0, &fd_, socket_));
     }
 
     af::TaskResult finish_socket() {
-        return consume_socket_status(af::io_socket(*this, SendZcThreads::IO_0, AF_INET,
-                                                   SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0,
-                                                   &fd_, socket_));
+        return consume_socket_status(af::io_socket(
+            *this, SendZcThreads::IO_0, AF_INET,
+            asyncflow_examples::socket_type_with_flags(SOCK_STREAM), 0, &fd_, socket_));
     }
 
     af::TaskResult consume_socket_status(af::IoStatus status) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "io_uring_send_zc_endpoint.hpp"
+#include "posix_socket_flags.hpp"
 
 #if defined(__linux__)
 #include <arpa/inet.h>
@@ -13,7 +14,7 @@ struct SendZcLoopbackListener {
     SendZcLoopbackEndpoint endpoint{};
 
     bool create() noexcept {
-        fd.reset(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
+        fd.reset(asyncflow_examples::socket_with_flags(AF_INET, SOCK_STREAM, 0));
         if (!fd) {
             return false;
         }
