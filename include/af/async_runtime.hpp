@@ -174,7 +174,7 @@ public:
     template <typename TaskT, typename... Args>
     [[nodiscard]] static bool start_task(Args &&...args);
 
-    static bool post(Thread thread, Task *task) noexcept;
+    static bool post(Thread thread, Task *task, ScheduleMode mode = ScheduleMode::Auto) noexcept;
 
     [[nodiscard]] static Thread current_thread() noexcept;
     [[nodiscard]] static bool is_runtime_thread() noexcept;
@@ -314,28 +314,33 @@ private:
     [[nodiscard]] static constexpr ReadyQueueRoute
     ready_route_from_runtime_thread(std::uint16_t source, std::uint16_t target) noexcept;
 
-    static bool try_enqueue_ready(std::uint16_t index, Task *task) noexcept;
+    static bool try_enqueue_ready(std::uint16_t index, Task *task,
+                                  ScheduleMode mode = ScheduleMode::Auto) noexcept;
     static bool try_enqueue_ready_from_runtime_thread(std::uint16_t source, std::uint16_t target,
-                                                      Task *task) noexcept;
+                                                      Task *task, ScheduleMode mode) noexcept;
     static bool try_enqueue_local_from_runtime_thread(std::uint16_t target, Task *task) noexcept;
     static bool try_enqueue_cross_thread_spsc(std::uint16_t source, std::uint16_t target,
                                               Task *task) noexcept;
     static bool try_enqueue_external_mpsc(std::uint16_t target, Task *task) noexcept;
     static void mark_source_ready(std::uint16_t source, std::uint16_t target) noexcept;
 
-    static void enqueue_ready_blocking(std::uint16_t index, Task *task) noexcept;
+    static void enqueue_ready_blocking(std::uint16_t index, Task *task,
+                                       ScheduleMode mode = ScheduleMode::Auto) noexcept;
     static void enqueue_ready_blocking_from_runtime_thread(std::uint16_t source,
-                                                           std::uint16_t target,
-                                                           Task *task) noexcept;
+                                                           std::uint16_t target, Task *task,
+                                                           ScheduleMode mode) noexcept;
     static void enqueue_local_from_runtime_thread_blocking(std::uint16_t target,
                                                            Task *task) noexcept;
     static void enqueue_cross_thread_spsc_blocking(std::uint16_t source, std::uint16_t target,
                                                    Task *task) noexcept;
     static void enqueue_external_mpsc_blocking(std::uint16_t target, Task *task) noexcept;
 
-    static void post_blocking(Thread thread, Task *task) noexcept;
-    static bool enqueue_ready_by_policy(std::uint16_t index, Task *task) noexcept;
-    static void enqueue_pending_blocking(std::uint16_t index, Task *task) noexcept;
+    static void post_blocking(Thread thread, Task *task,
+                              ScheduleMode mode = ScheduleMode::Auto) noexcept;
+    static bool enqueue_ready_by_policy(std::uint16_t index, Task *task,
+                                        ScheduleMode mode) noexcept;
+    static void enqueue_pending_blocking(std::uint16_t index, Task *task,
+                                         ScheduleMode mode) noexcept;
 
     [[nodiscard]] static bool try_enter_post(std::uint16_t target) noexcept;
     static void leave_post(std::uint16_t target) noexcept;

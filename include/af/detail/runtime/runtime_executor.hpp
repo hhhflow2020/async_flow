@@ -57,14 +57,16 @@ template <typename RuntimeT, typename TraitsT> class alignas(hardware_cache_line
         RuntimeT::on_task_finished(task);
     }
 
-    static void enqueue_pending_blocking(std::uint16_t index, Task *task) noexcept {
-        RuntimeT::enqueue_pending_blocking(index, task);
+    static void enqueue_pending_blocking(std::uint16_t index, Task *task,
+                                         ScheduleMode mode = ScheduleMode::Auto) noexcept {
+        RuntimeT::enqueue_pending_blocking(index, task, mode);
     }
 
-    static void enqueue_ready_blocking_from_runtime_thread(std::uint16_t source,
-                                                           std::uint16_t target,
-                                                           Task *task) noexcept {
-        RuntimeT::enqueue_ready_blocking_from_runtime_thread(source, target, task);
+    static void
+    enqueue_ready_blocking_from_runtime_thread(std::uint16_t source, std::uint16_t target,
+                                               Task *task,
+                                               ScheduleMode mode = ScheduleMode::Auto) noexcept {
+        RuntimeT::enqueue_ready_blocking_from_runtime_thread(source, target, task, mode);
     }
 
     [[nodiscard]] static bool fail_io_result(IoResult *result, int fd, int error) noexcept {

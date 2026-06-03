@@ -88,6 +88,61 @@ private:
     std::atomic<int> *completed_{nullptr};
 };
 
+class ScheduleModeStartTask final : public Task {
+public:
+    explicit ScheduleModeStartTask(Task::FactoryToken token) : Task(token) {}
+
+    bool begin_on(TestThread target, af::ScheduleMode mode, std::atomic<int> *completed,
+                  std::atomic<std::uint16_t> *ran_on) {
+        completed_ = completed;
+        ran_on_ = ran_on;
+        return schedule(target, mode);
+    }
+
+private:
+    af::TaskResult run() override {
+        ran_on_->store(Runtime::current_thread_index(), std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<std::uint16_t> *ran_on_{nullptr};
+};
+
+class RuntimeFastScheduleChildTask final : public Task {
+public:
+    explicit RuntimeFastScheduleChildTask(Task::FactoryToken token) : Task(token) {}
+
+    bool do_it(std::atomic<int> *completed, std::atomic<int> *result,
+               std::array<std::atomic<std::uint16_t>, 2> *seen) {
+        completed_ = completed;
+        result_ = result;
+        seen_ = seen;
+        return schedule(TestThreads::Logic_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        (*seen_)[0].store(Runtime::current_thread_index(), std::memory_order_release);
+        auto child = Runtime::make_task<ScheduleModeStartTask>();
+        const bool ok =
+            child->begin_on(TestThreads::Logic_1, af::ScheduleMode::Fast, completed_, &(*seen_)[1]);
+        if (!ok) {
+            result_->store(-1, std::memory_order_release);
+            completed_->fetch_add(1, std::memory_order_release);
+            return done();
+        }
+
+        result_->store(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *result_{nullptr};
+    std::array<std::atomic<std::uint16_t>, 2> *seen_{nullptr};
+};
+
 class UnscheduledTask final : public Task {
 public:
     UnscheduledTask(Task::FactoryToken token, std::atomic<int> *destroyed)
@@ -221,6 +276,42 @@ private:
     State state_{State::Start};
     std::atomic<int> *completed_{nullptr};
     std::array<std::atomic<std::uint16_t>, 4> *seen_{nullptr};
+};
+
+class OrderedPendingModeTask final : public Task {
+public:
+    explicit OrderedPendingModeTask(Task::FactoryToken token) : Task(token) {}
+
+    bool do_it(std::atomic<int> *completed, std::array<std::atomic<std::uint16_t>, 2> *seen) {
+        completed_ = completed;
+        seen_ = seen;
+        return schedule(TestThreads::Logic_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Start,
+        Finish,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Start:
+            (*seen_)[0].store(Runtime::current_thread_index(), std::memory_order_release);
+            state_ = State::Finish;
+            return pending_on(TestThreads::Logic_1, af::ScheduleMode::Ordered);
+
+        case State::Finish:
+            (*seen_)[1].store(Runtime::current_thread_index(), std::memory_order_release);
+            completed_->fetch_add(1, std::memory_order_release);
+            return done();
+        }
+        return failed();
+    }
+
+    State state_{State::Start};
+    std::atomic<int> *completed_{nullptr};
+    std::array<std::atomic<std::uint16_t>, 2> *seen_{nullptr};
 };
 
 static_assert(!std::is_default_constructible_v<OneShotTask>);

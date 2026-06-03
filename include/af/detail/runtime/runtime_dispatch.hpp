@@ -38,18 +38,26 @@ constexpr auto AsyncRuntime<TraitsT>::ready_route_from_runtime_thread(std::uint1
 }
 
 template <typename TraitsT>
-bool AsyncRuntime<TraitsT>::try_enqueue_ready(std::uint16_t index, Task *task) noexcept {
+bool AsyncRuntime<TraitsT>::try_enqueue_ready(std::uint16_t index, Task *task,
+                                              ScheduleMode mode) noexcept {
     if (current_thread_index_ < thread_count) {
-        return try_enqueue_ready_from_runtime_thread(current_thread_index_, index, task);
+        return try_enqueue_ready_from_runtime_thread(current_thread_index_, index, task, mode);
     }
 
+    if (mode == ScheduleMode::Fast) {
+        return false;
+    }
     return try_enqueue_external_mpsc(index, task);
 }
 
 template <typename TraitsT>
 bool AsyncRuntime<TraitsT>::try_enqueue_ready_from_runtime_thread(std::uint16_t source,
-                                                                  std::uint16_t target,
-                                                                  Task *task) noexcept {
+                                                                  std::uint16_t target, Task *task,
+                                                                  ScheduleMode mode) noexcept {
+    if (mode == ScheduleMode::Ordered) {
+        return try_enqueue_external_mpsc(target, task);
+    }
+
     const ReadyQueueRoute route = ready_route_from_runtime_thread(source, target);
     if (route == ReadyQueueRoute::Local) {
         return try_enqueue_local_from_runtime_thread(target, task);
@@ -92,19 +100,30 @@ void AsyncRuntime<TraitsT>::mark_source_ready(std::uint16_t source, std::uint16_
 }
 
 template <typename TraitsT>
-void AsyncRuntime<TraitsT>::enqueue_ready_blocking(std::uint16_t index, Task *task) noexcept {
+void AsyncRuntime<TraitsT>::enqueue_ready_blocking(std::uint16_t index, Task *task,
+                                                   ScheduleMode mode) noexcept {
     if (current_thread_index_ < thread_count) {
-        enqueue_ready_blocking_from_runtime_thread(current_thread_index_, index, task);
+        enqueue_ready_blocking_from_runtime_thread(current_thread_index_, index, task, mode);
         return;
     }
 
+    if (mode == ScheduleMode::Fast) {
+        AF_ASSERT(false && "ScheduleMode::Fast requires a runtime producer thread");
+        return;
+    }
     enqueue_external_mpsc_blocking(index, task);
 }
 
 template <typename TraitsT>
 void AsyncRuntime<TraitsT>::enqueue_ready_blocking_from_runtime_thread(std::uint16_t source,
                                                                        std::uint16_t target,
-                                                                       Task *task) noexcept {
+                                                                       Task *task,
+                                                                       ScheduleMode mode) noexcept {
+    if (mode == ScheduleMode::Ordered) {
+        enqueue_external_mpsc_blocking(target, task);
+        return;
+    }
+
     const ReadyQueueRoute route = ready_route_from_runtime_thread(source, target);
     if (route == ReadyQueueRoute::Local) {
         enqueue_local_from_runtime_thread_blocking(target, task);
@@ -153,17 +172,17 @@ void AsyncRuntime<TraitsT>::enqueue_external_mpsc_blocking(std::uint16_t target,
 }
 
 template <typename TraitsT>
-void AsyncRuntime<TraitsT>::post_blocking(Thread thread, Task *task) noexcept {
+void AsyncRuntime<TraitsT>::post_blocking(Thread thread, Task *task, ScheduleMode mode) noexcept {
     const std::uint16_t index = thread_index(thread);
     AF_ASSERT(index < thread_count);
 
-    const detail::ScheduleRequest request = task->request_schedule(index);
+    const detail::ScheduleRequest request = task->request_schedule(index, mode);
     switch (request.action) {
     case detail::ScheduleAction::Enqueue:
         if (request.previous == TaskState::Created) {
             on_task_started(task);
         }
-        enqueue_ready_blocking(index, task);
+        enqueue_ready_blocking(index, task, mode);
         return;
     case detail::ScheduleAction::Deferred:
         return;
@@ -174,16 +193,20 @@ void AsyncRuntime<TraitsT>::post_blocking(Thread thread, Task *task) noexcept {
 }
 
 template <typename TraitsT>
-bool AsyncRuntime<TraitsT>::enqueue_ready_by_policy(std::uint16_t index, Task *task) noexcept {
+bool AsyncRuntime<TraitsT>::enqueue_ready_by_policy(std::uint16_t index, Task *task,
+                                                    ScheduleMode mode) noexcept {
     if (current_thread_index_ < thread_count) {
         if constexpr (runtime_queue_full_policy == QueueFullPolicy::Yield) {
-            enqueue_ready_blocking_from_runtime_thread(current_thread_index_, index, task);
+            enqueue_ready_blocking_from_runtime_thread(current_thread_index_, index, task, mode);
             return true;
         } else {
-            return try_enqueue_ready_from_runtime_thread(current_thread_index_, index, task);
+            return try_enqueue_ready_from_runtime_thread(current_thread_index_, index, task, mode);
         }
     }
 
+    if (mode == ScheduleMode::Fast) {
+        return false;
+    }
     if constexpr (external_queue_full_policy == QueueFullPolicy::Yield) {
         enqueue_external_mpsc_blocking(index, task);
         return true;
@@ -193,11 +216,12 @@ bool AsyncRuntime<TraitsT>::enqueue_ready_by_policy(std::uint16_t index, Task *t
 }
 
 template <typename TraitsT>
-void AsyncRuntime<TraitsT>::enqueue_pending_blocking(std::uint16_t index, Task *task) noexcept {
+void AsyncRuntime<TraitsT>::enqueue_pending_blocking(std::uint16_t index, Task *task,
+                                                     ScheduleMode mode) noexcept {
     TaskState expected = TaskState::Pending;
     if (task->state_.compare_exchange_strong(expected, TaskState::Queued, std::memory_order_acq_rel,
                                              std::memory_order_acquire)) {
-        enqueue_ready_blocking(index, task);
+        enqueue_ready_blocking(index, task, mode);
         return;
     }
     AF_ASSERT(expected == TaskState::Queued || expected == TaskState::Starting ||

@@ -2017,3 +2017,80 @@ Interpretation:
   do not currently special-case repeated external notifications. A future wake
   optimization needs a dedicated benchmark and likely a more explicit
   sleep-transition protocol rather than a local branch reorder.
+
+## 2026-06-03 Semantic Schedule Modes
+
+This pass adds a semantic scheduling mode to `Runtime::post()`, task
+`schedule()`, and task `pending_on()`:
+
+- `ScheduleMode::Auto` keeps the default low-overhead runtime-selected route.
+- `ScheduleMode::Fast` is accepted only from a runtime thread and favors the
+  fastest per-producer route.
+- `ScheduleMode::Ordered` preserves one target-thread admission order across
+  producers.
+
+The public API deliberately exposes scheduling semantics rather than queue
+implementation names. Running-task wake requests now carry both the requested
+target thread and the requested schedule mode, so `pending_on(..., Ordered)`
+cannot lose its ordering intent when the task transitions from Running to
+Pending.
+
+Changes under validation:
+
+- Added `ScheduleMode` and threaded it through `post()`, `schedule()`,
+  `pending_on()`, ready enqueue helpers, blocking enqueue helpers, and Pending
+  wake requeue.
+- Reject `Fast` from non-runtime producers before mutating task state.
+- Preserve existing self-post and normal hop behavior under `Auto`.
+- Added lifecycle tests for external `Fast` rejection, runtime-thread `Fast`
+  acceptance, external `Ordered` acceptance, and `Ordered` Pending wake
+  preservation.
+- Added `BM_RuntimeScheduleModeHop/Fast` and `/Ordered` benchmark canaries.
+- Rechecked `[task=...]` log formatting: the tag stays after the Abseil line
+  prefix on every user-log line and never starts a continuation line.
+
+Correctness and benchmark checks:
+
+- Local macOS Debug build of `asyncflow_runtime_tests`,
+  `asyncflow_runtime_stress_tests`, `asyncflow_runtime_benchmarks`, and
+  `asyncflow_log_tests`: passed.
+- Local macOS Debug schedule-mode focused tests: 4/4 passed.
+- Local macOS Debug log task-tag focused tests: 2/2 passed.
+- Local macOS Debug full `asyncflow_runtime_tests`: 193 tests, 107 passed,
+  86 skipped, 0 failed.
+- Local macOS Debug `asyncflow_runtime_stress_tests`: 9/9 passed.
+- Local macOS Debug schedule-mode benchmark smoke:
+  `Fast/1024` 1.30 ms, `Fast/8192` 9.92 ms;
+  `Ordered/1024` 1.01 ms, `Ordered/8192` 9.49 ms.
+- Remote GCC Debug, `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: build passed for runtime tests, stress tests, runtime
+  benchmarks, and log tests.
+- Remote GCC Debug schedule-mode focused tests: 4/4 passed.
+- Remote GCC Debug log task-tag focused tests: 2/2 passed.
+- Remote GCC Debug full `asyncflow_runtime_tests`: 187 tests, 183 passed,
+  4 skipped, 0 failed.
+- Remote GCC Debug `asyncflow_runtime_stress_tests`: 9/9 passed.
+- Remote GCC Debug schedule-mode benchmark smoke:
+  `Fast/1024` 3.51 ms, `Fast/8192` 27.9 ms;
+  `Ordered/1024` 3.22 ms, `Ordered/8192` 23.8 ms.
+- Remote Clang Debug, `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: build passed for runtime tests, stress tests, runtime
+  benchmarks, and log tests.
+- Remote Clang Debug schedule-mode focused tests: 4/4 passed.
+- Remote Clang Debug log task-tag focused tests: 2/2 passed.
+- Remote Clang Debug full `asyncflow_runtime_tests`: 187 tests, 183 passed,
+  4 skipped, 0 failed.
+- Remote Clang Debug `asyncflow_runtime_stress_tests`: 9/9 passed.
+- Remote Clang Debug schedule-mode benchmark smoke:
+  `Fast/1024` 3.58 ms, `Fast/8192` 28.2 ms;
+  `Ordered/1024` 3.05 ms, `Ordered/8192` 23.0 ms.
+
+Interpretation:
+
+- The API now makes the ordering tradeoff explicit without exposing internal
+  queue names to users.
+- The state machine rejects invalid `Fast` calls before task-state mutation and
+  preserves `Ordered` through Running-to-Pending wake deferral.
+- The new benchmark rows are one-iteration Debug canaries, so they are useful
+  for catching gross regressions and semantic-path breakage, not for final
+  throughput claims.

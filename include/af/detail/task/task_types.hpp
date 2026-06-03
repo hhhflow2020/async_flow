@@ -19,6 +19,15 @@ enum class QueueFullPolicy : std::uint8_t {
     Yield,
 };
 
+enum class ScheduleMode : std::uint8_t {
+    // Let the runtime choose the normal low-overhead route for the producer.
+    Auto,
+    // Runtime-thread producer only; favors the fastest per-producer route.
+    Fast,
+    // Preserve one target-thread admission order across multiple producers.
+    Ordered,
+};
+
 enum class ShutdownPolicy : std::uint8_t {
     WaitForTasks,
     StopImmediately,

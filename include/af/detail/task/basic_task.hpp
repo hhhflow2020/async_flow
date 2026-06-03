@@ -53,12 +53,12 @@ protected:
         ::operator delete[](ptr, align);
     }
 
-    [[nodiscard]] bool schedule(Thread thread) noexcept {
-        return Runtime::post(thread, this);
+    [[nodiscard]] bool schedule(Thread thread, ScheduleMode mode = ScheduleMode::Auto) noexcept {
+        return Runtime::post(thread, this, mode);
     }
 
-    TaskResult pending_on(Thread thread) noexcept {
-        if (!Runtime::post(thread, this)) {
+    TaskResult pending_on(Thread thread, ScheduleMode mode = ScheduleMode::Auto) noexcept {
+        if (!Runtime::post(thread, this, mode)) {
             return TaskResult::Cancelled;
         }
         return TaskResult::Pending;
@@ -107,7 +107,9 @@ protected:
 
 private:
     static constexpr std::uint64_t requested_thread_mask = 0xFFFFULL;
-    static constexpr std::uint64_t requested_epoch_shift = 16;
+    static constexpr std::uint64_t requested_mode_shift = 16;
+    static constexpr std::uint64_t requested_mode_mask = 0x3ULL;
+    static constexpr std::uint64_t requested_epoch_shift = 18;
     static constexpr std::uint64_t requested_epoch_mask =
         (std::numeric_limits<std::uint64_t>::max() >> requested_epoch_shift);
 
@@ -137,7 +139,8 @@ private:
         }
     }
 
-    detail::ScheduleRequest request_schedule(std::uint16_t thread_index) noexcept {
+    detail::ScheduleRequest request_schedule(std::uint16_t thread_index,
+                                             ScheduleMode mode) noexcept {
         for (;;) {
             TaskState state = state_.load(std::memory_order_acquire);
             switch (state) {
@@ -156,7 +159,7 @@ private:
                 break;
 
             case TaskState::Running:
-                return request_wake_while_running(thread_index);
+                return request_wake_while_running(thread_index, mode);
 
             case TaskState::Queued:
             case TaskState::Done:
@@ -189,10 +192,11 @@ private:
         run_epoch_.store(next, std::memory_order_release);
     }
 
-    detail::ScheduleRequest request_wake_while_running(std::uint16_t thread_index) noexcept {
+    detail::ScheduleRequest request_wake_while_running(std::uint16_t thread_index,
+                                                       ScheduleMode mode) noexcept {
         for (;;) {
             const std::uint64_t epoch = run_epoch_.load(std::memory_order_acquire);
-            const std::uint64_t desired = pack_requested_thread(epoch, thread_index);
+            const std::uint64_t desired = pack_requested_thread(epoch, thread_index, mode);
             std::uint64_t expected = detail::no_requested_thread;
             if (requested_thread_.compare_exchange_strong(
                     expected, desired, std::memory_order_acq_rel, std::memory_order_acquire)) {
@@ -209,21 +213,26 @@ private:
             }
 
             AF_ASSERT(requested_target(expected) == thread_index &&
-                      "a running task can only register one wake-up target");
+                      requested_mode(expected) == mode &&
+                      "a running task can only register one wake-up target and mode");
             return {detail::ScheduleAction::Rejected, TaskState::Running};
         }
     }
 
-    std::uint16_t take_requested_thread() noexcept {
+    detail::RequestedSchedule take_requested_schedule() noexcept {
         const std::uint64_t value =
             requested_thread_.exchange(detail::no_requested_thread, std::memory_order_acq_rel);
         if (value == detail::no_requested_thread) {
-            return Runtime::invalid_thread_index;
+            return {Runtime::invalid_thread_index, ScheduleMode::Auto};
         }
         if (requested_epoch(value) != run_epoch_.load(std::memory_order_acquire)) {
-            return Runtime::invalid_thread_index;
+            return {Runtime::invalid_thread_index, ScheduleMode::Auto};
         }
-        return requested_target(value);
+        return {requested_target(value), requested_mode(value)};
+    }
+
+    std::uint16_t take_requested_thread() noexcept {
+        return take_requested_schedule().thread_index;
     }
 
     detail::ScheduleRequest resolve_running_wake_request(std::uint64_t epoch,
@@ -269,9 +278,11 @@ private:
                                                          std::memory_order_acquire);
     }
 
-    [[nodiscard]] static constexpr std::uint64_t
-    pack_requested_thread(std::uint64_t epoch, std::uint16_t thread_index) noexcept {
+    [[nodiscard]] static constexpr std::uint64_t pack_requested_thread(std::uint64_t epoch,
+                                                                       std::uint16_t thread_index,
+                                                                       ScheduleMode mode) noexcept {
         return ((epoch & requested_epoch_mask) << requested_epoch_shift) |
+               ((static_cast<std::uint64_t>(mode) & requested_mode_mask) << requested_mode_shift) |
                (static_cast<std::uint64_t>(thread_index) + 1U);
     }
 
@@ -281,6 +292,10 @@ private:
 
     [[nodiscard]] static constexpr std::uint16_t requested_target(std::uint64_t request) noexcept {
         return static_cast<std::uint16_t>((request & requested_thread_mask) - 1U);
+    }
+
+    [[nodiscard]] static constexpr ScheduleMode requested_mode(std::uint64_t request) noexcept {
+        return static_cast<ScheduleMode>((request >> requested_mode_shift) & requested_mode_mask);
     }
 
     static TaskId allocate_task_id() noexcept {

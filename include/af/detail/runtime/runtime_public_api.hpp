@@ -113,7 +113,8 @@ bool AsyncRuntime<TraitsT>::start_task(Args &&...args) {
     }
 }
 
-template <typename TraitsT> bool AsyncRuntime<TraitsT>::post(Thread thread, Task *task) noexcept {
+template <typename TraitsT>
+bool AsyncRuntime<TraitsT>::post(Thread thread, Task *task, ScheduleMode mode) noexcept {
     if (task == nullptr) {
         return false;
     }
@@ -124,17 +125,21 @@ template <typename TraitsT> bool AsyncRuntime<TraitsT>::post(Thread thread, Task
         return false;
     }
 
+    if (mode == ScheduleMode::Fast && current_thread_index_ >= thread_count) {
+        return false;
+    }
+
     if (!try_enter_post(index)) {
         return false;
     }
 
-    const detail::ScheduleRequest request = task->request_schedule(index);
+    const detail::ScheduleRequest request = task->request_schedule(index, mode);
     if (request.action == detail::ScheduleAction::Enqueue) {
         const bool first_schedule = request.previous == TaskState::Created;
         if (first_schedule) {
             on_task_started(task);
         }
-        const bool enqueued = enqueue_ready_by_policy(index, task);
+        const bool enqueued = enqueue_ready_by_policy(index, task, mode);
         if (!enqueued) {
             if (first_schedule) {
                 on_task_finished(task);

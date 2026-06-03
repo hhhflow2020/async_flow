@@ -13,6 +13,11 @@ struct ScheduleRequest {
     TaskState previous{TaskState::Done};
 };
 
+struct RequestedSchedule {
+    std::uint16_t thread_index{0};
+    ScheduleMode mode{ScheduleMode::Auto};
+};
+
 inline constexpr std::uint64_t no_requested_thread = 0;
 
 template <typename RuntimeT>

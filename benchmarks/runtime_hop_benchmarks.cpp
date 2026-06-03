@@ -56,6 +56,40 @@ private:
     std::atomic<int> *remaining_{nullptr};
 };
 
+class ScheduleModeHopTask final : public af_bench::runtime::Task {
+    using TaskBase = af_bench::runtime::Task;
+
+public:
+    explicit ScheduleModeHopTask(TaskBase::FactoryToken token) : TaskBase(token) {}
+
+    bool do_it(int hops, af::ScheduleMode mode, std::atomic<int> *remaining) {
+        hops_ = hops;
+        mode_ = mode;
+        remaining_ = remaining;
+        return schedule(af_bench::runtime::BenchThreads::Logic_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        if (hops_-- > 0) {
+            const auto next = af_bench::runtime::Runtime::current_thread() ==
+                                      af_bench::runtime::BenchThreads::Logic_0
+                                  ? af_bench::runtime::BenchThreads::Logic_1
+                                  : af_bench::runtime::BenchThreads::Logic_0;
+            return pending_on(next, mode_);
+        }
+
+        if (remaining_->fetch_sub(1, std::memory_order_acq_rel) == 1) {
+            remaining_->notify_one();
+        }
+        return done();
+    }
+
+    int hops_{0};
+    af::ScheduleMode mode_{af::ScheduleMode::Auto};
+    std::atomic<int> *remaining_{nullptr};
+};
+
 void BM_RuntimeCrossThreadHop(benchmark::State &state) {
     af_bench::runtime::Runtime::init();
     for (auto _ : state) {
@@ -112,6 +146,33 @@ void BM_RuntimeCrossThreadHopTaskPoolBatch(benchmark::State &state) {
         }
     }
     Runtime::shutdown();
+
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+
+void BM_RuntimeScheduleModeHop(benchmark::State &state, af::ScheduleMode mode) {
+    af_bench::runtime::Runtime::init();
+    for (auto _ : state) {
+        const int task_count = static_cast<int>(state.range(0));
+        std::atomic<int> remaining{0};
+        bool launch_failed = false;
+        for (int i = 0; i < task_count; ++i) {
+            remaining.fetch_add(1, std::memory_order_relaxed);
+            const bool ok =
+                af_bench::runtime::Runtime::start_task<ScheduleModeHopTask>(8, mode, &remaining);
+            if (!ok) {
+                af_bench::runtime::undo_remaining(remaining);
+                state.SkipWithError("Runtime::start_task<ScheduleModeHopTask> failed");
+                launch_failed = true;
+                break;
+            }
+        }
+        af_bench::runtime::wait_zero(remaining);
+        if (launch_failed) {
+            break;
+        }
+    }
+    af_bench::runtime::Runtime::shutdown();
 
     state.SetItemsProcessed(state.iterations() * state.range(0));
 }
@@ -194,6 +255,16 @@ BENCHMARK_TEMPLATE(BM_RuntimeCrossThreadHopTaskPoolBatch, 64, false, 512)
     ->UseRealTime()
     ->Unit(benchmark::kMillisecond);
 BENCHMARK_TEMPLATE(BM_RuntimeCrossThreadHopTaskPoolBatch, 64, false, 1024)
+    ->Arg(1024)
+    ->Arg(8192)
+    ->UseRealTime()
+    ->Unit(benchmark::kMillisecond);
+BENCHMARK_CAPTURE(BM_RuntimeScheduleModeHop, Fast, af::ScheduleMode::Fast)
+    ->Arg(1024)
+    ->Arg(8192)
+    ->UseRealTime()
+    ->Unit(benchmark::kMillisecond);
+BENCHMARK_CAPTURE(BM_RuntimeScheduleModeHop, Ordered, af::ScheduleMode::Ordered)
     ->Arg(1024)
     ->Arg(8192)
     ->UseRealTime()

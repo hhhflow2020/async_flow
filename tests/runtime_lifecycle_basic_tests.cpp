@@ -22,6 +22,61 @@ TEST_F(RuntimeFixture, MakeTaskSupportsCustomStartFunction) {
     ASSERT_TRUE(wait_until_at_least(completed, 1));
 }
 
+TEST_F(RuntimeFixture, FastScheduleModeRequiresRuntimeProducer) {
+    std::atomic<int> completed{0};
+    std::atomic<std::uint16_t> ran_on{Runtime::invalid_thread_index};
+
+    auto task = Runtime::make_task<ScheduleModeStartTask>();
+    ASSERT_TRUE(task);
+    EXPECT_FALSE(task->begin_on(TestThreads::Logic_0, af::ScheduleMode::Fast, &completed, &ran_on));
+    EXPECT_FALSE(task.scheduled());
+    Runtime::wait_for_idle();
+
+    EXPECT_EQ(completed.load(std::memory_order_acquire), 0);
+    EXPECT_EQ(ran_on.load(std::memory_order_acquire), Runtime::invalid_thread_index);
+}
+
+TEST_F(RuntimeFixture, FastScheduleModeAcceptsRuntimeProducer) {
+    std::atomic<int> completed{0};
+    std::atomic<int> result{0};
+    std::array<std::atomic<std::uint16_t>, 2> seen{};
+    for (auto &value : seen) {
+        value.store(Runtime::invalid_thread_index, std::memory_order_relaxed);
+    }
+
+    ASSERT_TRUE(Runtime::start_task<RuntimeFastScheduleChildTask>(&completed, &result, &seen));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(result.load(std::memory_order_acquire), 1);
+    EXPECT_EQ(seen[0].load(std::memory_order_acquire), Runtime::thread_index(TestThreads::Logic_0));
+    EXPECT_EQ(seen[1].load(std::memory_order_acquire), Runtime::thread_index(TestThreads::Logic_1));
+}
+
+TEST_F(RuntimeFixture, OrderedScheduleModeAcceptsExternalProducer) {
+    std::atomic<int> completed{0};
+    std::atomic<std::uint16_t> ran_on{Runtime::invalid_thread_index};
+
+    auto task = Runtime::make_task<ScheduleModeStartTask>();
+    ASSERT_TRUE(task);
+    ASSERT_TRUE(
+        task->begin_on(TestThreads::Logic_0, af::ScheduleMode::Ordered, &completed, &ran_on));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+
+    EXPECT_EQ(ran_on.load(std::memory_order_acquire), Runtime::thread_index(TestThreads::Logic_0));
+}
+
+TEST_F(RuntimeFixture, OrderedScheduleModeSurvivesPendingWakeRequest) {
+    std::atomic<int> completed{0};
+    std::array<std::atomic<std::uint16_t>, 2> seen{};
+    for (auto &value : seen) {
+        value.store(Runtime::invalid_thread_index, std::memory_order_relaxed);
+    }
+
+    ASSERT_TRUE(Runtime::start_task<OrderedPendingModeTask>(&completed, &seen));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(seen[0].load(std::memory_order_acquire), Runtime::thread_index(TestThreads::Logic_0));
+    EXPECT_EQ(seen[1].load(std::memory_order_acquire), Runtime::thread_index(TestThreads::Logic_1));
+}
+
 TEST_F(RuntimeFixture, UnscheduledCreatedTaskIsDestroyedByHandle) {
     std::atomic<int> destroyed{0};
 

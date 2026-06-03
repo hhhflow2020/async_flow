@@ -249,12 +249,12 @@ void Executor<RuntimeT, TraitsT>::finish_done(Task *task) noexcept {
 template <typename RuntimeT, typename TraitsT>
 void Executor<RuntimeT, TraitsT>::finish_pending(Task *task) noexcept {
     task->state_.store(TaskState::Pending, std::memory_order_release);
-    const std::uint16_t requested = task->take_requested_thread();
-    if (requested != invalid_thread_index) {
+    const detail::RequestedSchedule requested = task->take_requested_schedule();
+    if (requested.thread_index != invalid_thread_index) {
         // A running-task wake request is converted into a real queue entry only
         // if the task is still Pending; a concurrent Pending->Queued wake wins
         // otherwise.
-        enqueue_pending_blocking(requested, task);
+        enqueue_pending_blocking(requested.thread_index, task, requested.mode);
     }
 }
 
