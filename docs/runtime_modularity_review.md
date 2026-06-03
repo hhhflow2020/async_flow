@@ -105,6 +105,11 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - `include/af/io_filesystem.hpp` is now a small public umbrella over platform filesystem types, open/openat2, namespace operation, allocation/truncate, and `IoDirectory` adapter headers with normal module names instead of `*_fragment.hpp`. Public filesystem helpers remain header-only/template-visible while keeping operation families separate.
 - `include/af/platform.hpp` is now a small public constants header over detail platform/config constants; raw platform detection remains in detail config code.
 - `include/af/signal.hpp` is now a small public shell over `detail/signal/signal_platform.hpp`; POSIX/Windows signal masks, timed waits, fallback polling, and signal-ignore implementation are no longer embedded in the public class body.
+- Core POSIX baseline detail headers no longer carry Windows fallback branches:
+  `config.hpp` treats the framework build as POSIX-only, IO base/types use
+  POSIX fd/offset assumptions directly, runtime platform headers include POSIX
+  system headers directly, and thread naming keeps only the POSIX
+  `pthread_setname_np` paths.
 - The macOS/BSD kqueue backend is split by setup, timeout, poll, storage, wait, and event translation helpers. kqueue now supports native one-shot timeout completion and cancel for `io_wait_timeout()` / `arm_io_timeout()` without routing through Linux `timerfd`.
 - The bounded queue implementations are now split by SPSC, MPSC, and MPMC queue family, with `bounded_queues.hpp` kept as a compatibility umbrella. The split is mechanical and preserves queue layout, cache-line alignment, memory ordering, and template visibility.
 - Socket transfer helpers are now split by sendfile, shutdown, and splice operation family, with `io_socket_transfer.hpp` kept as a small inline umbrella.

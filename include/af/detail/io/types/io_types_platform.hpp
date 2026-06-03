@@ -1,13 +1,11 @@
 #pragma once
 
-#if !defined(_WIN32)
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/uio.h>
 #include <unistd.h>
-#endif
 
 #if defined(__linux__)
 #include <poll.h>

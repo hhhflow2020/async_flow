@@ -7,15 +7,12 @@
 
 #include "af/detail/config.hpp"
 
-#if !defined(_WIN32)
 #include <pthread.h>
-#endif
 
 namespace af::detail {
 
 inline void set_current_thread_name(std::string_view group_name,
                                     std::uint16_t group_offset) noexcept {
-#if !defined(_WIN32)
     std::array<char, 16> name{};
     const auto offset = static_cast<unsigned>(group_offset);
     const int offset_digits = std::snprintf(nullptr, 0, "%u", offset);
@@ -42,10 +39,6 @@ inline void set_current_thread_name(std::string_view group_name,
     static_cast<void>(::pthread_setname_np(name.data()));
 #elif defined(__linux__)
     static_cast<void>(::pthread_setname_np(::pthread_self(), name.data()));
-#endif
-#else
-    static_cast<void>(group_name);
-    static_cast<void>(group_offset);
 #endif
 }
 

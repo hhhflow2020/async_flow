@@ -2420,3 +2420,50 @@ Interpretation:
   platform branches for platform capability constants or signal support.
 - The change does not alter scheduler queues, IO submission paths, locking,
   atomics, allocation behavior, or signal API semantics.
+
+## 2026-06-03 POSIX Baseline Detail Header Cleanup
+
+This pass follows the no-Windows target direction for core detail headers. It
+removes Windows fallback branches from POSIX baseline runtime/IO support code
+while leaving Linux/macOS/BSD capability branches in place for real backend and
+syscall differences.
+
+Changes under validation:
+
+- `detail/config.hpp` now treats `platform_windows` as always false and
+  `platform_posix` as always true for supported builds.
+- `io_types_platform.hpp`, `io_types_base.hpp`, and
+  `io_types_unique_fd.hpp` include POSIX headers directly, use `off_t` for
+  `IoOffset`, keep `IoFixedBuffer` available directly, and close owned fds with
+  `::close()`.
+- `runtime_platform_headers.hpp` includes POSIX runtime headers directly
+  instead of guarding them behind Windows checks.
+- `thread_name.hpp` keeps POSIX thread naming setup directly and only branches
+  on the Linux/macOS `pthread_setname_np` call shape.
+- Rechecked the touched core detail headers for `_WIN32`/Windows spellings: no
+  matches remained.
+
+Correctness checks:
+
+- Local macOS Debug full `all` build: passed.
+- Local macOS Debug `ctest -R "Runtime|Log|Signal"`: 0 failures; Linux-only
+  epoll/io_uring cases were skipped by platform/capability logic.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: `asyncflow_runtime_tests`,
+  `asyncflow_log_tests`, and `asyncflow_runtime_stress_tests` built; selected
+  `Runtime|Log|Signal` ctest run reported 181 tests, 0 failures, 4 skipped.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: `asyncflow_runtime_tests`,
+  `asyncflow_log_tests`, and `asyncflow_runtime_stress_tests` built; selected
+  `Runtime|Log|Signal` ctest run reported 181 tests, 0 failures, 4 skipped.
+
+Interpretation:
+
+- This is a platform-scope cleanup only. It does not change scheduler queues,
+  runtime task admission, IO submit/completion paths, log formatting, locks,
+  atomics, allocation behavior, memory ordering, or cache layout.
+- The remaining platform branches in detail code should correspond to real
+  backend/syscall capability differences such as Linux epoll/io_uring and
+  macOS/BSD kqueue.

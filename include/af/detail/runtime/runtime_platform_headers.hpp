@@ -2,13 +2,11 @@
 
 #include "af/detail/config.hpp"
 
-#if !defined(_WIN32)
 #include <fcntl.h>
 #include <pthread.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
-#endif
 
 #if AF_DETAIL_HAS_EPOLL
 #include <algorithm>

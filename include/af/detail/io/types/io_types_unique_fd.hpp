@@ -37,11 +37,9 @@ public:
         if (fd_ == fd) {
             return;
         }
-#if !defined(_WIN32)
         if (fd_ >= 0) {
             ::close(fd_);
         }
-#endif
         fd_ = fd;
     }
 

@@ -1,18 +1,12 @@
 #pragma once
 
-#if defined(_WIN32)
-using IoOffset = std::int64_t;
-#else
 using IoOffset = off_t;
-#endif
 
-#if !defined(_WIN32)
 struct IoFixedBuffer {
     void *data{nullptr};
     std::size_t size{0};
     std::uint16_t index{0};
 };
-#endif
 
 template <typename ThreadT> class IoFixedFile;
 
