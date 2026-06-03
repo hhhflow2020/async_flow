@@ -1921,3 +1921,59 @@ Interpretation:
 - The framework now has a repeatable canary for MPSC producer-side contention.
   This gives future queue/layout changes a concrete comparison point instead of
   relying on single-threaded queue microbenchmarks.
+
+## 2026-06-03 MPSC Batch Push API
+
+This pass adds `BoundedMpscQueue::try_push_many()` so one producer can reserve
+and publish a contiguous run of MPSC slots with one tail CAS. This is a
+foundation for future external batch submission and runtime drain batching; the
+existing single-item `try_push()` / `try_pop()` behavior is unchanged.
+
+Changes under validation:
+
+- Added `BoundedMpscQueue::try_push_many(T *const *values, std::size_t count)`.
+- Added FIFO and full-queue tests for MPSC batch push.
+- Added `BM_MpscQueuePushManyPopMany` beside the existing single-item
+  `BM_MpscQueuePushPop` benchmark.
+- Kept MPSC consumer semantics single-consumer. No locks, allocations, task
+  routing changes, or scheduler wake behavior were added.
+
+Correctness and benchmark checks:
+
+- Local macOS Debug build of `asyncflow_runtime_tests` and
+  `asyncflow_runtime_benchmarks`: passed.
+- Local macOS Debug `QueueTests.*`: 13/13 passed.
+- Local macOS Debug MPSC benchmark comparison:
+  `PushPop/1024` 35.4 us, `PushManyPopMany/1024` 18.3 us;
+  `PushPop/16384` 443 us, `PushManyPopMany/16384` 232 us.
+- Local macOS Debug `BM_MpscQueueConcurrentProducers --benchmark_min_time=1x`:
+  `/256` 181 us real time, `/4096` 2897 us real time.
+- Remote GCC Debug clean build of `asyncflow_runtime_tests` and
+  `asyncflow_runtime_benchmarks`: passed.
+- Remote GCC Debug `QueueTests.*`: 13/13 passed.
+- Remote GCC Debug full `asyncflow_runtime_tests`: 183 tests, 179 passed,
+  4 skipped, 0 failed.
+- Remote GCC Debug MPSC benchmark comparison:
+  `PushPop/1024` 69.8 us, `PushManyPopMany/1024` 67.5 us;
+  `PushPop/16384` 1120 us, `PushManyPopMany/16384` 1100 us.
+- Remote GCC Debug concurrent producer canary:
+  `/256` 101 us real time, `/4096` 1591 us real time.
+- Remote Clang Debug clean build of `asyncflow_runtime_tests` and
+  `asyncflow_runtime_benchmarks`: passed.
+- Remote Clang Debug `QueueTests.*`: 13/13 passed.
+- Remote Clang Debug full `asyncflow_runtime_tests`: 183 tests, 179 passed,
+  4 skipped, 0 failed.
+- Remote Clang Debug MPSC benchmark comparison:
+  `PushPop/1024` 52.2 us, `PushManyPopMany/1024` 41.0 us;
+  `PushPop/16384` 833 us, `PushManyPopMany/16384` 628 us.
+- Remote Clang Debug concurrent producer canary:
+  `/256` 109 us real time, `/4096` 1820 us real time.
+
+Interpretation:
+
+- The new API is correctness-validated and gives a measurable single-producer
+  batch path, especially under Clang and on local macOS. GCC Debug shows only a
+  small gain because this implementation still validates each cell before the
+  one CAS reservation. Further gains likely require a dedicated producer-side
+  reservation/cache strategy or runtime-level batch drain so producers do less
+  per-cell readiness probing.

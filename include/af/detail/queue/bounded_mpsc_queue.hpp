@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -45,6 +46,52 @@ public:
         cell->data = value;
         cell->sequence.store(pos + 1U, std::memory_order_release);
         return true;
+    }
+
+    [[nodiscard]] std::size_t try_push_many(T *const *values, std::size_t count) noexcept {
+        if (count == 0U) {
+            return 0;
+        }
+
+        count = std::min(count, capacity_);
+        std::size_t pos = enqueue_pos_.load(std::memory_order_relaxed);
+
+        for (;;) {
+            std::size_t reservable = 0;
+            bool stale_position = false;
+            while (reservable < count) {
+                const std::size_t expected = pos + reservable;
+                Cell &cell = buffer_[expected & mask_];
+                const std::size_t seq = cell.sequence.load(std::memory_order_acquire);
+                if (seq == expected) {
+                    ++reservable;
+                    continue;
+                }
+                if (bounded_queue_sequence_before(seq, expected)) {
+                    break;
+                }
+                stale_position = true;
+                break;
+            }
+
+            if (reservable == 0U) {
+                if (!stale_position) {
+                    return 0;
+                }
+                pos = enqueue_pos_.load(std::memory_order_relaxed);
+                continue;
+            }
+
+            if (enqueue_pos_.compare_exchange_weak(pos, pos + reservable, std::memory_order_relaxed,
+                                                   std::memory_order_relaxed)) {
+                for (std::size_t i = 0; i < reservable; ++i) {
+                    Cell &cell = buffer_[(pos + i) & mask_];
+                    cell.data = values[i];
+                    cell.sequence.store(pos + i + 1U, std::memory_order_release);
+                }
+                return reservable;
+            }
+        }
     }
 
     [[nodiscard]] T *try_pop() noexcept {

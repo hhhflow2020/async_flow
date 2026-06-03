@@ -57,6 +57,32 @@ void BM_MpscQueuePushPop(benchmark::State &state) {
     state.SetItemsProcessed(state.iterations() * state.range(0));
 }
 
+void BM_MpscQueuePushManyPopMany(benchmark::State &state) {
+    af::detail::BoundedMpscQueue<int> queue(65536);
+    std::vector<int> values(static_cast<std::size_t>(state.range(0)));
+    std::vector<int *> inputs(values.size());
+    std::vector<int *> outputs(values.size());
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        values[i] = static_cast<int>(i);
+        inputs[i] = &values[i];
+    }
+
+    for (auto _ : state) {
+        std::size_t pushed = 0;
+        while (pushed < inputs.size()) {
+            pushed += queue.try_push_many(inputs.data() + pushed, inputs.size() - pushed);
+        }
+
+        std::size_t popped = 0;
+        while (popped < outputs.size()) {
+            popped += queue.try_pop_many(outputs.data() + popped, outputs.size() - popped);
+        }
+        benchmark::DoNotOptimize(outputs.data());
+    }
+
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+
 void BM_MpscQueueConcurrentProducers(benchmark::State &state) {
     constexpr int producer_count = 4;
     const int values_per_producer = static_cast<int>(state.range(0));
@@ -794,6 +820,7 @@ void BM_ObjectPoolReverseAlternatingPoolSet(benchmark::State &state) {
 
 BENCHMARK(BM_SpscQueuePushPop)->Arg(1024)->Arg(16384);
 BENCHMARK(BM_MpscQueuePushPop)->Arg(1024)->Arg(16384);
+BENCHMARK(BM_MpscQueuePushManyPopMany)->Arg(1024)->Arg(16384);
 BENCHMARK(BM_MpscQueueConcurrentProducers)
     ->Arg(256)
     ->Arg(4096)

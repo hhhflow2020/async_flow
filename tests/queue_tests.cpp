@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <limits>
@@ -130,6 +131,40 @@ TEST(QueueTests, BoundedMpscPopsManyInFifoOrder) {
     EXPECT_EQ(queue.try_pop_many(popped.data(), popped.size()), 0U);
 }
 
+TEST(QueueTests, BoundedMpscPushesManyInFifoOrder) {
+    af::detail::BoundedMpscQueue<int> queue(4);
+    int a = 1;
+    int b = 2;
+    int c = 3;
+    int d = 4;
+    std::array<int *, 3> first_push{&a, &b, &c};
+    std::array<int *, 2> second_push{&d, &a};
+
+    EXPECT_EQ(queue.try_push_many(first_push.data(), first_push.size()), first_push.size());
+    EXPECT_EQ(queue.try_pop(), &a);
+    EXPECT_EQ(queue.try_pop(), &b);
+
+    EXPECT_EQ(queue.try_push_many(second_push.data(), second_push.size()), second_push.size());
+    EXPECT_EQ(queue.try_pop(), &c);
+    EXPECT_EQ(queue.try_pop(), &d);
+    EXPECT_EQ(queue.try_pop(), &a);
+    EXPECT_EQ(queue.try_pop(), nullptr);
+}
+
+TEST(QueueTests, BoundedMpscPushManyStopsWhenFull) {
+    af::detail::BoundedMpscQueue<int> queue(2);
+    int a = 1;
+    int b = 2;
+    int c = 3;
+    std::array<int *, 3> values{&a, &b, &c};
+
+    EXPECT_EQ(queue.try_push_many(values.data(), values.size()), 2U);
+    EXPECT_FALSE(queue.try_push(&c));
+    EXPECT_EQ(queue.try_pop(), &a);
+    EXPECT_EQ(queue.try_pop(), &b);
+    EXPECT_EQ(queue.try_pop(), nullptr);
+}
+
 TEST(QueueTests, BoundedMpscSupportsConcurrentProducers) {
     constexpr int producer_count = 4;
     constexpr int values_per_producer = 64;
@@ -151,6 +186,68 @@ TEST(QueueTests, BoundedMpscSupportsConcurrentProducers) {
                     std::this_thread::yield();
                 }
                 pushed.fetch_add(1, std::memory_order_release);
+            }
+        });
+    }
+
+    int popped = 0;
+    while (popped < total_values) {
+        if (queue.try_pop() != nullptr) {
+            ++popped;
+        } else {
+            std::this_thread::yield();
+        }
+    }
+
+    for (auto &producer : producers) {
+        producer.join();
+    }
+
+    EXPECT_EQ(pushed.load(std::memory_order_acquire), total_values);
+    EXPECT_EQ(queue.try_pop(), nullptr);
+}
+
+TEST(QueueTests, BoundedMpscPushManySupportsConcurrentProducers) {
+    constexpr int producer_count = 4;
+    constexpr int values_per_producer = 64;
+    constexpr int batch_size = 8;
+    constexpr int total_values = producer_count * values_per_producer;
+
+    af::detail::BoundedMpscQueue<int> queue(128);
+    std::array<std::array<int, values_per_producer>, producer_count> values{};
+    std::array<std::thread, producer_count> producers;
+    std::atomic<int> pushed{0};
+
+    for (int producer = 0; producer < producer_count; ++producer) {
+        for (int i = 0; i < values_per_producer; ++i) {
+            values[producer][i] = producer * values_per_producer + i;
+        }
+
+        producers[producer] = std::thread([producer, &queue, &values, &pushed] {
+            constexpr int local_values_per_producer = 64;
+            constexpr int local_batch_size = 8;
+            std::array<int *, local_batch_size> batch{};
+            int index = 0;
+            while (index < local_values_per_producer) {
+                const int count = std::min(local_batch_size, local_values_per_producer - index);
+                for (int i = 0; i < count; ++i) {
+                    batch[i] = &values[producer][index + i];
+                }
+
+                std::size_t batch_pushed = 0;
+                while (batch_pushed < static_cast<std::size_t>(count)) {
+                    const std::size_t pushed_now =
+                        queue.try_push_many(batch.data() + batch_pushed,
+                                            static_cast<std::size_t>(count) - batch_pushed);
+                    if (pushed_now == 0U) {
+                        std::this_thread::yield();
+                        continue;
+                    }
+                    batch_pushed += pushed_now;
+                }
+
+                pushed.fetch_add(count, std::memory_order_release);
+                index += count;
             }
         });
     }
