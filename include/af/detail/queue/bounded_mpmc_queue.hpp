@@ -13,7 +13,7 @@ namespace af::detail {
 template <typename T> class BoundedMpmcQueue {
 public:
     explicit BoundedMpmcQueue(std::size_t capacity)
-        : capacity_(next_power_of_two(capacity < 2 ? 2 : capacity)), mask_(capacity_ - 1),
+        : capacity_(normalize_bounded_queue_capacity(capacity)), mask_(capacity_ - 1),
           buffer_(std::make_unique<Cell[]>(capacity_)) {
         for (std::size_t i = 0; i < capacity_; ++i) {
             buffer_[i].sequence.store(i, std::memory_order_relaxed);

@@ -13,7 +13,7 @@ namespace af::detail {
 template <typename T> class BoundedSpscQueue {
 public:
     explicit BoundedSpscQueue(std::size_t capacity)
-        : capacity_(next_power_of_two(capacity < 2 ? 2 : capacity)), mask_(capacity_ - 1),
+        : capacity_(normalize_bounded_queue_capacity(capacity)), mask_(capacity_ - 1),
           buffer_(capacity_) {}
 
     BoundedSpscQueue(const BoundedSpscQueue &) = delete;

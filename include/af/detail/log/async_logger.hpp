@@ -234,9 +234,10 @@ private:
                    : detail::next_power_of_two(static_cast<std::size_t>(hardware_threads));
     }
 
-    [[nodiscard]] static std::size_t normalize_queue_shard_count(std::size_t requested) noexcept {
+    [[nodiscard]] static std::size_t normalize_queue_shard_count(std::size_t requested) {
         const std::size_t shard_count = requested == 0U ? default_queue_shard_count() : requested;
-        return detail::next_power_of_two(shard_count == 0U ? 1U : shard_count);
+        return detail::checked_next_power_of_two(shard_count == 0U ? 1U : shard_count,
+                                                 "async log queue shard count is too large");
     }
 
     [[nodiscard]] static std::size_t validate_runtime_thread_count(std::size_t requested) {
@@ -249,7 +250,8 @@ private:
     [[nodiscard]] static std::size_t queue_capacity_per_shard(std::size_t total_capacity,
                                                               std::size_t shard_count) noexcept {
         const std::size_t capacity = total_capacity == 0U ? 1U : total_capacity;
-        return std::max<std::size_t>(2U, (capacity + shard_count - 1U) / shard_count);
+        const std::size_t per_shard = capacity / shard_count + (capacity % shard_count != 0U);
+        return std::max<std::size_t>(2U, per_shard);
     }
 
     [[nodiscard]] static std::size_t
@@ -259,7 +261,8 @@ private:
             return 0U;
         }
         const std::size_t capacity = total_capacity == 0U ? 1U : total_capacity;
-        return std::max<std::size_t>(2U, (capacity + thread_count - 1U) / thread_count);
+        const std::size_t per_thread = capacity / thread_count + (capacity % thread_count != 0U);
+        return std::max<std::size_t>(2U, per_thread);
     }
 
     [[nodiscard]] static std::size_t record_capacity_per_shard(std::size_t queue_capacity,

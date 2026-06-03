@@ -1,5 +1,7 @@
 #include <array>
 #include <atomic>
+#include <limits>
+#include <stdexcept>
 #include <thread>
 
 #include <gtest/gtest.h>
@@ -172,4 +174,12 @@ TEST(QueueTests, BoundedMpmcRejectsWhenFull) {
     EXPECT_EQ(queue.try_pop(), &a);
     EXPECT_EQ(queue.try_pop(), &b);
     EXPECT_EQ(queue.try_pop(), nullptr);
+}
+
+TEST(QueueTests, BoundedQueuesRejectOverflowingCapacities) {
+    constexpr std::size_t too_large = std::numeric_limits<std::size_t>::max();
+
+    EXPECT_THROW({ af::detail::BoundedSpscQueue<int> queue(too_large); }, std::length_error);
+    EXPECT_THROW({ af::detail::BoundedMpscQueue<int> queue(too_large); }, std::length_error);
+    EXPECT_THROW({ af::detail::BoundedMpmcQueue<int> queue(too_large); }, std::length_error);
 }
