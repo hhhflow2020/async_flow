@@ -9,15 +9,9 @@ namespace io_socket_lifecycle_example {
 
 struct SocketIoThreadTag;
 
-#if defined(__linux__)
-inline constexpr af::ThreadKind socket_io_thread_kind = af::ThreadKind::IoUring;
-#else
-inline constexpr af::ThreadKind socket_io_thread_kind = af::ThreadKind::Io;
-#endif
-
 struct SocketRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
-        af::thread_group<SocketIoThreadTag, 1, socket_io_thread_kind, "socket-io">());
+        af::thread_group<SocketIoThreadTag, 1, af::preferred_io_thread_kind, "socket-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
@@ -45,14 +39,7 @@ struct SocketLifecycleServerResult {
 };
 
 [[nodiscard]] inline const char *socket_lifecycle_backend_name() noexcept {
-#if defined(__linux__)
-    return socket_async::io_uring_backend_available(SocketThreads::IO_0) ? "io_uring"
-                                                                         : "epoll-fallback";
-#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
-    return "kqueue";
-#else
-    return "native-readiness";
-#endif
+    return af::runtime_io_backend_name<socket_async>(SocketThreads::IO_0);
 }
 
 } // namespace io_socket_lifecycle_example

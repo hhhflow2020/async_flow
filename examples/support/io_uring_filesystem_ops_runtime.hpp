@@ -10,8 +10,8 @@ namespace io_uring_filesystem_ops_example {
 struct FsIoThreadTag;
 
 struct FsRuntimeTraits {
-    static constexpr auto threads =
-        af::thread_layout(af::thread_group<FsIoThreadTag, 1, af::ThreadKind::IoUring, "fs-io">());
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<FsIoThreadTag, 1, af::preferred_io_thread_kind, "fs-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;

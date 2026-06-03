@@ -11,7 +11,7 @@ struct ClientIoThreadTag;
 
 struct ClientRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
-        af::thread_group<ClientIoThreadTag, 1, af::ThreadKind::Epoll, "client-io">());
+        af::thread_group<ClientIoThreadTag, 1, af::native_io_thread_kind, "client-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;

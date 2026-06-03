@@ -14,7 +14,7 @@ struct SendfileIoThreadTag;
 struct SendfileRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
         af::thread_group<SendfileLogicThreadTag, 1, af::ThreadKind::Worker, "sendfile-cpu">(),
-        af::thread_group<SendfileIoThreadTag, 1, af::ThreadKind::Epoll, "sendfile-io">());
+        af::thread_group<SendfileIoThreadTag, 1, af::native_io_thread_kind, "sendfile-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;

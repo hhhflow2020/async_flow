@@ -23,7 +23,7 @@ struct DirectAcceptIoThreadTag;
 struct DirectAcceptRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
         af::thread_group<DirectAcceptLogicThreadTag, 1, af::ThreadKind::Worker, "accept-cpu">(),
-        af::thread_group<DirectAcceptIoThreadTag, 1, af::ThreadKind::IoUring, "accept-io">());
+        af::thread_group<DirectAcceptIoThreadTag, 1, af::preferred_io_thread_kind, "accept-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;

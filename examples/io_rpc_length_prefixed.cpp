@@ -19,9 +19,8 @@ int main() {
         return 0;
     }
 
-    const char *backend =
-        rpc_async::io_uring_backend_available(RpcThreads::IO_0) ? "enabled" : "epoll-fallback";
-    std::cout << "rpc length-prefixed backend=" << backend << '\n';
+    std::cout << "rpc length-prefixed backend="
+              << af::runtime_io_backend_name<rpc_async>(RpcThreads::IO_0) << '\n';
 
     RpcLoopbackSockets sockets{};
     if (!sockets.create()) {

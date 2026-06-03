@@ -21,7 +21,7 @@ struct UdpRecvmsgIoThreadTag;
 
 struct UdpRecvmsgRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
-        af::thread_group<UdpRecvmsgIoThreadTag, 1, af::ThreadKind::IoUring, "udp-rmsg">());
+        af::thread_group<UdpRecvmsgIoThreadTag, 1, af::preferred_io_thread_kind, "udp-rmsg">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;

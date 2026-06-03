@@ -19,7 +19,7 @@ struct RecvIoThreadTag;
 
 struct RecvRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
-        af::thread_group<RecvIoThreadTag, 1, af::ThreadKind::IoUring, "recv-shot">());
+        af::thread_group<RecvIoThreadTag, 1, af::preferred_io_thread_kind, "recv-shot">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;

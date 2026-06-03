@@ -2094,3 +2094,66 @@ Interpretation:
 - The new benchmark rows are one-iteration Debug canaries, so they are useful
   for catching gross regressions and semantic-path breakage, not for final
   throughput claims.
+
+## 2026-06-03 Platform IO Backend Helper For Examples
+
+This pass reduces platform preprocessor exposure in copyable example runtime
+configuration. The framework already exposed `preferred_io_thread_kind` and
+`native_io_thread_kind`; this adds a small runtime backend-name helper and
+migrates examples to those semantic constants instead of spelling Linux/BSD
+branches in each runtime header.
+
+Changes under validation:
+
+- Added `af::runtime_io_backend_name<RuntimeT>(thread)` in `af/platform.hpp`.
+- Replaced repeated example runtime choices such as `#if defined(__linux__)`
+  `IoUring` else `Io` with `af::preferred_io_thread_kind`.
+- Replaced general native readiness examples that hard-coded `Epoll` with
+  `af::native_io_thread_kind`.
+- Updated TCP echo, TCP connect/accept, socket lifecycle, datagram, and RPC
+  example backend messages to use the new helper.
+- Left `io_uring_tuned_setup` explicitly on `ThreadKind::IoUring` because that
+  example is specifically about io_uring setup parameters and fallback traits.
+
+Correctness checks:
+
+- Local macOS Debug full `all` build: passed, including examples, tests, and
+  benchmarks.
+- Local macOS Debug full `asyncflow_runtime_tests`: 193 tests, 107 passed,
+  86 skipped, 0 failed.
+- Local macOS Debug `asyncflow_runtime_stress_tests`: 9/9 passed.
+- Local macOS Debug log task-tag focused tests: 2/2 passed.
+- Local macOS Debug example smoke:
+  `asyncflow_io_tcp_connect_accept_example` reported `backend=kqueue` and
+  completed; `asyncflow_io_socket_lifecycle_example` reported `backend=kqueue`
+  and completed; `asyncflow_io_uring_datagram_example` reported
+  `backend=kqueue` and completed; Linux-only RPC and io_uring-timeout examples
+  exited cleanly through capability checks.
+- Remote GCC Debug, `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: full `all` build passed.
+- Remote GCC Debug full `asyncflow_runtime_tests`: 187 tests, 183 passed,
+  4 skipped, 0 failed.
+- Remote GCC Debug `asyncflow_runtime_stress_tests`: 9/9 passed.
+- Remote GCC Debug log task-tag focused tests: 2/2 passed.
+- Remote GCC Debug example smoke passed:
+  TCP connect/accept `backend=io_uring`, socket lifecycle
+  `backend=epoll-fallback`, datagram `backend=io_uring`, RPC
+  `backend=io_uring`, and io_uring timeout fired.
+- Remote Clang Debug, `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: full `all` build passed.
+- Remote Clang Debug full `asyncflow_runtime_tests`: 187 tests, 183 passed,
+  4 skipped, 0 failed.
+- Remote Clang Debug `asyncflow_runtime_stress_tests`: 9/9 passed.
+- Remote Clang Debug log task-tag focused tests: 2/2 passed.
+- Remote Clang Debug example smoke passed with the same backend outcomes as GCC.
+
+Interpretation:
+
+- Example runtime configuration is now driven by framework-provided platform
+  capability constants, so users copying normal examples no longer need to
+  write Linux/BSD preprocessor branches just to select an IO thread kind or
+  print a backend name.
+- Low-level Linux-only example task bodies still contain platform guards around
+  system headers and Linux-specific syscalls. Those are implementation details
+  of specific examples and remain separate from the public scheduling/runtime
+  configuration style.

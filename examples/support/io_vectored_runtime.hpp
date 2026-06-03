@@ -20,7 +20,7 @@ struct VectoredIoThreadTag;
 
 struct VectoredRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
-        af::thread_group<VectoredIoThreadTag, 1, af::ThreadKind::IoUring, "vectored-io">());
+        af::thread_group<VectoredIoThreadTag, 1, af::preferred_io_thread_kind, "vectored-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;

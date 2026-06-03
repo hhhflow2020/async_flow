@@ -12,15 +12,9 @@ namespace io_tcp_echo_example {
 struct EchoIoThreadTag;
 struct EchoComputeThreadTag;
 
-#if defined(__linux__)
-inline constexpr af::ThreadKind echo_io_thread_kind = af::ThreadKind::IoUring;
-#else
-inline constexpr af::ThreadKind echo_io_thread_kind = af::ThreadKind::Io;
-#endif
-
 struct EchoRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
-        af::thread_group<EchoIoThreadTag, 2, echo_io_thread_kind, "echo-io">(),
+        af::thread_group<EchoIoThreadTag, 2, af::preferred_io_thread_kind, "echo-io">(),
         af::thread_group<EchoComputeThreadTag, 1, af::ThreadKind::Worker, "echo-cpu">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
@@ -58,14 +52,7 @@ struct EchoClientResult {
 }
 
 [[nodiscard]] inline const char *echo_backend_name(EchoThread thread) noexcept {
-    static_cast<void>(thread);
-#if defined(__linux__)
-    return echo_async::io_uring_backend_available(thread) ? "io_uring" : "epoll-fallback";
-#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
-    return "kqueue";
-#else
-    return "native-readiness";
-#endif
+    return af::runtime_io_backend_name<echo_async>(thread);
 }
 
 [[nodiscard]] inline std::size_t echo_lowercase_ascii(char *data, std::size_t size) noexcept {

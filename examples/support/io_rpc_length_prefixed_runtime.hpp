@@ -1,7 +1,7 @@
 #pragma once
 
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 
 #include "af/async_flow.hpp"
 
@@ -20,7 +20,7 @@ struct RpcIoThreadTag;
 struct RpcRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
         af::thread_group<RpcLogicThreadTag, 1, af::ThreadKind::Worker, "rpc-cpu">(),
-        af::thread_group<RpcIoThreadTag, 1, af::ThreadKind::IoUring, "rpc-io">());
+        af::thread_group<RpcIoThreadTag, 1, af::preferred_io_thread_kind, "rpc-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Reject;
@@ -37,8 +37,6 @@ struct RpcThreads {
     static constexpr RpcThread IO_0 = rpc_async::thread_group<RpcIoThreadTag>().template at<0>();
 };
 
-#if defined(__linux__)
 inline constexpr std::size_t kMaxFrameBytes = 4096;
-#endif
 
 } // namespace io_rpc_length_prefixed_example

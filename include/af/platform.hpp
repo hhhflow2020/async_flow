@@ -45,4 +45,21 @@ inline constexpr ThreadKind native_io_thread_kind =
 inline constexpr ThreadKind preferred_io_thread_kind =
     supports_io_uring ? ThreadKind::IoUring : native_io_thread_kind;
 
+template <typename RuntimeT>
+[[nodiscard]] const char *runtime_io_backend_name(typename RuntimeT::Thread thread) noexcept {
+    if constexpr (supports_io_uring) {
+        if (RuntimeT::thread_kind(thread) == ThreadKind::IoUring) {
+            return RuntimeT::io_uring_backend_available(thread) ? "io_uring" : "epoll-fallback";
+        }
+    }
+
+    if constexpr (supports_epoll) {
+        return "epoll";
+    } else if constexpr (supports_kqueue) {
+        return "kqueue";
+    } else {
+        return "native-readiness";
+    }
+}
+
 } // namespace af
