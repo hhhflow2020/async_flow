@@ -6,8 +6,12 @@
 #include "support/io_sendfile_static_server_task.hpp"
 
 int main() {
-#if defined(__linux__)
     using namespace io_sendfile_static_example;
+
+    if constexpr (!af::supports_sendfile) {
+        std::cout << "sendfile example is Linux-only\n";
+        return 0;
+    }
 
     SendfileStaticFile file{};
     if (!file.create()) {
@@ -26,8 +30,8 @@ int main() {
     SendfileClientResult client{};
     const bool server_started = sendfile_async::start_task<StaticSendfileServerTask>(
         listener.fd.get(), file.fd.get(), &server);
-    const bool client_started = sendfile_async::start_task<StaticSendfileClientTask>(
-        listener.address, listener.address_size, &client);
+    const bool client_started =
+        sendfile_async::start_task<StaticSendfileClientTask>(listener.endpoint, &client);
     if (!server_started || !client_started) {
         std::cerr << "sendfile tasks did not start\n";
         sendfile_async::shutdown();
@@ -43,8 +47,4 @@ int main() {
 
     std::cout << "sendfile bytes=" << server.bytes_sent << " read=" << client.bytes_read << '\n';
     return 0;
-#else
-    std::cout << "sendfile example is Linux-only\n";
-    return 0;
-#endif
 }

@@ -35,4 +35,18 @@ struct SendfileStaticFile {
 
 } // namespace io_sendfile_static_example
 
+#else
+
+namespace io_sendfile_static_example {
+
+struct SendfileStaticFile {
+    af::UniqueFd fd{};
+
+    bool create() noexcept {
+        return false;
+    }
+};
+
+} // namespace io_sendfile_static_example
+
 #endif

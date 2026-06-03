@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "io_sendfile_static_listener.hpp"
 #include "io_sendfile_static_runtime.hpp"
 
 #if defined(__linux__)
@@ -17,12 +18,11 @@ public:
     explicit StaticSendfileClientTask(SendfileTaskBase::FactoryToken token)
         : SendfileTaskBase(token) {}
 
-    bool do_it(sockaddr_in server, socklen_t server_size, SendfileClientResult *result) {
-        if (server_size == 0U || result == nullptr) {
+    bool do_it(const SendfileLoopbackEndpoint &server, SendfileClientResult *result) {
+        if (server.address_size == 0U || result == nullptr) {
             return false;
         }
         server_ = server;
-        server_size_ = server_size;
         result_ = result;
         return schedule(SendfileThreads::IO_0);
     }
@@ -78,8 +78,9 @@ private:
     }
 
     af::TaskResult connect() {
-        const af::IoStatus status = stream_.connect(
-            *this, reinterpret_cast<const sockaddr *>(&server_), server_size_, connect_);
+        const af::IoStatus status =
+            stream_.connect(*this, reinterpret_cast<const sockaddr *>(&server_.address),
+                            server_.address_size, connect_);
         if (status.pending()) {
             return pending();
         }
@@ -121,8 +122,7 @@ private:
     }
 
     State state_{State::CreateSocket};
-    sockaddr_in server_{};
-    socklen_t server_size_{sizeof(server_)};
+    SendfileLoopbackEndpoint server_{};
     int fd_{-1};
     af::UniqueFd owned_{};
     af::TcpStream<SendfileThread> stream_{};
@@ -130,6 +130,29 @@ private:
     af::IoOpState connect_{};
     af::IoOpState recv_{};
     SendfileClientResult *result_{nullptr};
+};
+
+} // namespace io_sendfile_static_example
+
+#else
+
+namespace io_sendfile_static_example {
+
+class StaticSendfileClientTask final : public SendfileTaskBase {
+public:
+    explicit StaticSendfileClientTask(SendfileTaskBase::FactoryToken token)
+        : SendfileTaskBase(token) {}
+
+    bool do_it(const SendfileLoopbackEndpoint &server, SendfileClientResult *result) {
+        static_cast<void>(server);
+        static_cast<void>(result);
+        return false;
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
 };
 
 } // namespace io_sendfile_static_example

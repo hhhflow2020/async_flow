@@ -105,4 +105,28 @@ private:
 
 } // namespace io_sendfile_static_example
 
+#else
+
+namespace io_sendfile_static_example {
+
+class StaticSendfileServerTask final : public SendfileTaskBase {
+public:
+    explicit StaticSendfileServerTask(SendfileTaskBase::FactoryToken token)
+        : SendfileTaskBase(token) {}
+
+    bool do_it(int listener_fd, int file_fd, SendfileServerResult *result) {
+        static_cast<void>(listener_fd);
+        static_cast<void>(file_fd);
+        static_cast<void>(result);
+        return false;
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
+};
+
+} // namespace io_sendfile_static_example
+
 #endif
