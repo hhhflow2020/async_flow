@@ -67,6 +67,13 @@ template <typename RuntimeT, typename TraitsT> class alignas(hardware_cache_line
         RuntimeT::enqueue_ready_blocking_from_runtime_thread(source, target, task);
     }
 
+    [[nodiscard]] static bool fail_io_result(IoResult *result, int fd, int error) noexcept {
+        if (result != nullptr) {
+            detail::set_io_result_error(*result, fd, error);
+        }
+        return false;
+    }
+
 #if AF_DETAIL_HAS_NATIVE_IO_WAIT
     struct IoWaitRegistration;
 #endif
@@ -216,10 +223,7 @@ public:
         static_cast<void>(size);
         static_cast<void>(offset);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, fd, ENOSYS);
 #endif
     }
 
@@ -235,10 +239,7 @@ public:
         static_cast<void>(size);
         static_cast<void>(offset);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, fd, ENOSYS);
 #endif
     }
     [[nodiscard]] bool submit_io_timeout(std::chrono::nanoseconds timeout, Task *task,
@@ -364,10 +365,7 @@ public:
         static_cast<void>(size);
         static_cast<void>(offset);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, file_index, ENOSYS);
 #endif
     }
 
@@ -383,10 +381,7 @@ public:
         static_cast<void>(size);
         static_cast<void>(offset);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, file_index, ENOSYS);
 #endif
     }
 #if !defined(_WIN32)
@@ -403,10 +398,7 @@ public:
         static_cast<void>(iov_count);
         static_cast<void>(offset);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, file_index, ENOSYS);
 #endif
     }
 
@@ -423,10 +415,7 @@ public:
         static_cast<void>(iov_count);
         static_cast<void>(offset);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, file_index, ENOSYS);
 #endif
     }
 
@@ -446,10 +435,7 @@ public:
         static_cast<void>(offset);
         static_cast<void>(buffer_index);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, file_index, ENOSYS);
 #endif
     }
 
@@ -468,10 +454,7 @@ public:
         static_cast<void>(offset);
         static_cast<void>(buffer_index);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, file_index, ENOSYS);
 #endif
     }
 
@@ -491,10 +474,7 @@ public:
         static_cast<void>(offset);
         static_cast<void>(buffer_index);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, fd, ENOSYS);
 #endif
     }
 
@@ -512,10 +492,7 @@ public:
         static_cast<void>(offset);
         static_cast<void>(buffer_index);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, fd, ENOSYS);
 #endif
     }
 
@@ -534,10 +511,7 @@ public:
         static_cast<void>(iov_count);
         static_cast<void>(offset);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, fd, ENOSYS);
 #endif
     }
 
@@ -554,10 +528,7 @@ public:
         static_cast<void>(iov_count);
         static_cast<void>(offset);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, fd, ENOSYS);
 #endif
     }
 #endif
@@ -570,10 +541,7 @@ public:
         static_cast<void>(fd);
         static_cast<void>(flags);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, fd, ENOSYS);
 #endif
     }
 
@@ -587,10 +555,7 @@ public:
         static_cast<void>(file_index);
         static_cast<void>(flags);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, file_index, ENOSYS);
 #endif
     }
 
@@ -606,10 +571,7 @@ public:
         static_cast<void>(flags);
         static_cast<void>(mode);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, dir_fd, ENOSYS);
 #endif
     }
 
@@ -628,10 +590,7 @@ public:
         static_cast<void>(mode);
         static_cast<void>(file_index);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, file_index, ENOSYS);
 #endif
     }
 
@@ -651,10 +610,7 @@ public:
         static_cast<void>(path);
         static_cast<void>(how);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, dir_fd, ENOSYS);
 #endif
     }
     [[nodiscard]] bool submit_io_uring_close(int fd, Task *task, IoResult *result) noexcept {
@@ -663,10 +619,7 @@ public:
 #else
         static_cast<void>(fd);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, fd, ENOSYS);
 #endif
     }
 
@@ -679,10 +632,7 @@ public:
         static_cast<void>(fd);
         static_cast<void>(how);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, fd, ENOSYS);
 #endif
     }
     [[nodiscard]] bool submit_io_uring_statx(int dir_fd, const char *path, int flags,
@@ -704,10 +654,7 @@ public:
         static_cast<void>(mask);
         static_cast<void>(output);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, dir_fd, ENOSYS);
 #endif
     }
     [[nodiscard]] bool submit_io_uring_fallocate(int fd, int mode, std::uint64_t offset,
@@ -727,10 +674,7 @@ public:
         static_cast<void>(offset);
         static_cast<void>(length);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, fd, ENOSYS);
 #endif
     }
 
@@ -746,10 +690,7 @@ public:
         static_cast<void>(fd);
         static_cast<void>(length);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, fd, ENOSYS);
 #endif
     }
     [[nodiscard]] bool submit_io_uring_renameat(int old_dir_fd, const char *old_path,
@@ -772,10 +713,7 @@ public:
         static_cast<void>(new_path);
         static_cast<void>(flags);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, old_dir_fd, ENOSYS);
 #endif
     }
 
@@ -793,10 +731,7 @@ public:
         static_cast<void>(path);
         static_cast<void>(flags);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, dir_fd, ENOSYS);
 #endif
     }
 
@@ -814,10 +749,7 @@ public:
         static_cast<void>(path);
         static_cast<void>(mode);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, dir_fd, ENOSYS);
 #endif
     }
 
@@ -836,10 +768,7 @@ public:
         static_cast<void>(new_dir_fd);
         static_cast<void>(link_path);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, new_dir_fd, ENOSYS);
 #endif
     }
 
@@ -862,10 +791,7 @@ public:
         static_cast<void>(new_path);
         static_cast<void>(flags);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, old_dir_fd, ENOSYS);
 #endif
     }
     [[nodiscard]] bool submit_io_uring_splice(int in_fd, std::int64_t off_in, int out_fd,
@@ -885,10 +811,7 @@ public:
         static_cast<void>(count);
         static_cast<void>(flags);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, out_fd, ENOSYS);
 #endif
     }
 
@@ -904,10 +827,7 @@ public:
         static_cast<void>(size);
         static_cast<void>(flags);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, fd, ENOSYS);
 #endif
     }
 
@@ -924,10 +844,7 @@ public:
         static_cast<void>(size);
         static_cast<void>(flags);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, file_index, ENOSYS);
 #endif
     }
 #if defined(__linux__)
@@ -974,10 +891,7 @@ public:
         static_cast<void>(size);
         static_cast<void>(flags);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, fd, ENOSYS);
 #endif
     }
 
@@ -994,10 +908,7 @@ public:
         static_cast<void>(size);
         static_cast<void>(flags);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, file_index, ENOSYS);
 #endif
     }
 #if defined(__linux__)
@@ -1062,10 +973,7 @@ public:
         static_cast<void>(iov_count);
         static_cast<void>(flags);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, file_index, ENOSYS);
 #endif
     }
 
@@ -1086,10 +994,7 @@ public:
         static_cast<void>(address_size);
         static_cast<void>(flags);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, fd, ENOSYS);
 #endif
     }
 
@@ -1109,10 +1014,7 @@ public:
         static_cast<void>(address_size);
         static_cast<void>(flags);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, fd, ENOSYS);
 #endif
     }
 
@@ -1132,10 +1034,7 @@ public:
         static_cast<void>(iov_count);
         static_cast<void>(flags);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, file_index, ENOSYS);
 #endif
     }
 
@@ -1156,10 +1055,7 @@ public:
         static_cast<void>(address_size);
         static_cast<void>(flags);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, fd, ENOSYS);
 #endif
     }
 
@@ -1179,10 +1075,7 @@ public:
         static_cast<void>(address_size);
         static_cast<void>(flags);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, fd, ENOSYS);
 #endif
     }
 
@@ -1200,10 +1093,7 @@ public:
         static_cast<void>(address_size);
         static_cast<void>(flags);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, fd, ENOSYS);
 #endif
     }
 
@@ -1223,10 +1113,7 @@ public:
         static_cast<void>(flags);
         static_cast<void>(file_index);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, file_index, ENOSYS);
 #endif
     }
 
@@ -1244,10 +1131,7 @@ public:
         static_cast<void>(address_size);
         static_cast<void>(flags);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, fd, ENOSYS);
 #endif
     }
 #endif
@@ -1264,10 +1148,7 @@ public:
         static_cast<void>(address);
         static_cast<void>(address_size);
         static_cast<void>(task);
-        if (result != nullptr) {
-            result->error = ENOSYS;
-        }
-        return false;
+        return fail_io_result(result, fd, ENOSYS);
 #endif
     }
 #endif
@@ -1844,10 +1725,7 @@ private:
         static_cast<void>(events);
         static_cast<void>(task);
         static_cast<void>(prefer_rearm);
-        result->fd = fd;
-        result->events = io_error;
-        result->error = fd < 0 ? EBADF : ENOSYS;
-        return false;
+        return fail_io_result(result, fd, fd < 0 ? EBADF : ENOSYS);
     }
 #endif
 
