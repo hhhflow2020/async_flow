@@ -3962,3 +3962,45 @@ Interpretation:
 - This is an API ergonomics change. It does not change queue topology, record
   pool layout, locks, atomics, memory ordering, backend IO, or benchmarked hot
   paths.
+
+## 2026-06-04 TCP Reactor io_uring Poll Backend
+
+This pass moves the new `af::net` TCP reactor readiness path on
+`ThreadKind::IoUring` from epoll fallback to `IORING_OP_POLL_ADD` while keeping
+the same owner-IO-thread `NetIoChannel` abstraction.
+
+Changes under validation:
+
+- Added a Linux io_uring net poll operation type that points directly at
+  `NetIoChannel` and dispatches completion on the owner IO executor.
+- Kept epoll LT as the native readiness backend and as the final fallback.
+- Added adaptive poll flag downgrade: start with multishot level poll, retry as
+  multishot poll if the kernel rejects the level flag, retry as one-shot poll if
+  multishot is rejected, then fall back to epoll.
+- Tightened the poll request mask to actual requested readiness bits; error and
+  hangup remain completion result events.
+
+Correctness checks:
+
+- Local macOS Debug build of TCP examples, runtime tests, log tests, and runtime
+  stress tests: passed.
+- Local macOS Debug `ctest`: 143/143 passed.
+- Remote Linux Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`, clean target rebuild
+  with parallelism 10: passed.
+- Remote Linux Clang Debug `ctest`: 143/143 passed.
+- Remote Linux IPv4 echo smoke under `strace`: echo response matched; trace
+  reported `io_uring_setup=2`, `io_uring_enter=12`, and `epoll_ctl=2`. The two
+  `epoll_ctl` calls were the runtime wake eventfd registrations; no TCP reactor
+  listener/connection channel was registered in epoll after adaptive downgrade.
+- Remote Linux IPv6 echo smoke: passed.
+- Remote Linux protobuf login server smoke: login request packet returned packet
+  id 2 with `hello codex` payload.
+
+Interpretation:
+
+- TCP reactor readiness now stays in io_uring on the tested Linux host, while
+  preserving epoll LT fallback for unavailable or incompatible kernels.
+- The data path is still readiness-driven nonblocking accept/recv/send on the
+  owner IO thread; ring-native multishot accept/recv/provided-buffer/send-zc
+  integration remains a later optimization layer behind the same channel model.

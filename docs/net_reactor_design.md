@@ -10,7 +10,9 @@ readiness 作为普通 task 的 pending/resume 热路径。
 核心目标：
 
 - IO 热路径尽量少系统调用。
-- Linux 主路径采用 epoll LT，避免 `EPOLLONESHOT` 每次事件后的 re-arm 成本。
+- Linux native readiness 主路径采用 epoll LT，避免 `EPOLLONESHOT` 每次事件后的
+  re-arm 成本；`ThreadKind::IoUring` 线程优先用 io_uring poll 承接同一套
+  `NetIoChannel` readiness。
 - fd、buffer、epoll interest、连接状态都由 owner IO 线程独占管理。
 - 用户态内部尽量零拷贝，通过 `BufferView`、`BufferSlice`、`BufferChain`
   传递数据。
@@ -94,7 +96,7 @@ eventfd/kqueue user event 唤醒，并需要 wake coalescing，避免大量重�
 `IoChannel` 是 fd 的事件句柄，热路径不要求虚函数。Linux epoll 事件使用
 `event.data.ptr = IoChannel*`，避免事件回来后再次通过 fd hash 查找。
 
-Linux 主路径：
+Linux native readiness 主路径：
 
 ```text
 epoll LT
@@ -116,9 +118,16 @@ connection EPOLLOUT -> send/writev/sendmsg loop 到 EAGAIN 或 output empty
 - `NetIoChannel` 已接入 runtime native readiness backend。
 - Linux epoll 使用 LT 模式；macOS/BSD kqueue 使用持久 `EVFILT_READ/EVFILT_WRITE`，
   不使用 one-shot re-arm。
-- `ThreadKind::IoUring` 线程会优先初始化 io_uring，但 TCP reactor 的 socket
-  readiness 当前仍走同一线程上的 native epoll fallback；后续可在连接收发路径逐步接入
-  multishot accept/recv、send_zc 等 ring-native 优化。
+- `ThreadKind::IoUring` 线程会优先初始化 io_uring，并让 `NetIoChannel` readiness
+  优先提交 `IORING_OP_POLL_ADD`。默认先尝试
+  `IORING_POLL_ADD_MULTI | IORING_POLL_ADD_LEVEL`，如果内核拒绝该 flag 组合，会在同一
+  IO executor 内自适应降级到 multishot poll，再降到 one-shot poll；只有 io_uring
+  不可用、ring 满或 poll add 全部不可用时才自动回退到同线程 epoll LT。completion
+  直接在 owner IO executor 上回调 channel。
+- 当前 `af::net` TCP reactor 仍是 readiness-driven 数据面：accept/recv/send 在 owner
+  IO 线程用非阻塞 syscall drain 到 `EAGAIN` 或预算耗尽。后续可在相同 shard/channel
+  抽象后面继续接入 multishot accept/recv、provided buffer 和 send_zc 等 ring-native
+  数据面优化。
 - wake 机制在 Linux 使用 eventfd，在 kqueue/macOS 路径使用 nonblocking pipe，且有
   wake coalescing，避免每个 command 都触发一次 wake syscall。
 

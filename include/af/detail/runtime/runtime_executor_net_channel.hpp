@@ -23,6 +23,7 @@ bool Executor<RuntimeT, TraitsT>::register_net_channel(detail::NetIoChannel *cha
     }
     channel->active = false;
     channel->interests = 0;
+    channel->backend_token = nullptr;
     auto [it, inserted] = net_channels_.try_emplace(channel->fd, channel);
     if (!inserted) {
         return false;

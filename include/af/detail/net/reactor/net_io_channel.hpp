@@ -15,6 +15,7 @@ struct NetIoChannel {
     int fd{-1};
     std::uint32_t interests{0};
     bool active{false};
+    void *backend_token{nullptr};
     void *owner{nullptr};
     EventFn on_event{nullptr};
 };

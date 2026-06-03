@@ -54,17 +54,20 @@ template <typename RuntimeT, typename TraitsT>
     operation->task = task;
     operation->result = result;
     operation->complete_events = complete_events;
+    operation->poll_flags = 0;
     operation->direct_file_index = -1;
     operation->opcode = opcode;
     operation->cancel_requested = false;
     operation->multishot = false;
     operation->poll_wait = false;
+    operation->net_poll = false;
     operation->zero_copy_send = false;
     operation->zero_copy_primary_done = false;
     operation->zero_copy_notification_done = false;
     operation->msg = nullptr;
     operation->socket_address = nullptr;
     operation->wait_registration = nullptr;
+    operation->net_channel = nullptr;
 
     int reserve_error = 0;
     io_uring_sqe *sqe = reserve_io_uring_sqe(reserve_error);
@@ -131,17 +134,20 @@ template <typename FillSqe>
     operation->task = task;
     operation->result = result;
     operation->complete_events = complete_events;
+    operation->poll_flags = 0;
     operation->direct_file_index = -1;
     operation->opcode = opcode;
     operation->cancel_requested = false;
     operation->multishot = false;
     operation->poll_wait = false;
+    operation->net_poll = false;
     operation->zero_copy_send = false;
     operation->zero_copy_primary_done = false;
     operation->zero_copy_notification_done = false;
     operation->msg = nullptr;
     operation->socket_address = nullptr;
     operation->wait_registration = nullptr;
+    operation->net_channel = nullptr;
 
     int reserve_error = 0;
     io_uring_sqe *sqe = reserve_io_uring_sqe(reserve_error);
@@ -209,17 +215,20 @@ Executor<RuntimeT, TraitsT>::submit_io_uring_socket_impl(int domain, int type, i
     operation->task = task;
     operation->result = result;
     operation->complete_events = io_readable;
+    operation->poll_flags = 0;
     operation->direct_file_index = -1;
     operation->opcode = detail::io_uring_op_socket;
     operation->cancel_requested = false;
     operation->multishot = false;
     operation->poll_wait = false;
+    operation->net_poll = false;
     operation->zero_copy_send = false;
     operation->zero_copy_primary_done = false;
     operation->zero_copy_notification_done = false;
     operation->msg = nullptr;
     operation->socket_address = nullptr;
     operation->wait_registration = nullptr;
+    operation->net_channel = nullptr;
 
     int reserve_error = 0;
     io_uring_sqe *sqe = reserve_io_uring_sqe(reserve_error);
@@ -316,17 +325,20 @@ template <typename RuntimeT, typename TraitsT>
     operation->task = task;
     operation->result = result;
     operation->complete_events = complete_events;
+    operation->poll_flags = 0;
     operation->direct_file_index = -1;
     operation->opcode = opcode;
     operation->cancel_requested = false;
     operation->multishot = false;
     operation->poll_wait = false;
+    operation->net_poll = false;
     operation->zero_copy_send = false;
     operation->zero_copy_primary_done = false;
     operation->zero_copy_notification_done = false;
     operation->msg = nullptr;
     operation->socket_address = nullptr;
     operation->wait_registration = nullptr;
+    operation->net_channel = nullptr;
 
     int reserve_error = 0;
     io_uring_sqe *sqe = reserve_io_uring_sqe(reserve_error);

@@ -12,6 +12,7 @@ void Executor<RuntimeT, TraitsT>::detect_io_uring_features() noexcept {
     io_uring_send_zc_available_ = false;
     io_uring_sendmsg_zc_available_ = false;
     io_uring_poll_add_available_ = false;
+    io_uring_net_poll_flags_ = IORING_POLL_ADD_MULTI | IORING_POLL_ADD_LEVEL;
     io_uring_socket_available_ = false;
 
     constexpr unsigned probe_count = 64;

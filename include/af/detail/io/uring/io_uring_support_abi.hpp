@@ -20,6 +20,14 @@
 #define IORING_RECV_MULTISHOT (1U << 1U)
 #endif
 
+#ifndef IORING_POLL_ADD_MULTI
+#define IORING_POLL_ADD_MULTI (1U << 0U)
+#endif
+
+#ifndef IORING_POLL_ADD_LEVEL
+#define IORING_POLL_ADD_LEVEL (1U << 3U)
+#endif
+
 #ifndef IORING_REGISTER_PBUF_RING
 #define IORING_REGISTER_PBUF_RING 22U
 #endif

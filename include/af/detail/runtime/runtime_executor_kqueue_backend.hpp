@@ -64,6 +64,7 @@ void Executor<RuntimeT, TraitsT>::close_native_io_backend() noexcept {
         if (entry.second != nullptr) {
             entry.second->active = false;
             entry.second->interests = 0;
+            entry.second->backend_token = nullptr;
         }
     }
     net_channels_.clear();

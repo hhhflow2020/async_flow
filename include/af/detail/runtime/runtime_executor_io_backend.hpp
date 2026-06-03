@@ -273,6 +273,11 @@ template <typename RuntimeT, typename TraitsT>
 [[nodiscard]] bool
 Executor<RuntimeT, TraitsT>::complete_io_uring_operation(IoUringOperation *operation, int result,
                                                          std::uint32_t cqe_flags) noexcept {
+    if (operation->net_poll) {
+        complete_io_uring_net_poll(operation, result, cqe_flags);
+        return false;
+    }
+
     if (operation->poll_wait) {
         complete_io_uring_poll_wait(operation, result);
         return false;
@@ -503,6 +508,12 @@ void Executor<RuntimeT, TraitsT>::clear_or_fail_io_uring_operations(
             continue;
         }
 
+        if (fail_io_uring_net_poll(operation, error)) {
+            destroy_io_uring_operation(operation);
+            operation = next;
+            continue;
+        }
+
         if (fail_io_uring_poll_wait(operation, error)) {
             destroy_io_uring_operation(operation);
             operation = next;
@@ -592,6 +603,12 @@ void Executor<RuntimeT, TraitsT>::clear_io_uring_result_token(
 #if defined(__linux__)
 template <typename RuntimeT, typename TraitsT>
 void Executor<RuntimeT, TraitsT>::destroy_io_uring_operation(IoUringOperation *operation) noexcept {
+    if (operation->net_poll && operation->net_channel != nullptr &&
+        operation->net_channel->backend_token == operation) {
+        operation->net_channel->backend_token = nullptr;
+        operation->net_channel->active = false;
+    }
+    operation->net_channel = nullptr;
     clear_io_uring_result_token(operation);
     if (operation->msg != nullptr) {
         io_uring_msg_pool_.destroy(operation->msg);

@@ -28,8 +28,10 @@ AsyncRuntime + Fixed Threads + Task + Scheduler + Shard + Ordered Batch
 - 新 `af::net` 主路径采用 reactor-driven 设计，IO 线程直接管理 fd、事件、
   buffer 和连接状态，不再把每个 socket readiness 绑定到普通 task 的
   pending/resume 热路径。
-- Linux 网络主路径采用 epoll LT，事件触发后 drain 到 `EAGAIN` 或预算耗尽；
-  `epoll_ctl` 只发生在 fd 注册、interest 变化和关闭时。
+- Linux native readiness 主路径采用 epoll LT，事件触发后 drain 到 `EAGAIN` 或预算耗尽；
+  `epoll_ctl` 只发生在 fd 注册、interest 变化和关闭时；`ThreadKind::IoUring`
+  线程优先用 io_uring poll 承接同一套 `NetIoChannel` readiness，并按
+  level-multishot、multishot、one-shot 的顺序自适应降级，最后才回退 epoll LT。
 - `TcpServer`、`UdpServer`、Unix socket server/client 都是绑定框架 IO 线程的网络服务
   抽象；业务 task 只处理业务计算和跨线程流程。
 - `TcpConnectionHandle` 由 `io_thread + slot + generation` 组成，允许业务层安全地
@@ -586,7 +588,7 @@ auto sharded = af::split_change_batch(batch, shard_count);
 - `StopImmediately` 可通过 `Traits::enable_task_registry = true` 开启 intrusive task registry，shutdown 后会取消并释放仍处于 `Pending` / `Queued` 的任务。
 - 有序 batch 提供 `af::retryable_ordered_batch_options`，业务重试同一 batch 时可跳过已经应用成功的 shard。
 - Linux IO executor 使用 epoll + eventfd，任务先调度到指定 IO 线程后再注册 fd readiness，避免所有 IO 都通过 MPMC 队列跨线程搬运。
-- `ThreadKind::IoUring` 优先初始化 io_uring，并通过 eventfd 唤醒 completion；如果 io_uring 不可用，线程仍保留 epoll readiness fallback。
+- `ThreadKind::IoUring` 优先初始化 io_uring，并通过 eventfd 唤醒 completion；`af::net` 的 `NetIoChannel` readiness 在内核支持时优先提交 `IORING_OP_POLL_ADD`，先尝试 multishot level poll，再按内核能力降到 multishot 或 one-shot poll，completion 直接回调 owner IO 线程上的 channel。如果 io_uring 不可用、ring 满、poll add 全部不可用或 submit 失败，线程仍保留 epoll LT fallback。
 - io_uring submit 在 executor tick 内合并，多个 SQE 尽量一次 `io_uring_enter` 提交；SQ 接近阈值或线程准备阻塞前会强制 flush，兼顾吞吐和尾延迟。
 - `af::io_openat()` / `io_openat2()` / `io_mkdirat()` / `io_close()` / `io_statx()` / `io_fallocate()` / `io_ftruncate()` / `io_linkat()` / `io_symlinkat()` / `io_renameat()` / `io_unlinkat()` 和 `af::IoFile::read_at()` / `write_at()` / `readv_at()` / `writev_at()` / `fsync()` 通过 io_uring 提交真正的文件生命周期操作，completion 后恢复原 task。
 - `af::io_sendfile_some()` 通过 Linux `sendfile(2)` 做文件到 socket 的内核态搬运，遇到 socket buffer 满时等待 out fd writable；`af::io_splice_some()` 在 `ThreadKind::IoUring` 优先提交 `IORING_OP_SPLICE`，不可用时退回 `splice(2)` + readiness。

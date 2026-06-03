@@ -215,14 +215,17 @@ public:
         operation->msg = nullptr;
         operation->socket_address = nullptr;
         operation->wait_registration = nullptr;
+        operation->net_channel = nullptr;
         operation->timeout.tv_sec = seconds.count();
         operation->timeout.tv_nsec = nanoseconds.count();
         operation->complete_events = io_readable;
+        operation->poll_flags = 0;
         operation->direct_file_index = -1;
         operation->opcode = IORING_OP_TIMEOUT;
         operation->cancel_requested = false;
         operation->multishot = false;
         operation->poll_wait = false;
+        operation->net_poll = false;
         operation->zero_copy_send = false;
         operation->zero_copy_primary_done = false;
         operation->zero_copy_notification_done = false;
@@ -1194,12 +1197,15 @@ private:
             __kernel_timespec timeout;
         };
         IoWaitRegistration *wait_registration{nullptr};
+        detail::NetIoChannel *net_channel{nullptr};
         std::uint32_t complete_events{0};
+        std::uint32_t poll_flags{0};
         int direct_file_index{-1};
         std::uint8_t opcode{0};
         bool cancel_requested{false};
         bool multishot{false};
         bool poll_wait{false};
+        bool net_poll{false};
         bool zero_copy_send{false};
         bool zero_copy_primary_done{false};
         bool zero_copy_notification_done{false};
@@ -1277,12 +1283,15 @@ private:
         operation->msg = nullptr;
         operation->socket_address = nullptr;
         operation->wait_registration = registration;
+        operation->net_channel = nullptr;
         operation->complete_events = 0;
+        operation->poll_flags = 0;
         operation->direct_file_index = -1;
         operation->opcode = IORING_OP_POLL_ADD;
         operation->cancel_requested = false;
         operation->multishot = false;
         operation->poll_wait = true;
+        operation->net_poll = false;
         operation->zero_copy_send = false;
         operation->zero_copy_primary_done = false;
         operation->zero_copy_notification_done = false;
@@ -1479,6 +1488,7 @@ private:
         operation->task = args.task;
         operation->result = args.result;
         operation->complete_events = args.complete_events;
+        operation->poll_flags = 0;
         operation->direct_file_index = args.direct_file_index;
         operation->opcode = args.opcode;
         operation->cancel_requested = false;
@@ -1490,6 +1500,8 @@ private:
         operation->msg = nullptr;
         operation->socket_address = nullptr;
         operation->wait_registration = nullptr;
+        operation->net_channel = nullptr;
+        operation->net_poll = false;
     }
 
     [[nodiscard]] bool attach_io_uring_generic_submit_message(const IoUringGenericSubmitArgs &args,
@@ -1579,6 +1591,19 @@ private:
     [[nodiscard]] static std::uint32_t
     epoll_events_for_net_channel(const detail::NetIoChannel &channel,
                                  std::uint32_t events) noexcept;
+#if defined(__linux__)
+    [[nodiscard]] IoUringPollSubmitResult
+    try_submit_io_uring_net_poll(detail::NetIoChannel *channel, std::uint32_t events) noexcept;
+    void detach_io_uring_net_poll(detail::NetIoChannel *channel) noexcept;
+    [[nodiscard]] bool fallback_io_uring_net_poll_to_epoll(detail::NetIoChannel *channel) noexcept;
+    void complete_io_uring_net_poll(IoUringOperation *operation, int result,
+                                    std::uint32_t cqe_flags) noexcept;
+    [[nodiscard]] bool fail_io_uring_net_poll(IoUringOperation *operation, int error) noexcept;
+    [[nodiscard]] static bool io_uring_net_poll_unsupported(int result) noexcept;
+    [[nodiscard]] bool degrade_io_uring_net_poll_flags(std::uint32_t rejected_flags) noexcept;
+#endif
+    [[nodiscard]] bool update_epoll_net_channel_interest(detail::NetIoChannel *channel,
+                                                         std::uint32_t events) noexcept;
     [[nodiscard]] bool update_net_channel_interest(detail::NetIoChannel *channel,
                                                    std::uint32_t events) noexcept;
     [[nodiscard]] bool native_io_backend_available() const noexcept;
@@ -1726,6 +1751,7 @@ private:
     void drain_io_wake() noexcept;
     [[nodiscard]] static std::uint32_t native_poll_events(std::uint32_t events) noexcept;
     [[nodiscard]] static std::uint32_t io_events_from_poll(std::uint32_t events) noexcept;
+    [[nodiscard]] static std::uint32_t net_events_from_poll(std::uint32_t events) noexcept;
     [[nodiscard]] static std::uint32_t io_events_from_native(std::uint32_t events) noexcept;
 #endif
 
@@ -1796,6 +1822,7 @@ private:
     bool io_uring_send_zc_available_{false};
     bool io_uring_sendmsg_zc_available_{false};
     bool io_uring_poll_add_available_{false};
+    std::uint32_t io_uring_net_poll_flags_{IORING_POLL_ADD_MULTI | IORING_POLL_ADD_LEVEL};
     bool io_uring_socket_available_{false};
     bool io_uring_buffers_registered_{false};
     unsigned io_uring_registered_buffer_count_{0};

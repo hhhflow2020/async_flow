@@ -72,7 +72,7 @@ void Executor<RuntimeT, TraitsT>::drain_io_wake() noexcept {
 template <typename RuntimeT, typename TraitsT>
 [[nodiscard]] std::uint32_t
 Executor<RuntimeT, TraitsT>::native_poll_events(std::uint32_t events) noexcept {
-    std::uint32_t result = POLLERR | POLLHUP;
+    std::uint32_t result = 0;
     if ((events & io_readable) != 0U) {
         result |= POLLIN;
     }
@@ -101,6 +101,30 @@ Executor<RuntimeT, TraitsT>::io_events_from_poll(std::uint32_t events) noexcept 
 #ifdef POLLRDHUP
     if ((events & POLLRDHUP) != 0U) {
         result |= io_hangup;
+    }
+#endif
+    return result;
+}
+
+template <typename RuntimeT, typename TraitsT>
+[[nodiscard]] std::uint32_t
+Executor<RuntimeT, TraitsT>::net_events_from_poll(std::uint32_t events) noexcept {
+    std::uint32_t result = 0;
+    if ((events & (POLLIN | POLLPRI)) != 0U) {
+        result |= detail::net_io_readable;
+    }
+    if ((events & POLLOUT) != 0U) {
+        result |= detail::net_io_writable;
+    }
+    if ((events & (POLLERR | POLLNVAL)) != 0U) {
+        result |= detail::net_io_error;
+    }
+    if ((events & POLLHUP) != 0U) {
+        result |= detail::net_io_hangup;
+    }
+#ifdef POLLRDHUP
+    if ((events & POLLRDHUP) != 0U) {
+        result |= detail::net_io_hangup;
     }
 #endif
     return result;
@@ -189,6 +213,7 @@ void Executor<RuntimeT, TraitsT>::close_native_io_backend() noexcept {
         if (entry.second != nullptr) {
             entry.second->active = false;
             entry.second->interests = 0;
+            entry.second->backend_token = nullptr;
         }
     }
     net_channels_.clear();
@@ -336,9 +361,234 @@ Executor<RuntimeT, TraitsT>::epoll_events_for_net_channel(const detail::NetIoCha
     return native_events;
 }
 
+#if defined(__linux__)
 template <typename RuntimeT, typename TraitsT>
-bool Executor<RuntimeT, TraitsT>::update_net_channel_interest(detail::NetIoChannel *channel,
-                                                              std::uint32_t events) noexcept {
+[[nodiscard]] bool Executor<RuntimeT, TraitsT>::io_uring_net_poll_unsupported(int result) noexcept {
+    const int error = result < 0 ? -result : result;
+    return error == EINVAL || error == EOPNOTSUPP || error == ENOSYS;
+}
+
+template <typename RuntimeT, typename TraitsT>
+[[nodiscard]] typename Executor<RuntimeT, TraitsT>::IoUringPollSubmitResult
+Executor<RuntimeT, TraitsT>::try_submit_io_uring_net_poll(detail::NetIoChannel *channel,
+                                                          std::uint32_t events) noexcept {
+    if (!io_uring_thread() || io_uring_fd_ < 0 || !io_uring_poll_add_available_) {
+        return IoUringPollSubmitResult::Fallback;
+    }
+    if (channel == nullptr || channel->fd < 0 ||
+        (events & (detail::net_io_readable | detail::net_io_writable)) == 0U) {
+        return IoUringPollSubmitResult::Failed;
+    }
+
+    const std::uint32_t native_events = native_poll_events(events);
+    if (native_events == 0U) {
+        return IoUringPollSubmitResult::Failed;
+    }
+
+    IoUringOperation *operation = nullptr;
+    try {
+        operation = io_uring_op_pool_.create();
+    } catch (...) {
+        return IoUringPollSubmitResult::Failed;
+    }
+
+    int reserve_error = 0;
+    io_uring_sqe *sqe = reserve_io_uring_sqe(reserve_error);
+    if (sqe == nullptr) {
+        io_uring_op_pool_.destroy(operation);
+        if (io_uring_fd_ < 0) {
+            return IoUringPollSubmitResult::BackendClosed;
+        }
+        return IoUringPollSubmitResult::Fallback;
+    }
+
+    operation->task = nullptr;
+    operation->result = nullptr;
+    operation->prev = nullptr;
+    operation->next = nullptr;
+    operation->msg = nullptr;
+    operation->socket_address = nullptr;
+    operation->wait_registration = nullptr;
+    operation->net_channel = channel;
+    operation->complete_events = 0;
+    operation->poll_flags = io_uring_net_poll_flags_;
+    operation->direct_file_index = -1;
+    operation->opcode = IORING_OP_POLL_ADD;
+    operation->cancel_requested = false;
+    operation->multishot = (operation->poll_flags & IORING_POLL_ADD_MULTI) != 0U;
+    operation->poll_wait = false;
+    operation->net_poll = true;
+    operation->zero_copy_send = false;
+    operation->zero_copy_primary_done = false;
+    operation->zero_copy_notification_done = false;
+
+    track_io_uring_operation(operation);
+
+    *sqe = io_uring_sqe{};
+    sqe->opcode = IORING_OP_POLL_ADD;
+    sqe->fd = channel->fd;
+    sqe->user_data = reinterpret_cast<std::uint64_t>(operation);
+    sqe->poll32_events = native_events;
+    sqe->len = operation->poll_flags;
+
+    channel->backend_token = operation;
+    channel->active = true;
+    channel->interests = events;
+
+    if (io_uring_pending_submissions_ >= io_uring_submit_batch_threshold) {
+        const int submit_error = flush_io_uring_submissions();
+        if (submit_error == 0) {
+            return IoUringPollSubmitResult::Submitted;
+        }
+        fail_io_uring_backend(submit_error, operation);
+        return IoUringPollSubmitResult::BackendClosed;
+    }
+    return IoUringPollSubmitResult::Submitted;
+}
+
+template <typename RuntimeT, typename TraitsT>
+void Executor<RuntimeT, TraitsT>::detach_io_uring_net_poll(detail::NetIoChannel *channel) noexcept {
+    if (channel == nullptr || channel->backend_token == nullptr) {
+        return;
+    }
+
+    auto *operation = static_cast<IoUringOperation *>(channel->backend_token);
+    channel->backend_token = nullptr;
+    if (operation->net_channel == channel) {
+        operation->net_channel = nullptr;
+    }
+    operation->cancel_requested = true;
+    static_cast<void>(submit_io_uring_cancel(operation));
+}
+
+template <typename RuntimeT, typename TraitsT>
+[[nodiscard]] bool Executor<RuntimeT, TraitsT>::fallback_io_uring_net_poll_to_epoll(
+    detail::NetIoChannel *channel) noexcept {
+    if (channel == nullptr || channel->fd < 0) {
+        return false;
+    }
+    auto it = net_channels_.find(channel->fd);
+    if (it == net_channels_.end() || it->second != channel) {
+        return false;
+    }
+    const std::uint32_t interests = channel->interests;
+    channel->backend_token = nullptr;
+    channel->active = false;
+    if ((interests & (detail::net_io_readable | detail::net_io_writable)) == 0U) {
+        return true;
+    }
+    return update_epoll_net_channel_interest(channel, interests);
+}
+
+template <typename RuntimeT, typename TraitsT>
+[[nodiscard]] bool Executor<RuntimeT, TraitsT>::degrade_io_uring_net_poll_flags(
+    std::uint32_t rejected_flags) noexcept {
+    if ((rejected_flags & IORING_POLL_ADD_LEVEL) != 0U) {
+        io_uring_net_poll_flags_ &= ~static_cast<std::uint32_t>(IORING_POLL_ADD_LEVEL);
+        return true;
+    }
+    if ((rejected_flags & IORING_POLL_ADD_MULTI) != 0U) {
+        io_uring_net_poll_flags_ &= ~static_cast<std::uint32_t>(IORING_POLL_ADD_MULTI);
+        return true;
+    }
+    return false;
+}
+
+template <typename RuntimeT, typename TraitsT>
+void Executor<RuntimeT, TraitsT>::complete_io_uring_net_poll(IoUringOperation *operation,
+                                                             int result,
+                                                             std::uint32_t cqe_flags) noexcept {
+    detail::NetIoChannel *channel = operation->net_channel;
+    const bool more =
+        result >= 0 && (cqe_flags & IORING_CQE_F_MORE) != 0U && !operation->cancel_requested;
+
+    if (!more) {
+        untrack_io_uring_operation(operation);
+        if (channel != nullptr && channel->backend_token == operation) {
+            channel->backend_token = nullptr;
+            channel->active = false;
+        }
+        operation->net_channel = nullptr;
+    }
+
+    if (operation->cancel_requested || channel == nullptr) {
+        if (!more) {
+            destroy_io_uring_operation(operation);
+        }
+        return;
+    }
+
+    auto it = net_channels_.find(channel->fd);
+    if (it == net_channels_.end() || it->second != channel) {
+        if (!more) {
+            destroy_io_uring_operation(operation);
+        }
+        return;
+    }
+
+    if (result < 0 && io_uring_net_poll_unsupported(result)) {
+        if (!more) {
+            if (degrade_io_uring_net_poll_flags(operation->poll_flags) &&
+                channel->interests != 0U) {
+                const IoUringPollSubmitResult retry_result =
+                    try_submit_io_uring_net_poll(channel, channel->interests);
+                if (retry_result == IoUringPollSubmitResult::Submitted) {
+                    destroy_io_uring_operation(operation);
+                    return;
+                }
+            }
+            static_cast<void>(fallback_io_uring_net_poll_to_epoll(channel));
+            destroy_io_uring_operation(operation);
+        }
+        return;
+    }
+
+    std::uint32_t events = detail::net_io_error;
+    if (result >= 0) {
+        events = net_events_from_poll(static_cast<std::uint32_t>(result));
+    }
+
+    if (!more && channel->interests != 0U) {
+        const IoUringPollSubmitResult poll_result =
+            try_submit_io_uring_net_poll(channel, channel->interests);
+        if (poll_result != IoUringPollSubmitResult::Submitted) {
+            static_cast<void>(fallback_io_uring_net_poll_to_epoll(channel));
+        }
+    }
+
+    if (channel->on_event != nullptr) {
+        channel->on_event(channel->owner, events);
+    }
+
+    if (!more) {
+        destroy_io_uring_operation(operation);
+    }
+}
+
+template <typename RuntimeT, typename TraitsT>
+[[nodiscard]] bool Executor<RuntimeT, TraitsT>::fail_io_uring_net_poll(IoUringOperation *operation,
+                                                                       int error) noexcept {
+    if (operation == nullptr || !operation->net_poll) {
+        return false;
+    }
+
+    detail::NetIoChannel *channel = operation->net_channel;
+    if (channel != nullptr && channel->backend_token == operation) {
+        channel->backend_token = nullptr;
+        channel->active = false;
+        if (!fallback_io_uring_net_poll_to_epoll(channel) && channel->on_event != nullptr) {
+            channel->on_event(channel->owner, detail::net_io_error);
+        }
+    }
+    operation->net_channel = nullptr;
+    static_cast<void>(error);
+    return true;
+}
+#endif
+
+template <typename RuntimeT, typename TraitsT>
+bool Executor<RuntimeT, TraitsT>::update_epoll_net_channel_interest(detail::NetIoChannel *channel,
+                                                                    std::uint32_t events) noexcept {
     if (io_epoll_fd_ < 0 || channel == nullptr || channel->fd < 0) {
         return false;
     }
@@ -348,6 +598,7 @@ bool Executor<RuntimeT, TraitsT>::update_net_channel_interest(detail::NetIoChann
         }
         channel->active = false;
         channel->interests = 0;
+        channel->backend_token = nullptr;
         return true;
     }
 
@@ -366,6 +617,49 @@ bool Executor<RuntimeT, TraitsT>::update_net_channel_interest(detail::NetIoChann
     channel->active = true;
     channel->interests = events;
     return true;
+}
+
+template <typename RuntimeT, typename TraitsT>
+bool Executor<RuntimeT, TraitsT>::update_net_channel_interest(detail::NetIoChannel *channel,
+                                                              std::uint32_t events) noexcept {
+    if (io_epoll_fd_ < 0 || channel == nullptr || channel->fd < 0) {
+        return false;
+    }
+
+#if defined(__linux__)
+    if (channel->backend_token != nullptr) {
+        if ((events & (detail::net_io_readable | detail::net_io_writable)) == 0U) {
+            detach_io_uring_net_poll(channel);
+            channel->active = false;
+            channel->interests = 0;
+            return true;
+        }
+        if (events == channel->interests) {
+            return true;
+        }
+        detach_io_uring_net_poll(channel);
+        channel->active = false;
+        channel->interests = events;
+        const IoUringPollSubmitResult poll_result = try_submit_io_uring_net_poll(channel, events);
+        if (poll_result == IoUringPollSubmitResult::Submitted) {
+            return true;
+        }
+        if (poll_result == IoUringPollSubmitResult::Failed) {
+            return false;
+        }
+    } else if (!channel->active &&
+               (events & (detail::net_io_readable | detail::net_io_writable)) != 0U) {
+        const IoUringPollSubmitResult poll_result = try_submit_io_uring_net_poll(channel, events);
+        if (poll_result == IoUringPollSubmitResult::Submitted) {
+            return true;
+        }
+        if (poll_result == IoUringPollSubmitResult::Failed) {
+            return false;
+        }
+    }
+#endif
+
+    return update_epoll_net_channel_interest(channel, events);
 }
 
 template <typename RuntimeT, typename TraitsT>
