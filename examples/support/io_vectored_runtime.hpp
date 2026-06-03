@@ -7,12 +7,10 @@
 
 #include "af/async_flow.hpp"
 
-#if defined(__linux__)
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <unistd.h>
-#endif
 
 namespace io_vectored_example {
 

@@ -2,31 +2,58 @@
 
 #include "io_vectored_runtime.hpp"
 
-#if defined(__linux__)
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
-#endif
+#include <unistd.h>
 
 namespace io_vectored_example {
 
 struct VectoredUdpEndpoint {
-#if defined(__linux__)
     sockaddr_in address{};
     socklen_t address_size{sizeof(address)};
-#endif
 };
 
-#if defined(__linux__)
+inline bool apply_vectored_socket_flags(int fd) noexcept {
+#if !defined(SOCK_NONBLOCK)
+    const int status_flags = ::fcntl(fd, F_GETFL, 0);
+    if (status_flags < 0 || ::fcntl(fd, F_SETFL, status_flags | O_NONBLOCK) != 0) {
+        return false;
+    }
+#endif
+
+#if !defined(SOCK_CLOEXEC)
+    const int descriptor_flags = ::fcntl(fd, F_GETFD, 0);
+    if (descriptor_flags < 0 || ::fcntl(fd, F_SETFD, descriptor_flags | FD_CLOEXEC) != 0) {
+        return false;
+    }
+#endif
+    return true;
+}
+
+[[nodiscard]] inline int vectored_socket_type(int base) noexcept {
+#if defined(SOCK_NONBLOCK)
+    base |= SOCK_NONBLOCK;
+#endif
+#if defined(SOCK_CLOEXEC)
+    base |= SOCK_CLOEXEC;
+#endif
+    return base;
+}
 
 struct VectoredStreamSocketPair {
     [[nodiscard]] bool create() noexcept {
         int fds[2]{-1, -1};
-        if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds) != 0) {
+        if (::socketpair(AF_UNIX, vectored_socket_type(SOCK_STREAM), 0, fds) != 0) {
             return false;
         }
         server.reset(fds[0]);
         client.reset(fds[1]);
+        if (!apply_vectored_socket_flags(server.get()) ||
+            !apply_vectored_socket_flags(client.get())) {
+            return false;
+        }
         return true;
     }
 
@@ -36,9 +63,10 @@ struct VectoredStreamSocketPair {
 
 struct VectoredUdpLoopbackSockets {
     [[nodiscard]] bool create() noexcept {
-        receiver.reset(::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
-        sender.reset(::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
-        if (!receiver || !sender) {
+        receiver.reset(::socket(AF_INET, vectored_socket_type(SOCK_DGRAM), 0));
+        sender.reset(::socket(AF_INET, vectored_socket_type(SOCK_DGRAM), 0));
+        if (!receiver || !sender || !apply_vectored_socket_flags(receiver.get()) ||
+            !apply_vectored_socket_flags(sender.get())) {
             return false;
         }
 
@@ -65,34 +93,5 @@ struct VectoredUdpLoopbackSockets {
 private:
     VectoredUdpEndpoint endpoint_{};
 };
-
-#else
-
-struct VectoredStreamSocketPair {
-    [[nodiscard]] bool create() noexcept {
-        return false;
-    }
-
-    af::UniqueFd server{};
-    af::UniqueFd client{};
-};
-
-struct VectoredUdpLoopbackSockets {
-    [[nodiscard]] bool create() noexcept {
-        return false;
-    }
-
-    [[nodiscard]] const VectoredUdpEndpoint &endpoint() const noexcept {
-        return endpoint_;
-    }
-
-    af::UniqueFd receiver{};
-    af::UniqueFd sender{};
-
-private:
-    VectoredUdpEndpoint endpoint_{};
-};
-
-#endif
 
 } // namespace io_vectored_example

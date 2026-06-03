@@ -75,6 +75,10 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - Test support and benchmark support detail headers now use normal `*.hpp` names and no detail include gate macros instead of `*_fragment.hpp` filenames or `FRAGMENT_INCLUDE`/`DETAIL_INCLUDE` gates. The remaining benchmark `FakeRuntime` class-body include splice was replaced with operation-family base structs.
 - The length-prefixed RPC example is now split into runtime traits, server/process task fragments, a cohesive client state-machine task, and a thin executable entry point.
 - The vectored IO example is now split into runtime/common helpers, stream readv/writev tasks, datagram recvmsg/sendmsg tasks, and a thin executable entry point.
+- The vectored IO example is no longer Linux-only. It uses POSIX socket setup
+  with portable nonblocking/close-on-exec flag handling and the framework's
+  preferred IO thread kind, so Linux runs through io_uring/epoll fallback and
+  macOS/BSD runs through kqueue without user-visible platform guards.
 - The io_uring UDP recvmsg multishot example is now split into runtime/wait helpers, UDP socket setup helpers, a cohesive provided-buffer recvmsg multishot task class, and a thin executable entry point.
 - The io_uring accept-direct example is now split into runtime/wait helpers, socket setup/read-write helpers, the fixed-file accept round-trip task, and a thin executable entry point.
 - The io_uring fixed-file example is now split into runtime traits, temporary file lifecycle helpers, a cohesive registered-file/buffer task class, and a thin executable entry point.

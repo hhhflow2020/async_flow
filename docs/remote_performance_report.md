@@ -2910,3 +2910,52 @@ Interpretation:
 - User code can now reference these runtime submit methods across supported
   POSIX platforms and branch on runtime/platform capability or returned
   `ENOSYS`, rather than using preprocessor guards to check method existence.
+
+## 2026-06-03 POSIX Vectored IO Example
+
+This pass makes the vectored IO example a real POSIX example instead of a
+Linux-only smoke path. The example now uses the framework's preferred IO thread
+kind and runs on macOS/BSD through kqueue while still using io_uring on Linux
+when available.
+
+Changes under validation:
+
+- Removed `__linux__` guards and non-Linux stubs from
+  `io_vectored_runtime.hpp`, `io_vectored_socket_helpers.hpp`,
+  `io_vectored_stream_tasks.hpp`, and `io_vectored_datagram_tasks.hpp`.
+- Replaced Linux-only socket setup with POSIX socket setup plus portable
+  nonblocking/close-on-exec flag handling.
+- Removed the main-program Linux-only early return and report the actual
+  runtime backend via `af::runtime_io_backend_name`.
+
+Correctness checks:
+
+- Local macOS Debug built `asyncflow_io_vectored_example`.
+- Local macOS Debug `asyncflow_io_vectored_example` ran successfully with
+  `backend=kqueue`, stream request/response `0x4849 -> 0x4f4b`, and UDP
+  datagram `0x5544`.
+- Local macOS Debug ctest `Vectored|Stream|Datagram`: 39 tests selected, 0
+  failures; Linux-only runtime tests were skipped by capability logic.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: `asyncflow_io_vectored_example` and
+  `asyncflow_runtime_tests` built; the vectored example ran successfully with
+  `backend=io_uring`; ctest `Vectored|Stream|Datagram` reported 37 tests, 0
+  failures.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: `asyncflow_io_vectored_example` and
+  `asyncflow_runtime_tests` built; the vectored example ran successfully with
+  `backend=io_uring`; ctest `Vectored|Stream|Datagram` reported 37 tests, 0
+  failures.
+
+Interpretation:
+
+- This is an example portability cleanup only. It does not change runtime
+  scheduler routing, local/SPSC/MPSC queue topology, IO wait state transitions,
+  io_uring SQE arguments, readiness fallback behavior, locks, atomics,
+  allocations, memory ordering, or cache layout.
+- The example now demonstrates the intended user-facing model: choose
+  `af::preferred_io_thread_kind`, use public adapters, and let the framework
+  select io_uring/epoll/kqueue internally instead of writing platform guards in
+  application code.

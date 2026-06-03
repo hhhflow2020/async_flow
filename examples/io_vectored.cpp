@@ -8,11 +8,6 @@
 int main() {
     using namespace io_vectored_example;
 
-    if constexpr (!af::supports_io_uring) {
-        std::cout << "vectored io example is Linux-only\n";
-        return 0;
-    }
-
     vectored_async::init();
 
     VectoredStreamSocketPair stream{};
@@ -37,9 +32,7 @@ int main() {
         return 1;
     }
 
-    const char *backend = vectored_async::io_uring_backend_available(VectoredThreads::IO_0)
-                              ? "io_uring"
-                              : "epoll-fallback";
+    const char *backend = af::runtime_io_backend_name<vectored_async>(VectoredThreads::IO_0);
     std::cout << "vectored stream backend=" << backend << '\n';
 
     VectoredUdpLoopbackSockets udp{};

@@ -5,8 +5,6 @@
 #include "io_vectored_runtime.hpp"
 #include "io_vectored_socket_helpers.hpp"
 
-#if defined(__linux__)
-
 namespace io_vectored_example {
 
 class DatagramReceiverTask final : public VectoredTask {
@@ -95,47 +93,3 @@ private:
 };
 
 } // namespace io_vectored_example
-
-#else
-
-namespace io_vectored_example {
-
-class DatagramReceiverTask final : public VectoredTask {
-public:
-    explicit DatagramReceiverTask(VectoredTask::FactoryToken token) : VectoredTask(token) {}
-
-    bool do_it(int fd, std::atomic<int> *armed, bool *ok, int *payload_seen) {
-        static_cast<void>(fd);
-        static_cast<void>(armed);
-        static_cast<void>(ok);
-        static_cast<void>(payload_seen);
-        return false;
-    }
-
-private:
-    af::TaskResult run() override {
-        return failed();
-    }
-};
-
-class DatagramSenderTask final : public VectoredTask {
-public:
-    explicit DatagramSenderTask(VectoredTask::FactoryToken token) : VectoredTask(token) {}
-
-    bool do_it(int fd, const VectoredUdpEndpoint &endpoint, bool *ok, int *bytes_sent) {
-        static_cast<void>(fd);
-        static_cast<void>(endpoint);
-        static_cast<void>(ok);
-        static_cast<void>(bytes_sent);
-        return false;
-    }
-
-private:
-    af::TaskResult run() override {
-        return failed();
-    }
-};
-
-} // namespace io_vectored_example
-
-#endif
