@@ -1106,6 +1106,28 @@ TEST(LogTests, SpscRecordPoolBatchReleaseReusesSlots) {
         std::span<af::detail::LogRecord *const>(records.data(), records.size()));
 }
 
+TEST(LogTests, SpscRecordPoolProducerReleaseReusesSpareSlot) {
+    af::detail::AsyncLogSpscRecordPool pool(1);
+
+    af::detail::LogRecord *record = pool.try_acquire("spsc producer abandoned record\n");
+    ASSERT_NE(record, nullptr);
+    pool.release_from_producer(record);
+
+    af::detail::LogRecord *reused = pool.try_acquire("spsc producer reused abandoned record\n");
+    EXPECT_EQ(reused, record);
+    ASSERT_NE(reused, nullptr);
+
+    std::array<af::detail::LogRecord *, 1> records{reused};
+    af::detail::release_async_log_records(
+        std::span<af::detail::LogRecord *const>(records.data(), records.size()));
+
+    af::detail::LogRecord *consumer_reused = pool.try_acquire("spsc consumer released record\n");
+    ASSERT_NE(consumer_reused, nullptr);
+    records[0] = consumer_reused;
+    af::detail::release_async_log_records(
+        std::span<af::detail::LogRecord *const>(records.data(), records.size()));
+}
+
 TEST(LogTests, RuntimeAwareSinkTagsFirstUserLogFieldWithRuntimeTaskId) {
     const auto path = std::filesystem::temp_directory_path() / "async_flow_task_id_log.txt";
     std::filesystem::remove(path);

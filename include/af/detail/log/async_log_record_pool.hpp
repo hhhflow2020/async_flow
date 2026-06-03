@@ -194,7 +194,7 @@ public:
     AsyncLogSpscRecordPool &operator=(const AsyncLogSpscRecordPool &) = delete;
 
     [[nodiscard]] LogRecord *try_acquire(std::string_view message) noexcept {
-        Slot *slot = free_slots_.try_pop();
+        Slot *slot = acquire_producer_slot();
         if (slot == nullptr) {
             return nullptr;
         }
@@ -202,7 +202,7 @@ public:
         try {
             slot->record.reset(message);
         } catch (...) {
-            release(slot);
+            stash_producer_slot(slot);
             return nullptr;
         }
         return &slot->record;
@@ -212,6 +212,12 @@ public:
         auto *slot = static_cast<Slot *>(header);
         AF_ASSERT(slot != nullptr && slot->owner != nullptr);
         static_cast<AsyncLogSpscRecordPool *>(slot->owner)->release(slot);
+    }
+
+    void release_from_producer(LogRecord *record) noexcept {
+        auto *slot = static_cast<Slot *>(record->pool_slot());
+        AF_ASSERT(slot != nullptr && slot->owner == this);
+        stash_producer_slot(slot);
     }
 
     void release_records(std::span<LogRecord *const> records) noexcept {
@@ -244,6 +250,21 @@ private:
         return capacity;
     }
 
+    [[nodiscard]] Slot *acquire_producer_slot() noexcept {
+        if (producer_spare_slot_ != nullptr) {
+            Slot *slot = producer_spare_slot_;
+            producer_spare_slot_ = nullptr;
+            return slot;
+        }
+        return free_slots_.try_pop();
+    }
+
+    void stash_producer_slot(Slot *slot) noexcept {
+        AF_ASSERT(slot != nullptr && slot->owner == this);
+        AF_ASSERT(producer_spare_slot_ == nullptr);
+        producer_spare_slot_ = slot;
+    }
+
     void release(Slot *slot) noexcept {
         const bool pushed = free_slots_.try_push(slot);
         AF_ASSERT(pushed);
@@ -253,6 +274,7 @@ private:
     const std::size_t capacity_;
     std::unique_ptr<Slot[]> slots_;
     BoundedSpscQueue<Slot> free_slots_;
+    Slot *producer_spare_slot_{nullptr};
 };
 
 inline void release_async_log_record(LogRecord *record) noexcept {

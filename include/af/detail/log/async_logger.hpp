@@ -164,7 +164,7 @@ private:
 
         pending_.fetch_add(1U, std::memory_order_relaxed);
         if (!push_record(lane, record)) {
-            release_record(record);
+            release_unpublished_record(lane, record);
             abandon_pending_record();
             record_dropped(lane);
             return false;
@@ -353,6 +353,16 @@ private:
 
     static void release_record(detail::LogRecord *record) noexcept {
         detail::release_async_log_record(record);
+    }
+
+    static void release_unpublished_record(detail::AsyncLogQueueShard &,
+                                           detail::LogRecord *record) noexcept {
+        release_record(record);
+    }
+
+    static void release_unpublished_record(detail::AsyncLogRuntimeLane &lane,
+                                           detail::LogRecord *record) noexcept {
+        lane.records.release_from_producer(record);
     }
 
     void shutdown() noexcept {
