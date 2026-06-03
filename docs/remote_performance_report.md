@@ -2158,6 +2158,39 @@ Interpretation:
   of specific examples and remain separate from the public scheduling/runtime
   configuration style.
 
+## 2026-06-03 Native Readiness Example Platform Setup Encapsulation
+
+This pass keeps the normal native readiness example focused on AsyncFlow task
+and IO flow by moving POSIX socketpair/fd setup into a support helper.
+
+Changes under validation:
+
+- Added `examples/support/io_native_readiness_socket_pair.hpp` with
+  `NativeReadinessSocketPair`, nonblocking/close-on-exec setup, and a
+  one-byte peer write helper.
+- Updated `examples/io_native_readiness.cpp` to use `af::platform_posix`, the
+  support socket pair, and `write_native_readiness_byte()`.
+- Removed direct POSIX system headers, manual `::close()` calls, and the
+  executable-body `_WIN32` branch from the example source.
+
+Correctness checks:
+
+- Local macOS Debug `asyncflow_io_native_readiness_example` build/run: passed
+  with `native IO received byte: N`.
+- Remote GCC Debug, `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`, `asyncflow_io_native_readiness_example` build/run:
+  passed with `native IO received byte: N`.
+- Remote Clang Debug, `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`, `asyncflow_io_native_readiness_example` build/run:
+  passed with `native IO received byte: N`.
+
+Interpretation:
+
+- Users reading or copying the example now see the runtime/thread/task flow
+  first; platform syscall setup is isolated in example support code.
+- This does not change runtime scheduling, queue selection, IO backend
+  behavior, locking, memory ordering, or public API semantics.
+
 ## 2026-06-03 Event/Timer Wait Platform Branch Encapsulation
 
 This pass moves the `eventfd`/`timerfd` wait-read platform branch out of the

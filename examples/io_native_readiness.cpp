@@ -5,12 +5,7 @@
 #include <thread>
 
 #include "af/async_flow.hpp"
-
-#if !defined(_WIN32)
-#include <fcntl.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#endif
+#include "support/io_native_readiness_socket_pair.hpp"
 
 namespace {
 
@@ -41,34 +36,6 @@ bool wait_until(std::atomic<int> &value, int expected) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     return true;
-}
-
-#if !defined(_WIN32)
-bool set_nonblocking_cloexec(int fd) {
-    const int flags = ::fcntl(fd, F_GETFL, 0);
-    if (flags < 0 || ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) {
-        return false;
-    }
-    const int fd_flags = ::fcntl(fd, F_GETFD, 0);
-    return fd_flags >= 0 && ::fcntl(fd, F_SETFD, fd_flags | FD_CLOEXEC) == 0;
-}
-
-bool make_socket_pair(int fds[2]) {
-    fds[0] = -1;
-    fds[1] = -1;
-    if (::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0) {
-        return false;
-    }
-    if (set_nonblocking_cloexec(fds[0]) && set_nonblocking_cloexec(fds[1])) {
-        return true;
-    }
-    if (fds[0] >= 0) {
-        ::close(fds[0]);
-    }
-    if (fds[1] >= 0) {
-        ::close(fds[1]);
-    }
-    return false;
 }
 
 class ReadOneByteTask final : public NativeIoTask {
@@ -125,12 +92,17 @@ private:
     af::IoOpState read_{};
     std::atomic<int> *armed_{nullptr};
 };
-#endif
 
 } // namespace
 
 int main() {
-#if !defined(_WIN32)
+    if constexpr (!af::platform_posix) {
+        std::cout << "native readiness IO example is unavailable on Windows\n";
+        return 0;
+    }
+
+    using namespace io_native_readiness_example;
+
     NativeIoRuntime::init();
     if (!NativeIoRuntime::io_backend_available(NativeIoThreads::IO_0)) {
         std::cout << "native IO backend unavailable\n";
@@ -138,32 +110,23 @@ int main() {
         return 0;
     }
 
-    int fds[2]{-1, -1};
-    if (!make_socket_pair(fds)) {
+    NativeReadinessSocketPair sockets{};
+    if (!sockets.create()) {
         std::cerr << "socketpair failed\n";
         NativeIoRuntime::shutdown();
         return 1;
     }
 
     std::atomic<int> armed{0};
-    const bool started = NativeIoRuntime::start_task<ReadOneByteTask>(fds[0], &armed);
+    const bool started = NativeIoRuntime::start_task<ReadOneByteTask>(sockets.reader.get(), &armed);
     if (!started || !wait_until(armed, 1)) {
         std::cerr << "read task did not arm\n";
-        ::close(fds[0]);
-        ::close(fds[1]);
         NativeIoRuntime::shutdown();
         return 1;
     }
 
-    const char value = 'N';
-    static_cast<void>(::write(fds[1], &value, sizeof(value)));
+    static_cast<void>(write_native_readiness_byte(sockets.writer.get(), 'N'));
 
     NativeIoRuntime::shutdown();
-    ::close(fds[0]);
-    ::close(fds[1]);
     return 0;
-#else
-    std::cout << "native readiness IO example is unavailable on Windows\n";
-    return 0;
-#endif
 }
