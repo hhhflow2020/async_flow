@@ -96,11 +96,6 @@ private:
 } // namespace
 
 int main() {
-    if constexpr (!af::platform_posix) {
-        std::cout << "native readiness IO example is unavailable on Windows\n";
-        return 0;
-    }
-
     using namespace io_native_readiness_example;
 
     NativeIoRuntime::init();

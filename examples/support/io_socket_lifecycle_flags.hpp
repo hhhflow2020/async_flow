@@ -1,6 +1,5 @@
 #pragma once
 
-#if !defined(_WIN32)
 #include <cerrno>
 #include <fcntl.h>
 #include <sys/socket.h>
@@ -39,5 +38,3 @@ namespace io_socket_lifecycle_example {
 }
 
 } // namespace io_socket_lifecycle_example
-
-#endif

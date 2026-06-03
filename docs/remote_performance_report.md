@@ -2168,10 +2168,10 @@ Changes under validation:
 - Added `examples/support/io_native_readiness_socket_pair.hpp` with
   `NativeReadinessSocketPair`, nonblocking/close-on-exec setup, and a
   one-byte peer write helper.
-- Updated `examples/io_native_readiness.cpp` to use `af::platform_posix`, the
-  support socket pair, and `write_native_readiness_byte()`.
+- Updated `examples/io_native_readiness.cpp` to use the support socket pair
+  and `write_native_readiness_byte()`.
 - Removed direct POSIX system headers, manual `::close()` calls, and the
-  executable-body `_WIN32` branch from the example source.
+  executable-body Windows fallback from the example source.
 
 Correctness checks:
 
@@ -2190,6 +2190,50 @@ Interpretation:
   first; platform syscall setup is isolated in example support code.
 - This does not change runtime scheduling, queue selection, IO backend
   behavior, locking, memory ordering, or public API semantics.
+
+## 2026-06-03 POSIX-Only IO Example Entry Cleanup
+
+This pass follows the updated project direction that Windows is no longer a
+target platform. Instead of hiding Windows fallback branches in example entry
+points, it removes those branches from the affected POSIX socket examples.
+
+Changes under validation:
+
+- Added support-level run helpers for TCP connect/accept, socket lifecycle, and
+  datagram examples, keeping each executable entry point as a small call into
+  the example support layer.
+- Removed `_WIN32` wrappers from the native readiness, TCP connect/accept,
+  socket lifecycle, and datagram example support headers touched by this pass.
+- Kept `SOCK_NONBLOCK` and `SOCK_CLOEXEC` feature checks because they describe
+  POSIX socket capability availability, not Windows compatibility.
+
+Correctness checks:
+
+- Local macOS Debug build/run passed for
+  `asyncflow_io_native_readiness_example`,
+  `asyncflow_io_tcp_connect_accept_example`,
+  `asyncflow_io_socket_lifecycle_example`, and
+  `asyncflow_io_uring_datagram_example`.
+- Local macOS runs reported `native IO received byte: N`, TCP
+  `backend=kqueue`, socket lifecycle `backend=kqueue`, and datagram
+  `backend=kqueue`.
+- Remote GCC Debug, `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`, with isolated `/data/conan-cache-gcc`: all four
+  example targets built and ran successfully. Linux runs reported native byte
+  `N`, TCP `backend=io_uring`, socket lifecycle `backend=epoll-fallback`, and
+  datagram `backend=io_uring`.
+- Remote Clang Debug, `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`, with isolated `/data/conan-cache-clang`: all four
+  example targets built and ran successfully with the same backend outcomes as
+  GCC.
+- `git diff --check`: passed.
+
+Interpretation:
+
+- These examples now align better with the no-Windows support direction and
+  have smaller executable entry points.
+- Runtime scheduling, queue selection, IO backend behavior, locking, atomics,
+  memory ordering, and public API semantics were not changed.
 
 ## 2026-06-03 Event/Timer Wait Platform Branch Encapsulation
 

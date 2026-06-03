@@ -4,7 +4,6 @@
 
 #include "io_uring_datagram_runtime.hpp"
 
-#if !defined(_WIN32)
 #include <netinet/in.h>
 #include <sys/socket.h>
 
@@ -86,5 +85,3 @@ private:
 };
 
 } // namespace io_uring_datagram_example
-
-#endif

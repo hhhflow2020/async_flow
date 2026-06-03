@@ -2,7 +2,6 @@
 
 #include "io_uring_datagram_runtime.hpp"
 
-#if !defined(_WIN32)
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -73,5 +72,3 @@ struct DatagramLoopbackSockets {
 };
 
 } // namespace io_uring_datagram_example
-
-#endif

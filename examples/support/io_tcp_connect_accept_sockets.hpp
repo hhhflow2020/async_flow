@@ -2,7 +2,6 @@
 
 #include "io_tcp_connect_accept_runtime.hpp"
 
-#if !defined(_WIN32)
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -79,5 +78,3 @@ struct TcpLoopbackSockets {
 };
 
 } // namespace io_tcp_connect_accept_example
-
-#endif

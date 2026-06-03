@@ -5,7 +5,6 @@
 
 #include "io_socket_lifecycle_client_task.hpp"
 
-#if !defined(_WIN32)
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -166,5 +165,3 @@ private:
 };
 
 } // namespace io_socket_lifecycle_example
-
-#endif

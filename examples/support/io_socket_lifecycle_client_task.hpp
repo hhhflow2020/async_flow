@@ -6,7 +6,6 @@
 #include "io_socket_lifecycle_flags.hpp"
 #include "io_socket_lifecycle_runtime.hpp"
 
-#if !defined(_WIN32)
 #include <netinet/in.h>
 #include <sys/socket.h>
 
@@ -106,5 +105,3 @@ private:
 };
 
 } // namespace io_socket_lifecycle_example
-
-#endif
