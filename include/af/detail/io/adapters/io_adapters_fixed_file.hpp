@@ -30,7 +30,6 @@ public:
         return af::io_read_fixed_file_at(task, thread_, index_, data, size, offset, state);
     }
 
-#if !defined(_WIN32)
     template <typename TaskT>
     [[nodiscard]] IoStatus readv_at(TaskT &task, const iovec *iov, int iov_count,
                                     std::uint64_t offset, IoOpState &state) const noexcept {
@@ -56,8 +55,6 @@ public:
                       "IoFixedFile thread type must match the task runtime thread type");
         return af::io_read_fixed_file_at(task, thread_, index_, buffer, offset, state);
     }
-#endif
-
     template <typename TaskT>
     [[nodiscard]] IoStatus recv_some(TaskT &task, void *data, std::size_t size, IoOpState &state,
                                      std::uint32_t flags = 0) const noexcept {
@@ -66,7 +63,6 @@ public:
         return af::io_recv_fixed_file_some(task, thread_, index_, data, size, state, flags);
     }
 
-#if !defined(_WIN32)
     template <typename TaskT>
     [[nodiscard]] IoStatus recvv_some(TaskT &task, const iovec *iov, int iov_count,
                                       IoOpState &state, std::uint32_t flags = 0) const noexcept {
@@ -74,8 +70,6 @@ public:
                       "IoFixedFile thread type must match the task runtime thread type");
         return af::io_recvv_fixed_file_some(task, thread_, index_, iov, iov_count, state, flags);
     }
-#endif
-
     template <typename TaskT>
     [[nodiscard]] IoStatus write_at(TaskT &task, const void *data, std::size_t size,
                                     std::uint64_t offset, IoOpState &state) const noexcept {
@@ -84,7 +78,6 @@ public:
         return af::io_write_fixed_file_at(task, thread_, index_, data, size, offset, state);
     }
 
-#if !defined(_WIN32)
     template <typename TaskT>
     [[nodiscard]] IoStatus writev_at(TaskT &task, const iovec *iov, int iov_count,
                                      std::uint64_t offset, IoOpState &state) const noexcept {
@@ -110,8 +103,6 @@ public:
                       "IoFixedFile thread type must match the task runtime thread type");
         return af::io_write_fixed_file_at(task, thread_, index_, buffer, offset, state);
     }
-#endif
-
     template <typename TaskT>
     [[nodiscard]] IoStatus send_some(TaskT &task, const void *data, std::size_t size,
                                      IoOpState &state,
@@ -122,7 +113,6 @@ public:
         return af::io_send_fixed_file_some(task, thread_, index_, data, size, state, flags);
     }
 
-#if !defined(_WIN32)
     template <typename TaskT>
     [[nodiscard]] IoStatus sendv_some(TaskT &task, const iovec *iov, int iov_count,
                                       IoOpState &state,
@@ -132,8 +122,6 @@ public:
                       "IoFixedFile thread type must match the task runtime thread type");
         return af::io_sendv_fixed_file_some(task, thread_, index_, iov, iov_count, state, flags);
     }
-#endif
-
     template <typename TaskT>
     [[nodiscard]] IoStatus fsync(TaskT &task, IoOpState &state,
                                  std::uint32_t flags = 0) const noexcept {

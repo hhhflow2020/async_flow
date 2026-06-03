@@ -4,7 +4,6 @@ template <typename ThreadT> class IoDatagramSocket : public IoDescriptor<ThreadT
 public:
     using IoDescriptor<ThreadT>::IoDescriptor;
 
-#if !defined(_WIN32)
     template <typename TaskT>
     [[nodiscard]] IoStatus bind(TaskT &task, const sockaddr *address,
                                 socklen_t address_size) const noexcept {
@@ -12,8 +11,6 @@ public:
                       "IoDatagramSocket thread type must match the task runtime thread type");
         return af::io_bind(task, this->thread_, this->fd_, address, address_size);
     }
-#endif
-
     template <typename TaskT>
     [[nodiscard]] IoStatus recv_from_some(TaskT &task, void *data, std::size_t size,
                                           sockaddr *address, socklen_t *address_size,
@@ -45,7 +42,6 @@ public:
                                         control_capacity, buffer_id, state, flags);
     }
 
-#if !defined(_WIN32)
     template <typename TaskT>
     [[nodiscard]] IoStatus recvv_from_some(TaskT &task, const iovec *iov, int iov_count,
                                            sockaddr *address, socklen_t *address_size,
@@ -55,8 +51,6 @@ public:
         return af::io_recvv_from_some(task, this->thread_, this->fd_, iov, iov_count, address,
                                       address_size, state);
     }
-#endif
-
     template <typename TaskT>
     [[nodiscard]] IoStatus send_to_some(TaskT &task, const void *data, std::size_t size,
                                         const sockaddr *address, socklen_t address_size,
@@ -77,7 +71,6 @@ public:
                                       address_size, state);
     }
 
-#if !defined(_WIN32)
     template <typename TaskT>
     [[nodiscard]] IoStatus sendv_to_some(TaskT &task, const iovec *iov, int iov_count,
                                          const sockaddr *address, socklen_t address_size,
@@ -97,5 +90,4 @@ public:
         return af::io_sendv_zc_to_some(task, this->thread_, this->fd_, iov, iov_count, address,
                                        address_size, state);
     }
-#endif
 };

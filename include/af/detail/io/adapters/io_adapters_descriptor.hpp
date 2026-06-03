@@ -22,7 +22,6 @@ public:
         fd_ = fd;
     }
 
-#if !defined(_WIN32)
     template <typename TaskT>
     [[nodiscard]] IoStatus setsockopt(TaskT &task, int level, int option, const void *value,
                                       socklen_t value_size) const noexcept {
@@ -54,7 +53,6 @@ public:
                       "IoDescriptor thread type must match the task runtime thread type");
         return af::io_getpeername(task, thread_, fd_, address, address_size);
     }
-#endif
 
 protected:
     ThreadT thread_{};

@@ -22,7 +22,6 @@ public:
                                      flags);
     }
 
-#if !defined(_WIN32)
     template <typename TaskT>
     [[nodiscard]] IoStatus recvv_some(TaskT &task, const iovec *iov, int iov_count,
                                       IoOpState &state) const noexcept {
@@ -30,8 +29,6 @@ public:
                       "IoStream thread type must match the task runtime thread type");
         return af::io_recvv_some(task, this->thread_, this->fd_, iov, iov_count, state);
     }
-#endif
-
     template <typename TaskT>
     [[nodiscard]] IoStatus send_some(TaskT &task, const void *data, std::size_t size,
                                      IoOpState &state) const noexcept {
@@ -48,7 +45,6 @@ public:
         return af::io_send_zc_some(task, this->thread_, this->fd_, data, size, state);
     }
 
-#if !defined(_WIN32)
     template <typename TaskT>
     [[nodiscard]] IoStatus sendv_some(TaskT &task, const iovec *iov, int iov_count,
                                       IoOpState &state) const noexcept {
@@ -64,8 +60,6 @@ public:
                       "IoStream thread type must match the task runtime thread type");
         return af::io_sendv_zc_some(task, this->thread_, this->fd_, iov, iov_count, state);
     }
-#endif
-
     template <typename TaskT>
     [[nodiscard]] IoStatus sendfile_some(TaskT &task, int file_fd, IoOffset *offset,
                                          std::size_t count, IoOpState &state) const noexcept {
@@ -95,21 +89,17 @@ public:
         return recv_some(task, data, size, state);
     }
 
-#if !defined(_WIN32)
     template <typename TaskT>
     [[nodiscard]] IoStatus readv_some(TaskT &task, const iovec *iov, int iov_count,
                                       IoOpState &state) const noexcept {
         return recvv_some(task, iov, iov_count, state);
     }
-#endif
-
     template <typename TaskT>
     [[nodiscard]] IoStatus write_some(TaskT &task, const void *data, std::size_t size,
                                       IoOpState &state) const noexcept {
         return send_some(task, data, size, state);
     }
 
-#if !defined(_WIN32)
     template <typename TaskT>
     [[nodiscard]] IoStatus writev_some(TaskT &task, const iovec *iov, int iov_count,
                                        IoOpState &state) const noexcept {
@@ -121,5 +111,4 @@ public:
                                           IoOpState &state) const noexcept {
         return sendv_zc_some(task, iov, iov_count, state);
     }
-#endif
 };

@@ -2655,3 +2655,51 @@ Interpretation:
   ordering, or cache layout.
 - Remaining file IO platform branches now correspond to real backend/syscall
   capability differences rather than unsupported Windows compatibility.
+
+## 2026-06-03 POSIX-Only IO Adapter Cleanup
+
+This pass removes Windows fallback guards from adapter wrapper methods under
+`include/af/detail/io/adapters`. The adapter classes keep the same public shape;
+their POSIX methods are now directly available over the already POSIX-only
+socket, datagram, file, vectored, fixed-buffer, and fixed-file helper layer.
+
+Changes under validation:
+
+- Removed `_WIN32` guards from `IoDescriptor` socket option/name wrappers.
+- Removed `_WIN32` guards from `IoFile` vectored and registered-buffer wrappers.
+- Removed `_WIN32` guards from `IoStream` vectored recv/send and alias wrappers.
+- Removed `_WIN32` guards from `IoDatagramSocket` bind and vectored send/recv
+  wrappers.
+- Removed `_WIN32` guards from `IoListener` bind/listen wrappers and
+  `IoFixedFile` vectored/fixed-buffer wrappers.
+- Rechecked `include/af/detail/io/adapters` for `_WIN32`/Windows spellings: no
+  matches remained.
+
+Correctness checks:
+
+- Local macOS Debug `asyncflow_runtime_tests` plus adapter/vector/file example
+  targets built: `asyncflow_io_adapters_example`,
+  `asyncflow_io_vectored_example`, `asyncflow_io_uring_file_example`, and
+  `asyncflow_io_uring_fixed_file_example`.
+- Local macOS Debug adapter/IO-targeted ctest
+  `Adapter|Stream|Datagram|File|Vectored|Fixed`: 65 tests, 0 failures; Linux
+  only cases were skipped by platform/capability logic.
+- Local macOS Debug adapter/vector/file example smoke exited through the
+  expected Linux-only paths.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: `asyncflow_runtime_tests` and adapter/vector/file
+  examples built; adapter/IO-targeted ctest reported 65 tests, 0 failures, 3
+  skipped; adapter, vectored, file, and fixed-file example smoke runs passed.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: `asyncflow_runtime_tests` and adapter/vector/file
+  examples built; adapter/IO-targeted ctest reported 65 tests, 0 failures, 3
+  skipped; adapter, vectored, file, and fixed-file example smoke runs passed.
+
+Interpretation:
+
+- This is a wrapper visibility cleanup only. It does not change scheduler
+  routing, local/SPSC/MPSC queue topology, IO wait state transitions, io_uring
+  SQE arguments, readiness fallback behavior, locks, atomics, allocations,
+  memory ordering, cache layout, or log formatting.

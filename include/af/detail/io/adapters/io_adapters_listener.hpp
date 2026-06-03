@@ -4,7 +4,6 @@ template <typename ThreadT> class IoListener : public IoDescriptor<ThreadT> {
 public:
     using IoDescriptor<ThreadT>::IoDescriptor;
 
-#if !defined(_WIN32)
     template <typename TaskT>
     [[nodiscard]] IoStatus bind(TaskT &task, const sockaddr *address,
                                 socklen_t address_size) const noexcept {
@@ -19,8 +18,6 @@ public:
                       "IoListener thread type must match the task runtime thread type");
         return af::io_listen(task, this->thread_, this->fd_, backlog);
     }
-#endif
-
     template <typename TaskT>
     [[nodiscard]] IoStatus
     accept_some(TaskT &task, sockaddr *address, socklen_t *address_size, int *accepted_fd,
