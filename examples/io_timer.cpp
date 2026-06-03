@@ -6,7 +6,6 @@
 
 #include "app_runtime.hpp"
 
-#if defined(__linux__)
 namespace {
 
 bool wait_until(std::atomic<int> &value, int expected) {
@@ -57,10 +56,13 @@ private:
 };
 
 } // namespace
-#endif
 
 int main() {
-#if defined(__linux__)
+    if constexpr (!af::supports_timerfd) {
+        std::cout << "timerfd example is Linux-only\n";
+        return 0;
+    }
+
     async::init();
 
     if (!async::io_backend_available(AppThreads::IO_0)) {
@@ -94,8 +96,4 @@ int main() {
     async::shutdown();
     std::cout << "timer expirations=" << expirations << '\n';
     return 0;
-#else
-    std::cout << "timerfd example is Linux-only\n";
-    return 0;
-#endif
 }

@@ -41,7 +41,11 @@ struct FallbackSetupRuntimeTraits {
 } // namespace
 
 int main() {
-#if defined(__linux__)
+    if constexpr (!af::supports_io_uring) {
+        std::cout << "io_uring tuned setup example is Linux-only\n";
+        return 0;
+    }
+
     using tuned_async = af::AsyncRuntime<TunedSetupRuntimeTraits>;
     constexpr auto tuned_io = tuned_async::thread_group<TunedSetupIoThreadTag>().template at<0>();
 
@@ -67,8 +71,4 @@ int main() {
     std::cout << "io_uring fallback backend available\n";
     fallback_async::shutdown();
     return 0;
-#else
-    std::cout << "io_uring tuned setup example is Linux-only\n";
-    return 0;
-#endif
 }

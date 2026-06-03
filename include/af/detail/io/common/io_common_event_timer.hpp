@@ -89,3 +89,53 @@ make_timerfd(clockid_t clock_id = CLOCK_MONOTONIC,
     return arm_timerfd(fd, std::chrono::nanoseconds{0}, std::chrono::nanoseconds{0}, error);
 }
 #endif
+
+#if !defined(__linux__)
+[[nodiscard]] inline UniqueFd make_eventfd(unsigned int init_value = 0, int flags = 0) noexcept {
+    static_cast<void>(init_value);
+    static_cast<void>(flags);
+    return UniqueFd();
+}
+
+[[nodiscard]] inline bool write_eventfd(int fd, std::uint64_t value, int &error) noexcept {
+    static_cast<void>(fd);
+    static_cast<void>(value);
+    error = ENOSYS;
+    return false;
+}
+
+[[nodiscard]] inline UniqueFd make_timerfd() noexcept {
+    return UniqueFd();
+}
+
+[[nodiscard]] inline bool arm_timerfd(int fd, std::chrono::nanoseconds initial,
+                                      std::chrono::nanoseconds interval, int &error) noexcept {
+    static_cast<void>(fd);
+    static_cast<void>(initial);
+    static_cast<void>(interval);
+    error = ENOSYS;
+    return false;
+}
+
+[[nodiscard]] inline bool arm_timerfd_after(int fd, std::chrono::nanoseconds delay,
+                                            int &error) noexcept {
+    static_cast<void>(fd);
+    static_cast<void>(delay);
+    error = ENOSYS;
+    return false;
+}
+
+[[nodiscard]] inline bool arm_timerfd_every(int fd, std::chrono::nanoseconds interval,
+                                            int &error) noexcept {
+    static_cast<void>(fd);
+    static_cast<void>(interval);
+    error = ENOSYS;
+    return false;
+}
+
+[[nodiscard]] inline bool disarm_timerfd(int fd, int &error) noexcept {
+    static_cast<void>(fd);
+    error = ENOSYS;
+    return false;
+}
+#endif
