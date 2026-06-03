@@ -62,7 +62,42 @@ enum class LogOrdering : std::uint8_t {
 };
 
 struct AsyncLogConfig {
-    std::size_t queue_capacity{1U << 16U};
+    static constexpr std::size_t default_queue_capacity = 1U << 16U;
+    static constexpr std::size_t auto_queue_shard_count = 0U;
+    static constexpr std::size_t auto_runtime_thread_count = 0U;
+
+    [[nodiscard]] static AsyncLogConfig ordered() noexcept {
+        AsyncLogConfig config;
+        config.use_ordered();
+        return config;
+    }
+
+    [[nodiscard]] static AsyncLogConfig relaxed() noexcept {
+        AsyncLogConfig config;
+        config.use_relaxed();
+        return config;
+    }
+
+    // Ordered keeps one backend-visible enqueue order. Relaxed trades that
+    // global order for runtime SPSC lanes and sharded external MPSC queues.
+    AsyncLogConfig &
+    use_ordered(std::size_t producer_shard_count = auto_queue_shard_count) noexcept {
+        ordering = LogOrdering::Ordered;
+        queue_shard_count = producer_shard_count;
+        runtime_thread_count = 0U;
+        return *this;
+    }
+
+    AsyncLogConfig &
+    use_relaxed(std::size_t runtime_threads = auto_runtime_thread_count,
+                std::size_t external_shard_count = auto_queue_shard_count) noexcept {
+        ordering = LogOrdering::Relaxed;
+        queue_shard_count = external_shard_count;
+        runtime_thread_count = runtime_threads;
+        return *this;
+    }
+
+    std::size_t queue_capacity{default_queue_capacity};
     std::size_t queue_shard_count{0};
     std::size_t runtime_thread_count{0};
     std::size_t runtime_queue_capacity{0};

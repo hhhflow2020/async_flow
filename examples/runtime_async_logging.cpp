@@ -70,7 +70,7 @@ bool wait_for_completion(std::atomic<int> &completed, int expected) {
 int main(int argc, char **argv) {
     using namespace std::chrono_literals;
 
-    af::AsyncLogConfig config;
+    af::AsyncLogConfig config = af::AsyncLogConfig::relaxed();
     config.queue_capacity = 1U << 15U;
     config.runtime_queue_capacity = 1U << 15U;
     config.max_batch_size = 512;

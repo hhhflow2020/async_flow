@@ -13,6 +13,12 @@
   consumer observes the queue's enqueue linearization order. `LogOrdering::Relaxed`
   switches to per-runtime-thread SPSC lanes plus external sharded MPSC queues for
   higher producer throughput when strict global ordering is not required.
+- `AsyncLogConfig::ordered()` and `AsyncLogConfig::relaxed()` are the preferred
+  user-facing strategy factories. Existing configs can switch strategy with
+  `use_ordered(producer_shard_count)` or
+  `use_relaxed(runtime_thread_count, external_shard_count)`. For runtime-bound
+  logging, `runtime_thread_count == 0` means auto-fill from
+  `RuntimeT::thread_count`.
 - Ordered logging keeps only the enqueue position as the required global
   serialization point. Producer record pools and accepted/dropped counters are
   sharded and cache-line isolated so unrelated producer-side state does not

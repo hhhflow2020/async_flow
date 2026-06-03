@@ -3918,3 +3918,47 @@ Interpretation:
   topology stays sharded; it remains the explicit throughput-oriented mode.
 - The wake-state fix adds one cache-line-isolated state machine and no locks,
   heap allocations, backend thread, or extra queue hop.
+
+## 2026-06-03 Async Logger Strategy Config Helpers
+
+This pass improves the user-facing ordered/relaxed configuration surface without
+changing the queue implementation.
+
+Changes under validation:
+
+- Added `AsyncLogConfig::ordered()` and `AsyncLogConfig::relaxed()` strategy
+  factories.
+- Added `use_ordered(producer_shard_count)` and
+  `use_relaxed(runtime_thread_count, external_shard_count)` for switching an
+  existing config.
+- Kept `runtime_thread_count == 0` as the runtime-bound auto-fill mode, so
+  `AsyncLogConfig::relaxed()` enables runtime SPSC lanes when started through
+  `start_async_logging_for_runtime<RuntimeT>()`.
+- Updated runtime async logging to demonstrate the relaxed profile and the TCP
+  echo server to use the ordered profile.
+
+Correctness checks:
+
+- Local macOS Debug build of `asyncflow_log_tests`,
+  `asyncflow_runtime_async_logging_example`, and
+  `asyncflow_io_tcp_echo_server_example`: passed.
+- Local macOS Debug `ctest -R LogTests`: 37/37 passed.
+- Local macOS Debug `asyncflow_runtime_async_logging_example`: completed 4
+  tasks, accepted 2049 records, dropped 0, flushed 1.
+- Local macOS Debug TCP echo self-test: accepted/completed 2 sessions, 16 bytes
+  in/out, log accepted 36, dropped 0, flushed 1.
+- Remote Linux GCC Release,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: built the same three targets.
+- Remote Linux GCC Release `ctest -R LogTests`: 37/37 passed.
+- Remote Linux GCC Release `asyncflow_runtime_async_logging_example`: completed
+  4 tasks, accepted 2049 records, dropped 0, flushed 1.
+- Remote Linux GCC Release TCP echo self-test on io_uring backend:
+  accepted/completed 2 sessions, 16 bytes in/out, log accepted 36, dropped 0,
+  flushed 1.
+
+Interpretation:
+
+- This is an API ergonomics change. It does not change queue topology, record
+  pool layout, locks, atomics, memory ordering, backend IO, or benchmarked hot
+  paths.

@@ -38,7 +38,7 @@ int main(int argc, char **argv) {
 
     echo_async::init();
 
-    af::AsyncLogConfig log_config;
+    af::AsyncLogConfig log_config = af::AsyncLogConfig::ordered();
     log_config.queue_capacity = 8192;
     log_config.runtime_queue_capacity = 8192;
     log_config.max_batch_size = 256;

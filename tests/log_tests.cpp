@@ -154,6 +154,30 @@ TEST(LogTests, LogSocketNonblockingHelperReportsInvalidFd) {
     EXPECT_FALSE(af::detail::set_log_socket_nonblocking(-1));
 }
 
+TEST(LogTests, AsyncLogConfigProfilesSelectQueueStrategy) {
+    af::AsyncLogConfig ordered = af::AsyncLogConfig::ordered();
+    ordered.use_ordered(4);
+    EXPECT_EQ(ordered.ordering, af::LogOrdering::Ordered);
+    EXPECT_EQ(ordered.queue_shard_count, 4U);
+    EXPECT_EQ(ordered.runtime_thread_count, 0U);
+
+    af::AsyncLogConfig relaxed = af::AsyncLogConfig::relaxed();
+    relaxed.use_relaxed(8, 16);
+    EXPECT_EQ(relaxed.ordering, af::LogOrdering::Relaxed);
+    EXPECT_EQ(relaxed.runtime_thread_count, 8U);
+    EXPECT_EQ(relaxed.queue_shard_count, 16U);
+
+    relaxed.use_ordered(2);
+    EXPECT_EQ(relaxed.ordering, af::LogOrdering::Ordered);
+    EXPECT_EQ(relaxed.queue_shard_count, 2U);
+    EXPECT_EQ(relaxed.runtime_thread_count, 0U);
+
+    ordered.use_relaxed();
+    EXPECT_EQ(ordered.ordering, af::LogOrdering::Relaxed);
+    EXPECT_EQ(ordered.runtime_thread_count, af::AsyncLogConfig::auto_runtime_thread_count);
+    EXPECT_EQ(ordered.queue_shard_count, af::AsyncLogConfig::auto_queue_shard_count);
+}
+
 class BlockingLogBackend final : public af::LogBackend {
 public:
     void write_batch(std::span<af::detail::LogRecord *const> records) noexcept override {
@@ -997,13 +1021,12 @@ TEST(LogTests, RuntimeAwareSinkUsesSpscLaneWhenExternalMpscIsFull) {
     auto backend = std::make_unique<BlockingLogBackend>();
     auto *blocking_backend = backend.get();
 
-    af::AsyncLogConfig config;
+    af::AsyncLogConfig config = af::AsyncLogConfig::relaxed();
     config.queue_capacity = 1;
     config.queue_shard_count = 1;
     config.runtime_queue_capacity = 2;
     config.max_batch_size = 1;
     config.overflow_policy = af::LogOverflowPolicy::DropNewest;
-    config.ordering = af::LogOrdering::Relaxed;
     config.backends.push_back(std::move(backend));
     auto logging = af::start_async_logging_for_runtime<LogTestRuntime>(std::move(config),
                                                                        LogTestThreads::Runtime_1);

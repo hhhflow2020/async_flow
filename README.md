@@ -311,6 +311,6 @@ ASYNCFLOW_STRESS_MS=1500 ctest --test-dir build-tsan/build/Debug -R RuntimeStres
 
 ## 业务 IO adapter 接入建议
 
-- 日志：`AsyncLogConfig::ordering` 默认 `LogOrdering::Ordered`，所有生产者进入单个 bounded MPSC，由 runtime 绑定的消费者按入队线性化顺序批量写后端；ordered 模式下 record pool 与统计计数按 producer shard 分散，减少无关 cache line 争用。追求极致吞吐时可显式切到 `LogOrdering::Relaxed`，runtime 线程走 SPSC lane，框架外线程走 sharded MPSC。
+- 日志：推荐用 `AsyncLogConfig::ordered()` / `AsyncLogConfig::relaxed()` 选择策略，或在已有配置上调用 `use_ordered()` / `use_relaxed()`。默认 ordered 让所有生产者进入单个 bounded MPSC，由 runtime 绑定的消费者按入队线性化顺序批量写后端；ordered 模式下 record pool 与统计计数按 producer shard 分散，减少无关 cache line 争用。追求极致吞吐时可显式切到 relaxed，runtime 线程走 SPSC lane，框架外线程走 sharded MPSC；runtime-bound 入口会在 `runtime_thread_count == 0` 时自动使用 `RuntimeT::thread_count`。
 - Redis/MySQL/Kafka/配置中心/服务发现：优先选择可暴露底层 fd 的 nonblocking client；将连接归属到固定 IO 线程，在 task 内维护状态机，按 WANT_READ/WANT_WRITE 注册 readiness；业务回调尽量只做轻量解析，重 CPU 处理再切回逻辑线程。
 - RPC：连接归属固定 IO 线程，网络读写和 buffer 生命周期都留在该线程；拆包/编解码可先在 IO 线程做轻量 framing，再把 payload 切回逻辑线程处理，响应结果再切回 IO 线程发送。
