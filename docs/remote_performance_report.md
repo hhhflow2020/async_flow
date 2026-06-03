@@ -3727,6 +3727,58 @@ Interpretation:
   header and leaves scheduling, queue topology, IO wait ownership, io_uring SQ/CQ
   semantics, locks, atomics, memory ordering, and cache layout unchanged.
 
+## 2026-06-03 io_uring Submission Queue Split
+
+This pass moves Linux io_uring submission queue bodies out of the generic IO
+backend implementation header and into a dedicated submission header. The
+generic backend file now keeps cross-platform IO entry points, shared native
+wait helpers, and CQ/operation completion logic, while
+`runtime_executor_io_uring_submission.hpp` owns SQE reservation and submission
+flush behavior.
+
+Changes under validation:
+
+- Added `runtime_executor_io_uring_submission.hpp`.
+- Moved `reserve_io_uring_sqe()`, `flush_io_uring_submissions()`,
+  `flush_io_uring_submissions_or_fail()`, and `submit_io_uring_cancel()` to the
+  new header.
+- `runtime_executor_io_backend.hpp` dropped from 717 lines to 608 lines. The
+  new submission header is 112 lines. The moved functions remain
+  template-inline definitions included after the executor class, so this does
+  not add dispatch, allocation, locking, atomics, or cross-thread
+  communication.
+
+Correctness checks:
+
+- Local macOS Debug built `asyncflow_runtime_tests`,
+  `asyncflow_io_epoll_example`, `asyncflow_io_native_readiness_example`,
+  `asyncflow_io_timeout_example`, and `asyncflow_io_shutdown_example`.
+- Local macOS Debug ctest selection
+  `IoRuntimeKqueueFixture|IoRuntimeStreamFixture|IoRuntimeDatagramFixture|RuntimePublicIo|RuntimeConfig|RuntimeIo|Uring|IoUring`:
+  79 tests selected, 0 failures; Linux-only/io_uring cases in that selection
+  were skipped by platform capability checks.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: rebuilt the same targets; ctest selection
+  `IoRuntimeEpollFixture|IoRuntimeStreamFixture|IoRuntimeDatagramFixture|RuntimePublicIo|RuntimeConfig|RuntimeIo`
+  reported 51 tests selected, 0 failures, with the non-Linux-only public IO
+  test skipped by capability checks. A separate `Uring|IoUring` ctest selection
+  reported 43 tests selected, 0 failures, with 3 platform/capability skips.
+  `asyncflow_io_epoll_example`,
+  `asyncflow_io_native_readiness_example`, `asyncflow_io_timeout_example`, and
+  `asyncflow_io_shutdown_example` also ran successfully.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: rebuilt the same targets; the same two ctest
+  selections reported 51 selected / 0 failures and 43 selected / 0 failures,
+  with the same skips. The same four example binaries also ran successfully.
+
+Interpretation:
+
+- This is a modularity-only runtime cleanup. It keeps io_uring SQ ownership,
+  pending-submission accounting, syscall retry behavior, wake/cancel semantics,
+  locks, atomics, memory ordering, and cache layout unchanged.
+
 ## 2026-06-03 Scheduling Mode Convenience API
 
 This pass makes the SPSC/MPSC scheduling semantics explicit at the task API

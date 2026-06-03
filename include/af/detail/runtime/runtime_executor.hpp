@@ -1788,6 +1788,7 @@ private:
 #include "af/detail/runtime/runtime_executor_kqueue_backend.hpp"
 #include "af/detail/runtime/runtime_executor_io_backend.hpp"
 #include "af/detail/runtime/runtime_executor_io_uring_backend.hpp"
+#include "af/detail/runtime/runtime_executor_io_uring_submission.hpp"
 #include "af/detail/runtime/runtime_executor_io_resources.hpp"
 #include "af/detail/runtime/runtime_executor_io_submit_core.hpp"
 #include "af/detail/runtime/runtime_executor_lifecycle.hpp"

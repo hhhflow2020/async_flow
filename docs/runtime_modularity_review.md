@@ -142,6 +142,11 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
   file. The new header owns feature probing, ring mmap/pointer binding,
   requested setup flags, eventfd registration, init, and close/reset; generic
   IO backend entry points stay in `runtime_executor_io_backend.hpp`.
+- Linux io_uring submission queue bodies now live in
+  `runtime_executor_io_uring_submission.hpp` instead of the generic IO backend
+  file. The new header owns SQE reservation, submission flush, flush-or-fail,
+  and async-cancel SQE submission while preserving the same inline template
+  visibility and ring memory-ordering operations.
 - The io_uring stream recv multishot example is now split into runtime/wait helpers, socketpair setup helpers, a cohesive provided-buffer recv task class, and a thin executable entry point.
 - The TCP connect/accept example is now split into runtime traits, portable loopback socket setup, server/client state-machine tasks, and a thin executable entry point. It uses the unified `ThreadKind::Io`/`ThreadKind::IoUring` API so Linux can prefer io_uring while macOS/BSD uses the native kqueue readiness backend.
 - The TCP echo server example demonstrates a fully asynchronous 2-IO-thread/1-compute-thread flow: accept/read on IO threads, uppercase-to-lowercase transform on the compute thread, then send on the owning IO thread. Its runtime traits, socket setup, server acceptor, session state machine, client driver, and executable entry point are split into focused headers.
