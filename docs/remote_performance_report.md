@@ -288,9 +288,10 @@ Interpretation:
 
 - The TSAN failure observed before the fix was a close-vs-`epoll_ctl(DEL)` race caused by publishing readiness before deferred delete cleanup. The new ordering removes that race and avoids fd-number reuse hazards from stale epoll interest.
 - Removing the rearm hint keeps the correctness fix from adding an avoidable `MOD -> ADD` syscall pair on normal rearm after readiness.
-- The existing IO adapter benchmarks cover helper-level fast paths. A live
-  epoll readiness-loop canary now exists as `BM_LiveEpollReadinessRearm`, which
-  should be used before treating readiness syscall-rate changes as meaningful.
+- The existing IO adapter benchmarks cover helper-level fast paths. Live native
+  readiness-loop canaries now exist as `BM_LiveEpollReadinessRearm` and
+  `BM_LiveKqueueReadinessRearm`, which should be used before treating readiness
+  syscall-rate changes as meaningful.
 
 ## 2026-06-01 Runtime Common-State Split Validation
 

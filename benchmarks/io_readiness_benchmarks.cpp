@@ -8,37 +8,28 @@
 
 #include "af/async_flow.hpp"
 
-#if defined(__linux__)
+#if AF_DETAIL_HAS_EPOLL || AF_DETAIL_HAS_KQUEUE
 #include <cerrno>
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 namespace {
 
-struct ReadinessIoThreadTag;
+constexpr std::size_t readiness_queue_capacity = 65536;
 
-struct ReadinessRuntimeTraits {
-    static constexpr auto threads = af::thread_layout(
-        af::thread_group<ReadinessIoThreadTag, 1, af::ThreadKind::Epoll, "readiness">());
-    static constexpr std::size_t spsc_queue_capacity = 65536;
-    static constexpr std::size_t external_queue_capacity = 65536;
-    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
-    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
-};
-
-using ReadinessRuntime = af::AsyncRuntime<ReadinessRuntimeTraits>;
-using ReadinessTaskBase = ReadinessRuntime::Task;
-using ReadinessThread = ReadinessRuntime::Thread;
-
-struct ReadinessThreads {
-    static constexpr ReadinessThread IO_0 =
-        ReadinessRuntime::thread_group<ReadinessIoThreadTag>().template at<0>();
-};
-
-class ReadinessReadLoopTask final : public ReadinessTaskBase {
+template <typename RuntimeT, typename IoThreadTag>
+class ReadinessReadLoopTask final : public RuntimeT::Task {
 public:
-    explicit ReadinessReadLoopTask(ReadinessTaskBase::FactoryToken token)
-        : ReadinessTaskBase(token) {}
+    using TaskBase = typename RuntimeT::Task;
+    using Thread = typename RuntimeT::Thread;
+
+private:
+    static constexpr Thread io_thread =
+        RuntimeT::template thread_group<IoThreadTag>().template at<0>();
+
+public:
+    explicit ReadinessReadLoopTask(typename TaskBase::FactoryToken token) : TaskBase(token) {}
 
     bool do_it(int fd, int expected_reads, std::atomic<int> *completed, std::atomic<int> *reads,
                std::atomic<int> *failures) {
@@ -47,7 +38,7 @@ public:
         completed_ = completed;
         reads_ = reads;
         failures_ = failures;
-        return schedule(ReadinessThreads::IO_0);
+        return this->schedule(io_thread);
     }
 
 private:
@@ -70,19 +61,19 @@ private:
     af::TaskResult arm_read() {
         state_ = State::Read;
         const af::IoStatus status =
-            af::io_read_some(*this, ReadinessThreads::IO_0, fd_, &value_, sizeof(value_), read_);
+            af::io_read_some(*this, io_thread, fd_, &value_, sizeof(value_), read_);
         return handle_status(status);
     }
 
     af::TaskResult finish_read() {
         const af::IoStatus status =
-            af::io_read_some(*this, ReadinessThreads::IO_0, fd_, &value_, sizeof(value_), read_);
+            af::io_read_some(*this, io_thread, fd_, &value_, sizeof(value_), read_);
         return handle_status(status);
     }
 
     af::TaskResult handle_status(af::IoStatus status) {
         if (status.pending()) {
-            return pending();
+            return this->pending();
         }
         if (!status.ready() || status.bytes != sizeof(value_)) {
             return complete_failure();
@@ -101,14 +92,14 @@ private:
     af::TaskResult complete_success() {
         completed_->store(1, std::memory_order_release);
         completed_->notify_one();
-        return done();
+        return this->done();
     }
 
     af::TaskResult complete_failure() {
         failures_->fetch_add(1, std::memory_order_relaxed);
         completed_->store(1, std::memory_order_release);
         completed_->notify_one();
-        return done();
+        return this->done();
     }
 
     State state_{State::Arm};
@@ -128,12 +119,31 @@ struct SocketPair {
 
     [[nodiscard]] bool create() noexcept {
         int fds[2]{-1, -1};
-        if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds) != 0) {
+        if (::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0) {
+            return false;
+        }
+        if (!set_nonblocking_cloexec(fds[0]) || !set_nonblocking_cloexec(fds[1])) {
+            if (fds[0] >= 0) {
+                ::close(fds[0]);
+            }
+            if (fds[1] >= 0) {
+                ::close(fds[1]);
+            }
             return false;
         }
         reader.reset(fds[0]);
         writer.reset(fds[1]);
         return true;
+    }
+
+private:
+    [[nodiscard]] static bool set_nonblocking_cloexec(int fd) noexcept {
+        const int flags = ::fcntl(fd, F_GETFL, 0);
+        if (flags < 0 || ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) {
+            return false;
+        }
+        const int fd_flags = ::fcntl(fd, F_GETFD, 0);
+        return fd_flags >= 0 && ::fcntl(fd, F_SETFD, fd_flags | FD_CLOEXEC) == 0;
     }
 };
 
@@ -175,7 +185,8 @@ struct SocketPair {
     return true;
 }
 
-void BM_LiveEpollReadinessRearm(benchmark::State &state) {
+template <typename RuntimeT, typename IoThreadTag, typename TaskT>
+void run_readiness_rearm_benchmark(benchmark::State &state, const char *backend_name) {
     const int read_count = static_cast<int>(state.range(0));
     SocketPair sockets{};
     if (!sockets.create()) {
@@ -183,10 +194,11 @@ void BM_LiveEpollReadinessRearm(benchmark::State &state) {
         return;
     }
 
-    ReadinessRuntime::init();
-    if (!ReadinessRuntime::io_backend_available(ReadinessThreads::IO_0)) {
-        ReadinessRuntime::shutdown();
-        state.SkipWithError("epoll backend unavailable");
+    RuntimeT::init();
+    constexpr auto io_thread = RuntimeT::template thread_group<IoThreadTag>().template at<0>();
+    if (!RuntimeT::io_backend_available(io_thread)) {
+        RuntimeT::shutdown();
+        state.SkipWithError(backend_name);
         return;
     }
 
@@ -195,8 +207,8 @@ void BM_LiveEpollReadinessRearm(benchmark::State &state) {
         std::atomic<int> completed{0};
         std::atomic<int> reads{0};
         std::atomic<int> failures{0};
-        if (!ReadinessRuntime::start_task<ReadinessReadLoopTask>(sockets.reader.get(), read_count,
-                                                                 &completed, &reads, &failures)) {
+        if (!RuntimeT::template start_task<TaskT>(sockets.reader.get(), read_count, &completed,
+                                                  &reads, &failures)) {
             state.SkipWithError("readiness read task did not start");
             failed = true;
             break;
@@ -210,10 +222,32 @@ void BM_LiveEpollReadinessRearm(benchmark::State &state) {
         }
     }
 
-    ReadinessRuntime::shutdown();
+    RuntimeT::shutdown();
     if (!failed) {
         state.SetItemsProcessed(state.iterations() * read_count);
     }
+}
+
+#if AF_DETAIL_HAS_EPOLL
+
+struct EpollReadinessIoThreadTag;
+
+struct EpollReadinessRuntimeTraits {
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<EpollReadinessIoThreadTag, 1, af::ThreadKind::Epoll, "readiness">());
+    static constexpr std::size_t spsc_queue_capacity = readiness_queue_capacity;
+    static constexpr std::size_t external_queue_capacity = readiness_queue_capacity;
+    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
+};
+
+using EpollReadinessRuntime = af::AsyncRuntime<EpollReadinessRuntimeTraits>;
+using EpollReadinessReadLoopTask =
+    ReadinessReadLoopTask<EpollReadinessRuntime, EpollReadinessIoThreadTag>;
+
+void BM_LiveEpollReadinessRearm(benchmark::State &state) {
+    run_readiness_rearm_benchmark<EpollReadinessRuntime, EpollReadinessIoThreadTag,
+                                  EpollReadinessReadLoopTask>(state, "epoll backend unavailable");
 }
 
 BENCHMARK(BM_LiveEpollReadinessRearm)
@@ -221,6 +255,38 @@ BENCHMARK(BM_LiveEpollReadinessRearm)
     ->Arg(1024)
     ->UseRealTime()
     ->Unit(benchmark::kMicrosecond);
+
+#endif
+
+#if AF_DETAIL_HAS_KQUEUE
+
+struct KqueueReadinessIoThreadTag;
+
+struct KqueueReadinessRuntimeTraits {
+    static constexpr auto threads = af::thread_layout(
+        af::thread_group<KqueueReadinessIoThreadTag, 1, af::ThreadKind::Kqueue, "readiness">());
+    static constexpr std::size_t spsc_queue_capacity = readiness_queue_capacity;
+    static constexpr std::size_t external_queue_capacity = readiness_queue_capacity;
+    static constexpr af::QueueFullPolicy queue_full_policy = af::QueueFullPolicy::Yield;
+    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
+};
+
+using KqueueReadinessRuntime = af::AsyncRuntime<KqueueReadinessRuntimeTraits>;
+using KqueueReadinessReadLoopTask =
+    ReadinessReadLoopTask<KqueueReadinessRuntime, KqueueReadinessIoThreadTag>;
+
+void BM_LiveKqueueReadinessRearm(benchmark::State &state) {
+    run_readiness_rearm_benchmark<KqueueReadinessRuntime, KqueueReadinessIoThreadTag,
+                                  KqueueReadinessReadLoopTask>(state, "kqueue backend unavailable");
+}
+
+BENCHMARK(BM_LiveKqueueReadinessRearm)
+    ->Arg(64)
+    ->Arg(1024)
+    ->UseRealTime()
+    ->Unit(benchmark::kMicrosecond);
+
+#endif
 
 } // namespace
 #endif
