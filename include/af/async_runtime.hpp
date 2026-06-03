@@ -20,46 +20,19 @@
 #include "absl/container/flat_hash_map.h"
 #include "af/detail/queue/bounded_queues.hpp"
 #include "af/detail/config.hpp"
+#include "af/detail/io/filesystem/io_filesystem_platform.hpp"
 #include "af/detail/io/uring/io_uring_support.hpp"
 #include "af/detail/memory/contiguous_object_storage.hpp"
 #include "af/detail/memory/object_pool.hpp"
 #include "af/detail/queue/queue_backoff.hpp"
 #include "af/detail/runtime/runtime_common_state.hpp"
 #include "af/detail/runtime/runtime_config.hpp"
+#include "af/detail/runtime/runtime_platform_headers.hpp"
 #include "af/detail/runtime/runtime_public_io.hpp"
 #include "af/detail/runtime/runtime_ready_source_set.hpp"
 #include "af/detail/runtime/runtime_task_registry.hpp"
 #include "af/detail/runtime/runtime_task_handle.hpp"
 #include "af/task.hpp"
-
-#if !defined(_WIN32)
-#include <fcntl.h>
-#include <pthread.h>
-#include <sys/socket.h>
-#include <sys/stat.h>
-#include <sys/uio.h>
-#endif
-
-#if AF_DETAIL_HAS_EPOLL
-#include <algorithm>
-#include <linux/openat2.h>
-#include <poll.h>
-#include <sys/epoll.h>
-#include <sys/eventfd.h>
-#include <sys/mman.h>
-#include <unistd.h>
-#endif
-
-#if AF_DETAIL_HAS_KQUEUE
-#include <sys/event.h>
-#include <sys/time.h>
-#include <unistd.h>
-#endif
-
-#if !defined(__linux__)
-struct open_how;
-struct statx;
-#endif
 
 namespace af {
 

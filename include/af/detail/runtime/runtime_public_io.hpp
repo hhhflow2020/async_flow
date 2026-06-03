@@ -10,13 +10,7 @@
 #include <sys/uio.h>
 #endif
 
-#if defined(__linux__)
-#include <linux/openat2.h>
-#include <sys/stat.h>
-#else
-struct open_how;
-struct statx;
-#endif
+#include "af/detail/io/filesystem/io_filesystem_platform.hpp"
 
 namespace af::detail {
 

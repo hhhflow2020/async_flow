@@ -7,14 +7,7 @@
 #include <type_traits>
 
 #include "af/io_common.hpp"
-
-#if defined(__linux__)
-#include <linux/openat2.h>
-#endif
-
-#if !defined(__linux__)
-struct open_how;
-#endif
+#include "af/detail/io/filesystem/io_filesystem_platform.hpp"
 
 namespace af {
 

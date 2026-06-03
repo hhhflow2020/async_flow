@@ -2207,3 +2207,48 @@ Interpretation:
 - The branch remains close to the syscall-specific detail implementation, where
   it belongs, without adding locks, allocations, state transitions, or runtime
   scheduling behavior.
+
+## 2026-06-03 Public IO Platform Header Cleanup
+
+This pass continues reducing platform preprocessor exposure from public IO and
+runtime headers. It centralizes system-header and platform type declarations in
+detail headers while keeping the public API signatures and behavior unchanged.
+
+Changes under validation:
+
+- Added `io_types_platform.hpp` for POSIX/Linux IO system headers and the
+  non-Linux `statx` forward declaration.
+- Added `io_filesystem_platform.hpp` for Linux `open_how`/`statx` definitions
+  and non-Linux forward declarations.
+- Added `runtime_platform_headers.hpp` for runtime executor platform headers
+  such as pthread, epoll, eventfd, mmap, and kqueue.
+- Simplified `io_types.hpp`, `io_filesystem.hpp`, `runtime_public_io.hpp`, and
+  `async_runtime.hpp` to include those detail headers instead of spelling
+  repeated platform branches in public-facing headers.
+- Rechecked public headers: after this pass the remaining platform macros are
+  concentrated in `platform.hpp` capability constants and `signal.hpp` signal
+  handling support.
+
+Correctness checks:
+
+- Local macOS Debug full `all` build: passed.
+- Local macOS Debug full `asyncflow_runtime_tests`: 193 tests, 107 passed,
+  86 skipped, 0 failed.
+- Local macOS Debug `asyncflow_runtime_stress_tests`: 9/9 passed.
+- Remote GCC Debug, `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: full `all` build passed.
+- Remote GCC Debug full `asyncflow_runtime_tests`: 187 tests, 183 passed,
+  4 skipped, 0 failed.
+- Remote GCC Debug `asyncflow_runtime_stress_tests`: 9/9 passed.
+- Remote Clang Debug, `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: full `all` build passed.
+- Remote Clang Debug full `asyncflow_runtime_tests`: 187 tests, 183 passed,
+  4 skipped, 0 failed.
+- Remote Clang Debug `asyncflow_runtime_stress_tests`: 9/9 passed.
+
+Interpretation:
+
+- Public API users now see fewer raw platform branches when including the core
+  IO/runtime headers.
+- This is an include-boundary cleanup only; it does not add locks, atomics,
+  allocations, scheduler branches, or syscall-path behavior changes.
