@@ -7,17 +7,14 @@
 int main() {
     using namespace io_adapters_example;
 
-    if constexpr (!af::supports_epoll) {
-        std::cout << "IO adapter example is Linux-only\n";
-        return 0;
-    }
-
     async::init();
     if (!async::io_backend_available(AppThreads::IO_0)) {
-        std::cout << "epoll backend unavailable\n";
+        std::cout << "IO backend unavailable\n";
         async::shutdown();
         return 0;
     }
+    std::cout << "IO adapter backend=" << af::runtime_io_backend_name<async>(AppThreads::IO_0)
+              << '\n';
 
     StreamSocketPair stream{};
     if (!stream.create()) {

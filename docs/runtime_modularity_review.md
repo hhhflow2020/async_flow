@@ -100,6 +100,11 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
 - The io_uring openat-direct example is now split into runtime traits, temporary path lifecycle, the fixed-file direct-open round-trip task, and a thin executable entry point.
 - The io_uring send zero-copy example is now split into runtime traits, listener setup, async accept/send_zc server task, async connect/read verification client task, and a thin executable entry point. The network path no longer uses main-thread blocking accept/read polling.
 - The IO adapter example is now split into POSIX socket setup helpers, stream adapter tasks, UDP adapter tasks, result types, and a thin executable entry point. Main no longer uses atomic readiness polling before writing to sockets; stream and UDP peer activity is driven by runtime tasks on the IO thread.
+- The IO adapter example is no longer Linux-only. It now owns a small
+  example-specific runtime using `af::preferred_io_thread_kind`, uses POSIX
+  socket setup with portable nonblocking/close-on-exec flag handling, and runs
+  through io_uring on Linux and kqueue on macOS/BSD without user-visible
+  platform guards.
 - The native readiness example now keeps POSIX socketpair setup, fd flags, and one-byte peer write helpers in a focused support header. The executable body uses framework IO flow directly instead of carrying direct platform system headers or Windows fallback branches.
 - TCP connect/accept, socket lifecycle, and datagram examples now expose thin executable entry points over support-level `run_*_example()` helpers. After dropping Windows support, their support headers include POSIX socket types directly instead of wrapping the task/socket definitions in `_WIN32` guards.
 - TCP echo server and runtime TCP/UDP async logging examples no longer carry Windows fallback branches. The remaining Linux/macOS split in TCP echo shutdown notification is the `pipe2` capability path, not Windows compatibility logic.

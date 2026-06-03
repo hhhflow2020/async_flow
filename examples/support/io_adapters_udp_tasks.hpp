@@ -4,10 +4,9 @@
 #include <cstdint>
 
 #include "io_adapters_results.hpp"
+#include "io_adapters_runtime.hpp"
 #include "io_adapters_socket_helpers.hpp"
-#include "../app_runtime.hpp"
 
-#if defined(__linux__)
 #include <netinet/in.h>
 #include <sys/socket.h>
 
@@ -105,44 +104,3 @@ private:
 };
 
 } // namespace io_adapters_example
-
-#else
-
-namespace io_adapters_example {
-
-class UdpReceiveTask final : public Task {
-public:
-    explicit UdpReceiveTask(Task::FactoryToken token) : Task(token) {}
-
-    bool do_it(int fd, UdpReceiveResult *result) {
-        static_cast<void>(fd);
-        static_cast<void>(result);
-        return false;
-    }
-
-private:
-    af::TaskResult run() override {
-        return failed();
-    }
-};
-
-class UdpSendTask final : public Task {
-public:
-    explicit UdpSendTask(Task::FactoryToken token) : Task(token) {}
-
-    bool do_it(int fd, const UdpLoopbackEndpoint &endpoint, UdpSendResult *result) {
-        static_cast<void>(fd);
-        static_cast<void>(endpoint);
-        static_cast<void>(result);
-        return false;
-    }
-
-private:
-    af::TaskResult run() override {
-        return failed();
-    }
-};
-
-} // namespace io_adapters_example
-
-#endif

@@ -3001,3 +3001,52 @@ Interpretation:
 - The example now demonstrates the intended public API shape: application code
   declares `af::preferred_io_thread_kind`, uses public stream/listener adapters,
   and lets AsyncFlow choose the platform backend internally.
+
+## 2026-06-03 POSIX IO Adapter Example
+
+This pass makes the IO adapter example run on the supported POSIX backend set
+instead of exiting on non-Linux platforms. The stream and UDP adapter tasks are
+unchanged in behavior; only the example runtime/socket guard layer was removed.
+
+Changes under validation:
+
+- Added a small `io_adapters_runtime.hpp` using
+  `af::preferred_io_thread_kind` instead of the shared epoll-specific app
+  runtime.
+- Removed the main-program `supports_epoll` early return from
+  `io_adapters.cpp`.
+- Removed `__linux__` guards and non-Linux stubs from the adapter socket
+  helper, stream task, and UDP task headers.
+- Replaced Linux-only socket creation with POSIX socket creation plus portable
+  nonblocking/close-on-exec flag handling.
+
+Correctness checks:
+
+- Local macOS Debug built `asyncflow_io_adapters_example`.
+- Local macOS Debug `asyncflow_io_adapters_example` ran successfully with
+  `backend=kqueue`, stream `request=T response=S peer_received=S`, and UDP
+  `datagram=U sent=U`.
+- Local macOS Debug ctest `Adapter|Stream|Datagram`: 46 tests selected, 0
+  failures; Linux-only runtime tests were skipped by capability logic.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: `asyncflow_io_adapters_example` and
+  `asyncflow_runtime_tests` built; the adapter example ran successfully with
+  `backend=io_uring`; ctest `Adapter|Stream|Datagram` reported 44 tests, 0
+  failures.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: `asyncflow_io_adapters_example` and
+  `asyncflow_runtime_tests` built; the adapter example ran successfully with
+  `backend=io_uring`; ctest `Adapter|Stream|Datagram` reported 44 tests, 0
+  failures.
+
+Interpretation:
+
+- This is an example portability cleanup only. It does not change runtime
+  scheduler routing, local/SPSC/MPSC queue topology, IO wait state transitions,
+  io_uring SQE arguments, readiness fallback behavior, locks, atomics,
+  allocations, memory ordering, or cache layout.
+- The example now demonstrates the intended adapter API shape: application code
+  uses public stream/datagram adapter views and lets AsyncFlow select the
+  platform backend internally.
