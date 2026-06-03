@@ -34,7 +34,8 @@ namespace detail {
     const auto user_begin = reinterpret_cast<std::uintptr_t>(user_message.data());
     if (message_begin != 0U && user_begin >= message_begin) {
         const auto offset = static_cast<std::size_t>(user_begin - message_begin);
-        if (offset <= message.size() && user_message.size() <= message.size() - offset) {
+        if (offset <= message.size() && user_message.size() <= message.size() - offset &&
+            message.substr(offset, user_message.size()) == user_message) {
             return offset;
         }
     }
@@ -57,17 +58,42 @@ template <typename TaskId>
         return std::string(message);
     }
 
+    const std::string_view prefix = message.substr(0, prefix_size);
     std::array<char, 32> digits{};
     const auto converted = std::to_chars(digits.data(), digits.data() + digits.size(), task_id);
     AF_ASSERT(converted.ec == std::errc{});
+    const std::string_view task_digits(digits.data(),
+                                       static_cast<std::size_t>(converted.ptr - digits.data()));
+
+    std::size_t line_count = 0;
+    for (const char character : user_message) {
+        line_count += character == '\n' ? 1U : 0U;
+    }
+    if (user_message.empty() || user_message.back() != '\n') {
+        ++line_count;
+    }
 
     std::string tagged;
-    tagged.reserve(message.size() + static_cast<std::size_t>(converted.ptr - digits.data()) + 8U);
-    tagged.append(message.data(), prefix_size);
-    tagged.append("[task=");
-    tagged.append(digits.data(), converted.ptr);
-    tagged.append("] ");
-    tagged.append(user_message.data(), user_message.size());
+    tagged.reserve(message.size() + (prefix.size() + task_digits.size() + 8U) * line_count);
+
+    std::size_t line_begin = 0;
+    while (line_begin < user_message.size()) {
+        const std::size_t newline = user_message.find('\n', line_begin);
+        const std::size_t line_end =
+            newline == std::string_view::npos ? user_message.size() : newline + 1U;
+        tagged.append(prefix.data(), prefix.size());
+        tagged.append("[task=");
+        tagged.append(task_digits.data(), task_digits.size());
+        tagged.append("] ");
+        tagged.append(user_message.data() + line_begin, line_end - line_begin);
+        line_begin = line_end;
+    }
+    if (user_message.empty()) {
+        tagged.append(prefix.data(), prefix.size());
+        tagged.append("[task=");
+        tagged.append(task_digits.data(), task_digits.size());
+        tagged.append("] ");
+    }
     return tagged;
 }
 

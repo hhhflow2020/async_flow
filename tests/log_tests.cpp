@@ -61,10 +61,11 @@ TEST(LogTests, TaskIdTagIsInsertedAtFirstUserLogField) {
     const std::string tagged =
         af::detail::task_id_tagged_user_log_message(message, user_message, 1025);
 
-    EXPECT_EQ(tagged,
-              "I0603 10:31:40.550430 123 log_tests.cpp:42] [task=1025] user first\nsecond\n");
-    EXPECT_EQ(count_substring_occurrences(tagged, "[task=1025] "), 1U);
+    EXPECT_EQ(tagged, "I0603 10:31:40.550430 123 log_tests.cpp:42] [task=1025] user first\n"
+                      "I0603 10:31:40.550430 123 log_tests.cpp:42] [task=1025] second\n");
+    EXPECT_EQ(count_substring_occurrences(tagged, "[task=1025] "), 2U);
     EXPECT_EQ(tagged.find("[task=1025] "), message.size() - user_message.size());
+    EXPECT_EQ(tagged.find("\n[task=1025] "), std::string::npos);
 }
 
 TEST(LogTests, TaskIdTagUsesSharedLogEntryUserFieldStart) {
@@ -76,9 +77,9 @@ TEST(LogTests, TaskIdTagUsesSharedLogEntryUserFieldStart) {
     const std::string tagged =
         af::detail::task_id_tagged_user_log_message(formatted_message, user_message, 1025);
 
-    EXPECT_EQ(tagged, prefix + "[task=1025] user first\nsecond\n");
+    EXPECT_EQ(tagged, prefix + "[task=1025] user first\n" + prefix + "[task=1025] second\n");
     EXPECT_NE(tagged.find("[task=1025] "), 0U);
-    EXPECT_EQ(count_substring_occurrences(tagged, "[task=1025] "), 1U);
+    EXPECT_EQ(count_substring_occurrences(tagged, "[task=1025] "), 2U);
     EXPECT_EQ(tagged.find("\n[task=1025] "), std::string::npos);
 }
 
@@ -1138,7 +1139,7 @@ TEST(LogTests, RuntimeAwareSinkTagsFirstUserLogFieldWithRuntimeTaskId) {
     EXPECT_NE(contents.find(task_tag + "runtime task id log"), std::string::npos);
 }
 
-TEST(LogTests, RuntimeAwareSinkTagsOnlyFirstUserLogLine) {
+TEST(LogTests, RuntimeAwareSinkTagsEachUserLogLineAfterPrefix) {
     const auto path = std::filesystem::temp_directory_path() / "async_flow_multiline_task_log.txt";
     std::filesystem::remove(path);
 
@@ -1167,12 +1168,19 @@ TEST(LogTests, RuntimeAwareSinkTagsOnlyFirstUserLogLine) {
     const std::string task_tag = "[task=" + std::to_string(task_id) + "] ";
     const std::size_t task_tag_pos = contents.find(task_tag);
     const std::size_t first_user_line_pos = contents.find("runtime task id log first");
+    const std::size_t second_user_line_pos = contents.find("runtime task id log second");
     ASSERT_NE(task_tag_pos, std::string::npos);
     ASSERT_NE(first_user_line_pos, std::string::npos);
+    ASSERT_NE(second_user_line_pos, std::string::npos);
     EXPECT_EQ(first_user_line_pos, task_tag_pos + task_tag.size());
-    EXPECT_EQ(count_substring_occurrences(contents, task_tag), 1U);
-    EXPECT_NE(contents.find("\nruntime task id log second"), std::string::npos);
-    EXPECT_EQ(contents.find("\n" + task_tag + "runtime task id log second"), std::string::npos);
+    EXPECT_EQ(count_substring_occurrences(contents, task_tag), 2U);
+    EXPECT_NE(contents.find(task_tag + "runtime task id log first"), std::string::npos);
+    EXPECT_NE(contents.find(task_tag + "runtime task id log second"), std::string::npos);
+    EXPECT_EQ(contents.find("\n" + task_tag), std::string::npos);
+
+    const std::size_t second_line_begin = contents.rfind('\n', second_user_line_pos);
+    ASSERT_NE(second_line_begin, std::string::npos);
+    EXPECT_EQ(contents[second_line_begin + 1U], 'I');
 }
 
 TEST(LogTests, BlockOverflowWaitsForQueueCapacity) {
