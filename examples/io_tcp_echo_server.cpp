@@ -13,7 +13,6 @@
 #include "support/io_tcp_echo_sockets.hpp"
 
 int main(int argc, char **argv) {
-#if !defined(_WIN32)
     using namespace std::chrono_literals;
     using namespace io_tcp_echo_example;
 
@@ -241,8 +240,4 @@ int main(int argc, char **argv) {
               << " bytes_in=" << snapshot.bytes_received << " bytes_out=" << snapshot.bytes_sent
               << " drained=" << drained << " log_dropped=" << log_stats.dropped << '\n';
     return logs_ok ? 0 : 1;
-#else
-    std::cout << "tcp echo server example requires POSIX sockets\n";
-    return 0;
-#endif
 }

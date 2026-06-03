@@ -8,12 +8,10 @@
 
 #include "af/async_flow.hpp"
 
-#if !defined(_WIN32)
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#endif
 
 namespace {
 
@@ -77,7 +75,6 @@ bool wait_for_completion(std::atomic<int> &completed, int expected) {
     return true;
 }
 
-#if !defined(_WIN32)
 void close_fd(int &fd) noexcept {
     if (fd >= 0) {
         static_cast<void>(::close(fd));
@@ -137,15 +134,10 @@ void receive_datagrams(int fd, std::atomic<int> &received, int expected) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
-#endif
 
 } // namespace
 
 int main() {
-#if defined(_WIN32)
-    std::cout << "runtime udp async logging example is POSIX-only\n";
-    return 0;
-#else
     using namespace std::chrono_literals;
 
     std::uint16_t udp_port = 0;
@@ -207,5 +199,4 @@ int main() {
                    received.load(std::memory_order_acquire) == expected_datagrams
                ? 0
                : 1;
-#endif
 }

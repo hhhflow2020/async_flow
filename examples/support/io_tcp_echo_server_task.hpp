@@ -9,7 +9,6 @@
 #include "io_tcp_echo_session_task.hpp"
 #include "io_tcp_echo_sockets.hpp"
 
-#if !defined(_WIN32)
 #include <netinet/in.h>
 #include <sys/socket.h>
 
@@ -113,5 +112,3 @@ private:
 };
 
 } // namespace io_tcp_echo_example
-
-#endif

@@ -2,7 +2,6 @@
 
 #include "io_tcp_echo_runtime.hpp"
 
-#if !defined(_WIN32)
 #include <arpa/inet.h>
 #include <cerrno>
 #include <fcntl.h>
@@ -156,5 +155,3 @@ inline bool echo_wake_listener(sockaddr_in address) noexcept {
 }
 
 } // namespace io_tcp_echo_example
-
-#endif

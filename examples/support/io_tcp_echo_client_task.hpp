@@ -7,7 +7,6 @@
 
 #include "io_tcp_echo_runtime.hpp"
 
-#if !defined(_WIN32)
 #include <netinet/in.h>
 #include <sys/socket.h>
 
@@ -147,5 +146,3 @@ private:
 };
 
 } // namespace io_tcp_echo_example
-
-#endif

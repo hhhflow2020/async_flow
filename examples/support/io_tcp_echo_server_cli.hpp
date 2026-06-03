@@ -12,7 +12,6 @@
 
 #include "io_tcp_echo_sockets.hpp"
 
-#if !defined(_WIN32)
 #include <arpa/inet.h>
 
 namespace io_tcp_echo_example {
@@ -194,5 +193,3 @@ inline void echo_print_server_usage(std::ostream &out) {
 }
 
 } // namespace io_tcp_echo_example
-
-#endif

@@ -8,8 +8,6 @@
 
 #include "io_tcp_echo_server_state.hpp"
 
-#if !defined(_WIN32)
-
 namespace io_tcp_echo_example {
 
 class EchoSessionTask final : public EchoTask {
@@ -154,5 +152,3 @@ private:
 };
 
 } // namespace io_tcp_echo_example
-
-#endif

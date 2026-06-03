@@ -7,12 +7,10 @@
 
 #include "io_tcp_echo_runtime.hpp"
 
-#if !defined(_WIN32)
 #include <cerrno>
 #include <fcntl.h>
 #include <poll.h>
 #include <unistd.h>
-#endif
 
 namespace io_tcp_echo_example {
 
@@ -60,7 +58,6 @@ echo_server_snapshot(const EchoServerState &state) noexcept {
            state.active_sessions.load(std::memory_order_acquire) == 0U;
 }
 
-#if !defined(_WIN32)
 [[nodiscard]] inline bool echo_set_notify_fd_flags(int fd) noexcept {
     const int status_flags = ::fcntl(fd, F_GETFL, 0);
     if (status_flags < 0 || ::fcntl(fd, F_SETFL, status_flags | O_NONBLOCK) != 0) {
@@ -195,19 +192,6 @@ echo_wait_for_shutdown(EchoServerState &state, int notify_fd,
     }
     return echo_server_drained(state);
 }
-#else
-inline void echo_notify_shutdown_state(EchoServerState &state) noexcept {
-    static_cast<void>(state);
-}
-
-[[nodiscard]] inline bool
-echo_wait_for_shutdown(EchoServerState &state, int notify_fd,
-                       std::chrono::steady_clock::time_point deadline) noexcept {
-    static_cast<void>(notify_fd);
-    static_cast<void>(deadline);
-    return echo_server_drained(state);
-}
-#endif
 
 [[nodiscard]] inline std::uint64_t echo_session_started(EchoServerState &state) noexcept {
     return state.active_sessions.fetch_add(1, std::memory_order_relaxed) + 1U;

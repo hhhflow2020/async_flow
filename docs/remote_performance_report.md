@@ -2235,6 +2235,49 @@ Interpretation:
 - Runtime scheduling, queue selection, IO backend behavior, locking, atomics,
   memory ordering, and public API semantics were not changed.
 
+## 2026-06-03 Remaining Example Windows Fallback Removal
+
+This pass removes the remaining Windows fallback branches from ordinary example
+entry points and the TCP echo support headers touched by those examples. The
+examples are now POSIX-oriented directly instead of compiling alternate no-op
+Windows exits.
+
+Changes under validation:
+
+- Removed `_WIN32` wrappers from `runtime_tcp_async_logging.cpp`,
+  `runtime_udp_async_logging.cpp`, and `io_tcp_echo_server.cpp`.
+- Removed `_WIN32` wrappers from TCP echo socket, CLI, server state, client
+  task, server task, and session task support headers.
+- Kept the Linux-only `pipe2` branch in TCP echo shutdown notification because
+  macOS uses the portable POSIX `pipe` fallback.
+- Rechecked public headers excluding `include/af/detail` plus ordinary example
+  entry points excluding `examples/support`: no platform macro matches remain.
+
+Correctness checks:
+
+- Local macOS Debug build/run passed for
+  `asyncflow_io_tcp_echo_server_example --self-test`,
+  `asyncflow_runtime_tcp_async_logging_example`, and
+  `asyncflow_runtime_udp_async_logging_example`.
+- Local macOS runs reported TCP echo `backends=kqueue,kqueue`, self-test
+  accepted/completed 2 sessions with 16 bytes in/out, and both runtime logging
+  examples accepted/flushed/received 129 records with 0 drops.
+- Remote GCC Debug, `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`, reusing `/data/conan-cache-gcc`: all three targets
+  built and ran successfully. TCP echo reported `backends=io_uring,io_uring`;
+  TCP and UDP runtime logging each received 129 records with 0 drops.
+- Remote Clang Debug, `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`, reusing `/data/conan-cache-clang`: all three targets
+  built and ran successfully with the same outcome as GCC.
+
+Interpretation:
+
+- Normal example entry points no longer show platform-selection preprocessor
+  branches to users.
+- This is a source-boundary cleanup only; it does not change IO backend
+  selection, scheduler queues, logging format, locking, atomics, or memory
+  ordering.
+
 ## 2026-06-03 Event/Timer Wait Platform Branch Encapsulation
 
 This pass moves the `eventfd`/`timerfd` wait-read platform branch out of the
