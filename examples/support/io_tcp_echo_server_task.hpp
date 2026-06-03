@@ -93,8 +93,7 @@ private:
     }
 
     af::TaskResult finish(int error) {
-        state_->accept_error.store(error, std::memory_order_release);
-        state_->accept_stopped.store(true, std::memory_order_release);
+        echo_accept_finished(*state_, error);
         if (error == 0) {
             LOG(INFO) << "tcp echo accept task ended accepted="
                       << state_->accepted.load(std::memory_order_acquire)

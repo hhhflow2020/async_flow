@@ -27,10 +27,9 @@ public:
         server_state_ = state;
         session_id_ = session_id;
         stream_.reset(io_thread_, fd_.get());
-        const std::uint64_t active_sessions =
-            server_state_->active_sessions.fetch_add(1, std::memory_order_acq_rel) + 1U;
+        const std::uint64_t active_sessions = echo_session_started(*server_state_);
         if (!schedule(io_thread_)) {
-            server_state_->active_sessions.fetch_sub(1, std::memory_order_acq_rel);
+            echo_session_start_aborted(*server_state_);
             LOG(ERROR) << "tcp echo session task start failed session=" << session_id_;
             return false;
         }
@@ -122,12 +121,9 @@ private:
     }
 
     af::TaskResult finish(int error) {
-        server_state_->bytes_received.fetch_add(session_bytes_received_, std::memory_order_relaxed);
-        server_state_->bytes_sent.fetch_add(session_bytes_sent_, std::memory_order_relaxed);
-        server_state_->active_sessions.fetch_sub(1, std::memory_order_acq_rel);
-
         if (error == 0) {
-            server_state_->completed_sessions.fetch_add(1, std::memory_order_acq_rel);
+            echo_session_finished(*server_state_, true, session_bytes_received_,
+                                  session_bytes_sent_);
             LOG(INFO) << "tcp echo session disconnected session=" << session_id_
                       << " bytes_in=" << session_bytes_received_
                       << " bytes_out=" << session_bytes_sent_;
@@ -135,7 +131,7 @@ private:
             return done();
         }
 
-        server_state_->failed_sessions.fetch_add(1, std::memory_order_acq_rel);
+        echo_session_finished(*server_state_, false, session_bytes_received_, session_bytes_sent_);
         LOG(ERROR) << "tcp echo session task ended session=" << session_id_ << " error=" << error
                    << " bytes_in=" << session_bytes_received_
                    << " bytes_out=" << session_bytes_sent_;

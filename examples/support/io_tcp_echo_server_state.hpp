@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 
 #include "io_tcp_echo_runtime.hpp"
@@ -42,6 +43,37 @@ echo_server_snapshot(const EchoServerState &state) noexcept {
         .bytes_sent = state.bytes_sent.load(std::memory_order_acquire),
         .accept_error = state.accept_error.load(std::memory_order_acquire),
     };
+}
+
+[[nodiscard]] inline std::uint64_t echo_session_started(EchoServerState &state) noexcept {
+    return state.active_sessions.fetch_add(1, std::memory_order_relaxed) + 1U;
+}
+
+inline void echo_session_start_aborted(EchoServerState &state) noexcept {
+    if (state.active_sessions.fetch_sub(1, std::memory_order_release) == 1U) {
+        state.active_sessions.notify_all();
+    }
+}
+
+inline void echo_session_finished(EchoServerState &state, bool success,
+                                  std::uint64_t bytes_received, std::uint64_t bytes_sent) noexcept {
+    state.bytes_received.fetch_add(bytes_received, std::memory_order_relaxed);
+    state.bytes_sent.fetch_add(bytes_sent, std::memory_order_relaxed);
+    if (success) {
+        state.completed_sessions.fetch_add(1, std::memory_order_relaxed);
+    } else {
+        state.failed_sessions.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    if (state.active_sessions.fetch_sub(1, std::memory_order_release) == 1U) {
+        state.active_sessions.notify_all();
+    }
+}
+
+inline void echo_accept_finished(EchoServerState &state, int error) noexcept {
+    state.accept_error.store(error, std::memory_order_release);
+    state.accept_stopped.store(true, std::memory_order_release);
+    state.accept_stopped.notify_all();
 }
 
 } // namespace io_tcp_echo_example
