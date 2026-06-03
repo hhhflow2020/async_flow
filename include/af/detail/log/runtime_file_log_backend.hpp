@@ -140,8 +140,8 @@ public:
             return true;
         }
         if (path.empty()) {
-            last_error.store(EINVAL, std::memory_order_release);
-            last_error_stage.store(1, std::memory_order_release);
+            last_error.store(EINVAL, std::memory_order_relaxed);
+            last_error_stage.store(1, std::memory_order_relaxed);
             return false;
         }
 
@@ -159,8 +159,8 @@ public:
 
         int candidate = ::open(path.c_str(), flags, 0644);
         if (candidate < 0) {
-            last_error.store(errno == 0 ? EIO : errno, std::memory_order_release);
-            last_error_stage.store(2, std::memory_order_release);
+            last_error.store(errno == 0 ? EIO : errno, std::memory_order_relaxed);
+            last_error_stage.store(2, std::memory_order_relaxed);
             return false;
         }
 
@@ -347,12 +347,12 @@ private:
                 continue;
             }
             if (status.ready()) {
-                state_->last_error.store(EIO, std::memory_order_release);
-                state_->last_error_stage.store(3, std::memory_order_release);
+                state_->last_error.store(EIO, std::memory_order_relaxed);
+                state_->last_error_stage.store(3, std::memory_order_relaxed);
             } else {
                 state_->last_error.store(status.failed() ? status.error : EIO,
-                                         std::memory_order_release);
-                state_->last_error_stage.store(4, std::memory_order_release);
+                                         std::memory_order_relaxed);
+                state_->last_error_stage.store(4, std::memory_order_relaxed);
             }
             state_->close_file();
             drop_current_records();
@@ -383,8 +383,8 @@ private:
                 if (errno == EINTR) {
                     continue;
                 }
-                state_->last_error.store(errno == 0 ? EIO : errno, std::memory_order_release);
-                state_->last_error_stage.store(5, std::memory_order_release);
+                state_->last_error.store(errno == 0 ? EIO : errno, std::memory_order_relaxed);
+                state_->last_error_stage.store(5, std::memory_order_relaxed);
                 break;
             }
             state_->flushes.fetch_add(1U, std::memory_order_relaxed);
@@ -402,8 +402,8 @@ private:
         fsync_state_.reset();
         if (status.failed()) {
             state_->last_error.store(status.error == 0 ? EIO : status.error,
-                                     std::memory_order_release);
-            state_->last_error_stage.store(6, std::memory_order_release);
+                                     std::memory_order_relaxed);
+            state_->last_error_stage.store(6, std::memory_order_relaxed);
         }
         state_->flushes.fetch_add(1U, std::memory_order_relaxed);
         state_->complete_requested_flushes();

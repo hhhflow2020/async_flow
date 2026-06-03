@@ -127,31 +127,31 @@ public:
             return true;
         }
         if (!resolved) {
-            last_error.store(EDESTADDRREQ, std::memory_order_release);
-            last_error_stage.store(1, std::memory_order_release);
+            last_error.store(EDESTADDRREQ, std::memory_order_relaxed);
+            last_error_stage.store(1, std::memory_order_relaxed);
             return false;
         }
 
         const auto now = std::chrono::steady_clock::now();
         if (now < next_connect_time) {
-            last_error.store(EAGAIN, std::memory_order_release);
-            last_error_stage.store(2, std::memory_order_release);
+            last_error.store(EAGAIN, std::memory_order_relaxed);
+            last_error_stage.store(2, std::memory_order_relaxed);
             return false;
         }
         next_connect_time = now + reconnect_interval;
 
         int candidate = ::socket(address.ss_family, SOCK_STREAM, protocol);
         if (candidate < 0) {
-            last_error.store(errno == 0 ? EIO : errno, std::memory_order_release);
-            last_error_stage.store(3, std::memory_order_release);
+            last_error.store(errno == 0 ? EIO : errno, std::memory_order_relaxed);
+            last_error_stage.store(3, std::memory_order_relaxed);
             return false;
         }
 
         if (!set_log_socket_nonblocking(candidate)) {
             const int error = errno == 0 ? EIO : errno;
             static_cast<void>(::close(candidate));
-            last_error.store(error, std::memory_order_release);
-            last_error_stage.store(7, std::memory_order_release);
+            last_error.store(error, std::memory_order_relaxed);
+            last_error_stage.store(7, std::memory_order_relaxed);
             return false;
         }
         fd = candidate;
@@ -339,16 +339,16 @@ private:
             }
             if (status.ready()) {
                 close_socket();
-                state_->last_error.store(EPIPE, std::memory_order_release);
-                state_->last_error_stage.store(5, std::memory_order_release);
+                state_->last_error.store(EPIPE, std::memory_order_relaxed);
+                state_->last_error_stage.store(5, std::memory_order_relaxed);
                 drop_current_records();
                 return SendResult::Complete;
             }
 
             close_socket();
             state_->last_error.store(status.failed() ? status.error : ECONNRESET,
-                                     std::memory_order_release);
-            state_->last_error_stage.store(6, std::memory_order_release);
+                                     std::memory_order_relaxed);
+            state_->last_error_stage.store(6, std::memory_order_relaxed);
             drop_current_records();
             return SendResult::Complete;
         }
@@ -388,8 +388,8 @@ private:
 
         close_socket();
         state_->last_error.store(status.failed() ? status.error : ECONNRESET,
-                                 std::memory_order_release);
-        state_->last_error_stage.store(4, std::memory_order_release);
+                                 std::memory_order_relaxed);
+        state_->last_error_stage.store(4, std::memory_order_relaxed);
         return State::ConnectResult::Failed;
     }
 
