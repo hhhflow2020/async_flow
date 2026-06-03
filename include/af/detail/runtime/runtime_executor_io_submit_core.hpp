@@ -26,28 +26,20 @@ template <typename RuntimeT, typename TraitsT>
     }
     if (RuntimeT::current_thread_index_ != index_ || task == nullptr || result == nullptr) {
         if (result != nullptr) {
-            result->fd = fd;
-            result->events = io_error;
-            result->error = EINVAL;
+            detail::set_io_result_error(*result, fd, EINVAL);
         }
         return false;
     }
     if (io_uring_fd_ < 0 || fd < 0) {
-        result->fd = fd;
-        result->events = io_error;
-        result->error = io_uring_fd_ < 0 ? ENOSYS : EBADF;
+        detail::set_io_result_error(*result, fd, io_uring_fd_ < 0 ? ENOSYS : EBADF);
         return false;
     }
     if (data == nullptr) {
-        result->fd = fd;
-        result->events = io_error;
-        result->error = EINVAL;
+        detail::set_io_result_error(*result, fd, EINVAL);
         return false;
     }
     if (!detail::io_uring_sqe_len_fits(size)) {
-        result->fd = fd;
-        result->events = io_error;
-        result->error = EINVAL;
+        detail::set_io_result_error(*result, fd, EINVAL);
         return false;
     }
 
@@ -55,9 +47,7 @@ template <typename RuntimeT, typename TraitsT>
     try {
         operation = io_uring_op_pool_.create();
     } catch (...) {
-        result->fd = fd;
-        result->events = io_error;
-        result->error = ENOMEM;
+        detail::set_io_result_error(*result, fd, ENOMEM);
         return false;
     }
 
@@ -80,9 +70,7 @@ template <typename RuntimeT, typename TraitsT>
     io_uring_sqe *sqe = reserve_io_uring_sqe(reserve_error);
     if (sqe == nullptr) {
         io_uring_op_pool_.destroy(operation);
-        result->fd = fd;
-        result->events = io_error;
-        result->error = reserve_error == 0 ? EBUSY : reserve_error;
+        detail::set_io_result_error(*result, fd, reserve_error == 0 ? EBUSY : reserve_error);
         return false;
     }
 
@@ -125,16 +113,12 @@ template <typename FillSqe>
     }
     if (RuntimeT::current_thread_index_ != index_ || task == nullptr || result == nullptr) {
         if (result != nullptr) {
-            result->fd = result_fd;
-            result->events = io_error;
-            result->error = EINVAL;
+            detail::set_io_result_error(*result, result_fd, EINVAL);
         }
         return false;
     }
     if (io_uring_fd_ < 0) {
-        result->fd = result_fd;
-        result->events = io_error;
-        result->error = ENOSYS;
+        detail::set_io_result_error(*result, result_fd, ENOSYS);
         return false;
     }
 
@@ -142,9 +126,7 @@ template <typename FillSqe>
     try {
         operation = io_uring_op_pool_.create();
     } catch (...) {
-        result->fd = result_fd;
-        result->events = io_error;
-        result->error = ENOMEM;
+        detail::set_io_result_error(*result, result_fd, ENOMEM);
         return false;
     }
 
@@ -167,9 +149,7 @@ template <typename FillSqe>
     io_uring_sqe *sqe = reserve_io_uring_sqe(reserve_error);
     if (sqe == nullptr) {
         io_uring_op_pool_.destroy(operation);
-        result->fd = result_fd;
-        result->events = io_error;
-        result->error = reserve_error == 0 ? EBUSY : reserve_error;
+        detail::set_io_result_error(*result, result_fd, reserve_error == 0 ? EBUSY : reserve_error);
         return false;
     }
 
@@ -213,16 +193,12 @@ Executor<RuntimeT, TraitsT>::submit_io_uring_socket_impl(int domain, int type, i
     }
     if (RuntimeT::current_thread_index_ != index_ || task == nullptr || result == nullptr) {
         if (result != nullptr) {
-            result->fd = -1;
-            result->events = io_error;
-            result->error = EINVAL;
+            detail::set_io_result_error(*result, -1, EINVAL);
         }
         return false;
     }
     if (io_uring_fd_ < 0 || !io_uring_socket_available_) {
-        result->fd = -1;
-        result->events = io_error;
-        result->error = ENOSYS;
+        detail::set_io_result_error(*result, -1, ENOSYS);
         return false;
     }
 
@@ -230,9 +206,7 @@ Executor<RuntimeT, TraitsT>::submit_io_uring_socket_impl(int domain, int type, i
     try {
         operation = io_uring_op_pool_.create();
     } catch (...) {
-        result->fd = -1;
-        result->events = io_error;
-        result->error = ENOMEM;
+        detail::set_io_result_error(*result, -1, ENOMEM);
         return false;
     }
 
@@ -255,9 +229,7 @@ Executor<RuntimeT, TraitsT>::submit_io_uring_socket_impl(int domain, int type, i
     io_uring_sqe *sqe = reserve_io_uring_sqe(reserve_error);
     if (sqe == nullptr) {
         io_uring_op_pool_.destroy(operation);
-        result->fd = -1;
-        result->events = io_error;
-        result->error = reserve_error == 0 ? EBUSY : reserve_error;
+        detail::set_io_result_error(*result, -1, reserve_error == 0 ? EBUSY : reserve_error);
         return false;
     }
 
@@ -304,54 +276,38 @@ template <typename RuntimeT, typename TraitsT>
     }
     if (RuntimeT::current_thread_index_ != index_ || task == nullptr || result == nullptr) {
         if (result != nullptr) {
-            result->fd = file_index;
-            result->events = io_error;
-            result->error = EINVAL;
+            detail::set_io_result_error(*result, file_index, EINVAL);
         }
         return false;
     }
     if (io_uring_fd_ < 0 || file_index < 0) {
-        result->fd = file_index;
-        result->events = io_error;
-        result->error = io_uring_fd_ < 0 ? ENOSYS : EBADF;
+        detail::set_io_result_error(*result, file_index, io_uring_fd_ < 0 ? ENOSYS : EBADF);
         return false;
     }
     if (data == nullptr) {
-        result->fd = file_index;
-        result->events = io_error;
-        result->error = EINVAL;
+        detail::set_io_result_error(*result, file_index, EINVAL);
         return false;
     }
     if (!io_uring_files_registered_) {
-        result->fd = file_index;
-        result->events = io_error;
-        result->error = ENXIO;
+        detail::set_io_result_error(*result, file_index, ENXIO);
         return false;
     }
     if (static_cast<unsigned>(file_index) >= io_uring_registered_file_count_) {
-        result->fd = file_index;
-        result->events = io_error;
-        result->error = EINVAL;
+        detail::set_io_result_error(*result, file_index, EINVAL);
         return false;
     }
     if (fixed_buffer) {
         if (!io_uring_buffers_registered_) {
-            result->fd = file_index;
-            result->events = io_error;
-            result->error = ENOBUFS;
+            detail::set_io_result_error(*result, file_index, ENOBUFS);
             return false;
         }
         if (fixed_buffer_index >= io_uring_registered_buffer_count_) {
-            result->fd = file_index;
-            result->events = io_error;
-            result->error = EINVAL;
+            detail::set_io_result_error(*result, file_index, EINVAL);
             return false;
         }
     }
     if (!detail::io_uring_sqe_len_fits(size)) {
-        result->fd = file_index;
-        result->events = io_error;
-        result->error = EINVAL;
+        detail::set_io_result_error(*result, file_index, EINVAL);
         return false;
     }
 
@@ -359,9 +315,7 @@ template <typename RuntimeT, typename TraitsT>
     try {
         operation = io_uring_op_pool_.create();
     } catch (...) {
-        result->fd = file_index;
-        result->events = io_error;
-        result->error = ENOMEM;
+        detail::set_io_result_error(*result, file_index, ENOMEM);
         return false;
     }
 
@@ -384,9 +338,8 @@ template <typename RuntimeT, typename TraitsT>
     io_uring_sqe *sqe = reserve_io_uring_sqe(reserve_error);
     if (sqe == nullptr) {
         io_uring_op_pool_.destroy(operation);
-        result->fd = file_index;
-        result->events = io_error;
-        result->error = reserve_error == 0 ? EBUSY : reserve_error;
+        detail::set_io_result_error(*result, file_index,
+                                    reserve_error == 0 ? EBUSY : reserve_error);
         return false;
     }
 

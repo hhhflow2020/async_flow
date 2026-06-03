@@ -79,3 +79,33 @@ TEST_F(UringIoRuntimeFileFixture, IoUringFileAdapterUsesAsyncCurrentOffsetReadWr
     GTEST_SKIP() << "io_uring backend is Linux-only";
 #endif
 }
+
+TEST_F(UringIoRuntimeFileFixture, IoUringOversizedReadRejectClearsStaleResultState) {
+#if defined(__linux__)
+    if (!UringIoRuntime::io_uring_backend_available(IoTestThreads::IO_0)) {
+        GTEST_SKIP() << "io_uring backend unavailable";
+    }
+
+    char path[] = "/tmp/asyncflow-uring-oversized-read-XXXXXX";
+    const int fd = ::mkstemp(path);
+    ASSERT_GE(fd, 0);
+    af::UniqueFd file(fd);
+
+    std::atomic<int> completed{0};
+    std::atomic<int> error{0};
+    std::atomic<std::int64_t> result_value{0};
+    std::atomic<int> token_cleared{0};
+    ASSERT_TRUE(UringIoRuntime::start_task<UringOversizedReadRejectTask>(
+        file.get(), &completed, &error, &result_value, &token_cleared));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+
+    EXPECT_EQ(error.load(std::memory_order_acquire), EINVAL);
+    EXPECT_EQ(result_value.load(std::memory_order_acquire), -EINVAL);
+    EXPECT_EQ(token_cleared.load(std::memory_order_acquire), 1);
+
+    file.reset();
+    static_cast<void>(::unlink(path));
+#else
+    GTEST_SKIP() << "io_uring backend is Linux-only";
+#endif
+}

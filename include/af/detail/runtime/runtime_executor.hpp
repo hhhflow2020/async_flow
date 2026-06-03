@@ -115,9 +115,7 @@ public:
                   "io_wait must be called from its IO thread");
         if (RuntimeT::current_thread_index_ != index_ || task == nullptr || result == nullptr) {
             if (result != nullptr) {
-                result->fd = fd;
-                result->events = io_error;
-                result->error = EINVAL;
+                detail::set_io_result_error(*result, fd, EINVAL);
             }
             return false;
         }
@@ -253,11 +251,7 @@ public:
         static_cast<void>(timeout);
         static_cast<void>(task);
         if (result != nullptr) {
-            result->fd = -1;
-            result->events = io_error;
-            result->error = ENOSYS;
-            result->result = -ENOSYS;
-            result->completion_token = nullptr;
+            detail::set_io_result_error(*result, -1, ENOSYS);
         }
         return false;
 #endif
@@ -274,18 +268,12 @@ public:
         if (RuntimeT::current_thread_index_ != index_ || task == nullptr || result == nullptr ||
             timeout.count() <= 0) {
             if (result != nullptr) {
-                result->fd = -1;
-                result->events = io_error;
-                result->error = EINVAL;
-                result->result = -EINVAL;
+                detail::set_io_result_error(*result, -1, EINVAL);
             }
             return false;
         }
         if (io_uring_fd_ < 0) {
-            result->fd = -1;
-            result->events = io_error;
-            result->error = ENOSYS;
-            result->result = -ENOSYS;
+            detail::set_io_result_error(*result, -1, ENOSYS);
             return false;
         }
 
@@ -293,10 +281,7 @@ public:
         try {
             operation = io_uring_op_pool_.create();
         } catch (...) {
-            result->fd = -1;
-            result->events = io_error;
-            result->error = ENOMEM;
-            result->result = -ENOMEM;
+            detail::set_io_result_error(*result, -1, ENOMEM);
             return false;
         }
 
@@ -325,10 +310,7 @@ public:
         io_uring_sqe *sqe = reserve_io_uring_sqe(reserve_error);
         if (sqe == nullptr) {
             destroy_io_uring_operation(operation);
-            result->fd = -1;
-            result->events = io_error;
-            result->error = reserve_error == 0 ? EBUSY : reserve_error;
-            result->result = -result->error;
+            detail::set_io_result_error(*result, -1, reserve_error == 0 ? EBUSY : reserve_error);
             return false;
         }
 
@@ -365,11 +347,7 @@ public:
         static_cast<void>(timeout);
         static_cast<void>(task);
         if (result != nullptr) {
-            result->fd = -1;
-            result->events = io_error;
-            result->error = ENOSYS;
-            result->result = -ENOSYS;
-            result->completion_token = nullptr;
+            detail::set_io_result_error(*result, -1, ENOSYS);
         }
         return false;
 #endif
@@ -958,9 +936,7 @@ public:
                                                       IoResult *result) noexcept {
         if (!provided_buffer_group_registered(buffer_group)) {
             if (result != nullptr) {
-                result->fd = fd;
-                result->events = io_error;
-                result->error = ENOBUFS;
+                detail::set_io_result_error(*result, fd, ENOBUFS);
             }
             return false;
         }
@@ -976,9 +952,7 @@ public:
                                                          IoResult *result) noexcept {
         if (!provided_buffer_group_registered(buffer_group)) {
             if (result != nullptr) {
-                result->fd = fd;
-                result->events = io_error;
-                result->error = ENOBUFS;
+                detail::set_io_result_error(*result, fd, ENOBUFS);
             }
             return false;
         }
@@ -1032,9 +1006,7 @@ public:
                                                IoResult *result) noexcept {
         if (!io_uring_send_zc_available_) {
             if (result != nullptr) {
-                result->fd = fd;
-                result->events = io_error;
-                result->error = ENOSYS;
+                detail::set_io_result_error(*result, fd, ENOSYS);
             }
             return false;
         }
@@ -1049,9 +1021,7 @@ public:
                                                   IoResult *result) noexcept {
         if (!io_uring_sendmsg_zc_available_) {
             if (result != nullptr) {
-                result->fd = fd;
-                result->events = io_error;
-                result->error = ENOSYS;
+                detail::set_io_result_error(*result, fd, ENOSYS);
             }
             return false;
         }
@@ -1067,9 +1037,7 @@ public:
                                                       Task *task, IoResult *result) noexcept {
         if (!io_uring_sendmsg_zc_available_) {
             if (result != nullptr) {
-                result->fd = fd;
-                result->events = io_error;
-                result->error = ENOSYS;
+                detail::set_io_result_error(*result, fd, ENOSYS);
             }
             return false;
         }
@@ -1315,9 +1283,7 @@ public:
         static_cast<void>(flags);
         static_cast<void>(task);
         if (result != nullptr) {
-            result->fd = -1;
-            result->events = io_error;
-            result->error = ENOSYS;
+            detail::set_io_result_error(*result, -1, ENOSYS);
         }
         return false;
 #endif
@@ -1487,9 +1453,7 @@ private:
 
         const std::uint32_t native_events = native_poll_events(events);
         if (native_events == 0U) {
-            result->fd = fd;
-            result->events = io_error;
-            result->error = EINVAL;
+            detail::set_io_result_error(*result, fd, EINVAL);
             return IoUringPollSubmitResult::Failed;
         }
 
@@ -1497,9 +1461,7 @@ private:
         try {
             operation = io_uring_op_pool_.create();
         } catch (...) {
-            result->fd = fd;
-            result->events = io_error;
-            result->error = ENOMEM;
+            detail::set_io_result_error(*result, fd, ENOMEM);
             return IoUringPollSubmitResult::Failed;
         }
 
@@ -1507,9 +1469,7 @@ private:
         io_uring_sqe *sqe = reserve_io_uring_sqe(reserve_error);
         if (sqe == nullptr) {
             io_uring_op_pool_.destroy(operation);
-            result->fd = fd;
-            result->events = io_error;
-            result->error = reserve_error == 0 ? EBUSY : reserve_error;
+            detail::set_io_result_error(*result, fd, reserve_error == 0 ? EBUSY : reserve_error);
             if (io_uring_fd_ < 0) {
                 return IoUringPollSubmitResult::BackendClosed;
             }
@@ -1645,9 +1605,7 @@ private:
         if (result == nullptr) {
             return;
         }
-        result->fd = fd;
-        result->events = io_error;
-        result->error = error;
+        detail::set_io_result_error(*result, fd, error);
     }
 
     [[nodiscard]] static IoUringGenericSubmitKind

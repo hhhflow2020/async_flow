@@ -79,3 +79,45 @@ private:
     std::atomic<int> *completed_{nullptr};
     std::atomic<char> *byte_read_{nullptr};
 };
+
+class UringOversizedReadRejectTask final : public UringIoTaskBase {
+public:
+    explicit UringOversizedReadRejectTask(UringIoTaskBase::FactoryToken token)
+        : UringIoTaskBase(token) {}
+
+    bool do_it(int fd, std::atomic<int> *completed, std::atomic<int> *error,
+               std::atomic<std::int64_t> *result_value, std::atomic<int> *token_cleared) {
+        fd_ = fd;
+        completed_ = completed;
+        error_ = error;
+        result_value_ = result_value;
+        token_cleared_ = token_cleared;
+        return schedule(IoTestThreads::IO_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        int token = 0;
+        char buffer = 0;
+        af::IoResult result{fd_, af::io_readable, 0, 64, &token};
+        const auto oversized = static_cast<std::size_t>(std::numeric_limits<unsigned>::max()) + 1U;
+        const bool accepted = UringIoRuntime::io_submit_read_at(IoTestThreads::IO_0, fd_, &buffer,
+                                                                oversized, 0, this, &result);
+        if (accepted) {
+            return failed();
+        }
+
+        error_->store(result.error, std::memory_order_release);
+        result_value_->store(result.result, std::memory_order_release);
+        token_cleared_->store(result.completion_token == nullptr ? 1 : 0,
+                              std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    int fd_{-1};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> *error_{nullptr};
+    std::atomic<std::int64_t> *result_value_{nullptr};
+    std::atomic<int> *token_cleared_{nullptr};
+};
