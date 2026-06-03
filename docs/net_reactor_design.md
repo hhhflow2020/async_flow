@@ -111,6 +111,17 @@ connection EPOLLOUT -> send/writev/sendmsg loop 到 EAGAIN 或 output empty
 
 事件触发后不做 re-arm。
 
+当前实现状态：
+
+- `NetIoChannel` 已接入 runtime native readiness backend。
+- Linux epoll 使用 LT 模式；macOS/BSD kqueue 使用持久 `EVFILT_READ/EVFILT_WRITE`，
+  不使用 one-shot re-arm。
+- `ThreadKind::IoUring` 线程会优先初始化 io_uring，但 TCP reactor 的 socket
+  readiness 当前仍走同一线程上的 native epoll fallback；后续可在连接收发路径逐步接入
+  multishot accept/recv、send_zc 等 ring-native 优化。
+- wake 机制在 Linux 使用 eventfd，在 kqueue/macOS 路径使用 nonblocking pipe，且有
+  wake coalescing，避免每个 command 都触发一次 wake syscall。
+
 ## TCP
 
 `TcpServer` 是用户侧控制句柄，不是普通业务 task。真正运行的是每个 IO 线程上的
@@ -157,6 +168,37 @@ conn_handle.send(buffer);
 内部生成轻量 `SendCommand` 投递到 owner IO 线程。owner IO 线程检查
 `slot/generation` 后追加 output buffer，尝试发送；未写完时打开 `EPOLLOUT`。
 如果当前线程就是 owner IO 线程，可走 fast path。
+
+当前 TCP 连接控制 API：
+
+```cpp
+conn.send(bytes);
+conn.close();
+conn.close_after_flush();
+conn.shutdown_write();
+conn.pause_read();
+conn.resume_read();
+conn.set_no_delay(true);
+conn.set_keepalive(true);
+conn.local_endpoint();
+conn.peer_endpoint();
+conn.queued_bytes();
+```
+
+`TcpConnectionRef` 只能在 owner IO 线程回调内使用，走直接调用热路径；
+`TcpConnectionHandle` 可保存到业务对象或跨线程 task 中，内部通过 bounded MPSC command
+投递回连接 owner IO 线程，并用 `slot/generation` 校验连接是否仍然是同一个实例。
+
+`TcpServer::stop()` 会为每个 shard 启动 stop task，在对应 owner IO 线程关闭 listener、
+已有 connection 和 wake channel。生产服务应在收到退出信号后先调用 `server.stop()`，
+再等待 runtime idle 并执行 `Runtime::shutdown()`，避免从主线程析构时跨线程
+unregister reactor channel。
+
+endpoint 支持：
+
+- IPv4：`TcpEndpoint::any_v4(port)`、`loopback_v4(port)`、`host("127.0.0.1", port)`。
+- IPv6：`TcpEndpoint::any_v6(port)`、`loopback_v6(port)`、`host("::1", port)`。
+- `TcpServerOptions::ipv6_only` 控制 IPv6 listener 是否设置 `IPV6_V6ONLY`。
 
 ## 用户 API 边界
 
@@ -250,3 +292,21 @@ logger、timer、filesystem 等内部依赖完成替换。
 5. `tcp_echo_server` 示例。
 6. `tcp_login_server` 示例，protobuf 仅作为示例依赖。
 7. 基础 tests/benchmarks。
+
+本阶段已经完成：
+
+- `Buffer` / `BufferView` / `BufferChain`。
+- runtime-bound `NetIoChannel`，Linux epoll LT 与 macOS/BSD kqueue LT。
+- `TcpServer` / `TcpConnectionRef` / `TcpConnectionHandle`。
+- IPv4/IPv6 numeric endpoint 与 `sockaddr_storage` 转换。
+- send/close/flush shutdown/read pause/keepalive/nodelay command。
+- `tcp_echo_server` 与 `tcp_login_server` 示例。
+- buffer 与 socket address 单测，macOS kqueue IPv4/IPv6 smoke，远端 Linux 验证计划。
+
+仍未完成、需要后续阶段继续：
+
+- `TcpClient`、`UdpServer`、`UdpClient`、Unix stream/datagram server/client。
+- 真正独立的 public `IoReactor` façade；当前 channel 先复用 runtime native IO backend。
+- io_uring-native TCP server 热路径，例如 multishot accept/recv、provided buffer、send_zc。
+- `BufferPool`、writev/sendmsg coalescing、文件 sendfile/splice 与大包 zero-copy 策略在
+  `af::net` 核心中的整合。

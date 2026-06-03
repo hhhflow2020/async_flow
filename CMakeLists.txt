@@ -163,6 +163,7 @@ if(ASYNCFLOW_BUILD_TESTS)
         tests/signal_tests.cpp
         tests/batch_utility_tests.cpp
         tests/net_buffer_tests.cpp
+        tests/net_socket_address_tests.cpp
     )
     target_link_libraries(asyncflow_runtime_tests PRIVATE AsyncFlow::AsyncFlow GTest::gtest_main)
 

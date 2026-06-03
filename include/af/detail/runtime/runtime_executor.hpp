@@ -1612,6 +1612,9 @@ private:
     [[nodiscard]] bool complete_kqueue_timeout(KqueueTimeoutRegistration *registration,
                                                const struct kevent &event) noexcept;
     [[nodiscard]] bool poll_native_io(int timeout_ms, bool did_work) noexcept;
+    [[nodiscard]] bool update_net_channel_interest(detail::NetIoChannel *channel,
+                                                   std::uint32_t events) noexcept;
+    [[nodiscard]] static std::uint32_t net_events_from_kqueue(const struct kevent &event) noexcept;
     void clear_io_waits() noexcept;
     void reserve_native_io_wait_storage() noexcept;
     [[nodiscard]] bool register_native_io_wait(int fd, std::uint32_t events, Task *task,
@@ -1752,7 +1755,7 @@ private:
     absl::flat_hash_map<int, IoWaitEntry> io_waits_;
     IoObjectPool<IoWaitRegistration> io_wait_pool_;
 #endif
-#if AF_DETAIL_HAS_EPOLL
+#if AF_DETAIL_HAS_NATIVE_IO_WAIT
     absl::flat_hash_map<int, detail::NetIoChannel *> net_channels_;
 #endif
 #if AF_DETAIL_HAS_EPOLL

@@ -60,6 +60,13 @@ template <typename RuntimeT, typename TraitsT>
 void Executor<RuntimeT, TraitsT>::close_native_io_backend() noexcept {
     clear_io_waits();
     clear_kqueue_timeouts();
+    for (auto &entry : net_channels_) {
+        if (entry.second != nullptr) {
+            entry.second->active = false;
+            entry.second->interests = 0;
+        }
+    }
+    net_channels_.clear();
     if (io_kqueue_fd_ >= 0) {
         ::close(io_kqueue_fd_);
         io_kqueue_fd_ = -1;
@@ -277,8 +284,8 @@ template <typename RuntimeT, typename TraitsT>
     if (io_kqueue_fd_ < 0) {
         return did_work;
     }
-    if (timeout_ms == 0 && io_waits_.empty() && io_kqueue_timeout_count_ == 0U &&
-        !io_wake_pending_.load(std::memory_order_acquire)) {
+    if (timeout_ms == 0 && io_waits_.empty() && net_channels_.empty() &&
+        io_kqueue_timeout_count_ == 0U && !io_wake_pending_.load(std::memory_order_acquire)) {
         return did_work;
     }
 
@@ -314,13 +321,24 @@ template <typename RuntimeT, typename TraitsT>
             continue;
         }
 
+        const int fd = static_cast<int>(event.ident);
+        auto net_it = net_channels_.find(fd);
+        if (net_it != net_channels_.end()) {
+            detail::NetIoChannel *channel = net_it->second;
+            if (channel != nullptr && channel->active && channel->on_event != nullptr) {
+                channel->on_event(channel->owner, net_events_from_kqueue(event));
+                did_work = true;
+            }
+            continue;
+        }
+
         auto *registration = static_cast<IoWaitRegistration *>(event.udata);
         if (registration == nullptr) {
             continue;
         }
 
-        const int fd = registration->fd;
-        auto it = io_waits_.find(fd);
+        const int wait_fd = registration->fd;
+        auto it = io_waits_.find(wait_fd);
         if (it == io_waits_.end() || !io_wait_entry_contains(it->second, registration)) {
             continue;
         }
@@ -333,9 +351,9 @@ template <typename RuntimeT, typename TraitsT>
 
         const int error = io_error_from_kqueue(event);
         if (error != 0) {
-            detail::set_io_result_error(*registration->result, fd, error);
+            detail::set_io_result_error(*registration->result, wait_fd, error);
         } else {
-            registration->result->fd = fd;
+            registration->result->fd = wait_fd;
             registration->result->events = io_events_from_kqueue(event);
             registration->result->error = 0;
         }
@@ -348,6 +366,37 @@ template <typename RuntimeT, typename TraitsT>
         io_wait_pool_.destroy(completed[i]);
     }
     return did_work;
+}
+
+template <typename RuntimeT, typename TraitsT>
+bool Executor<RuntimeT, TraitsT>::update_net_channel_interest(detail::NetIoChannel *channel,
+                                                              std::uint32_t events) noexcept {
+    if (io_kqueue_fd_ < 0 || channel == nullptr || channel->fd < 0) {
+        return false;
+    }
+
+    const std::uint32_t old_events = channel->interests;
+    std::array<struct kevent, 2> changes;
+    int count = 0;
+    auto update_filter = [&](std::uint32_t bit, int16_t filter) {
+        const bool had = (old_events & bit) != 0U;
+        const bool wants = (events & bit) != 0U;
+        if (had == wants) {
+            return;
+        }
+        EV_SET(&changes[static_cast<std::size_t>(count++)], static_cast<uintptr_t>(channel->fd),
+               filter, wants ? EV_ADD : EV_DELETE, 0, 0, channel);
+    };
+    update_filter(detail::net_io_readable, EVFILT_READ);
+    update_filter(detail::net_io_writable, EVFILT_WRITE);
+
+    if (count != 0 && ::kevent(io_kqueue_fd_, changes.data(), count, nullptr, 0, nullptr) != 0) {
+        return false;
+    }
+
+    channel->interests = events;
+    channel->active = events != 0U;
+    return true;
 }
 
 template <typename RuntimeT, typename TraitsT>
@@ -383,6 +432,7 @@ Executor<RuntimeT, TraitsT>::register_native_io_wait(int fd, std::uint32_t event
     const bool unsupported_events = (events & (io_readable | io_writable)) == 0U;
     auto existing = io_waits_.find(fd);
     if (io_kqueue_fd_ < 0 || fd < 0 || events == 0U || unsupported_events ||
+        net_channels_.find(fd) != net_channels_.end() ||
         (existing != io_waits_.end() && io_wait_events_conflict(existing->second, events))) {
         int error = 0;
         if (fd < 0) {
@@ -515,6 +565,25 @@ Executor<RuntimeT, TraitsT>::io_events_from_kqueue(const struct kevent &event) n
     }
     if ((event.flags & EV_EOF) != 0) {
         result |= io_hangup;
+    }
+    return result;
+}
+
+template <typename RuntimeT, typename TraitsT>
+[[nodiscard]] std::uint32_t
+Executor<RuntimeT, TraitsT>::net_events_from_kqueue(const struct kevent &event) noexcept {
+    if ((event.flags & EV_ERROR) != 0) {
+        return detail::net_io_error;
+    }
+
+    std::uint32_t result = 0;
+    if (event.filter == EVFILT_READ) {
+        result |= detail::net_io_readable;
+    } else if (event.filter == EVFILT_WRITE) {
+        result |= detail::net_io_writable;
+    }
+    if ((event.flags & EV_EOF) != 0) {
+        result |= detail::net_io_hangup;
     }
     return result;
 }

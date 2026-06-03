@@ -222,7 +222,8 @@ template <typename RuntimeT, typename TraitsT>
     if (io_epoll_fd_ < 0) {
         return did_work;
     }
-    if (timeout_ms == 0 && io_waits_.empty()) {
+    if (timeout_ms == 0 && io_waits_.empty() && net_channels_.empty() &&
+        !io_wake_pending_.load(std::memory_order_acquire)) {
         return did_work;
     }
 

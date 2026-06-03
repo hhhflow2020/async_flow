@@ -16,8 +16,8 @@ bool Executor<RuntimeT, TraitsT>::register_net_channel(detail::NetIoChannel *cha
         return false;
     }
 
-#if AF_DETAIL_HAS_EPOLL
-    if (io_epoll_fd_ < 0 || net_channels_.find(channel->fd) != net_channels_.end() ||
+#if AF_DETAIL_HAS_NATIVE_IO_WAIT
+    if (!native_io_backend_available() || net_channels_.find(channel->fd) != net_channels_.end() ||
         io_waits_.find(channel->fd) != io_waits_.end()) {
         return false;
     }
@@ -49,7 +49,7 @@ bool Executor<RuntimeT, TraitsT>::update_net_channel(detail::NetIoChannel *chann
         return false;
     }
 
-#if AF_DETAIL_HAS_EPOLL
+#if AF_DETAIL_HAS_NATIVE_IO_WAIT
     auto it = net_channels_.find(channel->fd);
     if (it == net_channels_.end() || it->second != channel) {
         return false;
@@ -69,14 +69,12 @@ bool Executor<RuntimeT, TraitsT>::unregister_net_channel(detail::NetIoChannel *c
         return false;
     }
 
-#if AF_DETAIL_HAS_EPOLL
+#if AF_DETAIL_HAS_NATIVE_IO_WAIT
     auto it = net_channels_.find(channel->fd);
     if (it == net_channels_.end() || it->second != channel) {
         return false;
     }
-    if (channel->active) {
-        static_cast<void>(::epoll_ctl(io_epoll_fd_, EPOLL_CTL_DEL, channel->fd, nullptr));
-    }
+    static_cast<void>(update_net_channel_interest(channel, 0));
     net_channels_.erase(it);
     channel->active = false;
     channel->interests = 0;

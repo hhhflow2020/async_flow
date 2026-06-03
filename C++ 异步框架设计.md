@@ -755,16 +755,23 @@ async::parallel_shards_ordered(
 
 展示内容：
 
-- 使用 `af::net::TcpServer<Runtime, Handler>` 绑定多个 `ThreadKind::Epoll` IO 线程。
-- Linux 下每个 IO 线程一个 listener，并通过 `SO_REUSEPORT` 绑定同一地址，连接从 accept 开始归属对应 owner IO 线程。
+- 使用 `af::net::TcpServer<Runtime, Handler>` 绑定多个 `af::preferred_io_thread_kind`
+  IO 线程；Linux 默认优先 `ThreadKind::IoUring`，macOS/BSD 使用 kqueue，运行期会保留
+  native readiness fallback。
+- Linux 下每个 IO 线程一个 listener，并通过 `SO_REUSEPORT` 绑定同一地址，连接从 accept
+  开始归属对应 owner IO 线程；macOS/kqueue 路径同样使用 reactor channel 注册 listener
+  和 connection fd。
 - `on_read(conn, BufferView)` 只处理字节流，示例直接 `conn.send(bytes)` 原样回包。
+- 支持 IPv4/IPv6 numeric endpoint；示例默认监听 IPv4，传入 `--ipv6` 时监听 `[::]`。
 - 建连和断连日志包含 connection slot / generation，方便观察连接生命周期。
-- `SIGINT` / `SIGTERM` 触发停止标记，主线程负责关闭 runtime。
+- `SIGINT` / `SIGTERM` 触发停止标记，主线程先调用 `server.stop()`，等待 runtime idle，
+  再关闭 runtime；真正的 listener/connection/channel 关闭在 owner IO 线程完成。
 
 运行：
 
 ```sh
 ./build-conan/build/Release/asyncflow_net_tcp_echo_server_example 9090
+./build-conan/build/Release/asyncflow_net_tcp_echo_server_example 9090 --ipv6
 ```
 
 ### 11.7 net_tcp_login_server.cpp：长度 + 包 id + protobuf 登录示例
@@ -778,11 +785,13 @@ async::parallel_shards_ordered(
 - 登录包 content 使用 `examples/net/login.proto` 中的 `LoginRequest`，protobuf 只作为示例依赖，不进入 `af::net` 核心库。
 - IO 线程解析登录包后启动 `LoginTask`，任务切到计算线程打日志并构造 `LoginResponse`，再通过 `TcpConnectionHandle::send()` 回到连接 owner IO 线程发送响应。
 - 连接状态用 `slot + generation` 做 key，断连时清理 parser 状态。
+- 示例同样使用平台首选 IO 线程并支持 `--ipv6`。
 
 运行：
 
 ```sh
 ./build-conan/build/Release/asyncflow_net_tcp_login_server_example 9091
+./build-conan/build/Release/asyncflow_net_tcp_login_server_example 9091 --ipv6
 ```
 
 ## 12. 测试覆盖
@@ -797,7 +806,10 @@ async::parallel_shards_ordered(
 - `tests/queue_tests.cpp`、`tests/pool_tests.cpp`、`tests/batch_utility_tests.cpp`：SPSC/MPSC/MPMC 队列、对象池、分片工具、CRUD helper、BatchSequencer 和 ordered retry/skip policy。
 - `tests/log_tests.cpp`：异步日志格式、runtime-bound consumer、文件/TCP/UDP 后端、ordered/relaxed 队列策略、flush/shutdown、无丢失/无重复和单 producer FIFO 边界。
 - `tests/net_buffer_tests.cpp`：`af::Buffer`、`BufferView`、`BufferChain` 基础覆盖。
-- 旧 task-driven IO tests 已从本分支移除；新的网络服务路径通过 `af::net` 示例、buffer tests、本地 macOS CTest 和远端 Linux epoll smoke 覆盖。
+- `tests/net_socket_address_tests.cpp`：IPv4/IPv6 `TcpEndpoint` 与 `sockaddr_storage` 转换覆盖。
+- 旧 task-driven IO tests 已从本分支移除；新的网络服务路径通过 `af::net` 示例、buffer
+  tests、socket address tests、本地 macOS kqueue IPv4/IPv6 smoke 和远端 Linux
+  preferred-IO smoke 覆盖。
 
 重点覆盖：
 
@@ -941,7 +953,12 @@ P3：`start_task()` 为通用 handle 生命周期多做一次引用计数增减�
 - `include/af/detail/runtime/` 承载 runtime 配置、生命周期、dispatch、executor、parallel、IO backend 等实现片段。
 - `include/af/detail/queue/` 拆分 bounded SPSC/MPSC/MPMC queue family。
 - `include/af/detail/io/` 按 common/types/adapters/socket/file/filesystem/datagram/timeout/uring 分目录管理。
-- 旧 task-driven IO examples/tests/benchmarks 已移除；新网络层文档见 `docs/net_reactor_design.md`，当前落地代码集中在 `include/af/net/`、`include/af/buffer/` 和 `include/af/detail/net/`。
+- 旧 task-driven IO examples/tests/benchmarks 已移除；新网络层文档见
+  `docs/net_reactor_design.md`，当前落地代码集中在 `include/af/net/`、`include/af/buffer/`
+  和 `include/af/detail/net/`。TCP server 当前已支持 IPv4/IPv6 endpoint、epoll LT、
+  kqueue LT、IoUring 线程上的 native readiness fallback，以及 `close_after_flush()`、
+  `shutdown_write()`、`pause_read()`、`resume_read()`、`set_no_delay()`、`set_keepalive()`
+  等生产级连接控制 API。
 
 后续如果继续整理文件结构，应遵守以下约束：
 

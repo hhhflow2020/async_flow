@@ -273,13 +273,16 @@ ASYNCFLOW_STRESS_MS=1500 ctest --test-dir build-tsan/build/Debug -R RuntimeStres
 - `examples/ordered_batches.cpp`：乱序 batch 进入 sequencer，并用全 shard 顺序屏障应用。
 - `examples/crud_apply.cpp`：完整 CRUD change batch 模板，包含乱序提交、sequencer、ordered shard apply。
 - `examples/runtime_async_logging.cpp`、`examples/runtime_file_async_logging.cpp`、`examples/runtime_udp_async_logging.cpp`、`examples/runtime_tcp_async_logging.cpp`：runtime-bound 异步日志示例。
-- `examples/net_tcp_echo_server.cpp`：新 `af::net::TcpServer` reactor TCP echo server，支持多个 IO 线程和 `SO_REUSEPORT`。
-- `examples/net_tcp_login_server.cpp`：长度 + 包 id + protobuf content 的 TCP 登录示例，IO 线程解析包后启动计算线程任务并回包。
+- `examples/net_tcp_echo_server.cpp`：新 `af::net::TcpServer` reactor TCP echo server，
+  使用平台首选 IO 线程，支持多个 IO 线程、`SO_REUSEPORT` 和 `--ipv6`。
+- `examples/net_tcp_login_server.cpp`：长度 + 包 id + protobuf content 的 TCP 登录示例，
+  IO 线程解析包后启动计算线程任务并回包，同样支持 `--ipv6`。
 - `examples/net/login.proto`：仅供登录示例使用的 protobuf schema，不进入核心库依赖。
 - `tests/runtime_*_tests.cpp`：runtime 生命周期、调度、背压、shutdown、parallel、有序 batch 和 stress 覆盖。
 - `tests/queue_tests.cpp`、`tests/pool_tests.cpp`、`tests/signal_tests.cpp`、`tests/batch_utility_tests.cpp`：底层队列、对象池、信号和批处理工具覆盖。
 - `tests/log_tests.cpp`：runtime-bound 异步日志、ordered/relaxed 策略、file/udp/tcp 后端覆盖。
 - `tests/net_buffer_tests.cpp`：`af::Buffer`、`BufferView`、`BufferChain` 基础覆盖。
+- `tests/net_socket_address_tests.cpp`：IPv4/IPv6 endpoint 与 `sockaddr_storage` 转换覆盖。
 - `benchmarks/log_benchmarks.cpp`、`benchmarks/queue_benchmarks.cpp`、`benchmarks/runtime_*_benchmarks.cpp`：保留日志、队列和 runtime 调度路径 benchmark；旧 task-driven IO benchmarks 已在本分支移除。
 - `benchmarks/perf_baseline.json`：本地 runtime benchmark baseline。
 - `benchmarks/perf_baseline_github_ubuntu.json` 与 `scripts/check_benchmark_regression.py`：GitHub Ubuntu runner 性能 baseline 与回归阈值检查。
