@@ -135,6 +135,10 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
   carry Windows fallback guards. The runtime layer now exposes POSIX socket and
   `iovec`-based helpers directly while keeping real Linux/io_uring and
   macOS/BSD capability branches explicit.
+- Linux-only io_uring submit entry points on `AsyncRuntime` are declared on all
+  supported POSIX platforms. Non-Linux builds return `ENOSYS` from the public
+  submit wrapper instead of forcing user code to guard method existence with
+  platform macros.
 - `include/af/detail/log` no longer carries Windows fallback guards in its
   file, UDP/TCP, and runtime-bound file/UDP/TCP backend implementations. The
   logging backend layer now relies on the supported POSIX baseline directly

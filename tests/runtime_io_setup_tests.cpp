@@ -1,5 +1,25 @@
 #include "runtime_io_test_support.hpp"
 
+namespace {
+
+class PublicIoSubmitStubTask final : public UringIoTaskBase {
+public:
+    explicit PublicIoSubmitStubTask(UringIoTaskBase::FactoryToken token) : UringIoTaskBase(token) {}
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
+};
+
+void expect_enosys_result(const af::IoResult &result, int fd) {
+    EXPECT_EQ(result.fd, fd);
+    EXPECT_EQ(result.error, ENOSYS);
+    EXPECT_EQ(result.result, -static_cast<std::int64_t>(ENOSYS));
+}
+
+} // namespace
+
 TEST(IoUringSetupConfig, PopulatesRequestedSetupParams) {
 #if defined(__linux__)
     io_uring_params params{};
@@ -21,6 +41,46 @@ TEST(IoUringSetupConfig, PopulatesRequestedSetupParams) {
     EXPECT_EQ(params.sq_thread_cpu, 3U);
 #else
     GTEST_SKIP() << "io_uring setup params are Linux-only";
+#endif
+}
+
+TEST(RuntimePublicIo, LinuxOnlySubmitMethodsExistOnNonLinuxAndReportUnavailable) {
+#if defined(__linux__)
+    GTEST_SKIP() << "non-Linux public io_uring submit API fallback is not used on Linux";
+#else
+    auto task = UringIoRuntime::make_task<PublicIoSubmitStubTask>();
+    char byte = 0;
+    iovec iov{&byte, 1};
+    sockaddr_storage address{};
+    constexpr int fd = 0;
+    af::IoResult result{};
+
+    EXPECT_FALSE(UringIoRuntime::io_submit_recv_multishot(UringIoRuntime::thread_from_index(1), fd,
+                                                          1, 0, task.get(), &result));
+    expect_enosys_result(result, fd);
+
+    result = {};
+    EXPECT_FALSE(UringIoRuntime::io_submit_recvmsg_multishot(UringIoRuntime::thread_from_index(1),
+                                                             fd, 1, sizeof(sockaddr_storage), 0, 0,
+                                                             task.get(), &result));
+    expect_enosys_result(result, fd);
+
+    result = {};
+    EXPECT_FALSE(UringIoRuntime::io_submit_send_zc(UringIoRuntime::thread_from_index(1), fd, &byte,
+                                                   1, 0, task.get(), &result));
+    expect_enosys_result(result, fd);
+
+    result = {};
+    EXPECT_FALSE(UringIoRuntime::io_submit_sendmsg_zc(
+        UringIoRuntime::thread_from_index(1), fd, &byte, 1,
+        reinterpret_cast<const sockaddr *>(&address), sizeof(address), 0, task.get(), &result));
+    expect_enosys_result(result, fd);
+
+    result = {};
+    EXPECT_FALSE(UringIoRuntime::io_submit_sendmsg_zc_iov(
+        UringIoRuntime::thread_from_index(1), fd, &iov, 1,
+        reinterpret_cast<const sockaddr *>(&address), sizeof(address), 0, task.get(), &result));
+    expect_enosys_result(result, fd);
 #endif
 }
 

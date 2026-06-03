@@ -2865,3 +2865,48 @@ Interpretation:
   not expected to run on Linux; direct fixed-file accept/openat coverage depends
   on kernel/io_uring support; non-Linux fallback coverage is intentionally not
   executed on Linux.
+
+## 2026-06-03 Public io_uring Submit Fallback API
+
+This pass keeps Linux-only io_uring submit entry points declared on all
+supported POSIX platforms. Non-Linux builds now return `ENOSYS` from the public
+runtime submit wrapper instead of making those methods disappear behind
+`__linux__` guards.
+
+Changes under validation:
+
+- `io_submit_recv_multishot()` and `io_submit_recvmsg_multishot()` now have
+  non-Linux public fallback bodies that validate arguments and report
+  `ENOSYS`.
+- `io_submit_send_zc()`, `io_submit_sendmsg_zc()`, and
+  `io_submit_sendmsg_zc_iov()` now have non-Linux public fallback bodies that
+  validate arguments and report `ENOSYS`.
+- Added `RuntimePublicIo.LinuxOnlySubmitMethodsExistOnNonLinuxAndReportUnavailable`
+  to prove the methods compile and return `ENOSYS` on macOS.
+
+Correctness checks:
+
+- Local macOS Debug built `asyncflow_runtime_tests`.
+- Local macOS Debug ctest
+  `RuntimePublicIo|IoUringSetupConfig|IoRuntime|RuntimeIo|Adapter|Stream|Datagram|File|Vectored|Fixed`:
+  105 tests selected, 0 failures; the new non-Linux fallback test passed.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: clean rebuilt `asyncflow_runtime_tests`; related ctest
+  reported 93 tests selected, 0 failures, 5 skipped. The new fallback test was
+  discovered and skipped on Linux as expected.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: clean rebuilt `asyncflow_runtime_tests`; related ctest
+  reported 93 tests selected, 0 failures, 5 skipped. The new fallback test was
+  discovered and skipped on Linux as expected.
+
+Interpretation:
+
+- This is an API availability cleanup only. It does not change Linux io_uring
+  executor submit paths, SQE arguments, readiness fallback behavior, scheduler
+  routing, local/SPSC/MPSC queue topology, locks, atomics, allocations, memory
+  ordering, or cache layout.
+- User code can now reference these runtime submit methods across supported
+  POSIX platforms and branch on runtime/platform capability or returned
+  `ENOSYS`, rather than using preprocessor guards to check method existence.

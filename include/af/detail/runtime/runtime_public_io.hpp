@@ -837,7 +837,6 @@ public:
 #endif
     }
 
-#if defined(__linux__)
     [[nodiscard]] static bool io_submit_recv_multishot(Thread thread, int fd,
                                                        std::uint16_t buffer_group,
                                                        std::uint32_t flags, Task *task,
@@ -846,12 +845,19 @@ public:
             return fail_io_result(result, fd, fd < 0 ? EBADF : EINVAL);
         }
 
+#if defined(__linux__)
         const std::uint16_t index = RuntimeT::thread_index(thread);
         if (index >= RuntimeT::executors_.size()) {
             return fail_io_result(result, fd, EINVAL);
         }
         return RuntimeT::executors_[index]->submit_io_uring_recv_multishot(fd, buffer_group, flags,
                                                                            task, result);
+#else
+        static_cast<void>(thread);
+        static_cast<void>(buffer_group);
+        static_cast<void>(flags);
+        return fail_io_result(result, fd, ENOSYS);
+#endif
     }
 
     [[nodiscard]] static bool
@@ -862,12 +868,21 @@ public:
             return fail_io_result(result, fd, fd < 0 ? EBADF : EINVAL);
         }
 
+#if defined(__linux__)
         const std::uint16_t index = RuntimeT::thread_index(thread);
         if (index >= RuntimeT::executors_.size()) {
             return fail_io_result(result, fd, EINVAL);
         }
         return RuntimeT::executors_[index]->submit_io_uring_recvmsg_multishot(
             fd, buffer_group, name_capacity, control_capacity, flags, task, result);
+#else
+        static_cast<void>(thread);
+        static_cast<void>(buffer_group);
+        static_cast<void>(name_capacity);
+        static_cast<void>(control_capacity);
+        static_cast<void>(flags);
+        return fail_io_result(result, fd, ENOSYS);
+#endif
     }
 
     [[nodiscard]] static bool io_submit_send_zc(Thread thread, int fd, const void *data,
@@ -877,12 +892,19 @@ public:
             return fail_io_result(result, fd, fd < 0 ? EBADF : EINVAL);
         }
 
+#if defined(__linux__)
         const std::uint16_t index = RuntimeT::thread_index(thread);
         if (index >= RuntimeT::executors_.size()) {
             return fail_io_result(result, fd, EINVAL);
         }
         return RuntimeT::executors_[index]->submit_io_uring_send_zc(fd, data, size, flags, task,
                                                                     result);
+#else
+        static_cast<void>(thread);
+        static_cast<void>(size);
+        static_cast<void>(flags);
+        return fail_io_result(result, fd, ENOSYS);
+#endif
     }
 
     [[nodiscard]] static bool io_submit_sendmsg_zc(Thread thread, int fd, const void *data,
@@ -893,12 +915,21 @@ public:
             return fail_io_result(result, fd, fd < 0 ? EBADF : EINVAL);
         }
 
+#if defined(__linux__)
         const std::uint16_t index = RuntimeT::thread_index(thread);
         if (index >= RuntimeT::executors_.size()) {
             return fail_io_result(result, fd, EINVAL);
         }
         return RuntimeT::executors_[index]->submit_io_uring_sendmsg_zc(
             fd, data, size, address, address_size, flags, task, result);
+#else
+        static_cast<void>(thread);
+        static_cast<void>(size);
+        static_cast<void>(address);
+        static_cast<void>(address_size);
+        static_cast<void>(flags);
+        return fail_io_result(result, fd, ENOSYS);
+#endif
     }
 
     [[nodiscard]] static bool io_submit_sendmsg_zc_iov(Thread thread, int fd, const iovec *iov,
@@ -909,14 +940,21 @@ public:
             return fail_io_result(result, fd, fd < 0 ? EBADF : EINVAL);
         }
 
+#if defined(__linux__)
         const std::uint16_t index = RuntimeT::thread_index(thread);
         if (index >= RuntimeT::executors_.size()) {
             return fail_io_result(result, fd, EINVAL);
         }
         return RuntimeT::executors_[index]->submit_io_uring_sendmsg_zc_iov(
             fd, iov, iov_count, address, address_size, flags, task, result);
-    }
+#else
+        static_cast<void>(thread);
+        static_cast<void>(address);
+        static_cast<void>(address_size);
+        static_cast<void>(flags);
+        return fail_io_result(result, fd, ENOSYS);
 #endif
+    }
 
     [[nodiscard]] static bool io_submit_recvmsg_fixed_file_iov(Thread thread, int file_index,
                                                                const iovec *iov, int iov_count,
