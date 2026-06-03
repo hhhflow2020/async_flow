@@ -249,6 +249,7 @@ if(ASYNCFLOW_BUILD_BENCHMARKS)
         benchmarks/io_adapter_resource_benchmarks.cpp
         benchmarks/io_adapter_stream_benchmarks.cpp
         benchmarks/io_filesystem_benchmarks.cpp
+        benchmarks/io_readiness_benchmarks.cpp
         benchmarks/io_zero_copy_benchmarks.cpp
         benchmarks/io_file_benchmarks.cpp
         benchmarks/io_vectored_benchmarks.cpp

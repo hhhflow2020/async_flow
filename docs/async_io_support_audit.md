@@ -141,8 +141,9 @@ Remaining performance headroom:
 - Native readiness waits use `absl::flat_hash_map<int, IoWaitEntry>` with two
   pointer slots per fd. It stays owner-thread-only and avoids locks; very high fd
   counts should still be benchmarked against alternate table shapes.
-- A live epoll readiness-loop benchmark is still missing. Existing IO adapter
-  microbenchmarks cover helper fast paths, not end-to-end readiness rearm rates.
+- `BM_LiveEpollReadinessRearm` now covers a live socketpair epoll readiness loop
+  with repeated one-byte `read_some` rearming. It complements the IO adapter
+  microbenchmarks, which only cover helper fast paths.
 
 ## Test Coverage Map
 
@@ -192,7 +193,8 @@ The runtime test binary includes targeted sources for:
 
 - Add or enable a CI lane where `io_uring_setup` is allowed, preferably with
   Release, Debug, and TSAN coverage for the ring-specific tests.
-- Add a live readiness-loop benchmark for epoll and, on macOS/BSD, kqueue.
+- Add a live readiness-loop benchmark for kqueue on macOS/BSD to pair with the
+  existing epoll readiness rearm canary.
 - Benchmark a latency-oriented io_uring submit flush policy against the current
   throughput-oriented batch threshold.
 - Remove or re-specify `prefer_rearm` so public API semantics match the active
