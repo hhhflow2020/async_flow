@@ -114,6 +114,10 @@ The runtime is intentionally header-only/template-visible for hot path inlining.
   zero-length datagrams, duplicate waits, read/write waits on the same fd,
   writable resume, and hangup handling without application-level platform
   guards.
+- Task scheduling now exposes semantic helpers on `BasicTask`:
+  `schedule_fast`/`pending_fast` for runtime-thread local/SPSC routing and
+  `schedule_ordered`/`pending_ordered` for target-thread MPSC admission order.
+  `ScheduleMode` comments now document the local/SPSC/MPSC routing contract.
 - The io_uring stream recv multishot example is now split into runtime/wait helpers, socketpair setup helpers, a cohesive provided-buffer recv task class, and a thin executable entry point.
 - The TCP connect/accept example is now split into runtime traits, portable loopback socket setup, server/client state-machine tasks, and a thin executable entry point. It uses the unified `ThreadKind::Io`/`ThreadKind::IoUring` API so Linux can prefer io_uring while macOS/BSD uses the native kqueue readiness backend.
 - The TCP echo server example demonstrates a fully asynchronous 2-IO-thread/1-compute-thread flow: accept/read on IO threads, uppercase-to-lowercase transform on the compute thread, then send on the owning IO thread. Its runtime traits, socket setup, server acceptor, session state machine, client driver, and executable entry point are split into focused headers.

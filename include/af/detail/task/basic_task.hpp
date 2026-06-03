@@ -57,11 +57,27 @@ protected:
         return Runtime::post(thread, this, mode);
     }
 
+    [[nodiscard]] bool schedule_fast(Thread thread) noexcept {
+        return schedule(thread, ScheduleMode::Fast);
+    }
+
+    [[nodiscard]] bool schedule_ordered(Thread thread) noexcept {
+        return schedule(thread, ScheduleMode::Ordered);
+    }
+
     TaskResult pending_on(Thread thread, ScheduleMode mode = ScheduleMode::Auto) noexcept {
         if (!Runtime::post(thread, this, mode)) {
             return TaskResult::Cancelled;
         }
         return TaskResult::Pending;
+    }
+
+    TaskResult pending_fast(Thread thread) noexcept {
+        return pending_on(thread, ScheduleMode::Fast);
+    }
+
+    TaskResult pending_ordered(Thread thread) noexcept {
+        return pending_on(thread, ScheduleMode::Ordered);
     }
 
     static TaskResult done() noexcept {

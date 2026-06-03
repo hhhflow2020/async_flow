@@ -20,11 +20,14 @@ enum class QueueFullPolicy : std::uint8_t {
 };
 
 enum class ScheduleMode : std::uint8_t {
-    // Let the runtime choose the normal low-overhead route for the producer.
+    // Normal low-overhead route. Runtime producers use local queue or
+    // per-source SPSC links; external producers use the target MPSC queue.
     Auto,
-    // Runtime-thread producer only; favors the fastest per-producer route.
+    // Runtime-thread producer only; same low-overhead routing as Auto, but
+    // rejects external producers instead of falling back to MPSC.
     Fast,
-    // Preserve one target-thread admission order across multiple producers.
+    // Force the target MPSC queue, including from runtime threads. Use this
+    // when multiple producers must share one target-thread admission order.
     Ordered,
 };
 

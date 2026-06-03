@@ -28,7 +28,7 @@ TEST_F(RuntimeFixture, FastScheduleModeRequiresRuntimeProducer) {
 
     auto task = Runtime::make_task<ScheduleModeStartTask>();
     ASSERT_TRUE(task);
-    EXPECT_FALSE(task->begin_on(TestThreads::Logic_0, af::ScheduleMode::Fast, &completed, &ran_on));
+    EXPECT_FALSE(task->begin_fast_on(TestThreads::Logic_0, &completed, &ran_on));
     EXPECT_FALSE(task.scheduled());
     Runtime::wait_for_idle();
 
@@ -57,8 +57,7 @@ TEST_F(RuntimeFixture, OrderedScheduleModeAcceptsExternalProducer) {
 
     auto task = Runtime::make_task<ScheduleModeStartTask>();
     ASSERT_TRUE(task);
-    ASSERT_TRUE(
-        task->begin_on(TestThreads::Logic_0, af::ScheduleMode::Ordered, &completed, &ran_on));
+    ASSERT_TRUE(task->begin_ordered_on(TestThreads::Logic_0, &completed, &ran_on));
     ASSERT_TRUE(wait_until_at_least(completed, 1));
 
     EXPECT_EQ(ran_on.load(std::memory_order_acquire), Runtime::thread_index(TestThreads::Logic_0));

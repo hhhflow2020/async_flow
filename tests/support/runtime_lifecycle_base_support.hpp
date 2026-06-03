@@ -99,6 +99,20 @@ public:
         return schedule(target, mode);
     }
 
+    bool begin_fast_on(TestThread target, std::atomic<int> *completed,
+                       std::atomic<std::uint16_t> *ran_on) {
+        completed_ = completed;
+        ran_on_ = ran_on;
+        return schedule_fast(target);
+    }
+
+    bool begin_ordered_on(TestThread target, std::atomic<int> *completed,
+                          std::atomic<std::uint16_t> *ran_on) {
+        completed_ = completed;
+        ran_on_ = ran_on;
+        return schedule_ordered(target);
+    }
+
 private:
     af::TaskResult run() override {
         ran_on_->store(Runtime::current_thread_index(), std::memory_order_release);
@@ -126,8 +140,7 @@ private:
     af::TaskResult run() override {
         (*seen_)[0].store(Runtime::current_thread_index(), std::memory_order_release);
         auto child = Runtime::make_task<ScheduleModeStartTask>();
-        const bool ok =
-            child->begin_on(TestThreads::Logic_1, af::ScheduleMode::Fast, completed_, &(*seen_)[1]);
+        const bool ok = child->begin_fast_on(TestThreads::Logic_1, completed_, &(*seen_)[1]);
         if (!ok) {
             result_->store(-1, std::memory_order_release);
             completed_->fetch_add(1, std::memory_order_release);
@@ -299,7 +312,7 @@ private:
         case State::Start:
             (*seen_)[0].store(Runtime::current_thread_index(), std::memory_order_release);
             state_ = State::Finish;
-            return pending_on(TestThreads::Logic_1, af::ScheduleMode::Ordered);
+            return pending_ordered(TestThreads::Logic_1);
 
         case State::Finish:
             (*seen_)[1].store(Runtime::current_thread_index(), std::memory_order_release);

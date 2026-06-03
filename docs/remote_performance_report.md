@@ -3282,6 +3282,48 @@ Interpretation:
   behavior regresses while Linux-only io_uring capabilities remain separately
   guarded.
 
+## 2026-06-03 Scheduling Mode Convenience API
+
+This pass makes the SPSC/MPSC scheduling semantics explicit at the task API
+level. The runtime routing logic is unchanged; `BasicTask` now exposes named
+helpers so task code can opt into the intended route without passing enum values
+at every call site.
+
+Changes under validation:
+
+- Added `schedule_fast(thread)` and `pending_fast(thread)` as explicit
+  runtime-thread producer helpers for the low-overhead local/SPSC route.
+- Added `schedule_ordered(thread)` and `pending_ordered(thread)` as explicit
+  target-MPSC helpers for a shared target admission order across producers.
+- Expanded `ScheduleMode` comments to document the routing contract:
+  `Auto` uses local/SPSC for runtime producers and MPSC for external producers,
+  `Fast` rejects external producers, and `Ordered` forces target MPSC.
+- Updated lifecycle scheduling tests to exercise the new convenience helpers
+  while preserving the existing mode behavior checks.
+
+Correctness checks:
+
+- Local macOS Debug built `asyncflow_runtime_tests`.
+- Local macOS Debug ctest `ScheduleMode|OrderedSchedule`: 4 tests selected, 0
+  failures.
+- Remote GCC Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`,
+  `seccomp=unconfined`: clean-first rebuilt `asyncflow_runtime_tests`; ctest
+  `ScheduleMode|OrderedSchedule` reported 4 tests, 0 failures.
+- Remote Clang Debug,
+  `ghcr.io/hhhflow2020/cpp-dev-clang:bookworm-v2.0.3`,
+  `seccomp=unconfined`: clean-first rebuilt `asyncflow_runtime_tests`; the same
+  ctest selection reported 4 tests, 0 failures.
+
+Interpretation:
+
+- This is an API clarity improvement over the existing scheduler design. It
+  does not change queue topology, queue ordering, wakeups, locks, atomics,
+  allocations, memory ordering, or cache layout.
+- The intended distinction is now visible in task code: `fast` means
+  low-overhead runtime-thread local/SPSC routing, while `ordered` means target
+  MPSC admission order.
+
 ## 2026-06-03 POSIX Datagram Zero-Copy Send Fallback
 
 This pass makes the public datagram zero-copy send helpers usable on the
