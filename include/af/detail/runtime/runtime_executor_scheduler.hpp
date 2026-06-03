@@ -13,8 +13,8 @@ void Executor<RuntimeT, TraitsT>::mark_ready(std::uint16_t source) noexcept {
 
 template <typename RuntimeT, typename TraitsT>
 void Executor<RuntimeT, TraitsT>::notify_external_ready() noexcept {
-    if (!external_ready_.load(std::memory_order_acquire)) {
-        external_ready_.store(true, std::memory_order_release);
+    if (!external_ready_.load(std::memory_order_relaxed)) {
+        external_ready_.store(true, std::memory_order_relaxed);
         notify_force();
         return;
     }
@@ -223,14 +223,14 @@ typename Executor<RuntimeT, TraitsT>::Task *Executor<RuntimeT, TraitsT>::pop_one
         }
     }
 
-    if (external_ready_.load(std::memory_order_acquire)) {
+    if (external_ready_.load(std::memory_order_relaxed)) {
         if (Task *task = external_queue_->try_pop()) {
             return task;
         }
 
-        external_ready_.store(false, std::memory_order_release);
+        external_ready_.store(false, std::memory_order_relaxed);
         if (Task *task = external_queue_->try_pop()) {
-            external_ready_.store(true, std::memory_order_release);
+            external_ready_.store(true, std::memory_order_relaxed);
             return task;
         }
     }
