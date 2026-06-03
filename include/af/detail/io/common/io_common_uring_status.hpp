@@ -1,7 +1,11 @@
 #pragma once
 
 [[nodiscard]] inline bool uring_submit_error_can_fallback(int error) noexcept {
-    return error == ENOSYS || error == EBUSY;
+    return error == ENOSYS || error == EBUSY
+#ifdef EOPNOTSUPP
+           || error == EOPNOTSUPP
+#endif
+        ;
 }
 
 [[nodiscard]] inline bool uring_zero_copy_send_error_can_fallback(int error) noexcept {

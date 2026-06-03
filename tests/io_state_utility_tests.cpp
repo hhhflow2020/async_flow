@@ -1,3 +1,5 @@
+#include <cerrno>
+
 #include <gtest/gtest.h>
 
 #include "af/async_flow.hpp"
@@ -15,4 +17,13 @@ TEST(UtilityTests, IoOpStateResetClearsCompletionToken) {
     EXPECT_EQ(state.wait.completion_token, nullptr);
     EXPECT_FALSE(state.waiting);
     EXPECT_EQ(state.wait_kind, af::IoWaitKind::None);
+}
+
+TEST(UtilityTests, IoUringSubmitFallbackKeepsInvalidArgumentsFatal) {
+    EXPECT_TRUE(af::detail::uring_submit_error_can_fallback(ENOSYS));
+    EXPECT_TRUE(af::detail::uring_submit_error_can_fallback(EBUSY));
+#ifdef EOPNOTSUPP
+    EXPECT_TRUE(af::detail::uring_submit_error_can_fallback(EOPNOTSUPP));
+#endif
+    EXPECT_FALSE(af::detail::uring_submit_error_can_fallback(EINVAL));
 }
