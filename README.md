@@ -205,6 +205,7 @@ auto sharded = af::split_change_batch(batch, player_logic_shard_count);
 - runtime 固定线程之间使用 bounded SPSC ring，每个 source -> target 一条队列。
 - runtime 线程调度到自身时走 executor 本地 bounded queue，阻塞路径会先消化本地任务，避免固定容量队列满时自旋等待自己。
 - 非 runtime 线程进入 executor 时使用 bounded MPSC ingress，用于 `start_task()` 等外部入口。
+- 调度 API 提供 `Auto` / `Fast` / `Ordered` 三种语义：`Fast` 明确选择 runtime-thread-only 的 local/SPSC 快速路径，`Ordered` 明确强制走目标 MPSC；即使 runtime 线程投递给自身目标，也可以通过 `schedule_ordered()` / `pending_ordered()` 选择 MPSC 顺序路径。完整说明见 [Runtime 调度语义](docs/runtime_scheduling_semantics.md)。
 - 队列容量由 traits 配置；`QueueFullPolicy::Reject` 直接返回失败，`QueueFullPolicy::Yield` 会让出 CPU 等待空位。
 - shutdown 会先切到 stopping 并等待在途外部 post 退出，再停止 executor，避免队列清理和外部投递并发踩踏。
 - `ShutdownPolicy::WaitForTasks` 会让 `shutdown()` 等已接收任务全部结束；`ShutdownPolicy::StopImmediately` 不等待未完成任务，traits 可通过 `enable_task_registry = true` 开启任务注册表，在 shutdown 后取消并释放仍处于 `Pending` / `Queued` 的任务。
