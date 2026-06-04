@@ -36,7 +36,7 @@ public:
     }
 
 private:
-    af::TaskResult run() override {
+    af::task_result run() override {
         for (std::uint32_t i = 0; i < records_per_task; ++i) {
             LOG(INFO) << "runtime log task=" << task_id_ << " seq=" << i
                       << " thread=" << runtime_async::current_thread_index();

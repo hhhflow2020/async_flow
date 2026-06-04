@@ -79,6 +79,37 @@ static_assert(af::supports_sendfile == af::platform_linux);
 static_assert(af::supports_splice == af::platform_linux);
 static_assert(af::supports_zero_copy_send == af::platform_linux);
 static_assert(af::platform_posix != af::platform_windows);
+static_assert(std::is_same_v<af::task_result, af::TaskResult>);
+static_assert(std::is_same_v<af::schedule_mode, af::ScheduleMode>);
+static_assert(std::is_same_v<af::shutdown_policy, af::ShutdownPolicy>);
+static_assert(std::is_same_v<af::task_state, af::TaskState>);
+static_assert(std::is_same_v<af::parallel_mode, af::ParallelMode>);
+static_assert(std::is_same_v<af::ordered_batch_replay_policy, af::OrderedBatchReplayPolicy>);
+static_assert(std::is_same_v<af::ordered_batch_options, af::OrderedBatchOptions>);
+static_assert(std::is_same_v<af::sharded_ops<int>, af::ShardedOps<int>>);
+static_assert(af::task_result::done == af::TaskResult::Done);
+static_assert(af::task_result::pending == af::TaskResult::Pending);
+static_assert(af::task_result::again == af::TaskResult::Again);
+static_assert(af::task_result::failed == af::TaskResult::Failed);
+static_assert(af::task_result::cancelled == af::TaskResult::Cancelled);
+static_assert(af::schedule_mode::auto_select == af::ScheduleMode::Auto);
+static_assert(af::schedule_mode::fast == af::ScheduleMode::Fast);
+static_assert(af::schedule_mode::ordered == af::ScheduleMode::Ordered);
+static_assert(af::shutdown_policy::wait_for_tasks == af::ShutdownPolicy::WaitForTasks);
+static_assert(af::shutdown_policy::stop_immediately == af::ShutdownPolicy::StopImmediately);
+static_assert(af::task_state::created == af::TaskState::Created);
+static_assert(af::task_state::queued == af::TaskState::Queued);
+static_assert(af::task_state::timer_arming == af::TaskState::TimerArming);
+static_assert(af::task_state::timer_pending == af::TaskState::TimerPending);
+static_assert(af::task_state::starting == af::TaskState::Starting);
+static_assert(af::task_state::running == af::TaskState::Running);
+static_assert(af::task_state::pending == af::TaskState::Pending);
+static_assert(af::task_state::done == af::TaskState::Done);
+static_assert(af::parallel_mode::non_empty_only == af::ParallelMode::NonEmptyOnly);
+static_assert(af::parallel_mode::all_shards == af::ParallelMode::AllShards);
+static_assert(af::ordered_batch_replay_policy::strict == af::OrderedBatchReplayPolicy::Strict);
+static_assert(af::ordered_batch_replay_policy::skip_already_applied ==
+              af::OrderedBatchReplayPolicy::SkipAlreadyApplied);
 
 } // namespace
 

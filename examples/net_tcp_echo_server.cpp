@@ -26,7 +26,7 @@ struct EchoRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
         af::thread_group<EchoIoThreadTag, 2, af::thread_kind::io>("echo-io"),
         af::thread_group<EchoComputeThreadTag, 1, af::thread_kind::cpu>("echo-cpu"));
-    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
+    static constexpr af::shutdown_policy shutdown_policy = af::shutdown_policy::wait_for_tasks;
 };
 
 using EchoRuntime = af::AsyncRuntime<EchoRuntimeTraits>;
@@ -62,7 +62,7 @@ public:
     }
 
 private:
-    af::TaskResult run() override {
+    af::task_result run() override {
         auto *data = payload_.mutable_data();
         const std::size_t size = payload_.size();
         for (std::size_t i = 0; i < size; ++i) {
@@ -151,7 +151,7 @@ public:
     }
 
 private:
-    af::TaskResult run() override {
+    af::task_result run() override {
         if (server_ == nullptr) {
             if (lifecycle_ != nullptr) {
                 lifecycle_->record_failure(EINVAL);
@@ -216,7 +216,7 @@ public:
     }
 
 private:
-    af::TaskResult run() override {
+    af::task_result run() override {
         if (server_ == nullptr || !server_->stop()) {
             LOG(ERROR) << "tcp echo server stop failed";
         } else {

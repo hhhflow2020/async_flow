@@ -24,7 +24,7 @@ struct RuntimeUdpTraits {
     static constexpr auto threads = af::thread_layout(
         af::thread_group<RuntimeUdpLogicThreadTag, 2, af::thread_kind::cpu>("udp-log-cpu"),
         af::thread_group<RuntimeUdpIoThreadTag, 1, af::thread_kind::io>("udp-log-io"));
-    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
+    static constexpr af::shutdown_policy shutdown_policy = af::shutdown_policy::wait_for_tasks;
 };
 
 using runtime_udp_async = af::AsyncRuntime<RuntimeUdpTraits>;
@@ -48,7 +48,7 @@ public:
     }
 
 private:
-    af::TaskResult run() override {
+    af::task_result run() override {
         for (std::uint32_t i = 0; i < runtime_udp_records_per_task; ++i) {
             LOG(INFO) << "runtime udp log task=" << task_id_ << " seq=" << i
                       << " thread=" << runtime_udp_async::current_thread_index();

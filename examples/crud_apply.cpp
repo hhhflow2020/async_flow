@@ -38,7 +38,7 @@ private:
         Finish,
     };
 
-    af::TaskResult run() override {
+    af::task_result run() override {
         switch (state_) {
         case State::Apply:
             return apply_batch();
@@ -50,7 +50,7 @@ private:
         return failed();
     }
 
-    af::TaskResult apply_batch() {
+    af::task_result apply_batch() {
         state_ = State::Finish;
         sharded_ops_ = af::split_change_batch(batch_, player_logic_shard_count);
         async::parallel_shards_ordered(
@@ -94,7 +94,7 @@ private:
         return false;
     }
 
-    af::TaskResult finish() {
+    af::task_result finish() {
         if (last_parallel_failures() == 0) {
             applied_batches.fetch_add(1, std::memory_order_release);
             return done();
@@ -106,7 +106,8 @@ private:
 
     State state_{State::Apply};
     PlayerChangeBatch batch_;
-    af::ShardedOps<af::CrudOp<std::uint64_t, PlayerProfile>> sharded_ops_{player_logic_shard_count};
+    af::sharded_ops<af::CrudOp<std::uint64_t, PlayerProfile>> sharded_ops_{
+        player_logic_shard_count};
 };
 
 class SubmitPlayerCrudBatchTask final : public Task {
@@ -119,7 +120,7 @@ public:
     }
 
 private:
-    af::TaskResult run() override {
+    af::task_result run() override {
         const bool ok = async::start_ordered_task<PlayerCrudStream, ApplyPlayerCrudBatchTask>(
             AppThreads::IO_0, std::move(batch_));
         return ok ? done() : failed();

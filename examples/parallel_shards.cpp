@@ -32,7 +32,7 @@ private:
         Finish,
     };
 
-    af::TaskResult run() override {
+    af::task_result run() override {
         switch (state_) {
         case State::Split:
             return split_to_shards();
@@ -44,9 +44,9 @@ private:
         return failed();
     }
 
-    af::TaskResult split_to_shards() {
+    af::task_result split_to_shards() {
         state_ = State::Finish;
-        async::parallel_shards(player_logic_begin, sharded_ops_, af::ParallelMode::NonEmptyOnly,
+        async::parallel_shards(player_logic_begin, sharded_ops_, af::parallel_mode::non_empty_only,
                                this,
                                [this](std::uint16_t shard, std::vector<AddGoldOp> &shard_ops) {
                                    apply_shard(shard, shard_ops);
@@ -63,12 +63,12 @@ private:
         total_gold_->fetch_add(local_gold, std::memory_order_relaxed);
     }
 
-    af::TaskResult finish() {
+    af::task_result finish() {
         return done();
     }
 
     State state_{State::Split};
-    af::ShardedOps<AddGoldOp> sharded_ops_{player_logic_shard_count};
+    af::sharded_ops<AddGoldOp> sharded_ops_{player_logic_shard_count};
     std::atomic<int> *total_gold_{nullptr};
     std::array<std::atomic<int>, player_logic_shard_count> *shard_hits_{nullptr};
 };

@@ -18,18 +18,18 @@ runtime 每个固定线程拥有一个入口：
 
 ## 调度模式
 
-`ScheduleMode::Auto` 是默认模式：
+`schedule_mode::auto_select` 是默认模式：
 
 - runtime 线程 -> 自身目标线程：target intrusive MPSC inbox。
 - runtime 线程 -> 其他 runtime 线程：target intrusive MPSC inbox。
 - 外部线程 -> runtime 目标线程：target intrusive MPSC inbox。
 
-`ScheduleMode::Fast` 表示调用者明确要求 runtime 线程生产者：
+`schedule_mode::fast` 表示调用者明确要求 runtime 线程生产者：
 
 - runtime 线程 -> 目标线程：target intrusive MPSC inbox。
 - 外部线程调用会失败。
 
-`ScheduleMode::Ordered` 表示调用者明确强调目标线程上的统一入队顺序：
+`schedule_mode::ordered` 表示调用者明确强调目标线程上的统一入队顺序：
 
 - runtime 线程 -> 目标线程：target intrusive MPSC inbox。
 - 外部线程 -> runtime 目标线程：target intrusive MPSC inbox。
@@ -75,7 +75,7 @@ return pending_after(TargetThread, 20ms);
 
 不要把 `Fast` 当作“更快版本的 Ordered”。当前实现下二者都进入目标 inbox；`Fast` 的语义是 runtime-thread-only，`Ordered` 的语义是调用点显式要求目标 admission order。
 
-`schedule(...)` / `pending_on(...)` 仍保留为兼容入口；新代码推荐使用 `schedule_to(...)` / `pending_to(...)`，让“切到目标线程”的语义更直接。
+`ScheduleMode::Auto` / `Fast` / `Ordered` 和 `schedule(...)` / `pending_on(...)` 仍保留为兼容入口；新代码推荐使用 `schedule_mode::auto_select` / `fast` / `ordered` 与 `schedule_to(...)` / `pending_to(...)`，让“切到目标线程”的语义更直接。
 
 ## 队列满载语义
 

@@ -11,7 +11,7 @@ struct AppRuntimeTraits {
         af::thread_layout(af::thread_group<AppLogicThreadTag, 4, af::thread_kind::cpu>("logic"),
                           af::thread_group<AppDbThreadTag, 1, af::thread_kind::cpu>("db"),
                           af::thread_group<AppIoThreadTag, 1, af::thread_kind::io>("io"));
-    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
+    static constexpr af::shutdown_policy shutdown_policy = af::shutdown_policy::wait_for_tasks;
 };
 
 using async = af::AsyncRuntime<AppRuntimeTraits>;

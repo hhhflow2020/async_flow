@@ -23,7 +23,7 @@ public:
 
     bool do_it(PlayerDeltaBatch batch) {
         batch_ = std::move(batch);
-        sharded_deltas_ = af::ShardedOps<int>(player_logic_shard_count);
+        sharded_deltas_ = af::sharded_ops<int>(player_logic_shard_count);
         for (std::size_t i = 0; i < batch_.deltas.size(); ++i) {
             sharded_deltas_.shards[i % player_logic_shard_count].push_back(batch_.deltas[i]);
         }
@@ -36,7 +36,7 @@ private:
         Finish,
     };
 
-    af::TaskResult run() override {
+    af::task_result run() override {
         switch (state_) {
         case State::Apply:
             return apply_batch();
@@ -48,7 +48,7 @@ private:
         return failed();
     }
 
-    af::TaskResult apply_batch() {
+    af::task_result apply_batch() {
         state_ = State::Finish;
         async::parallel_shards_ordered(
             player_logic_begin, sharded_deltas_, batch_.batch_id, this,
@@ -67,13 +67,13 @@ private:
         batch_.total_delta->fetch_add(local_delta, std::memory_order_relaxed);
     }
 
-    af::TaskResult finish() {
+    af::task_result finish() {
         return done();
     }
 
     State state_{State::Apply};
     PlayerDeltaBatch batch_;
-    af::ShardedOps<int> sharded_deltas_{player_logic_shard_count};
+    af::sharded_ops<int> sharded_deltas_{player_logic_shard_count};
 };
 
 class SubmitPlayerDeltaBatchTask final : public Task {
@@ -86,7 +86,7 @@ public:
     }
 
 private:
-    af::TaskResult run() override {
+    af::task_result run() override {
         const bool started =
             async::start_ordered_task<PlayerDeltaStream, ApplyPlayerDeltaBatchTask>(
                 AppThreads::Logic_0, std::move(batch_));

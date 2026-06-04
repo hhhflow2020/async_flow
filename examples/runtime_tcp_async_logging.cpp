@@ -26,7 +26,7 @@ struct RuntimeTcpTraits {
     static constexpr auto threads = af::thread_layout(
         af::thread_group<RuntimeTcpLogicThreadTag, 2, af::thread_kind::cpu>("tcp-log-cpu"),
         af::thread_group<RuntimeTcpIoThreadTag, 1, af::thread_kind::io>("tcp-log-io"));
-    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
+    static constexpr af::shutdown_policy shutdown_policy = af::shutdown_policy::wait_for_tasks;
 };
 
 using runtime_tcp_async = af::AsyncRuntime<RuntimeTcpTraits>;
@@ -50,7 +50,7 @@ public:
     }
 
 private:
-    af::TaskResult run() override {
+    af::task_result run() override {
         for (std::uint32_t i = 0; i < runtime_tcp_records_per_task; ++i) {
             LOG(INFO) << "runtime tcp log task=" << task_id_ << " seq=" << i
                       << " thread=" << runtime_tcp_async::current_thread_index();

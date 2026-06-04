@@ -37,7 +37,7 @@ struct LoginRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
         af::thread_group<LoginIoThreadTag, 2, af::thread_kind::io>("login-io"),
         af::thread_group<LoginComputeThreadTag, 1, af::thread_kind::cpu>("login-cpu"));
-    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
+    static constexpr af::shutdown_policy shutdown_policy = af::shutdown_policy::wait_for_tasks;
 };
 
 using LoginRuntime = af::AsyncRuntime<LoginRuntimeTraits>;
@@ -153,7 +153,7 @@ public:
     }
 
 private:
-    af::TaskResult run() override {
+    af::task_result run() override {
         LOG(INFO) << "login task running user=" << user_id_ << " slot=" << conn_.slot()
                   << " generation=" << conn_.generation();
 
@@ -268,7 +268,7 @@ public:
     }
 
 private:
-    af::TaskResult run() override {
+    af::task_result run() override {
         if (server_ == nullptr) {
             if (lifecycle_ != nullptr) {
                 lifecycle_->record_failure(EINVAL);
@@ -333,7 +333,7 @@ public:
     }
 
 private:
-    af::TaskResult run() override {
+    af::task_result run() override {
         if (server_ == nullptr || !server_->stop()) {
             LOG(ERROR) << "tcp login server stop failed";
         } else {

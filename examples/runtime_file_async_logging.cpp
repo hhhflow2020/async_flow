@@ -23,7 +23,7 @@ struct RuntimeFileTraits {
     static constexpr auto threads = af::thread_layout(
         af::thread_group<RuntimeFileLogicThreadTag, 2, af::thread_kind::cpu>("file-log-cpu"),
         af::thread_group<RuntimeFileIoThreadTag, 1, af::thread_kind::io>("file-log-io"));
-    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
+    static constexpr af::shutdown_policy shutdown_policy = af::shutdown_policy::wait_for_tasks;
 };
 
 using runtime_file_async = af::AsyncRuntime<RuntimeFileTraits>;
@@ -47,7 +47,7 @@ public:
     }
 
 private:
-    af::TaskResult run() override {
+    af::task_result run() override {
         for (std::uint32_t i = 0; i < runtime_file_records_per_task; ++i) {
             LOG(INFO) << "runtime file log task=" << task_id_ << " seq=" << i
                       << " thread=" << runtime_file_async::current_thread_index();
