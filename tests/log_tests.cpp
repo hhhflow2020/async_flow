@@ -414,7 +414,7 @@ public:
 
 private:
     af::TaskResult run() override {
-        LOG(INFO) << "runtime spsc lane log";
+        LOG(INFO) << "runtime lane log";
         completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
@@ -523,8 +523,7 @@ struct DefaultConsumerLogThreadTag;
 
 struct LogDefaultLogRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
-        af::thread_group<DefaultConsumerWorkerThreadTag, 1, af::thread_kind::cpu,
-                         "log-pref-cpu">(),
+        af::thread_group<DefaultConsumerWorkerThreadTag, 1, af::thread_kind::cpu, "log-pref-cpu">(),
         af::thread_group<DefaultConsumerIoThreadTag, 1, af::thread_kind::io, "log-pref-io">(),
         af::thread_group<DefaultConsumerLogThreadTag, 1, af::thread_kind::cpu, "log-pref-log">());
 };
@@ -1021,7 +1020,7 @@ TEST(LogTests, QueueOverflowDropsNewestWithoutBlockingProducer) {
     ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
 }
 
-TEST(LogTests, RuntimeAwareSinkUsesSpscLaneWhenExternalMpscIsFull) {
+TEST(LogTests, RuntimeAwareSinkUsesRuntimeLaneWhenExternalMpscIsFull) {
     LogTestRuntimeGuard runtime_guard;
 
     auto backend = std::make_unique<BlockingLogBackend>();
@@ -1156,50 +1155,6 @@ TEST(LogTests, SharedRecordPoolBatchReleaseReusesSlots) {
         ASSERT_NE(records[i], nullptr);
     }
 
-    af::detail::release_async_log_records(
-        std::span<af::detail::LogRecord *const>(records.data(), records.size()));
-}
-
-TEST(LogTests, SpscRecordPoolBatchReleaseReusesSlots) {
-    af::detail::AsyncLogSpscRecordPool pool(4);
-    std::array<af::detail::LogRecord *, 4> records{};
-
-    for (std::size_t i = 0; i < records.size(); ++i) {
-        records[i] = pool.try_acquire("spsc batch release log record\n");
-        ASSERT_NE(records[i], nullptr);
-    }
-    EXPECT_EQ(pool.try_acquire("spsc pool should be full\n"), nullptr);
-
-    af::detail::release_async_log_records(
-        std::span<af::detail::LogRecord *const>(records.data(), records.size()));
-
-    for (std::size_t i = 0; i < records.size(); ++i) {
-        records[i] = pool.try_acquire("spsc batch release reused log record\n");
-        ASSERT_NE(records[i], nullptr);
-    }
-
-    af::detail::release_async_log_records(
-        std::span<af::detail::LogRecord *const>(records.data(), records.size()));
-}
-
-TEST(LogTests, SpscRecordPoolProducerReleaseReusesSpareSlot) {
-    af::detail::AsyncLogSpscRecordPool pool(1);
-
-    af::detail::LogRecord *record = pool.try_acquire("spsc producer abandoned record\n");
-    ASSERT_NE(record, nullptr);
-    pool.release_from_producer(record);
-
-    af::detail::LogRecord *reused = pool.try_acquire("spsc producer reused abandoned record\n");
-    EXPECT_EQ(reused, record);
-    ASSERT_NE(reused, nullptr);
-
-    std::array<af::detail::LogRecord *, 1> records{reused};
-    af::detail::release_async_log_records(
-        std::span<af::detail::LogRecord *const>(records.data(), records.size()));
-
-    af::detail::LogRecord *consumer_reused = pool.try_acquire("spsc consumer released record\n");
-    ASSERT_NE(consumer_reused, nullptr);
-    records[0] = consumer_reused;
     af::detail::release_async_log_records(
         std::span<af::detail::LogRecord *const>(records.data(), records.size()));
 }

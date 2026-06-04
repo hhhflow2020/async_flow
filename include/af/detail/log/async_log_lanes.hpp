@@ -9,7 +9,6 @@
 #include "af/detail/log/log_record.hpp"
 #include "af/detail/memory/contiguous_object_storage.hpp"
 #include "af/detail/queue/bounded_mpsc_queue.hpp"
-#include "af/detail/queue/bounded_spsc_queue.hpp"
 
 namespace af::detail {
 
@@ -56,8 +55,8 @@ struct alignas(hardware_cache_line_size) AsyncLogRuntimeLane {
 
     AsyncLogStatCounter accepted;
     AsyncLogStatCounter dropped;
-    BoundedSpscQueue<LogRecord> queue;
-    AsyncLogSpscRecordPool records;
+    BoundedMpscQueue<LogRecord> queue;
+    AsyncLogRecordPool records;
 };
 
 using AsyncLogQueueShardStorage = ContiguousObjectStorage<AsyncLogQueueShard>;

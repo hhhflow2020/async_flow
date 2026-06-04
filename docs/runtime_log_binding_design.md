@@ -9,14 +9,13 @@
 优先级：
 
 1. 显式配置的 consumer thread。
-2. `ThreadKind::Log`。
-3. `ThreadKind::Io` / `Epoll` / `Kqueue`。
-4. thread index 0。
+2. 第一个 `thread_kind::io` 线程。
+3. thread index 0。
 
 ## 数据路径
 
-- runtime 线程生产日志：进入该线程对应的 SPSC lane。
-- 外部线程生产日志：进入 bounded MPSC ingress。
+- runtime 线程生产日志：进入该线程对应的 bounded MPSC runtime lane。
+- 外部线程生产日志：进入 sharded bounded MPSC ingress。
 - consumer task 在绑定线程上批量 drain。
 - record pool 批量回收，减少逐条分配。
 - 文件、UDP、TCP 后端由 consumer task 调用。

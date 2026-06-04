@@ -93,7 +93,7 @@ struct AsyncLogConfig {
     }
 
     // Ordered keeps one backend-visible enqueue order. Relaxed trades that
-    // global order for runtime SPSC lanes and sharded external MPSC queues.
+    // global order for runtime lanes and sharded external MPSC queues.
     AsyncLogConfig &
     use_ordered(std::size_t producer_shard_count = auto_queue_shard_count) noexcept {
         ordering = LogOrdering::Ordered;
@@ -586,7 +586,8 @@ private:
 
     static void release_unpublished_record(detail::AsyncLogRuntimeLane &lane,
                                            detail::LogRecord *record) noexcept {
-        lane.records.release_from_producer(record);
+        static_cast<void>(lane);
+        release_record(record);
     }
 
     void shutdown() noexcept {

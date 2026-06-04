@@ -1,7 +1,5 @@
 #pragma once
 
-#include <algorithm>
-#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -13,13 +11,11 @@
 
 #include "af/detail/config.hpp"
 #include "af/detail/log/log_record.hpp"
-#include "af/detail/queue/bounded_spsc_queue.hpp"
 
 namespace af::detail {
 
 enum class AsyncLogRecordPoolKind : std::uint8_t {
     Shared,
-    Spsc,
 };
 
 struct AsyncLogRecordPoolSlot {
@@ -170,122 +166,12 @@ private:
         pack_head(null_slot, 0U)};
 };
 
-class AsyncLogSpscRecordPool {
-    struct Slot : AsyncLogRecordPoolSlot {
-        LogRecord record;
-    };
-
-public:
-    explicit AsyncLogSpscRecordPool(std::size_t capacity)
-        : capacity_(validate_capacity(capacity)), slots_(new Slot[capacity_]),
-          free_slots_(capacity_) {
-        for (std::size_t i = 0; i < capacity_; ++i) {
-            Slot &slot = slots_[i];
-            slot.owner = this;
-            slot.kind = AsyncLogRecordPoolKind::Spsc;
-            slot.record.set_pool_slot(static_cast<AsyncLogRecordPoolSlot *>(&slot));
-            const bool pushed = free_slots_.try_push(&slot);
-            AF_ASSERT(pushed);
-            static_cast<void>(pushed);
-        }
-    }
-
-    AsyncLogSpscRecordPool(const AsyncLogSpscRecordPool &) = delete;
-    AsyncLogSpscRecordPool &operator=(const AsyncLogSpscRecordPool &) = delete;
-
-    [[nodiscard]] LogRecord *try_acquire(std::string_view message) noexcept {
-        Slot *slot = acquire_producer_slot();
-        if (slot == nullptr) {
-            return nullptr;
-        }
-
-        try {
-            slot->record.reset(message);
-        } catch (...) {
-            stash_producer_slot(slot);
-            return nullptr;
-        }
-        return &slot->record;
-    }
-
-    static void release_slot(AsyncLogRecordPoolSlot *header) noexcept {
-        auto *slot = static_cast<Slot *>(header);
-        AF_ASSERT(slot != nullptr && slot->owner != nullptr);
-        static_cast<AsyncLogSpscRecordPool *>(slot->owner)->release(slot);
-    }
-
-    void release_from_producer(LogRecord *record) noexcept {
-        auto *slot = static_cast<Slot *>(record->pool_slot());
-        AF_ASSERT(slot != nullptr && slot->owner == this);
-        stash_producer_slot(slot);
-    }
-
-    void release_records(std::span<LogRecord *const> records) noexcept {
-        constexpr std::size_t release_chunk_size = 64;
-        std::array<Slot *, release_chunk_size> slots{};
-
-        std::size_t index = 0;
-        while (index < records.size()) {
-            const std::size_t count = std::min(release_chunk_size, records.size() - index);
-            for (std::size_t i = 0; i < count; ++i) {
-                slots[i] = static_cast<Slot *>(records[index + i]->pool_slot());
-            }
-
-            const std::size_t pushed = free_slots_.try_push_many(slots.data(), count);
-            AF_ASSERT(pushed == count);
-            if (pushed != count) [[unlikely]] {
-                for (std::size_t i = pushed; i < count; ++i) {
-                    release(slots[i]);
-                }
-            }
-            index += count;
-        }
-    }
-
-private:
-    [[nodiscard]] static std::size_t validate_capacity(std::size_t capacity) {
-        if (capacity == 0U || capacity >= std::numeric_limits<std::uint32_t>::max()) {
-            throw std::length_error("async log record pool capacity is out of range");
-        }
-        return capacity;
-    }
-
-    [[nodiscard]] Slot *acquire_producer_slot() noexcept {
-        if (producer_spare_slot_ != nullptr) {
-            Slot *slot = producer_spare_slot_;
-            producer_spare_slot_ = nullptr;
-            return slot;
-        }
-        return free_slots_.try_pop();
-    }
-
-    void stash_producer_slot(Slot *slot) noexcept {
-        AF_ASSERT(slot != nullptr && slot->owner == this);
-        AF_ASSERT(producer_spare_slot_ == nullptr);
-        producer_spare_slot_ = slot;
-    }
-
-    void release(Slot *slot) noexcept {
-        const bool pushed = free_slots_.try_push(slot);
-        AF_ASSERT(pushed);
-        static_cast<void>(pushed);
-    }
-
-    const std::size_t capacity_;
-    std::unique_ptr<Slot[]> slots_;
-    BoundedSpscQueue<Slot> free_slots_;
-    Slot *producer_spare_slot_{nullptr};
-};
-
 inline void release_async_log_record(LogRecord *record) noexcept {
     auto *slot = static_cast<AsyncLogRecordPoolSlot *>(record->pool_slot());
     AF_ASSERT(slot != nullptr);
     switch (slot->kind) {
     case AsyncLogRecordPoolKind::Shared:
         AsyncLogRecordPool::release_slot(slot);
-        return;
-    case AsyncLogRecordPoolKind::Spsc:
-        AsyncLogSpscRecordPool::release_slot(slot);
         return;
     }
     AF_ASSERT(false);
@@ -313,9 +199,6 @@ inline void release_async_log_records(std::span<LogRecord *const> records) noexc
         switch (kind) {
         case AsyncLogRecordPoolKind::Shared:
             static_cast<AsyncLogRecordPool *>(owner)->release_records(group);
-            break;
-        case AsyncLogRecordPoolKind::Spsc:
-            static_cast<AsyncLogSpscRecordPool *>(owner)->release_records(group);
             break;
         }
         begin = end;

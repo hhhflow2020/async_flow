@@ -13,7 +13,7 @@
 #include "af/detail/config.hpp"
 #include "af/detail/log/log_record.hpp"
 #include "af/detail/memory/contiguous_object_storage.hpp"
-#include "af/detail/queue/bounded_spsc_queue.hpp"
+#include "af/detail/queue/bounded_mpsc_queue.hpp"
 #include "af/detail/runtime/runtime_common_state.hpp"
 #include "af/detail/runtime/timed_atomic_wait.hpp"
 
@@ -136,8 +136,8 @@ public:
 
     const std::size_t max_batch_records;
     const std::size_t max_batches_per_run;
-    BoundedSpscQueue<Batch> ready_batches;
-    BoundedSpscQueue<Batch> free_batches;
+    BoundedMpscQueue<Batch> ready_batches;
+    BoundedMpscQueue<Batch> free_batches;
     ContiguousObjectStorage<Batch> storage;
     CacheLineAtomic<std::uint64_t> queued_records{0};
     CacheLineAtomic<std::uint64_t> dropped_records{0};

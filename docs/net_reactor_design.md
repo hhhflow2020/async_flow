@@ -23,7 +23,7 @@
 单个 IO executor 的推荐顺序：
 
 1. drain 已经调度到本线程的 task。
-2. 处理本地队列和跨线程 SPSC/MPSC ingress。
+2. 继续 drain 统一 intrusive MPSC task inbox 中新到达的任务。
 3. 非阻塞 poll 一次 fd events。
 4. 如果没有 task 和事件，进入 epoll/kqueue 阻塞等待。
 5. 被 eventfd/user event 唤醒后先 drain task，再处理 fd events。

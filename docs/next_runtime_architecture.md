@@ -585,7 +585,7 @@ include/af/reactor/select_reactor.hpp
 
 - 当前调度已经统一为每 executor 一个 intrusive MPSC task inbox，后续继续收敛配置 API 和命名。
 - 当前 `ThreadKind` 已只保留 `io` 和 `cpu`，后续继续收敛旧文档和示例中的历史叫法。
-- 当前日志 relaxed 模式包含 SPSC lane；目标架构不再使用 SPSC。
+- 当前日志 relaxed 模式已使用 bounded MPSC runtime lane 和 sharded MPSC ingress，后续继续把 record pool 改为可扩展 slab pool。
 - 当前部分网络对象仍有 command queue；目标架构要求跨线程操作显式 task 调度到 owner reactor。
 - 当前日志 record pool 是固定容量；目标架构改为可扩展 slab pool。
 

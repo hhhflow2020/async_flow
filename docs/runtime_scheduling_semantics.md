@@ -72,8 +72,8 @@ task inbox 是 intrusive unbounded MPSC，不再用队列容量拒绝任务投�
 
 历史 traits 仍保留以下字段作为兼容配置和非 task 子系统的容量来源：
 
-- `spsc_queue_capacity`：runtime 内部 local/SPSC 路径容量。
-- `external_queue_capacity`：目标 MPSC ingress 容量。
+- `spsc_queue_capacity`：历史字段名，task 调度不再使用它限制 local/SPSC 路径。
+- `external_queue_capacity`：历史字段名，task 调度不再使用它限制外部 ingress。
 
 这些字段不再约束 task 调度热路径。旧的满队列策略字段也不再决定 task inbox 行为：
 
