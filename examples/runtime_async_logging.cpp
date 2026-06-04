@@ -15,7 +15,7 @@ struct RuntimeLogThreadTag;
 
 struct RuntimeLogTraits {
     static constexpr auto threads = af::thread_layout(
-        af::thread_group<RuntimeLogThreadTag, 2, af::ThreadKind::Worker, "logic">());
+        af::thread_group<RuntimeLogThreadTag, 2, af::thread_kind::cpu, "logic">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;

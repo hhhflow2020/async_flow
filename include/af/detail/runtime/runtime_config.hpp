@@ -64,7 +64,7 @@ template <typename TraitsT> struct RuntimeConfig {
     static_assert(task_pool_remote_release_batch_size <= task_pool_local_cache_capacity,
                   "task_pool_remote_release_batch_size must not exceed "
                   "task_pool_local_cache_capacity");
-    [[nodiscard]] static constexpr ThreadKind thread_kind(Thread thread) noexcept {
+    [[nodiscard]] static constexpr af::thread_kind thread_kind(Thread thread) noexcept {
         return ThreadLayout::thread_kind(thread);
     }
 

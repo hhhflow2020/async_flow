@@ -101,29 +101,14 @@ template <typename TaskId>
 
 namespace detail {
 
-[[nodiscard]] constexpr bool async_log_consumer_prefers_io_thread_kind(ThreadKind kind) noexcept {
-    switch (kind) {
-    case ThreadKind::Io:
-    case ThreadKind::Epoll:
-    case ThreadKind::Kqueue:
-        return true;
-    case ThreadKind::Worker:
-    case ThreadKind::Log:
-        return false;
-    }
-    return false;
+[[nodiscard]] constexpr bool
+async_log_consumer_prefers_io_thread_kind(af::thread_kind kind) noexcept {
+    return kind == af::thread_kind::io;
 }
 
 template <typename RuntimeT>
 [[nodiscard]] constexpr typename RuntimeT::Thread
 select_default_async_log_consumer_thread() noexcept {
-    for (std::uint32_t i = 0; i < RuntimeT::thread_count; ++i) {
-        const auto thread = RuntimeT::thread_from_index(static_cast<std::uint16_t>(i));
-        if (RuntimeT::thread_kind(thread) == ThreadKind::Log) {
-            return thread;
-        }
-    }
-
     for (std::uint32_t i = 0; i < RuntimeT::thread_count; ++i) {
         const auto thread = RuntimeT::thread_from_index(static_cast<std::uint16_t>(i));
         if (async_log_consumer_prefers_io_thread_kind(RuntimeT::thread_kind(thread))) {

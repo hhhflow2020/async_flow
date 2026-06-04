@@ -21,7 +21,7 @@ inline constexpr std::uint32_t runtime_file_records_per_task = 128;
 
 struct RuntimeFileTraits {
     static constexpr auto threads = af::thread_layout(
-        af::thread_group<RuntimeFileLogicThreadTag, 2, af::ThreadKind::Worker, "file-log-cpu">(),
+        af::thread_group<RuntimeFileLogicThreadTag, 2, af::thread_kind::cpu, "file-log-cpu">(),
         af::thread_group<RuntimeFileIoThreadTag, 1, af::preferred_io_thread_kind, "file-log-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;

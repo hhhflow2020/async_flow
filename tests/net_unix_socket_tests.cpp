@@ -124,9 +124,8 @@ private:
 template <typename Runtime> [[nodiscard]] typename Runtime::Thread first_reactor_thread() noexcept {
     for (std::uint16_t i = 0; i < Runtime::thread_count; ++i) {
         const auto thread = Runtime::thread_from_index(i);
-        const af::ThreadKind kind = Runtime::thread_kind(thread);
-        if (kind == af::ThreadKind::Io || kind == af::ThreadKind::Epoll ||
-            kind == af::ThreadKind::Kqueue) {
+        const af::thread_kind kind = Runtime::thread_kind(thread);
+        if (kind == af::thread_kind::io) {
             return thread;
         }
     }

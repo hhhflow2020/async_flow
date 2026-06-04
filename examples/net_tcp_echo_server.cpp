@@ -25,7 +25,7 @@ struct EchoComputeThreadTag;
 struct EchoRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
         af::thread_group<EchoIoThreadTag, 2, af::preferred_io_thread_kind, "echo-io">(),
-        af::thread_group<EchoComputeThreadTag, 1, af::ThreadKind::Worker, "echo-cpu">());
+        af::thread_group<EchoComputeThreadTag, 1, af::thread_kind::cpu, "echo-cpu">());
     static constexpr std::size_t spsc_queue_capacity = 4096;
     static constexpr std::size_t external_queue_capacity = 4096;
     static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;

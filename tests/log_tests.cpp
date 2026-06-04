@@ -344,7 +344,7 @@ struct LogTestRuntimeThreadTag;
 
 struct LogTestRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
-        af::thread_group<LogTestRuntimeThreadTag, 2, af::ThreadKind::Worker, "log-src">());
+        af::thread_group<LogTestRuntimeThreadTag, 2, af::thread_kind::cpu, "log-src">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
@@ -476,7 +476,7 @@ private:
 
 struct LogUdpIoThreadTag;
 
-inline constexpr af::ThreadKind log_udp_io_thread_kind = af::ThreadKind::Io;
+inline constexpr af::thread_kind log_udp_io_thread_kind = af::thread_kind::io;
 
 struct LogUdpIoRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
@@ -500,8 +500,8 @@ struct DefaultConsumerIoThreadTag;
 
 struct LogDefaultIoRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
-        af::thread_group<DefaultConsumerLogicThreadTag, 1, af::ThreadKind::Worker, "log-def-cpu">(),
-        af::thread_group<DefaultConsumerIoThreadTag, 1, af::ThreadKind::Io, "log-def-io">());
+        af::thread_group<DefaultConsumerLogicThreadTag, 1, af::thread_kind::cpu, "log-def-cpu">(),
+        af::thread_group<DefaultConsumerIoThreadTag, 1, af::thread_kind::io, "log-def-io">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
@@ -523,21 +523,21 @@ struct DefaultConsumerLogThreadTag;
 
 struct LogDefaultLogRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
-        af::thread_group<DefaultConsumerWorkerThreadTag, 1, af::ThreadKind::Worker,
+        af::thread_group<DefaultConsumerWorkerThreadTag, 1, af::thread_kind::cpu,
                          "log-pref-cpu">(),
-        af::thread_group<DefaultConsumerIoThreadTag, 1, af::ThreadKind::Io, "log-pref-io">(),
-        af::thread_group<DefaultConsumerLogThreadTag, 1, af::ThreadKind::Log, "log-pref-log">());
+        af::thread_group<DefaultConsumerIoThreadTag, 1, af::thread_kind::io, "log-pref-io">(),
+        af::thread_group<DefaultConsumerLogThreadTag, 1, af::thread_kind::cpu, "log-pref-log">());
 };
 
 using LogDefaultLogRuntime = af::AsyncRuntime<LogDefaultLogRuntimeTraits>;
 
 struct LogDefaultLogThreads {
-    static constexpr auto LOG_0 =
-        LogDefaultLogRuntime::thread_group<DefaultConsumerLogThreadTag>().template at<0>();
+    static constexpr auto IO_0 =
+        LogDefaultLogRuntime::thread_group<DefaultConsumerIoThreadTag>().template at<0>();
 };
 
 static_assert(af::default_async_log_consumer_thread<LogDefaultLogRuntime>() ==
-              LogDefaultLogThreads::LOG_0);
+              LogDefaultLogThreads::IO_0);
 
 class LogDefaultIoRuntimeGuard {
 public:

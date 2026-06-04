@@ -19,9 +19,8 @@ inline constexpr bool supports_openat2 = platform_linux;
 inline constexpr bool supports_sendfile = platform_linux;
 inline constexpr bool supports_splice = platform_linux;
 inline constexpr bool supports_zero_copy_send = platform_linux;
-inline constexpr ThreadKind native_io_thread_kind =
-    supports_epoll ? ThreadKind::Epoll : (supports_kqueue ? ThreadKind::Kqueue : ThreadKind::Io);
-inline constexpr ThreadKind preferred_io_thread_kind = native_io_thread_kind;
+inline constexpr af::thread_kind native_io_thread_kind = af::thread_kind::io;
+inline constexpr af::thread_kind preferred_io_thread_kind = native_io_thread_kind;
 
 template <typename RuntimeT>
 [[nodiscard]] const char *runtime_io_backend_name(typename RuntimeT::Thread thread) noexcept {

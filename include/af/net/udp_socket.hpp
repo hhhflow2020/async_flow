@@ -1466,8 +1466,8 @@ public:
 
 private:
     static constexpr bool is_io_thread(Thread thread) noexcept {
-        const ThreadKind kind = Runtime::thread_kind(thread);
-        return kind == ThreadKind::Io || kind == ThreadKind::Epoll || kind == ThreadKind::Kqueue;
+        const af::thread_kind kind = Runtime::thread_kind(thread);
+        return kind == af::thread_kind::io;
     }
 
     [[nodiscard]] static std::uint16_t first_io_thread_index() noexcept {

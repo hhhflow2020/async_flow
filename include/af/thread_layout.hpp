@@ -106,7 +106,7 @@ public:
     }
 };
 
-template <typename TagT, std::uint16_t CountV, ThreadKind KindV = ThreadKind::Worker,
+template <typename TagT, std::uint16_t CountV, af::thread_kind KindV = af::thread_kind::cpu,
           detail::FixedString NameV = "worker">
 struct ThreadGroupSpec {
     static_assert(CountV > 0, "thread groups must contain at least one thread");
@@ -114,7 +114,7 @@ struct ThreadGroupSpec {
     using Tag = TagT;
 
     static constexpr std::uint16_t count = CountV;
-    static constexpr ThreadKind kind = KindV;
+    static constexpr af::thread_kind kind = KindV;
     static constexpr auto name = NameV;
 
     [[nodiscard]] static constexpr std::string_view name_view() noexcept {
@@ -135,7 +135,7 @@ template <typename TagT, std::uint16_t CountV> struct ThreadGroupShape {
 template <typename... Groups> struct ThreadLayoutShape {};
 
 struct ThreadLayoutEntry {
-    ThreadKind kind{ThreadKind::Worker};
+    af::thread_kind kind{af::thread_kind::cpu};
     std::string_view name{"worker"};
     std::uint16_t group_offset{0};
 };
@@ -208,10 +208,10 @@ public:
         return detail::thread_group_count<Tag, Specs...>();
     }
 
-    [[nodiscard]] static constexpr ThreadKind thread_kind(Thread thread) noexcept {
+    [[nodiscard]] static constexpr af::thread_kind thread_kind(Thread thread) noexcept {
         const std::uint16_t index = thread.index();
         if (index >= thread_count) {
-            return ThreadKind::Worker;
+            return af::thread_kind::cpu;
         }
         return entry_table_[index].kind;
     }
@@ -248,7 +248,7 @@ private:
     static inline constexpr auto entry_table_ = make_entry_table();
 };
 
-template <typename TagT, std::uint16_t CountV, ThreadKind KindV = ThreadKind::Worker,
+template <typename TagT, std::uint16_t CountV, af::thread_kind KindV = af::thread_kind::cpu,
           detail::FixedString NameV = "worker">
 [[nodiscard]] consteval auto thread_group() noexcept {
     return ThreadGroupSpec<TagT, CountV, KindV, NameV>{};

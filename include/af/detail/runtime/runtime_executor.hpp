@@ -20,7 +20,7 @@ template <typename RuntimeT, typename TraitsT> class alignas(hardware_cache_line
         return RuntimeT::thread_from_index(index);
     }
 
-    [[nodiscard]] static constexpr ThreadKind thread_kind(Thread thread) noexcept {
+    [[nodiscard]] static constexpr af::thread_kind thread_kind(Thread thread) noexcept {
         return RuntimeT::thread_kind(thread);
     }
 
@@ -150,9 +150,9 @@ private:
 
     [[nodiscard]] bool native_io_thread() const noexcept {
 #if AF_DETAIL_HAS_EPOLL
-        return kind_ == ThreadKind::Io || kind_ == ThreadKind::Epoll;
+        return kind_ == af::thread_kind::io;
 #elif AF_DETAIL_HAS_KQUEUE
-        return kind_ == ThreadKind::Io || kind_ == ThreadKind::Kqueue;
+        return kind_ == af::thread_kind::io;
 #else
         return false;
 #endif
@@ -273,7 +273,7 @@ private:
     void finish_again(Task *task) noexcept;
 
     std::uint16_t index_;
-    ThreadKind kind_{ThreadKind::Worker};
+    af::thread_kind kind_{af::thread_kind::cpu};
     detail::IntrusiveMpscQueue<Task> inbox_;
     CacheLineAtomic<std::uint32_t> wake_epoch_{0};
     CacheLineAtomic<bool> sleeping_{false};

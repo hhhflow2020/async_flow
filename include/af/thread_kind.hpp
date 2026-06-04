@@ -4,12 +4,11 @@
 
 namespace af {
 
-enum class ThreadKind : std::uint8_t {
-    Worker,
-    Log,
-    Io,
-    Epoll,
-    Kqueue,
+enum class thread_kind : std::uint8_t {
+    cpu,
+    io,
 };
+
+using ThreadKind = thread_kind;
 
 } // namespace af

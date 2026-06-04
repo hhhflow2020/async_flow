@@ -101,7 +101,7 @@ public:
     static constexpr bool task_registry_enabled = Config::task_registry_enabled;
     static constexpr std::size_t io_wait_reserve = Config::io_wait_reserve;
 
-    [[nodiscard]] static constexpr ThreadKind thread_kind(Thread thread) noexcept {
+    [[nodiscard]] static constexpr af::thread_kind thread_kind(Thread thread) noexcept {
         return Config::thread_kind(thread);
     }
 

@@ -32,9 +32,9 @@ static_assert(AboveSixtyFourRuntime::Config::queue_full_spin_count == 64U);
 
 struct ThreadLayoutMetadataTraits {
     static constexpr auto threads = af::thread_layout(
-        af::thread_group<ConfigLogicThreadTag, 3, af::ThreadKind::Worker, "logic">(),
-        af::thread_group<ConfigIoThreadTag, 2, af::ThreadKind::Io, "io">(),
-        af::thread_group<ConfigLogThreadTag, 1, af::ThreadKind::Log, "log">());
+        af::thread_group<ConfigLogicThreadTag, 3, af::thread_kind::cpu, "logic">(),
+        af::thread_group<ConfigIoThreadTag, 2, af::thread_kind::io, "io">(),
+        af::thread_group<ConfigLogThreadTag, 1, af::thread_kind::cpu, "log">());
 };
 
 using ThreadLayoutMetadataRuntime = af::AsyncRuntime<ThreadLayoutMetadataTraits>;
@@ -85,10 +85,7 @@ static_assert(af::supports_sendfile == af::platform_linux);
 static_assert(af::supports_splice == af::platform_linux);
 static_assert(af::supports_zero_copy_send == af::platform_linux);
 static_assert(af::platform_posix != af::platform_windows);
-static_assert(af::native_io_thread_kind ==
-              (af::supports_epoll
-                   ? af::ThreadKind::Epoll
-                   : (af::supports_kqueue ? af::ThreadKind::Kqueue : af::ThreadKind::Io)));
+static_assert(af::native_io_thread_kind == af::thread_kind::io);
 static_assert(af::preferred_io_thread_kind == af::native_io_thread_kind);
 
 } // namespace
@@ -114,9 +111,9 @@ TEST(RuntimeConfigTests, ThreadLayoutGroupsCarryKindNameAndIndexMetadata) {
     EXPECT_EQ(logic.offset_of(logic.template at<2>()), 2U);
 
     EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_kind(logic.template at<0>()),
-              af::ThreadKind::Worker);
-    EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_kind(io.template at<0>()), af::ThreadKind::Io);
-    EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_kind(log.template at<0>()), af::ThreadKind::Log);
+              af::thread_kind::cpu);
+    EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_kind(io.template at<0>()), af::thread_kind::io);
+    EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_kind(log.template at<0>()), af::thread_kind::cpu);
     EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_name(logic.template at<0>()), "logic");
     EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_name(io.template at<1>()), "io");
     EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_name(log.template at<0>()), "log");

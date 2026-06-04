@@ -57,7 +57,7 @@ using NetServerTwoIoRuntime = af::AsyncRuntime<NetServerTwoIoRuntimeTraits>;
 struct NetServerIoWorkerRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
         af::thread_group<NetServerIoWorkerIoTag, 1, af::preferred_io_thread_kind, "net-test-io">(),
-        af::thread_group<NetServerIoWorkerCpuTag, 1, af::ThreadKind::Worker, "net-test-cpu">());
+        af::thread_group<NetServerIoWorkerCpuTag, 1, af::thread_kind::cpu, "net-test-cpu">());
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
@@ -270,9 +270,8 @@ private:
 template <typename Runtime> [[nodiscard]] typename Runtime::Thread first_reactor_thread() noexcept {
     for (std::uint16_t i = 0; i < Runtime::thread_count; ++i) {
         const auto thread = Runtime::thread_from_index(i);
-        const af::ThreadKind kind = Runtime::thread_kind(thread);
-        if (kind == af::ThreadKind::Io || kind == af::ThreadKind::Epoll ||
-            kind == af::ThreadKind::Kqueue) {
+        const af::thread_kind kind = Runtime::thread_kind(thread);
+        if (kind == af::thread_kind::io) {
             return thread;
         }
     }
