@@ -179,6 +179,73 @@ private:
     std::atomic<int> &counter_;
 };
 
+class InstanceRuntimeTask final : public af::runtime_task {
+public:
+    InstanceRuntimeTask(af::runtime_task::factory_token token, af::runtime &owner,
+                        std::atomic<int> &counter,
+                        std::atomic<af::runtime_task_id> &observed_task_id,
+                        std::atomic<af::runtime_task_id> &observed_current_task_id,
+                        std::atomic<std::uint16_t> &observed_thread)
+        : af::runtime_task(token, owner), counter_(counter), observed_task_id_(observed_task_id),
+          observed_current_task_id_(observed_current_task_id), observed_thread_(observed_thread) {}
+
+    [[nodiscard]] bool do_it(std::uint16_t thread) noexcept {
+        return schedule_to(thread);
+    }
+
+private:
+    af::task_result run_task() noexcept override {
+        observed_task_id_.store(task_id(), std::memory_order_release);
+        observed_current_task_id_.store(af::runtime::current_task_id(), std::memory_order_release);
+        observed_thread_.store(af::runtime::current_thread_index(), std::memory_order_release);
+        counter_.fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int> &counter_;
+    std::atomic<af::runtime_task_id> &observed_task_id_;
+    std::atomic<af::runtime_task_id> &observed_current_task_id_;
+    std::atomic<std::uint16_t> &observed_thread_;
+};
+
+class TwoHopRuntimeTask final : public af::runtime_task {
+public:
+    TwoHopRuntimeTask(af::runtime_task::factory_token token, af::runtime &owner,
+                      std::uint16_t second_thread, std::atomic<int> &counter,
+                      std::atomic<std::uint16_t> &first_thread,
+                      std::atomic<std::uint16_t> &second_observed_thread,
+                      std::atomic<bool> &next_schedule_ok)
+        : af::runtime_task(token, owner), second_thread_(second_thread), counter_(counter),
+          first_thread_(first_thread), second_observed_thread_(second_observed_thread),
+          next_schedule_ok_(next_schedule_ok) {}
+
+    [[nodiscard]] bool do_it(std::uint16_t first_thread) noexcept {
+        return schedule_to(first_thread);
+    }
+
+private:
+    af::task_result run_task() noexcept override {
+        const int phase = phase_.fetch_add(1, std::memory_order_acq_rel);
+        if (phase == 0) {
+            first_thread_.store(af::runtime::current_thread_index(), std::memory_order_release);
+            next_schedule_ok_.store(schedule_to(second_thread_), std::memory_order_release);
+            return pending();
+        }
+
+        second_observed_thread_.store(af::runtime::current_thread_index(),
+                                      std::memory_order_release);
+        counter_.fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::uint16_t second_thread_;
+    std::atomic<int> &counter_;
+    std::atomic<std::uint16_t> &first_thread_;
+    std::atomic<std::uint16_t> &second_observed_thread_;
+    std::atomic<bool> &next_schedule_ok_;
+    std::atomic<int> phase_{0};
+};
+
 } // namespace
 
 TEST(RuntimeConfigTests, PreservesThreadCountsAboveSixtyFour) {
@@ -500,4 +567,70 @@ TEST(RuntimeConfigTests, RuntimeInstanceStopCanBeRequestedFromRuntimeThread) {
     runtime.stop();
     EXPECT_EQ(runtime.state(), af::runtime_state::stopped);
     EXPECT_EQ(runtime.active_thread_count(), 0U);
+}
+
+TEST(RuntimeConfigTests, RuntimeMakeTaskSchedulesAndTracksTaskId) {
+    af::runtime_config config;
+    config.threads = {
+        af::io_threads("io", 1),
+        af::cpu_threads("logic", 1),
+    };
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    std::atomic<int> counter{0};
+    std::atomic<af::runtime_task_id> observed_task_id{af::runtime_invalid_task_id};
+    std::atomic<af::runtime_task_id> observed_current_task_id{af::runtime_invalid_task_id};
+    std::atomic<std::uint16_t> observed_thread{af::runtime_invalid_thread_index};
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 2));
+
+    auto task = af::make_task<InstanceRuntimeTask>(runtime, counter, observed_task_id,
+                                                   observed_current_task_id, observed_thread);
+    const auto task_id = task->task_id();
+    ASSERT_NE(task_id, af::runtime_invalid_task_id);
+
+    const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
+    ASSERT_TRUE(task->do_it(cpu_thread));
+    task.reset();
+
+    ASSERT_TRUE(wait_for_counter(counter, 1));
+    EXPECT_EQ(observed_task_id.load(std::memory_order_acquire), task_id);
+    EXPECT_EQ(observed_current_task_id.load(std::memory_order_acquire), task_id);
+    EXPECT_EQ(observed_thread.load(std::memory_order_acquire), cpu_thread);
+
+    runtime.stop();
+}
+
+TEST(RuntimeConfigTests, RuntimeTaskDefersRunningScheduleUntilRunReturns) {
+    af::runtime_config config;
+    config.threads = {
+        af::io_threads("io", 1),
+        af::cpu_threads("logic", 2),
+    };
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    std::atomic<int> counter{0};
+    std::atomic<std::uint16_t> first_thread{af::runtime_invalid_thread_index};
+    std::atomic<std::uint16_t> second_thread{af::runtime_invalid_thread_index};
+    std::atomic<bool> next_schedule_ok{false};
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 3));
+
+    const auto cpu0 = runtime.select_thread(af::thread_selector::cpu(0));
+    const auto cpu1 = runtime.select_thread(af::thread_selector::cpu(1));
+    auto task = af::make_task<TwoHopRuntimeTask>(runtime, cpu1, counter, first_thread,
+                                                 second_thread, next_schedule_ok);
+    ASSERT_TRUE(task->do_it(cpu0));
+    task.reset();
+
+    ASSERT_TRUE(wait_for_counter(counter, 1));
+    EXPECT_TRUE(next_schedule_ok.load(std::memory_order_acquire));
+    EXPECT_EQ(first_thread.load(std::memory_order_acquire), cpu0);
+    EXPECT_EQ(second_thread.load(std::memory_order_acquire), cpu1);
+
+    runtime.stop();
 }

@@ -11,10 +11,10 @@
 #include <utility>
 #include <vector>
 
-#include "af/detail/queue/intrusive_mpsc_queue.hpp"
 #include "af/detail/runtime/atomic_wait.hpp"
 #include "af/detail/thread/thread_name.hpp"
 #include "af/runtime/config_resolution.hpp"
+#include "af/runtime/task.hpp"
 
 namespace af {
 
@@ -25,26 +25,11 @@ enum class runtime_state : std::uint8_t {
     stopping,
 };
 
-class runtime;
-
-class runtime_work {
-public:
-    runtime_work() = default;
-    runtime_work(const runtime_work &) = delete;
-    runtime_work &operator=(const runtime_work &) = delete;
-    virtual ~runtime_work() = default;
-
-    virtual void run(runtime &owner) noexcept = 0;
-
-private:
-    detail::IntrusiveMpscNode<runtime_work> intrusive_mpsc_node_{this};
-
-    template <typename T> friend class detail::IntrusiveMpscQueue;
-};
-
 class runtime {
 public:
     using thread_index = std::uint16_t;
+    using task_id_type = runtime_task_id;
+    static constexpr task_id_type invalid_task_id = runtime_invalid_task_id;
 
     explicit runtime(runtime_config config)
         : resolution_(resolve_runtime_config(std::move(config))) {
@@ -118,6 +103,10 @@ public:
 
     [[nodiscard]] static bool is_runtime_thread() noexcept {
         return current_runtime_ != nullptr;
+    }
+
+    [[nodiscard]] static task_id_type current_task_id() noexcept {
+        return current_task_id_;
     }
 
     [[nodiscard]] bool start() {
@@ -335,6 +324,12 @@ private:
         detail::atomic_notify_all(active_epoch_);
     }
 
+    [[nodiscard]] static task_id_type exchange_current_task_id(task_id_type next) noexcept {
+        const task_id_type previous = current_task_id_;
+        current_task_id_ = next;
+        return previous;
+    }
+
     runtime_config_resolution resolution_;
     std::vector<std::unique_ptr<executor>> executors_;
     std::atomic<runtime_state> state_{runtime_state::stopped};
@@ -344,6 +339,11 @@ private:
 
     inline static thread_local runtime *current_runtime_{nullptr};
     inline static thread_local thread_index current_thread_index_{runtime_invalid_thread_index};
+    inline static thread_local task_id_type current_task_id_{invalid_task_id};
+
+    friend class runtime_task;
 };
 
 } // namespace af
+
+#include "af/runtime/task_impl.hpp"
