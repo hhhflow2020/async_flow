@@ -102,6 +102,8 @@ const bool started = task->do_it(player_id);
 
 新网络层使用 reactor-driven 设计。IO 线程直接管理 listener、connection、fd 事件、读写 buffer 和连接状态；业务 handler 在 IO 线程拿到字节流，再按需要创建任务切到逻辑线程处理。TCP/UDP/Unix socket 服务器、客户端都应绑定到一个或多个框架 IO 线程。
 
+TCP/UDP/Unix socket 的控制面是 reactor-only：`bind_threads()`、`add_listener()`、`connect()`、`start()`、`remove_listener()`、`stop()` 应在同一个 IO reactor 任务内调用。外部线程应显式投递控制任务；这是无锁控制面的使用契约，框架不为外部直接调用额外建立同步兼容层。
+
 TCP server 示例见：
 
 - `examples/net_tcp_echo_server.cpp`

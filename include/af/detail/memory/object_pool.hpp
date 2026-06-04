@@ -51,11 +51,32 @@ public:
         }
     }
 
+    template <typename... Args> [[nodiscard]] T *create_uncached(Args &&...args) {
+        void *memory = acquire_slot_uncached();
+        if constexpr (std::is_nothrow_constructible_v<T, Args...>) {
+            return std::construct_at(static_cast<T *>(memory), std::forward<Args>(args)...);
+        } else {
+            try {
+                return std::construct_at(static_cast<T *>(memory), std::forward<Args>(args)...);
+            } catch (...) {
+                release_slot_uncached(memory);
+                throw;
+            }
+        }
+    }
+
     void destroy(T *object) noexcept {
         if constexpr (!std::is_trivially_destructible_v<T>) {
             std::destroy_at(object);
         }
         release_slot(object);
+    }
+
+    void destroy_uncached(T *object) noexcept {
+        if constexpr (!std::is_trivially_destructible_v<T>) {
+            std::destroy_at(object);
+        }
+        release_slot_uncached(object);
     }
 
     void reserve_slots(std::size_t slot_count) {
@@ -607,6 +628,30 @@ private:
         }
     }
 
+    [[nodiscard]] void *acquire_slot_uncached() {
+        for (;;) {
+            Slot *slot = nullptr;
+            if (Block *block = hot_block_.load(std::memory_order_acquire)) {
+                if (block->try_pop_many(&slot, 1U) != 0U) {
+                    return slot->storage;
+                }
+            }
+
+            for (Block *block = blocks_.load(std::memory_order_acquire); block != nullptr;
+                 block = block->next) {
+                if (block->try_pop_many(&slot, 1U) != 0U) {
+                    hot_block_.store(block, std::memory_order_release);
+                    return slot->storage;
+                }
+            }
+
+            Block *block = add_block();
+            if (block->try_pop_many(&slot, 1U) != 0U) {
+                return slot->storage;
+            }
+        }
+    }
+
     void release_slot(void *memory) noexcept {
         Slot *slot = slot_from_memory(memory);
         if constexpr (remote_release_batch_size == 1U) {
@@ -630,6 +675,11 @@ private:
             }
             cache.push(slot);
         }
+    }
+
+    void release_slot_uncached(void *memory) noexcept {
+        Slot *slot = slot_from_memory(memory);
+        slot->owner->push(slot);
     }
 
     [[nodiscard]] static Slot *slot_from_memory(void *memory) noexcept {

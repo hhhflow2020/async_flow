@@ -164,6 +164,10 @@ if(ASYNCFLOW_BUILD_TESTS)
         tests/batch_utility_tests.cpp
         tests/net_buffer_tests.cpp
         tests/net_socket_address_tests.cpp
+        tests/net_tcp_client_tests.cpp
+        tests/net_tcp_server_tests.cpp
+        tests/net_udp_socket_tests.cpp
+        tests/net_unix_socket_tests.cpp
     )
     target_link_libraries(asyncflow_runtime_tests PRIVATE AsyncFlow::AsyncFlow GTest::gtest_main)
 

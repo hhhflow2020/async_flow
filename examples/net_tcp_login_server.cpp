@@ -1,13 +1,16 @@
 #include <atomic>
+#include <cerrno>
 #include <chrono>
-#include <csignal>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <limits>
+#include <memory>
 #include <string>
-#include <thread>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -15,6 +18,7 @@
 #include "af/log.hpp"
 #include "af/net.hpp"
 #include "af/platform.hpp"
+#include "af/signal.hpp"
 #include "login.pb.h"
 
 #include <arpa/inet.h>
@@ -24,6 +28,7 @@ namespace {
 constexpr std::uint16_t login_request_id = 1;
 constexpr std::uint16_t login_response_id = 2;
 constexpr std::size_t packet_header_size = sizeof(std::uint32_t) + sizeof(std::uint16_t);
+constexpr std::size_t max_packet_payload_size = 64U * 1024U;
 
 struct LoginIoThreadTag;
 struct LoginComputeThreadTag;
@@ -40,36 +45,71 @@ struct LoginRuntimeTraits {
 };
 
 using LoginRuntime = af::AsyncRuntime<LoginRuntimeTraits>;
+using LoginConnectionHandle = af::net::TcpConnectionHandle<LoginRuntime>;
 
-struct LoginHandler;
-using LoginConnectionHandle = af::net::TcpConnectionHandle<LoginRuntime, LoginHandler>;
+struct ServerLifecycleState {
+    std::atomic<bool> started{false};
+    std::atomic<bool> failed{false};
+    std::atomic<int> error{0};
 
-std::atomic<bool> stop_requested{false};
+    void record_failure(int err) noexcept {
+        error.store(err == 0 ? EIO : err, std::memory_order_release);
+        failed.store(true, std::memory_order_release);
+    }
+};
 
-void handle_signal(int) {
-    stop_requested.store(true, std::memory_order_release);
+[[nodiscard]] std::vector<LoginRuntime::Thread> login_io_threads() {
+    return af::net::thread_list<LoginRuntime>(LoginRuntime::thread_group<LoginIoThreadTag>());
 }
 
-[[nodiscard]] std::vector<std::byte> make_packet(std::uint16_t packet_id, std::string payload) {
+[[nodiscard]] LoginRuntime::Thread login_control_thread() {
+    return LoginRuntime::thread_group<LoginIoThreadTag>().template at<0>();
+}
+
+[[nodiscard]] std::uint64_t connection_key(std::uint32_t slot, std::uint32_t generation) noexcept {
+    return (static_cast<std::uint64_t>(generation) << 32U) | slot;
+}
+
+[[nodiscard]] std::uint64_t connection_key(LoginConnectionHandle conn) noexcept {
+    return connection_key(conn.slot(), conn.generation());
+}
+
+[[nodiscard]] af::Buffer make_packet(std::uint16_t packet_id, std::string payload) {
+    if (payload.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()) -
+                             sizeof(std::uint16_t)) {
+        return {};
+    }
     const std::uint32_t length = static_cast<std::uint32_t>(sizeof(std::uint16_t) + payload.size());
     const std::uint32_t network_length = htonl(length);
     const std::uint16_t network_id = htons(packet_id);
-    std::vector<std::byte> packet(packet_header_size + payload.size());
-    std::memcpy(packet.data(), &network_length, sizeof(network_length));
-    std::memcpy(packet.data() + sizeof(network_length), &network_id, sizeof(network_id));
-    if (!payload.empty()) {
-        std::memcpy(packet.data() + packet_header_size, payload.data(), payload.size());
+    af::Buffer packet = af::Buffer::with_capacity(packet_header_size + payload.size());
+    if (!packet.try_append(&network_length, sizeof(network_length)) ||
+        !packet.try_append(&network_id, sizeof(network_id)) ||
+        !packet.try_append(payload.data(), payload.size())) {
+        return {};
     }
     return packet;
 }
 
+enum class PacketParseResult : std::uint8_t {
+    Ok,
+    ProtocolError,
+    OutOfMemory,
+};
+
 struct StreamParser {
     std::vector<std::byte> buffered;
 
-    template <typename Fn> void feed(af::BufferView bytes, Fn &&fn) {
+    template <typename Fn> [[nodiscard]] PacketParseResult feed(af::BufferView bytes, Fn &&fn) {
         const auto old_size = buffered.size();
-        buffered.resize(old_size + bytes.size());
-        std::memcpy(buffered.data() + old_size, bytes.data(), bytes.size());
+        try {
+            buffered.resize(old_size + bytes.size());
+        } catch (...) {
+            return PacketParseResult::OutOfMemory;
+        }
+        if (!bytes.empty()) {
+            std::memcpy(buffered.data() + old_size, bytes.data(), bytes.size());
+        }
 
         std::size_t offset = 0;
         while (buffered.size() - offset >= packet_header_size) {
@@ -77,14 +117,17 @@ struct StreamParser {
             std::uint16_t network_id = 0;
             std::memcpy(&network_length, buffered.data() + offset, sizeof(network_length));
             const std::uint32_t length = ntohl(network_length);
-            if (length < sizeof(std::uint16_t)) {
+            if (length < sizeof(std::uint16_t) ||
+                length > sizeof(std::uint16_t) + max_packet_payload_size) {
                 buffered.clear();
-                return;
+                return PacketParseResult::ProtocolError;
             }
+
             const std::size_t full_size = sizeof(std::uint32_t) + length;
             if (buffered.size() - offset < full_size) {
                 break;
             }
+
             std::memcpy(&network_id, buffered.data() + offset + sizeof(network_length),
                         sizeof(network_id));
             const std::uint16_t packet_id = ntohs(network_id);
@@ -93,10 +136,12 @@ struct StreamParser {
             fn(packet_id, af::BufferView(payload, payload_size));
             offset += full_size;
         }
+
         if (offset != 0U) {
             buffered.erase(buffered.begin(),
                            buffered.begin() + static_cast<std::ptrdiff_t>(offset));
         }
+        return PacketParseResult::Ok;
     }
 };
 
@@ -104,63 +149,223 @@ class LoginTask final : public LoginRuntime::Task {
 public:
     explicit LoginTask(LoginRuntime::Task::FactoryToken token) : LoginRuntime::Task(token) {}
 
-    bool do_it(LoginConnectionHandle conn, std::string user_id) {
-        conn_ = std::move(conn);
+    bool do_it(LoginConnectionHandle conn, std::string user_id, std::string token) {
+        conn_ = conn;
         user_id_ = std::move(user_id);
+        token_ = std::move(token);
         return schedule(LoginRuntime::thread_group<LoginComputeThreadTag>().template at<0>());
     }
 
 private:
     af::TaskResult run() override {
-        LOG(INFO) << "login task running user=" << user_id_;
+        LOG(INFO) << "login task running user=" << user_id_ << " slot=" << conn_.slot()
+                  << " generation=" << conn_.generation();
+
         asyncflow::examples::net::LoginResponse response;
-        response.set_ok(true);
-        response.set_message("hello " + user_id_);
+        response.set_ok(!user_id_.empty() && !token_.empty());
+        response.set_message(response.ok() ? "hello " + user_id_ : "login rejected");
+
         std::string payload;
         if (!response.SerializeToString(&payload)) {
             LOG(ERROR) << "failed to serialize login response user=" << user_id_;
             return done();
         }
-        const std::vector<std::byte> packet = make_packet(login_response_id, std::move(payload));
-        static_cast<void>(conn_.send(af::Buffer::copy(packet.data(), packet.size())));
+
+        af::Buffer packet = make_packet(login_response_id, std::move(payload));
+        if (packet.empty()) {
+            LOG(ERROR) << "failed to encode login response user=" << user_id_;
+            return done();
+        }
+
+        const af::net::SendResult result = conn_.send(std::move(packet));
+        if (result == af::net::SendResult::Backpressure) {
+            LOG(WARNING) << "login response backpressure user=" << user_id_
+                         << " slot=" << conn_.slot();
+        } else if (result == af::net::SendResult::Closed) {
+            LOG(INFO) << "login response skipped closed user=" << user_id_
+                      << " slot=" << conn_.slot();
+        }
         return done();
     }
 
     LoginConnectionHandle conn_;
     std::string user_id_;
+    std::string token_;
 };
 
 struct LoginHandler {
+    std::shared_ptr<ServerLifecycleState> lifecycle;
     absl::flat_hash_map<std::uint64_t, StreamParser> parsers;
 
-    void on_read(af::net::TcpConnectionRef<LoginRuntime, LoginHandler> conn, af::BufferView bytes) {
-        const auto handle = conn.handle();
-        const std::uint64_t key =
-            (static_cast<std::uint64_t>(handle.generation()) << 32U) | handle.slot();
-        StreamParser &parser = parsers[key];
-        parser.feed(bytes, [&](std::uint16_t packet_id, af::BufferView payload) {
-            if (packet_id != login_request_id) {
-                return;
-            }
-            asyncflow::examples::net::LoginRequest request;
-            if (!request.ParseFromArray(payload.data(), static_cast<int>(payload.size()))) {
-                return;
-            }
-            static_cast<void>(
-                LoginRuntime::start_task<LoginTask>(handle, std::string(request.user_id())));
-        });
+    void on_accept(af::net::TcpConnectionRef<LoginRuntime> conn) {
+        static_cast<void>(conn.set_no_delay(true));
+        static_cast<void>(conn.set_keepalive(true));
+        LOG(INFO) << "login connection accepted listener=" << conn.listener_name()
+                  << " slot=" << conn.slot() << " generation=" << conn.generation();
     }
 
-    void on_close(af::net::TcpConnectionHandle<LoginRuntime, LoginHandler> conn,
-                  af::net::CloseReason reason) {
-        const std::uint64_t key =
-            (static_cast<std::uint64_t>(conn.generation()) << 32U) | conn.slot();
-        parsers.erase(key);
+    void on_read(af::net::TcpConnectionRef<LoginRuntime> conn, af::BufferView bytes) {
+        const LoginConnectionHandle handle = conn.handle();
+        StreamParser &parser = parsers[connection_key(handle)];
+        const PacketParseResult result =
+            parser.feed(bytes, [&](std::uint16_t packet_id, af::BufferView payload) {
+                if (packet_id != login_request_id) {
+                    LOG(WARNING) << "unknown login packet id=" << packet_id
+                                 << " slot=" << handle.slot();
+                    return;
+                }
+
+                asyncflow::examples::net::LoginRequest request;
+                if (!request.ParseFromArray(payload.data(), static_cast<int>(payload.size()))) {
+                    LOG(WARNING) << "invalid login protobuf slot=" << handle.slot();
+                    return;
+                }
+
+                LOG(INFO) << "login packet parsed user=" << request.user_id()
+                          << " slot=" << handle.slot() << " generation=" << handle.generation();
+                if (!LoginRuntime::start_task<LoginTask>(handle, std::string(request.user_id()),
+                                                         std::string(request.token()))) {
+                    LOG(ERROR) << "failed to schedule login task user=" << request.user_id()
+                               << " slot=" << handle.slot();
+                    static_cast<void>(handle.close());
+                }
+            });
+
+        if (result == PacketParseResult::ProtocolError) {
+            LOG(WARNING) << "login protocol error slot=" << conn.slot()
+                         << " generation=" << conn.generation();
+            conn.close(af::net::CloseReason::Error);
+        } else if (result == PacketParseResult::OutOfMemory) {
+            LOG(ERROR) << "login parser out of memory slot=" << conn.slot()
+                       << " generation=" << conn.generation();
+            conn.close(af::net::CloseReason::Error);
+        }
+    }
+
+    void on_close(af::net::TcpConnectionHandle<LoginRuntime> conn, af::net::CloseReason reason) {
+        parsers.erase(connection_key(conn));
         LOG(INFO) << "login connection closed slot=" << conn.slot()
                   << " generation=" << conn.generation()
                   << " reason=" << static_cast<unsigned>(reason);
     }
+
+    void on_error(af::net::TcpListenerHandle listener, int error) noexcept {
+        LOG(ERROR) << "login listener error slot=" << listener.slot()
+                   << " generation=" << listener.generation() << " error=" << error;
+        if (lifecycle != nullptr) {
+            lifecycle->record_failure(error);
+        }
+    }
 };
+
+class StartServerTask final : public LoginRuntime::Task {
+public:
+    explicit StartServerTask(LoginRuntime::Task::FactoryToken token) : LoginRuntime::Task(token) {}
+
+    bool do_it(af::net::TcpServer<LoginRuntime> *server, std::uint16_t port, bool ipv6,
+               std::shared_ptr<ServerLifecycleState> lifecycle) {
+        server_ = server;
+        port_ = port;
+        ipv6_ = ipv6;
+        lifecycle_ = std::move(lifecycle);
+        return schedule_ordered(login_control_thread());
+    }
+
+private:
+    af::TaskResult run() override {
+        if (server_ == nullptr) {
+            if (lifecycle_ != nullptr) {
+                lifecycle_->record_failure(EINVAL);
+            }
+            return done();
+        }
+
+        const af::net::ListenerResult listener = server_->add_listener<LoginHandler>(
+            {
+                .name = ipv6_ ? "login-v6" : "login-v4",
+                .endpoint =
+                    ipv6_ ? af::net::TcpEndpoint::any_v6(port_) : af::net::TcpEndpoint::any(port_),
+                .threads = login_io_threads(),
+                .options =
+                    {
+                        .backlog = 4096,
+                        .reuse_port = true,
+                        .ipv6_only = true,
+                        .accept_budget = 256,
+                        .read_budget_bytes = 512U * 1024U,
+                        .read_buffer_size = 16U * 1024U,
+                        .output_high_watermark = 8U * 1024U * 1024U,
+                    },
+                .accept_strategy = af::net::AcceptStrategy::ReusePortPerIoThread,
+            },
+            LoginHandler{lifecycle_});
+        if (!listener.ok()) {
+            if (lifecycle_ != nullptr) {
+                lifecycle_->record_failure(listener.error);
+            }
+            return done();
+        }
+
+        if (!server_->start()) {
+            if (lifecycle_ != nullptr) {
+                lifecycle_->record_failure(EIO);
+            }
+            return done();
+        }
+
+        LOG(INFO) << "tcp login start submitted listener_slot=" << listener.listener.slot()
+                  << " listener_generation=" << listener.listener.generation();
+        if (lifecycle_ != nullptr) {
+            lifecycle_->started.store(true, std::memory_order_release);
+        }
+        return done();
+    }
+
+    af::net::TcpServer<LoginRuntime> *server_{nullptr};
+    std::shared_ptr<ServerLifecycleState> lifecycle_;
+    std::uint16_t port_{0};
+    bool ipv6_{false};
+};
+
+class StopServerTask final : public LoginRuntime::Task {
+public:
+    explicit StopServerTask(LoginRuntime::Task::FactoryToken token) : LoginRuntime::Task(token) {}
+
+    bool do_it(af::net::TcpServer<LoginRuntime> *server) {
+        server_ = server;
+        return schedule_ordered(login_control_thread());
+    }
+
+private:
+    af::TaskResult run() override {
+        if (server_ == nullptr || !server_->stop()) {
+            LOG(ERROR) << "tcp login server stop failed";
+        } else {
+            LOG(INFO) << "tcp login stop submitted";
+        }
+        return done();
+    }
+
+    af::net::TcpServer<LoginRuntime> *server_{nullptr};
+};
+
+[[nodiscard]] bool wait_for_shutdown_signal(af::SignalSet &signals,
+                                            const ServerLifecycleState &lifecycle) {
+    for (;;) {
+        if (lifecycle.failed.load(std::memory_order_acquire)) {
+            return false;
+        }
+        const af::SignalWaitResult result = signals.wait_for(std::chrono::seconds(1));
+        if (result.ok()) {
+            LOG(INFO) << "tcp login received signal=" << result.signal;
+            return true;
+        }
+        if (result.error != EAGAIN) {
+            std::cerr << "signal wait failed error=" << result.error << '\n';
+            return false;
+        }
+    }
+}
 
 } // namespace
 
@@ -171,32 +376,42 @@ int main(int argc, char **argv) {
     }
     const bool ipv6 = argc > 2 && std::strcmp(argv[2], "--ipv6") == 0;
 
-    std::signal(SIGINT, handle_signal);
-    std::signal(SIGTERM, handle_signal);
-    std::signal(SIGPIPE, SIG_IGN);
+    af::SignalSet signals = af::make_termination_signal_set();
+    if (!signals.valid()) {
+        std::cerr << "failed to install signal set error=" << signals.error() << '\n';
+        return 1;
+    }
+    static_cast<void>(af::ignore_process_signal(SIGPIPE));
 
     LoginRuntime::init();
-    af::net::TcpServer<LoginRuntime, LoginHandler> server({
-        .threads =
-            af::net::thread_list<LoginRuntime>(LoginRuntime::thread_group<LoginIoThreadTag>()),
-        .endpoint = ipv6 ? af::net::TcpEndpoint::any_v6(port) : af::net::TcpEndpoint::any(port),
-        .options = {.reuse_port = true},
-    });
 
-    if (!server.start()) {
-        std::cerr << "failed to start tcp login server\n";
+    af::net::TcpServer<LoginRuntime> server(af::net::TcpServerConfig{
+        .command_queue_capacity = 8192,
+    });
+    auto lifecycle = std::make_shared<ServerLifecycleState>();
+    if (!LoginRuntime::start_task<StartServerTask>(&server, port, ipv6, lifecycle)) {
+        std::cerr << "failed to schedule tcp login server start\n";
         LoginRuntime::shutdown();
         return 1;
     }
 
-    std::cout << "tcp login server listening on " << (ipv6 ? "[::]" : "0.0.0.0") << ':' << port
-              << '\n';
-    while (!stop_requested.load(std::memory_order_acquire)) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    LoginRuntime::wait_for_idle();
+    if (!lifecycle->started.load(std::memory_order_acquire) ||
+        lifecycle->failed.load(std::memory_order_acquire)) {
+        std::cerr << "failed to start tcp login server error="
+                  << lifecycle->error.load(std::memory_order_acquire) << '\n';
+        LoginRuntime::shutdown();
+        return 1;
     }
 
-    static_cast<void>(server.stop());
+    std::cout << "tcp login server listening on " << std::string_view(ipv6 ? "[::]" : "0.0.0.0")
+              << ':' << port << '\n';
+    static_cast<void>(wait_for_shutdown_signal(signals, *lifecycle));
+
+    if (!LoginRuntime::start_task<StopServerTask>(&server)) {
+        std::cerr << "failed to schedule tcp login server stop\n";
+    }
     LoginRuntime::wait_for_idle();
     LoginRuntime::shutdown();
-    return 0;
+    return lifecycle->failed.load(std::memory_order_acquire) ? 1 : 0;
 }

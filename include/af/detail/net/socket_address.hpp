@@ -1,13 +1,16 @@
 #pragma once
 
 #include <cerrno>
+#include <cstddef>
 #include <cstring>
+#include <string>
 
 #include "af/net/tcp_endpoint.hpp"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 
 namespace af::detail {
 
@@ -26,6 +29,26 @@ struct SocketAddress {
     const bool prefer_ipv6 = endpoint.family == af::net::AddressFamily::IPv6 ||
                              (endpoint.family == af::net::AddressFamily::Unspecified &&
                               endpoint.address.find(':') != std::string::npos);
+    if (endpoint.family == af::net::AddressFamily::Unix) {
+        if (endpoint.address.empty()) {
+            error = EINVAL;
+            return false;
+        }
+        static_assert(sizeof(sockaddr_un) <= sizeof(sockaddr_storage));
+        auto *unix_address = reinterpret_cast<sockaddr_un *>(&address.storage);
+        unix_address->sun_family = AF_UNIX;
+        if (endpoint.address.size() >= sizeof(unix_address->sun_path)) {
+            error = ENAMETOOLONG;
+            return false;
+        }
+        std::memcpy(unix_address->sun_path, endpoint.address.data(), endpoint.address.size());
+        unix_address->sun_path[endpoint.address.size()] = '\0';
+        address.size =
+            static_cast<socklen_t>(offsetof(sockaddr_un, sun_path) + endpoint.address.size() + 1U);
+        address.family = AF_UNIX;
+        return true;
+    }
+
     if (prefer_ipv6) {
         auto *ipv6 = reinterpret_cast<sockaddr_in6 *>(&address.storage);
         ipv6->sin6_family = AF_INET6;
@@ -72,6 +95,16 @@ struct SocketAddress {
         }
         return af::net::TcpEndpoint::host(text, ntohs(ipv6->sin6_port),
                                           af::net::AddressFamily::IPv6);
+    }
+    if (address->sa_family == AF_UNIX && size > offsetof(sockaddr_un, sun_path)) {
+        const auto *unix_address = reinterpret_cast<const sockaddr_un *>(address);
+        const std::size_t max_size =
+            static_cast<std::size_t>(size - offsetof(sockaddr_un, sun_path));
+        std::size_t path_size = 0;
+        while (path_size < max_size && unix_address->sun_path[path_size] != '\0') {
+            ++path_size;
+        }
+        return af::net::TcpEndpoint::unix_path(std::string(unix_address->sun_path, path_size));
     }
     return {};
 }

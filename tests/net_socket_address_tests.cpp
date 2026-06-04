@@ -7,6 +7,7 @@
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <sys/un.h>
 
 TEST(NetSocketAddressTests, ConvertsIpv4EndpointToSocketAddress) {
     const af::net::TcpEndpoint endpoint =
@@ -64,4 +65,23 @@ TEST(NetSocketAddressTests, ConvertsSocketAddressBackToEndpoint) {
     EXPECT_EQ(endpoint.address, "::1");
     EXPECT_EQ(endpoint.port, 23456U);
     EXPECT_EQ(endpoint.family, af::net::AddressFamily::IPv6);
+}
+
+TEST(NetSocketAddressTests, ConvertsUnixEndpointToSocketAddress) {
+    const af::net::UnixEndpoint endpoint = af::net::UnixEndpoint::unix_path("/tmp/af-test.sock");
+    af::detail::SocketAddress address{};
+    int error = 0;
+
+    ASSERT_TRUE(af::detail::socket_address_from_endpoint(endpoint, address, error));
+    EXPECT_EQ(error, 0);
+    EXPECT_EQ(address.family, AF_UNIX);
+
+    const auto *unix_address = reinterpret_cast<const sockaddr_un *>(&address.storage);
+    EXPECT_EQ(unix_address->sun_family, AF_UNIX);
+    EXPECT_STREQ(unix_address->sun_path, "/tmp/af-test.sock");
+
+    const af::net::UnixEndpoint roundtrip = af::detail::endpoint_from_socket_address(
+        reinterpret_cast<const sockaddr *>(unix_address), address.size);
+    EXPECT_EQ(roundtrip.address, "/tmp/af-test.sock");
+    EXPECT_EQ(roundtrip.family, af::net::AddressFamily::Unix);
 }

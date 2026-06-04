@@ -46,6 +46,29 @@ TEST(PoolTests, ObjectPoolReturnsSlotAfterConstructorThrows) {
     pool.destroy(object);
 }
 
+TEST(PoolTests, ObjectPoolUncachedReturnsSlotAfterConstructorThrows) {
+    struct Payload {
+        Payload(bool fail, void **attempted_address) {
+            if (attempted_address != nullptr) {
+                *attempted_address = this;
+            }
+            if (fail) {
+                throw std::runtime_error("constructor failed");
+            }
+        }
+    };
+
+    af::detail::ObjectPool<Payload, 1> pool;
+    void *attempted = nullptr;
+
+    EXPECT_THROW(static_cast<void>(pool.create_uncached(true, &attempted)), std::runtime_error);
+    ASSERT_NE(attempted, nullptr);
+
+    Payload *object = pool.create_uncached(false, nullptr);
+    EXPECT_EQ(static_cast<void *>(object), attempted);
+    pool.destroy_uncached(object);
+}
+
 TEST(PoolTests, ObjectPoolSupportsCrossThreadDestroy) {
     struct Payload {
         explicit Payload(std::uint64_t value) : value(value) {}
@@ -588,4 +611,64 @@ TEST(PoolTests, ObjectPoolSupportsConcurrentCreateDestroy) {
     }
 
     EXPECT_EQ(failures.load(std::memory_order_acquire), 0);
+}
+
+TEST(PoolTests, ObjectPoolUncachedSupportsConcurrentCreateDestroy) {
+    struct Payload {
+        std::uint64_t producer{0};
+        std::uint64_t sequence{0};
+        std::uint64_t checksum{0};
+        std::atomic<int> *destroyed{nullptr};
+
+        Payload(std::uint64_t owner, std::uint64_t value, std::atomic<int> *destroyed_counter)
+            : producer(owner), sequence(value), checksum(owner ^ (value << 1U)),
+              destroyed(destroyed_counter) {}
+
+        ~Payload() {
+            destroyed->fetch_add(1, std::memory_order_relaxed);
+        }
+    };
+
+    constexpr int thread_count = 8;
+    constexpr int iterations = 4096;
+
+    af::detail::ObjectPool<Payload, 8> pool;
+    std::atomic<int> ready{0};
+    std::atomic<bool> start{false};
+    std::atomic<int> failures{0};
+    std::atomic<int> destroyed{0};
+    std::array<std::thread, thread_count> threads;
+
+    for (int thread = 0; thread < thread_count; ++thread) {
+        threads[static_cast<std::size_t>(thread)] = std::thread([&, thread] {
+            ready.fetch_add(1, std::memory_order_release);
+            while (!start.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+
+            for (int i = 0; i < iterations; ++i) {
+                auto *object = pool.create_uncached(static_cast<std::uint64_t>(thread),
+                                                    static_cast<std::uint64_t>(i), &destroyed);
+                if (object->producer != static_cast<std::uint64_t>(thread) ||
+                    object->sequence != static_cast<std::uint64_t>(i) ||
+                    object->checksum != (static_cast<std::uint64_t>(thread) ^
+                                         (static_cast<std::uint64_t>(i) << 1U))) {
+                    failures.fetch_add(1, std::memory_order_relaxed);
+                }
+                pool.destroy_uncached(object);
+            }
+        });
+    }
+
+    while (ready.load(std::memory_order_acquire) != thread_count) {
+        std::this_thread::yield();
+    }
+    start.store(true, std::memory_order_release);
+
+    for (auto &thread : threads) {
+        thread.join();
+    }
+
+    EXPECT_EQ(failures.load(std::memory_order_acquire), 0);
+    EXPECT_EQ(destroyed.load(std::memory_order_acquire), thread_count * iterations);
 }
