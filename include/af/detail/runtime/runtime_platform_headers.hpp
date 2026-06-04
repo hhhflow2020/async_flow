@@ -22,3 +22,10 @@
 #include <sys/time.h>
 #include <unistd.h>
 #endif
+
+#if AF_DETAIL_HAS_SELECT
+#include <algorithm>
+#include <sys/select.h>
+#include <sys/time.h>
+#include <unistd.h>
+#endif

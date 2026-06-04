@@ -166,6 +166,8 @@ private:
         return kind_ == af::thread_kind::io;
 #elif AF_DETAIL_HAS_KQUEUE
         return kind_ == af::thread_kind::io;
+#elif AF_DETAIL_HAS_SELECT
+        return kind_ == af::thread_kind::io;
 #else
         return false;
 #endif
@@ -237,6 +239,25 @@ private:
     void remove_kqueue_filters(const IoWaitRegistration &registration) noexcept;
     [[nodiscard]] static std::uint32_t io_events_from_kqueue(const struct kevent &event) noexcept;
     [[nodiscard]] static int io_error_from_kqueue(const struct kevent &event) noexcept;
+#elif AF_DETAIL_HAS_SELECT
+    [[nodiscard]] bool native_io_backend_available() const noexcept;
+    [[nodiscard]] bool notify_native_io_backend() noexcept;
+    [[nodiscard]] bool init_native_io_backend() noexcept;
+    void close_native_io_backend() noexcept;
+    void clear_io_waits() noexcept;
+    void reserve_native_io_wait_storage() noexcept;
+    void drain_select_wake() noexcept;
+    [[nodiscard]] bool poll_native_io(int timeout_ms, bool did_work) noexcept;
+    [[nodiscard]] bool update_net_channel_interest(detail::NetIoChannel *channel,
+                                                   std::uint32_t events) noexcept;
+    [[nodiscard]] bool register_native_io_wait(int fd, std::uint32_t events, Task *task,
+                                               IoResult *result) noexcept;
+    [[nodiscard]] bool cancel_native_io_wait(IoOpState &state) noexcept;
+    [[nodiscard]] static bool select_fd_supported(int fd) noexcept;
+    [[nodiscard]] static std::uint32_t select_io_events(int fd, fd_set &readfds, fd_set &writefds,
+                                                        fd_set &exceptfds) noexcept;
+    [[nodiscard]] static std::uint32_t select_net_events(int fd, fd_set &readfds, fd_set &writefds,
+                                                         fd_set &exceptfds) noexcept;
 #else
     [[nodiscard]] bool native_io_backend_available() const noexcept {
         return false;
@@ -323,7 +344,11 @@ private:
     uintptr_t io_kqueue_next_timeout_ident_{2};
     IoObjectPool<KqueueTimeoutRegistration> io_kqueue_timeout_pool_;
 #endif
-#if AF_DETAIL_HAS_EPOLL || AF_DETAIL_HAS_KQUEUE
+#if AF_DETAIL_HAS_SELECT
+    int io_select_wake_read_fd_{-1};
+    int io_select_wake_write_fd_{-1};
+#endif
+#if AF_DETAIL_HAS_EPOLL || AF_DETAIL_HAS_KQUEUE || AF_DETAIL_HAS_SELECT
     CacheLineAtomic<bool> io_wake_pending_{false};
 #endif
     std::thread worker_;
@@ -333,6 +358,7 @@ private:
 
 #include "af/detail/runtime/runtime_executor_epoll_backend.hpp"
 #include "af/detail/runtime/runtime_executor_kqueue_backend.hpp"
+#include "af/detail/runtime/runtime_executor_select_backend.hpp"
 #include "af/detail/runtime/runtime_executor_io_backend.hpp"
 #include "af/detail/runtime/runtime_executor_lifecycle.hpp"
 #include "af/detail/runtime/runtime_executor_net_channel.hpp"

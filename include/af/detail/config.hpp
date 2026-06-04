@@ -23,22 +23,36 @@
 #define AF_DETAIL_NOINLINE
 #endif
 
+#ifndef AF_DETAIL_HAS_EPOLL
 #if defined(__linux__)
 #define AF_DETAIL_HAS_EPOLL 1
 #else
 #define AF_DETAIL_HAS_EPOLL 0
 #endif
+#endif
 
+#ifndef AF_DETAIL_HAS_KQUEUE
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
 #define AF_DETAIL_HAS_KQUEUE 1
 #else
 #define AF_DETAIL_HAS_KQUEUE 0
 #endif
+#endif
 
-#if AF_DETAIL_HAS_EPOLL || AF_DETAIL_HAS_KQUEUE
+#ifndef AF_DETAIL_HAS_SELECT
+#if !AF_DETAIL_HAS_EPOLL && !AF_DETAIL_HAS_KQUEUE
+#define AF_DETAIL_HAS_SELECT 1
+#else
+#define AF_DETAIL_HAS_SELECT 0
+#endif
+#endif
+
+#ifndef AF_DETAIL_HAS_NATIVE_IO_WAIT
+#if AF_DETAIL_HAS_EPOLL || AF_DETAIL_HAS_KQUEUE || AF_DETAIL_HAS_SELECT
 #define AF_DETAIL_HAS_NATIVE_IO_WAIT 1
 #else
 #define AF_DETAIL_HAS_NATIVE_IO_WAIT 0
+#endif
 #endif
 
 namespace af::detail {
@@ -68,6 +82,7 @@ inline constexpr bool platform_bsd = false;
 inline constexpr bool platform_posix = true;
 inline constexpr bool supports_epoll = AF_DETAIL_HAS_EPOLL != 0;
 inline constexpr bool supports_kqueue = AF_DETAIL_HAS_KQUEUE != 0;
+inline constexpr bool supports_select = AF_DETAIL_HAS_SELECT != 0;
 inline constexpr bool supports_native_io_wait = AF_DETAIL_HAS_NATIVE_IO_WAIT != 0;
 
 } // namespace af::detail

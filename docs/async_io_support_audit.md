@@ -4,11 +4,13 @@
 
 - Linux：epoll + eventfd。
 - macOS/BSD：kqueue + user event。
+- 其他 POSIX：select + nonblocking pipe wake fallback。
 - 普通 socket readiness：accept、connect、recv、send、read、write、recvmsg、sendmsg。
 - 网络 reactor 抽象：TCP server/client、IPv4/IPv6 UDP socket server/client、Unix domain stream server/client、Unix domain datagram socket server/client。
 - Linux native helper：eventfd、timerfd、sendfile、splice、openat2、statx、fallocate 等。
 - readiness poller 默认使用 LT 语义；task 级 `io_wait()` 完成后由 runtime 删除或更新 interest，网络 channel 只在 interest 变化时更新。
 - kqueue timeout wait 保持一次性 timer 语义。
+- `asyncflow_select_backend_tests` 会强制关闭 epoll/kqueue 并启用 select，覆盖 fallback readiness wait。
 
 ## 已移除能力
 

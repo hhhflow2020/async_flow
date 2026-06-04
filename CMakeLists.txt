@@ -174,6 +174,16 @@ if(ASYNCFLOW_BUILD_TESTS)
     add_executable(asyncflow_log_tests tests/log_tests.cpp)
     target_link_libraries(asyncflow_log_tests PRIVATE AsyncFlow::AsyncFlow GTest::gtest_main)
 
+    add_executable(asyncflow_select_backend_tests tests/runtime_select_backend_tests.cpp)
+    target_compile_definitions(
+        asyncflow_select_backend_tests
+        PRIVATE
+            AF_DETAIL_HAS_EPOLL=0
+            AF_DETAIL_HAS_KQUEUE=0
+            AF_DETAIL_HAS_SELECT=1
+    )
+    target_link_libraries(asyncflow_select_backend_tests PRIVATE AsyncFlow::AsyncFlow GTest::gtest_main)
+
     add_executable(
         asyncflow_runtime_stress_tests
         tests/runtime_lifecycle_stress_tests.cpp
@@ -191,6 +201,7 @@ if(ASYNCFLOW_BUILD_TESTS)
         PROPERTIES
             RESOURCE_LOCK asyncflow_log_tests
     )
+    gtest_discover_tests(asyncflow_select_backend_tests DISCOVERY_TIMEOUT 30)
     gtest_discover_tests(
         asyncflow_runtime_stress_tests
         DISCOVERY_TIMEOUT 30

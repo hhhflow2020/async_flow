@@ -607,7 +607,7 @@ include/af/reactor/select_reactor.hpp
 
 - 当前调度已经统一为每 executor 一个 intrusive MPSC task inbox，后续继续收敛配置 API 和命名。
 - 当前线程类型已只保留 `thread_kind::io` 和 `thread_kind::cpu`，epoll/kqueue/select 属于 reactor backend。
-- 当前 epoll/kqueue readiness 已使用 LT 语义；网络 channel 不使用 one-shot rearm，task 级 `io_wait()` 完成后由 runtime 删除或更新等待项。
+- 当前 epoll/kqueue/select readiness 已使用 LT 语义；网络 channel 不使用 one-shot rearm，task 级 `io_wait()` 完成后由 runtime 删除或更新等待项。select fallback 使用非阻塞 pipe 唤醒，并有独立测试目标强制覆盖。
 - 当前日志 relaxed 模式已使用 bounded MPSC runtime lane 和 sharded MPSC ingress，日志 record pool 已改为可扩展 slab pool。
 - 当前 TCP stream 和 UDP/datagram 跨线程操作已迁移为显式 runtime task 调度到 owner reactor；后续继续收敛 API 命名、目录结构和对象池实现。
 - 当前 runtime 已提供 `try_make_task<T>()` 可恢复创建路径；对象池 `try_create()` 在分配或构造失败时返回空指针，并释放已获取 slot。
