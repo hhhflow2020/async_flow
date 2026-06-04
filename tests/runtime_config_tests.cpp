@@ -1,3 +1,4 @@
+#include <array>
 #include <chrono>
 #include <atomic>
 #include <cstddef>
@@ -8,6 +9,8 @@
 #include <thread>
 #include <type_traits>
 #include <variant>
+
+#include <unistd.h>
 
 #include <gtest/gtest.h>
 
@@ -336,6 +339,63 @@ private:
     }
 
     std::atomic<int> &destroyed_;
+};
+
+struct ReactorReadinessState {
+    int read_fd{-1};
+    int write_fd{-1};
+    af::fd_event_source source;
+    std::atomic<int> &counter;
+    std::atomic<std::uint16_t> &thread;
+    std::atomic<std::uint32_t> &events;
+};
+
+class ReactorReadinessTask final : public af::runtime_task {
+public:
+    ReactorReadinessTask(af::runtime_task::factory_token token, af::runtime &owner,
+                         ReactorReadinessState &state)
+        : af::runtime_task(token, owner), state_(state) {}
+
+    [[nodiscard]] bool do_it(std::uint16_t thread) noexcept {
+        return schedule_to(thread);
+    }
+
+private:
+    static void on_event(void *owner, af::fd_event_source &source, std::uint32_t events) noexcept {
+        auto &state = *static_cast<ReactorReadinessState *>(owner);
+        std::array<char, 16> buffer{};
+        static_cast<void>(::read(state.read_fd, buffer.data(), buffer.size()));
+        if (af::reactor *reactor = af::runtime::current_reactor()) {
+            static_cast<void>(reactor->del(&source));
+        }
+        state.thread.store(af::runtime::current_thread_index(), std::memory_order_release);
+        state.events.store(events, std::memory_order_release);
+        state.counter.fetch_add(1, std::memory_order_release);
+    }
+
+    af::task_result run_task() noexcept override {
+        af::reactor *reactor = af::runtime::current_reactor();
+        if (reactor == nullptr) {
+            return failed();
+        }
+
+        state_.source.fd = state_.read_fd;
+        state_.source.interests = af::reactor_readable;
+        state_.source.owner = &state_;
+        state_.source.on_event = &ReactorReadinessTask::on_event;
+        if (!reactor->add(&state_.source)) {
+            return failed();
+        }
+
+        const char value = 'x';
+        if (::write(state_.write_fd, &value, sizeof(value)) != sizeof(value)) {
+            static_cast<void>(reactor->del(&state_.source));
+            return failed();
+        }
+        return done();
+    }
+
+    ReactorReadinessState &state_;
 };
 
 } // namespace
@@ -808,4 +868,40 @@ TEST(RuntimeConfigTests, RuntimeStopCancelsPendingDelayedTask) {
 
     runtime.stop();
     EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
+}
+
+TEST(RuntimeConfigTests, RuntimeReactorDispatchesReadinessOnIoThread) {
+    af::runtime_config config;
+    config.threads = {
+        af::io_threads("io", 1),
+        af::cpu_threads("logic", 1),
+    };
+    config.reactor.backend = af::reactor_backend::select;
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    int pipe_fds[2]{-1, -1};
+    ASSERT_EQ(::pipe(pipe_fds), 0);
+
+    af::runtime runtime(config);
+    std::atomic<int> counter{0};
+    std::atomic<std::uint16_t> observed_thread{af::runtime_invalid_thread_index};
+    std::atomic<std::uint32_t> observed_events{0};
+    ReactorReadinessState state{pipe_fds[0], pipe_fds[1],     {},
+                                counter,     observed_thread, observed_events};
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 2));
+
+    const auto io_thread = runtime.select_thread(af::thread_selector::io(0));
+    auto task = af::make_task<ReactorReadinessTask>(runtime, state);
+    ASSERT_TRUE(task->do_it(io_thread));
+    task.reset();
+
+    ASSERT_TRUE(wait_for_counter(counter, 1));
+    EXPECT_EQ(observed_thread.load(std::memory_order_acquire), io_thread);
+    EXPECT_NE(observed_events.load(std::memory_order_acquire) & af::reactor_readable, 0U);
+
+    runtime.stop();
+    ::close(pipe_fds[0]);
+    ::close(pipe_fds[1]);
 }

@@ -16,6 +16,7 @@
 #include "af/detail/runtime/atomic_wait.hpp"
 #include "af/detail/thread/thread_name.hpp"
 #include "af/runtime/config_resolution.hpp"
+#include "af/runtime/reactor.hpp"
 #include "af/runtime/task.hpp"
 
 namespace af {
@@ -111,6 +112,8 @@ public:
         return current_task_id_;
     }
 
+    [[nodiscard]] static reactor *current_reactor() noexcept;
+
     [[nodiscard]] bool start() {
         runtime_state expected = runtime_state::stopped;
         if (!state_.compare_exchange_strong(expected, runtime_state::starting,
@@ -187,6 +190,9 @@ private:
             : owner_(owner), thread_(std::move(thread)),
               timer_drain_budget_(owner_.config().scheduler.timer_drain_budget) {
             timers_.reserve(owner_.config().timer.initial_reserve);
+            if (thread_.kind == thread_kind::io) {
+                reactor_ = make_reactor(owner_.config().reactor.backend);
+            }
         }
 
         executor(const executor &) = delete;
@@ -204,12 +210,18 @@ private:
         void request_stop() noexcept {
             stop_requested_.store(true, std::memory_order_release);
             wake_epoch_.fetch_add(1, std::memory_order_release);
+            if (reactor_ != nullptr) {
+                reactor_->wake();
+            }
             detail::atomic_notify_all(wake_epoch_);
         }
 
         void enqueue(runtime_work *work) noexcept {
             inbox_.push(work);
             wake_epoch_.fetch_add(1, std::memory_order_release);
+            if (reactor_ != nullptr) {
+                reactor_->wake();
+            }
             detail::atomic_notify_all(wake_epoch_);
         }
 
@@ -234,6 +246,10 @@ private:
                 return;
             }
             worker_.join();
+        }
+
+        [[nodiscard]] reactor *reactor_backend() noexcept {
+            return reactor_.get();
         }
 
     private:
@@ -315,6 +331,10 @@ private:
 
         void wait_for_wake_or_timer(std::uint32_t observed) noexcept {
             const auto timeout = timer_wait_duration();
+            if (reactor_ != nullptr) {
+                static_cast<void>(reactor_->poll(timeout));
+                return;
+            }
             if (timeout == std::chrono::nanoseconds(0)) {
                 return;
             }
@@ -362,6 +382,7 @@ private:
         runtime_thread_info thread_;
         detail::IntrusiveMpscQueue<runtime_work> inbox_;
         std::vector<TimerEntry> timers_;
+        std::unique_ptr<reactor> reactor_;
         std::size_t timer_drain_budget_{256};
         std::uint64_t next_timer_sequence_{0};
         std::atomic<std::uint32_t> wake_epoch_{0};
@@ -458,6 +479,13 @@ private:
 
     friend class runtime_task;
 };
+
+inline reactor *runtime::current_reactor() noexcept {
+    if (current_executor_ == nullptr) {
+        return nullptr;
+    }
+    return current_executor_->reactor_backend();
+}
 
 } // namespace af
 
