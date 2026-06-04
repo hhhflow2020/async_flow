@@ -11,7 +11,6 @@ struct AppRuntimeTraits {
         af::thread_layout(af::thread_group<AppLogicThreadTag, 4, af::thread_kind::cpu>("logic"),
                           af::thread_group<AppDbThreadTag, 1, af::thread_kind::cpu>("db"),
                           af::thread_group<AppIoThreadTag, 1, af::thread_kind::io>("io"));
-    static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Reject;
     static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Reject;

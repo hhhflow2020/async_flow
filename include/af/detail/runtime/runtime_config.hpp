@@ -29,7 +29,6 @@ template <typename TraitsT> struct RuntimeConfig {
     static constexpr std::uint16_t thread_count = ThreadLayout::thread_count;
     static constexpr std::uint16_t invalid_thread_index = ThreadLayout::invalid_thread_index;
 
-    static constexpr std::size_t spsc_queue_capacity = TraitConfig::spsc_queue_capacity;
     static constexpr std::size_t external_queue_capacity = TraitConfig::external_queue_capacity;
     static constexpr QueueFullPolicy runtime_queue_full_policy =
         TraitConfig::runtime_queue_full_policy;
@@ -50,7 +49,6 @@ template <typename TraitsT> struct RuntimeConfig {
         TraitConfig::task_pool_local_cache_capacity;
     static constexpr std::size_t io_wait_reserve = TraitConfig::io_wait_reserve;
 
-    static_assert(spsc_queue_capacity > 0, "spsc_queue_capacity must be greater than zero");
     static_assert(external_queue_capacity > 0, "external_queue_capacity must be greater than zero");
     static_assert(task_pool_remote_release_batch_size > 0,
                   "task_pool_remote_release_batch_size must be greater than zero");

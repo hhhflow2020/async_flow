@@ -4,7 +4,6 @@ struct RepeatHopThreadTag;
 
 struct RepeatHopRuntimeTraits {
     static constexpr auto threads = af::thread_layout(af::thread_group<RepeatHopThreadTag, 2>());
-    static constexpr std::size_t spsc_queue_capacity = 65536;
     static constexpr std::size_t external_queue_capacity = 65536;
     static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;

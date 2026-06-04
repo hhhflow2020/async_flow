@@ -70,12 +70,11 @@ return schedule_ordered(TargetThread);  // 强制目标 MPSC 顺序路径
 
 task inbox 是 intrusive unbounded MPSC，不再用队列容量拒绝任务投递。只要 task 对象已经成功创建，目标 inbox 不会因为容量满而返回失败。
 
-历史 traits 仍保留以下字段作为兼容配置和非 task 子系统的容量来源：
+历史 traits 只保留非 task 子系统仍需要的容量来源：
 
-- `spsc_queue_capacity`：历史字段名，task 调度不再使用它限制 local/SPSC 路径。
 - `external_queue_capacity`：历史字段名，task 调度不再使用它限制外部 ingress。
 
-这些字段不再约束 task 调度热路径。旧的满队列策略字段也不再决定 task inbox 行为：
+该字段不再约束 task 调度热路径。旧的满队列策略字段也不再决定 task inbox 行为：
 
 - `Reject`：入队失败时立即返回 `false`，不会阻塞生产者。
 - `Yield`：生产者等待空位，等待过程会执行 CPU relax / yield backoff。

@@ -12,7 +12,6 @@ template <std::size_t TaskPoolRemoteReleaseBatchSize, bool TaskPoolCacheSlotInde
           std::size_t TaskPoolDirectReleaseSetSize = 4, std::size_t TaskPoolLocalCacheCapacity = 64>
 struct BatchRuntimeTraits {
     static constexpr auto threads = af_bench::runtime::BenchRuntimeTraits::threads;
-    static constexpr std::size_t spsc_queue_capacity = 65536;
     static constexpr std::size_t external_queue_capacity = 65536;
     static constexpr std::size_t task_pool_remote_release_batch_size =
         TaskPoolRemoteReleaseBatchSize;

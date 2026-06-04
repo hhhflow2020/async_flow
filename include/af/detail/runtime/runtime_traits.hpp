@@ -15,13 +15,6 @@ struct RuntimeTraitsHasQueueFullPolicy<TraitsT, std::void_t<decltype(TraitsT::qu
     : std::true_type {};
 
 template <typename TraitsT, typename = void>
-struct RuntimeTraitsHasSpscQueueCapacity : std::false_type {};
-template <typename TraitsT>
-struct RuntimeTraitsHasSpscQueueCapacity<TraitsT,
-                                         std::void_t<decltype(TraitsT::spsc_queue_capacity)>>
-    : std::true_type {};
-
-template <typename TraitsT, typename = void>
 struct RuntimeTraitsHasExternalQueueCapacity : std::false_type {};
 template <typename TraitsT>
 struct RuntimeTraitsHasExternalQueueCapacity<
@@ -107,14 +100,6 @@ template <typename TraitsT> struct RuntimeTraitsConfig {
     static_assert(!RuntimeTraitsHasQueueFullPolicy<TraitsT>::value,
                   "queue_full_policy has been removed; define runtime_queue_full_policy "
                   "and external_queue_full_policy explicitly");
-
-    static constexpr std::size_t spsc_queue_capacity = [] {
-        if constexpr (RuntimeTraitsHasSpscQueueCapacity<TraitsT>::value) {
-            return static_cast<std::size_t>(TraitsT::spsc_queue_capacity);
-        } else {
-            return static_cast<std::size_t>(1024);
-        }
-    }();
 
     static constexpr std::size_t external_queue_capacity = [] {
         if constexpr (RuntimeTraitsHasExternalQueueCapacity<TraitsT>::value) {
@@ -223,7 +208,7 @@ template <typename TraitsT> struct RuntimeTraitsConfig {
         if constexpr (RuntimeTraitsHasIoWaitReserve<TraitsT>::value) {
             return static_cast<std::size_t>(TraitsT::io_wait_reserve);
         } else {
-            return spsc_queue_capacity;
+            return static_cast<std::size_t>(1024);
         }
     }();
 };
