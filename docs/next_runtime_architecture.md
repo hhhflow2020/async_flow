@@ -246,6 +246,8 @@ empty -> reactor/futex park
 
 service task 是长期服务对象，例如 logger、metrics、trace。executor 只知道 service task 的通用接口，不知道 logger 内部细节。
 
+当前实现已经具备通用 service task 骨架：service 对象通过 `register_service_task()` 在 owner runtime 线程注册，executor 每轮按 `service_task_budget` 调用 `run_service()`；外部生产者只更新 service 自己的 pending 状态并调用 `wake_service_tasks()` 唤醒目标 executor。service 列表仅在 owner runtime 线程访问，因此不需要互斥锁。日志消费者后续会从专用 runtime task 绑定逐步迁移到这个通用 service task 接口。
+
 ## Task API 与生命周期
 
 任务只能通过 runtime 创建：
@@ -608,6 +610,7 @@ include/af/reactor/select_reactor.hpp
 - 当前日志 relaxed 模式已使用 bounded MPSC runtime lane 和 sharded MPSC ingress，日志 record pool 已改为可扩展 slab pool。
 - 当前 TCP stream 和 UDP/datagram 跨线程操作已迁移为显式 runtime task 调度到 owner reactor；后续继续收敛 API 命名、目录结构和对象池实现。
 - 当前 runtime 已提供 `try_make_task<T>()` 可恢复创建路径；对象池 `try_create()` 在分配或构造失败时返回空指针，并释放已获取 slot。
+- 当前 executor 已提供通用 service task 注册、注销和唤醒入口；logger 仍使用专用 runtime task 绑定，后续可迁移到通用 service task。
 - 当前日志队列仍是有界队列，record 对象池不再用固定总容量承担背压职责。
 
 后续迁移应先补齐测试和 benchmark，再逐步替换旧路径，避免一次性重写导致行为不可控。

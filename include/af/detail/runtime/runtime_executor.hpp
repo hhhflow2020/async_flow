@@ -17,6 +17,7 @@ template <typename RuntimeT, typename TraitsT> class alignas(hardware_cache_line
     static constexpr std::size_t io_wait_reserve = RuntimeT::io_wait_reserve;
     static constexpr std::size_t timer_drain_budget = RuntimeT::timer_drain_budget;
     static constexpr std::size_t timer_reserve = RuntimeT::timer_reserve;
+    static constexpr std::size_t service_task_budget = RuntimeT::service_task_budget;
 
     [[nodiscard]] static constexpr Thread thread_from_index(std::uint16_t index) noexcept {
         return RuntimeT::thread_from_index(index);
@@ -89,6 +90,9 @@ public:
     [[nodiscard]] bool update_net_channel(detail::NetIoChannel *channel,
                                           std::uint32_t events) noexcept;
     [[nodiscard]] bool unregister_net_channel(detail::NetIoChannel *channel) noexcept;
+
+    [[nodiscard]] bool register_service_task(detail::RuntimeServiceTask *service) noexcept;
+    [[nodiscard]] bool unregister_service_task(detail::RuntimeServiceTask *service) noexcept;
 
     [[nodiscard]] bool register_timer_wait(std::chrono::nanoseconds timeout, Task *task,
                                            IoResult *result) noexcept {
@@ -286,6 +290,7 @@ private:
     [[nodiscard]] bool run_due_timers() noexcept;
     void cancel_timer_task(Task *task) noexcept;
     void cancel_timer_tasks() noexcept;
+    [[nodiscard]] bool run_service_tasks() noexcept;
 
     Task *pop_one() noexcept;
     void finish_done(Task *task) noexcept;
@@ -301,6 +306,8 @@ private:
     Task *running_task_{nullptr};
     std::vector<TimerEntry> timers_;
     std::uint64_t next_timer_sequence_{0};
+    std::vector<detail::RuntimeServiceTask *> service_tasks_;
+    std::size_t next_service_task_{0};
 #if AF_DETAIL_HAS_NATIVE_IO_WAIT
     absl::flat_hash_map<int, IoWaitEntry> io_waits_;
     IoObjectPool<IoWaitRegistration> io_wait_pool_;
@@ -330,5 +337,6 @@ private:
 #include "af/detail/runtime/runtime_executor_io_backend.hpp"
 #include "af/detail/runtime/runtime_executor_lifecycle.hpp"
 #include "af/detail/runtime/runtime_executor_net_channel.hpp"
+#include "af/detail/runtime/runtime_executor_service.hpp"
 #include "af/detail/runtime/runtime_executor_timer.hpp"
 #include "af/detail/runtime/runtime_executor_scheduler.hpp"

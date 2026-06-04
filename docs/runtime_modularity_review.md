@@ -7,6 +7,7 @@
 - `runtime_executor_lifecycle.hpp`：启动、停止、线程命名和通知。
 - `runtime_executor_scheduler.hpp`：intrusive MPSC inbox、task 执行循环。
 - `runtime_executor_timer.hpp`：executor 本地 task timer heap、timer 到期执行和退出取消。
+- `runtime_executor_service.hpp`：executor 通用 service task 注册、注销和轮询执行。
 - `runtime_executor_io_backend.hpp`：IO backend 入口、wait/cancel 通用逻辑。
 - `runtime_executor_epoll_backend.hpp`：Linux epoll 实现。
 - `runtime_executor_kqueue_backend.hpp`：macOS/BSD kqueue 实现。
@@ -19,6 +20,8 @@
 
 task timer 已从 scheduler 主循环中拆到 `runtime_executor_timer.hpp`。scheduler 只编排 drain inbox、run due timers、poll/park 的顺序，timer heap 的入堆、出堆、StopImmediately 取消都在 timer 模块内。
 
+通用 service task 已从 scheduler 主循环中拆到 `runtime_executor_service.hpp`。executor 只保存 `RuntimeServiceTask*` 列表并按预算调用 `run_service()`；service 自身负责 pending 状态和内部队列，跨线程 producer 通过 `wake_service_tasks()` 唤醒 executor。
+
 ## 模块边界
 
 - runtime 调度和 IO 后端分离。
@@ -26,6 +29,7 @@ task timer 已从 scheduler 主循环中拆到 `runtime_executor_timer.hpp`。sc
 - 网络连接生命周期不依赖普通 task pending/resume 热路径。
 - 日志 consumer 通过 runtime task 绑定线程，不侵入 executor 内部。
 - `make_task<T>()` 和 `try_make_task<T>()` 共享 task pool 生命周期管理；可恢复创建失败路径不影响普通调度热路径。
+- service task 注册/注销要求在 owner runtime 线程执行，列表不加锁；跨线程唤醒不修改列表。
 
 ## 后续拆分建议
 

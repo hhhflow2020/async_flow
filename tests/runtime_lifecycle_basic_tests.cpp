@@ -16,6 +16,17 @@ namespace {
            (std::string{"asyncflow-"} + name + "-" + std::to_string(now));
 }
 
+[[nodiscard]] bool wait_until_service_consumed(const CountingServiceTask &service, int expected) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (service.consumed() < expected) {
+        if (std::chrono::steady_clock::now() > deadline) {
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+}
+
 class RuntimeFileLifecycleTask final : public Task {
 public:
     explicit RuntimeFileLifecycleTask(Task::FactoryToken token) : Task(token) {}
@@ -278,6 +289,42 @@ TEST_F(RuntimeFixture, PendingAfterResumesOnRequestedThreadAfterDelay) {
     EXPECT_EQ(seen[0].load(std::memory_order_acquire), Runtime::thread_index(TestThreads::Logic_0));
     EXPECT_EQ(seen[1].load(std::memory_order_acquire), Runtime::thread_index(TestThreads::DB_0));
     EXPECT_GE(elapsed_ms.load(std::memory_order_acquire), 15);
+}
+
+TEST_F(RuntimeFixture, ServiceTaskRunsWhenExecutorIsWoken) {
+    CountingServiceTask service;
+    std::atomic<int> completed{0};
+    std::atomic<bool> ok{false};
+
+    ASSERT_TRUE(Runtime::start_task<ServiceControlTask>(
+        TestThreads::Logic_0, &service, ServiceControlTask::Operation::Register, &completed, &ok));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    ASSERT_TRUE(ok.load(std::memory_order_acquire));
+
+    service.add_work(3);
+    ASSERT_TRUE(Runtime::wake_service_tasks(TestThreads::Logic_0));
+    ASSERT_TRUE(wait_until_service_consumed(service, 3));
+    EXPECT_GE(service.runs(), 1);
+
+    completed.store(0, std::memory_order_release);
+    ok.store(false, std::memory_order_release);
+    ASSERT_TRUE(Runtime::start_task<ServiceControlTask>(TestThreads::Logic_0, &service,
+                                                        ServiceControlTask::Operation::Unregister,
+                                                        &completed, &ok));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    ASSERT_TRUE(ok.load(std::memory_order_acquire));
+
+    const int consumed_after_unregister = service.consumed();
+    service.add_work(2);
+    ASSERT_TRUE(Runtime::wake_service_tasks(TestThreads::Logic_0));
+
+    completed.store(0, std::memory_order_release);
+    ASSERT_TRUE(Runtime::start_task<ServiceControlTask>(TestThreads::Logic_0, &service,
+                                                        ServiceControlTask::Operation::Barrier,
+                                                        &completed, nullptr));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    EXPECT_EQ(service.consumed(), consumed_after_unregister);
 }
 
 TEST_F(RuntimeFixture, UnscheduledCreatedTaskIsDestroyedByHandle) {

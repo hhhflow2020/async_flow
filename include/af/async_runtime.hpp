@@ -30,6 +30,7 @@
 #include "af/detail/runtime/runtime_config.hpp"
 #include "af/detail/runtime/runtime_platform_headers.hpp"
 #include "af/detail/runtime/runtime_public_io.hpp"
+#include "af/detail/runtime/runtime_service_task.hpp"
 #include "af/detail/runtime/runtime_task_registry.hpp"
 #include "af/detail/runtime/runtime_task_handle.hpp"
 #include "af/task.hpp"
@@ -95,6 +96,7 @@ public:
     static constexpr std::size_t io_wait_reserve = Config::io_wait_reserve;
     static constexpr std::size_t timer_drain_budget = Config::timer_drain_budget;
     static constexpr std::size_t timer_reserve = Config::timer_reserve;
+    static constexpr std::size_t service_task_budget = Config::service_task_budget;
 
     [[nodiscard]] static constexpr af::thread_kind thread_kind(Thread thread) noexcept {
         return Config::thread_kind(thread);
@@ -141,6 +143,12 @@ public:
                                                  std::uint32_t events) noexcept;
     [[nodiscard]] static bool net_unregister_channel(Thread thread,
                                                      detail::NetIoChannel *channel) noexcept;
+
+    [[nodiscard]] static bool register_service_task(Thread thread,
+                                                    detail::RuntimeServiceTask *service) noexcept;
+    [[nodiscard]] static bool unregister_service_task(Thread thread,
+                                                      detail::RuntimeServiceTask *service) noexcept;
+    [[nodiscard]] static bool wake_service_tasks(Thread thread) noexcept;
 
     [[nodiscard]] static Thread current_thread() noexcept;
     [[nodiscard]] static bool is_runtime_thread() noexcept;

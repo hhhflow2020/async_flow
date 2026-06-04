@@ -77,6 +77,13 @@ template <typename TraitsT>
 struct RuntimeTraitsHasTimerReserve<TraitsT, std::void_t<decltype(TraitsT::timer_reserve)>>
     : std::true_type {};
 
+template <typename TraitsT, typename = void>
+struct RuntimeTraitsHasServiceTaskBudget : std::false_type {};
+template <typename TraitsT>
+struct RuntimeTraitsHasServiceTaskBudget<TraitsT,
+                                         std::void_t<decltype(TraitsT::service_task_budget)>>
+    : std::true_type {};
+
 template <typename TraitsT> struct RuntimeTraitsConfig {
     static constexpr ShutdownPolicy shutdown_policy = [] {
         if constexpr (RuntimeTraitsHasShutdownPolicy<TraitsT>::value) {
@@ -170,6 +177,14 @@ template <typename TraitsT> struct RuntimeTraitsConfig {
             return static_cast<std::size_t>(TraitsT::timer_reserve);
         } else {
             return static_cast<std::size_t>(1024);
+        }
+    }();
+
+    static constexpr std::size_t service_task_budget = [] {
+        if constexpr (RuntimeTraitsHasServiceTaskBudget<TraitsT>::value) {
+            return static_cast<std::size_t>(TraitsT::service_task_budget);
+        } else {
+            return static_cast<std::size_t>(32);
         }
     }();
 };

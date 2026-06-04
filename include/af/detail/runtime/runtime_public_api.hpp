@@ -249,6 +249,35 @@ bool AsyncRuntime<TraitsT>::net_unregister_channel(Thread thread,
 }
 
 template <typename TraitsT>
+bool AsyncRuntime<TraitsT>::register_service_task(Thread thread,
+                                                  detail::RuntimeServiceTask *service) noexcept {
+    const std::uint16_t index = thread_index(thread);
+    if (index >= executors_.size()) {
+        return false;
+    }
+    return executors_[index]->register_service_task(service);
+}
+
+template <typename TraitsT>
+bool AsyncRuntime<TraitsT>::unregister_service_task(Thread thread,
+                                                    detail::RuntimeServiceTask *service) noexcept {
+    const std::uint16_t index = thread_index(thread);
+    if (index >= executors_.size()) {
+        return false;
+    }
+    return executors_[index]->unregister_service_task(service);
+}
+
+template <typename TraitsT> bool AsyncRuntime<TraitsT>::wake_service_tasks(Thread thread) noexcept {
+    const std::uint16_t index = thread_index(thread);
+    if (index >= executors_.size()) {
+        return false;
+    }
+    executors_[index]->notify();
+    return true;
+}
+
+template <typename TraitsT>
 auto AsyncRuntime<TraitsT>::current_thread() noexcept -> typename AsyncRuntime<TraitsT>::Thread {
     return thread_from_index(current_thread_index_);
 }

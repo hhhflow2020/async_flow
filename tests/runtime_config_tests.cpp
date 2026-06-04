@@ -30,6 +30,7 @@ static_assert(AboveSixtyFourRuntime::Config::task_pool_direct_release_set_size =
 static_assert(AboveSixtyFourRuntime::Config::task_pool_local_cache_capacity == 64U);
 static_assert(AboveSixtyFourRuntime::Config::timer_drain_budget == 256U);
 static_assert(AboveSixtyFourRuntime::Config::timer_reserve == 1024U);
+static_assert(AboveSixtyFourRuntime::Config::service_task_budget == 32U);
 
 struct ThreadLayoutMetadataTraits {
     static constexpr auto threads =
@@ -56,6 +57,7 @@ struct RemoteBatchOverrideTraits {
     static constexpr std::size_t task_pool_local_cache_capacity = 128;
     static constexpr std::size_t timer_drain_budget = 64;
     static constexpr std::size_t timer_reserve = 2048;
+    static constexpr std::size_t service_task_budget = 8;
 };
 
 using RemoteBatchOverrideRuntime = af::AsyncRuntime<RemoteBatchOverrideTraits>;
@@ -68,6 +70,7 @@ static_assert(RemoteBatchOverrideRuntime::Config::task_pool_direct_release_set_s
 static_assert(RemoteBatchOverrideRuntime::Config::task_pool_local_cache_capacity == 128U);
 static_assert(RemoteBatchOverrideRuntime::Config::timer_drain_budget == 64U);
 static_assert(RemoteBatchOverrideRuntime::Config::timer_reserve == 2048U);
+static_assert(RemoteBatchOverrideRuntime::Config::service_task_budget == 8U);
 static_assert(af::supports_native_io_wait == (af::supports_epoll || af::supports_kqueue));
 static_assert(af::supports_eventfd == af::platform_linux);
 static_assert(af::supports_timerfd == af::platform_linux);
@@ -119,6 +122,7 @@ TEST(RuntimeConfigTests, DefaultsAndOverridesTaskPoolRemoteReleaseBatchSize) {
     EXPECT_EQ(AboveSixtyFourRuntime::Config::task_pool_local_cache_capacity, 64U);
     EXPECT_EQ(AboveSixtyFourRuntime::Config::timer_drain_budget, 256U);
     EXPECT_EQ(AboveSixtyFourRuntime::Config::timer_reserve, 1024U);
+    EXPECT_EQ(AboveSixtyFourRuntime::Config::service_task_budget, 32U);
     EXPECT_EQ(RemoteBatchOverrideRuntime::Config::task_pool_remote_release_batch_size, 32U);
     EXPECT_EQ(RemoteBatchOverrideRuntime::Config::task_pool_chunk_size, 512U);
     EXPECT_TRUE(RemoteBatchOverrideRuntime::Config::task_pool_cache_slot_index);
@@ -127,4 +131,5 @@ TEST(RuntimeConfigTests, DefaultsAndOverridesTaskPoolRemoteReleaseBatchSize) {
     EXPECT_EQ(RemoteBatchOverrideRuntime::Config::task_pool_local_cache_capacity, 128U);
     EXPECT_EQ(RemoteBatchOverrideRuntime::Config::timer_drain_budget, 64U);
     EXPECT_EQ(RemoteBatchOverrideRuntime::Config::timer_reserve, 2048U);
+    EXPECT_EQ(RemoteBatchOverrideRuntime::Config::service_task_budget, 8U);
 }

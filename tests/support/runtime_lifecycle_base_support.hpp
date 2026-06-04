@@ -424,5 +424,90 @@ private:
     std::atomic<std::int64_t> *elapsed_ms_{nullptr};
 };
 
+class CountingServiceTask final : public af::detail::RuntimeServiceTask {
+public:
+    void add_work(int count) noexcept {
+        pending_.fetch_add(count, std::memory_order_release);
+    }
+
+    [[nodiscard]] bool run_service(std::size_t budget) noexcept override {
+        const int limit = static_cast<int>(budget == 0U ? 1U : budget);
+        int pending = pending_.load(std::memory_order_acquire);
+        while (pending > 0) {
+            const int consumed = pending < limit ? pending : limit;
+            if (pending_.compare_exchange_weak(pending, pending - consumed,
+                                               std::memory_order_acq_rel,
+                                               std::memory_order_acquire)) {
+                runs_.fetch_add(1, std::memory_order_release);
+                consumed_.fetch_add(consumed, std::memory_order_release);
+                return true;
+            }
+        }
+        idle_runs_.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+
+    [[nodiscard]] int consumed() const noexcept {
+        return consumed_.load(std::memory_order_acquire);
+    }
+
+    [[nodiscard]] int runs() const noexcept {
+        return runs_.load(std::memory_order_acquire);
+    }
+
+private:
+    std::atomic<int> pending_{0};
+    std::atomic<int> consumed_{0};
+    std::atomic<int> runs_{0};
+    std::atomic<int> idle_runs_{0};
+};
+
+class ServiceControlTask final : public Task {
+public:
+    explicit ServiceControlTask(Task::FactoryToken token) : Task(token) {}
+
+    enum class Operation : std::uint8_t {
+        Register,
+        Unregister,
+        Barrier,
+    };
+
+    bool do_it(TestThread target, CountingServiceTask *service, Operation operation,
+               std::atomic<int> *completed, std::atomic<bool> *ok) {
+        target_ = target;
+        service_ = service;
+        operation_ = operation;
+        completed_ = completed;
+        ok_ = ok;
+        return schedule(target);
+    }
+
+private:
+    af::TaskResult run() override {
+        bool ok = true;
+        switch (operation_) {
+        case Operation::Register:
+            ok = Runtime::register_service_task(target_, service_);
+            break;
+        case Operation::Unregister:
+            ok = Runtime::unregister_service_task(target_, service_);
+            break;
+        case Operation::Barrier:
+            break;
+        }
+        if (ok_ != nullptr) {
+            ok_->store(ok, std::memory_order_release);
+        }
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    TestThread target_{TestThreads::Logic_0};
+    CountingServiceTask *service_{nullptr};
+    Operation operation_{Operation::Barrier};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<bool> *ok_{nullptr};
+};
+
 static_assert(!std::is_default_constructible_v<OneShotTask>);
 static_assert(!std::is_constructible_v<UnscheduledTask, std::atomic<int> *>);

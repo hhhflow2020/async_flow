@@ -83,6 +83,7 @@ void Executor<RuntimeT, TraitsT>::run_loop() noexcept {
         }
 
         did_work = run_due_timers() || did_work;
+        did_work = run_service_tasks() || did_work;
 
         if (stop_requested_.load(std::memory_order_acquire)) {
             if (!did_work) {
@@ -97,6 +98,9 @@ void Executor<RuntimeT, TraitsT>::run_loop() noexcept {
         if (run_due_timers()) {
             continue;
         }
+        if (run_service_tasks()) {
+            continue;
+        }
 
         const std::uint32_t observed = wake_epoch_.load(std::memory_order_acquire);
         sleeping_.store(true, std::memory_order_release);
@@ -109,6 +113,9 @@ void Executor<RuntimeT, TraitsT>::run_loop() noexcept {
             sleeping_.store(false, std::memory_order_relaxed);
             static_cast<void>(handle_inbox_task(task));
         } else if (run_due_timers()) {
+            sleeping_.store(false, std::memory_order_relaxed);
+            continue;
+        } else if (run_service_tasks()) {
             sleeping_.store(false, std::memory_order_relaxed);
             continue;
         } else {
