@@ -1125,15 +1125,14 @@ TEST(LogTests, RuntimeLaneRecordPoolReusesSlotsAcrossFlushes) {
     logging->stop();
 }
 
-TEST(LogTests, SharedRecordPoolBatchReleaseReusesSlots) {
+TEST(LogTests, SharedRecordPoolExpandsAndBatchReleaseReusesSlots) {
     af::detail::AsyncLogRecordPool pool(4);
-    std::array<af::detail::LogRecord *, 4> records{};
+    std::array<af::detail::LogRecord *, 5> records{};
 
     for (std::size_t i = 0; i < records.size(); ++i) {
         records[i] = pool.try_acquire("shared batch release log record\n");
         ASSERT_NE(records[i], nullptr);
     }
-    EXPECT_EQ(pool.try_acquire("shared pool should be full\n"), nullptr);
 
     af::detail::release_async_log_records(
         af::Span<af::detail::LogRecord *const>(records.data(), records.size()));

@@ -585,8 +585,8 @@ include/af/reactor/select_reactor.hpp
 
 - 当前调度已经统一为每 executor 一个 intrusive MPSC task inbox，后续继续收敛配置 API 和命名。
 - 当前线程类型已只保留 `thread_kind::io` 和 `thread_kind::cpu`，epoll/kqueue/select 属于 reactor backend。
-- 当前日志 relaxed 模式已使用 bounded MPSC runtime lane 和 sharded MPSC ingress，后续继续把 record pool 改为可扩展 slab pool。
+- 当前日志 relaxed 模式已使用 bounded MPSC runtime lane 和 sharded MPSC ingress，日志 record pool 已改为可扩展 slab pool。
 - 当前 TCP stream 和 UDP/datagram 跨线程操作已迁移为显式 runtime task 调度到 owner reactor；后续继续收敛 API 命名、目录结构和对象池实现。
-- 当前日志 record pool 是固定容量；目标架构改为可扩展 slab pool。
+- 当前日志队列仍是有界队列，record 对象池不再用固定总容量承担背压职责。
 
 后续迁移应先补齐测试和 benchmark，再逐步替换旧路径，避免一次性重写导致行为不可控。
