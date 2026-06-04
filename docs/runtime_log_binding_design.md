@@ -1,5 +1,7 @@
 # Runtime 绑定日志设计
 
+> 本文记录当前实现和短期演进背景。下一代目标架构中，日志消费者仍绑定 runtime 线程，但以 service task 形式运行；日志队列保留 bounded MPSC，日志 record pool 改为可扩展 slab pool。完整目标方案见 [next_runtime_architecture.md](next_runtime_architecture.md)。
+
 异步日志消费者默认绑定到 runtime 线程，不创建独立消费线程。
 
 ## 线程选择

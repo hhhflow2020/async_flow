@@ -1,5 +1,7 @@
 # 框架目录布局
 
+> 当前目录布局记录的是现有代码结构。下一代目标布局见 [next_runtime_architecture.md](next_runtime_architecture.md) 的“目录建议”。
+
 当前目录按职责拆分：
 
 - `include/af/detail/runtime/`：runtime 配置、executor、调度、task 生命周期、public API。
