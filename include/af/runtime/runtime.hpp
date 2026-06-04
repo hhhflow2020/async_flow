@@ -191,7 +191,7 @@ private:
               timer_drain_budget_(owner_.config().scheduler.timer_drain_budget) {
             timers_.reserve(owner_.config().timer.initial_reserve);
             if (thread_.kind == thread_kind::io) {
-                reactor_ = make_reactor(owner_.config().reactor.backend);
+                reactor_ = make_reactor(owner_.config().reactor);
             }
         }
 

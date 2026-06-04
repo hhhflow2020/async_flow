@@ -360,7 +360,7 @@ struct fd_event_source {
 
 TCP/UDP/Unix socket 只依赖 reactor 抽象，不直接依赖 epoll/kqueue/select。
 
-当前实例 runtime 已经接入基础 reactor 抽象：只有 IO executor 在构造时创建 reactor，CPU executor 继续使用 futex/atomic wait。`runtime::post()` 和 `stop()` 会同时唤醒目标 executor 的 task inbox 与 reactor wake fd，保证 IO 线程阻塞在 `poll(timeout)` 时也能及时处理被调度过来的 task、timer arm 和停止请求。当前新路径先落地 select backend，使用非阻塞 pipe 作为 wake fd，并通过 `fd_event_source` 回调把 readiness 事件分发回 owner IO 线程；epoll/kqueue 后端仍是下一步迁移目标。
+当前实例 runtime 已经接入基础 reactor 抽象：只有 IO executor 在构造时创建 reactor，CPU executor 继续使用 futex/atomic wait。`runtime::post()` 和 `stop()` 会同时唤醒目标 executor 的 task inbox 与 reactor wake fd，保证 IO 线程阻塞在 `poll(timeout)` 时也能及时处理被调度过来的 task、timer arm 和停止请求。当前新路径已经拆分 public reactor 接口与后端实现，并落地 select backend 和 Linux epoll backend；`auto_select` 在 Linux 优先 epoll，其他平台 fallback 到 select。kqueue 后端仍是下一步迁移目标。
 
 ## 网络层
 
@@ -611,7 +611,7 @@ include/af/reactor/select_reactor.hpp
 
 - 当前调度已经统一为每 executor 一个 intrusive MPSC task inbox，后续继续收敛配置 API 和命名。
 - 当前线程类型已只保留 `thread_kind::io` 和 `thread_kind::cpu`，epoll/kqueue/select 属于 reactor backend。
-- 当前旧网络 readiness 路径已使用 LT 语义，网络 channel 不使用 one-shot rearm；新的实例 runtime 已提供 `reactor` / `fd_event_source` 抽象和 select backend，IO executor 可在 `reactor.poll(timeout)` 中同时等待 fd readiness、task wake 和 timer deadline。epoll/kqueue 后端还需要继续补齐。
+- 当前旧网络 readiness 路径已使用 LT 语义，网络 channel 不使用 one-shot rearm；新的实例 runtime 已提供 `reactor` / `fd_event_source` 抽象、select backend 和 Linux epoll backend，IO executor 可在 `reactor.poll(timeout)` 中同时等待 fd readiness、task wake 和 timer deadline。kqueue 后端还需要继续补齐。
 - 当前日志 relaxed 模式已使用 bounded MPSC runtime lane 和 sharded MPSC ingress，日志 record pool 已改为可扩展 slab pool。
 - 当前 TCP stream 和 UDP/datagram 跨线程操作已迁移为显式 runtime task 调度到 owner reactor；后续继续收敛 API 命名、目录结构和对象池实现。
 - 当前 runtime 已提供 `try_make_task<T>()` 可恢复创建路径；对象池 `try_create()` 在分配或构造失败时返回空指针，并释放已获取 slot。

@@ -870,13 +870,13 @@ TEST(RuntimeConfigTests, RuntimeStopCancelsPendingDelayedTask) {
     EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
 }
 
-TEST(RuntimeConfigTests, RuntimeReactorDispatchesReadinessOnIoThread) {
+void run_reactor_readiness_test(af::reactor_backend backend) {
     af::runtime_config config;
     config.threads = {
         af::io_threads("io", 1),
         af::cpu_threads("logic", 1),
     };
-    config.reactor.backend = af::reactor_backend::select;
+    config.reactor.backend = backend;
     config.logger.consumer_thread = af::thread_selector::cpu(0);
 
     int pipe_fds[2]{-1, -1};
@@ -904,4 +904,19 @@ TEST(RuntimeConfigTests, RuntimeReactorDispatchesReadinessOnIoThread) {
     runtime.stop();
     ::close(pipe_fds[0]);
     ::close(pipe_fds[1]);
+}
+
+TEST(RuntimeConfigTests, RuntimeSelectReactorDispatchesReadinessOnIoThread) {
+    run_reactor_readiness_test(af::reactor_backend::select);
+}
+
+TEST(RuntimeConfigTests, RuntimeAutoReactorDispatchesReadinessOnIoThread) {
+    run_reactor_readiness_test(af::reactor_backend::auto_select);
+}
+
+TEST(RuntimeConfigTests, RuntimeEpollReactorDispatchesReadinessOnIoThread) {
+    if (!af::supports_epoll) {
+        GTEST_SKIP() << "epoll is not supported on this platform";
+    }
+    run_reactor_readiness_test(af::reactor_backend::epoll);
 }
