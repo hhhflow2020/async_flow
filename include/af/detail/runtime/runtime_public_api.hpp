@@ -153,6 +153,59 @@ bool AsyncRuntime<TraitsT>::post(Thread thread, Task *task, ScheduleMode mode) n
 }
 
 template <typename TraitsT>
+bool AsyncRuntime<TraitsT>::post_after(Thread thread, Task *task, std::chrono::nanoseconds delay,
+                                       ScheduleMode mode) noexcept {
+    if (task == nullptr) {
+        return false;
+    }
+
+    const std::uint16_t index = thread_index(thread);
+    if (index >= thread_count) {
+        AF_ASSERT(false && "invalid thread index");
+        return false;
+    }
+
+    if (mode == ScheduleMode::Fast && current_thread_index_ >= thread_count) {
+        return false;
+    }
+
+    if (!try_enter_post(index)) {
+        return false;
+    }
+
+    const detail::ScheduleRequest request = task->request_timer_schedule(index, delay, mode);
+    if (request.action == detail::ScheduleAction::ArmTimer) {
+        const bool first_schedule = request.previous == TaskState::Created;
+        if (first_schedule) {
+            on_task_started(task);
+        }
+        enqueue_timer_arming_blocking(index, task);
+        leave_post(index);
+        return true;
+    }
+
+    if (request.action == detail::ScheduleAction::Enqueue) {
+        const bool first_schedule = request.previous == TaskState::Created;
+        if (first_schedule) {
+            on_task_started(task);
+        }
+        const bool enqueued = enqueue_ready_by_policy(index, task, mode);
+        if (!enqueued) {
+            if (first_schedule) {
+                on_task_finished(task);
+            }
+            task->cancel_schedule(request.previous);
+        }
+        leave_post(index);
+        return enqueued;
+    }
+
+    const bool deferred = request.action == detail::ScheduleAction::Deferred;
+    leave_post(index);
+    return deferred;
+}
+
+template <typename TraitsT>
 bool AsyncRuntime<TraitsT>::net_register_channel(Thread thread, detail::NetIoChannel *channel,
                                                  std::uint32_t events) noexcept {
     const std::uint16_t index = thread_index(thread);

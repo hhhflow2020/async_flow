@@ -69,6 +69,12 @@ void AsyncRuntime<TraitsT>::post_blocking(Thread thread, Task *task, ScheduleMod
         }
         enqueue_inbox_blocking(index, task);
         return;
+    case detail::ScheduleAction::ArmTimer:
+        if (request.previous == TaskState::Created) {
+            on_task_started(task);
+        }
+        enqueue_timer_arming_blocking(index, task);
+        return;
     case detail::ScheduleAction::Deferred:
         return;
     case detail::ScheduleAction::Rejected:
@@ -94,7 +100,29 @@ void AsyncRuntime<TraitsT>::enqueue_pending_blocking(std::uint16_t index, Task *
         return;
     }
     AF_ASSERT(expected == TaskState::Queued || expected == TaskState::Starting ||
-              expected == TaskState::Running);
+              expected == TaskState::Running || expected == TaskState::TimerArming ||
+              expected == TaskState::TimerPending);
+    static_cast<void>(index);
+}
+
+template <typename TraitsT>
+void AsyncRuntime<TraitsT>::enqueue_timer_arming_blocking(std::uint16_t index,
+                                                          Task *task) noexcept {
+    enqueue_inbox_blocking(index, task);
+}
+
+template <typename TraitsT>
+void AsyncRuntime<TraitsT>::enqueue_pending_timer_blocking(std::uint16_t index, Task *task,
+                                                           std::int64_t deadline_ns,
+                                                           ScheduleMode mode) noexcept {
+    if (task->prepare_timer_from_pending(deadline_ns, mode)) {
+        enqueue_timer_arming_blocking(index, task);
+        return;
+    }
+    const TaskState state = task->state_.load(std::memory_order_acquire);
+    AF_ASSERT(state == TaskState::Queued || state == TaskState::Starting ||
+              state == TaskState::Running || state == TaskState::TimerArming ||
+              state == TaskState::TimerPending || state == TaskState::Done);
     static_cast<void>(index);
 }
 

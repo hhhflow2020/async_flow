@@ -206,6 +206,28 @@ private:
     std::atomic<int> *destroyed_{nullptr};
 };
 
+class FastShutdownDelayedTask final : public FastShutdownTaskBase {
+public:
+    explicit FastShutdownDelayedTask(FastShutdownTaskBase::FactoryToken token)
+        : FastShutdownTaskBase(token) {}
+
+    bool do_it(std::atomic<int> *destroyed) {
+        destroyed_ = destroyed;
+        return schedule_after(FastShutdownThreads::Logic_0, std::chrono::seconds(30));
+    }
+
+    ~FastShutdownDelayedTask() override {
+        destroyed_->fetch_add(1, std::memory_order_release);
+    }
+
+private:
+    af::TaskResult run() override {
+        return failed();
+    }
+
+    std::atomic<int> *destroyed_{nullptr};
+};
+
 struct AutoRegistryShutdownThreadTag;
 
 struct AutoRegistryShutdownRuntimeTraits {

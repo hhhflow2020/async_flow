@@ -218,6 +218,19 @@ TEST_F(RuntimeFixture, OrderedScheduleModeAcceptsExternalProducer) {
     EXPECT_EQ(ran_on.load(std::memory_order_acquire), Runtime::thread_index(TestThreads::Logic_0));
 }
 
+TEST_F(RuntimeFixture, DelayedStartRunsOnRequestedThreadAfterDelay) {
+    std::atomic<int> completed{0};
+    std::atomic<std::uint16_t> ran_on{Runtime::invalid_thread_index};
+    std::atomic<std::int64_t> elapsed_ms{0};
+
+    ASSERT_TRUE(Runtime::start_task<DelayedStartTask>(
+        TestThreads::Logic_2, std::chrono::milliseconds(20), &completed, &ran_on, &elapsed_ms));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+
+    EXPECT_EQ(ran_on.load(std::memory_order_acquire), Runtime::thread_index(TestThreads::Logic_2));
+    EXPECT_GE(elapsed_ms.load(std::memory_order_acquire), 15);
+}
+
 TEST_F(RuntimeFixture, OrderedScheduleModeSurvivesPendingWakeRequest) {
     std::atomic<int> completed{0};
     std::array<std::atomic<std::uint16_t>, 2> seen{};
@@ -229,6 +242,23 @@ TEST_F(RuntimeFixture, OrderedScheduleModeSurvivesPendingWakeRequest) {
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     EXPECT_EQ(seen[0].load(std::memory_order_acquire), Runtime::thread_index(TestThreads::Logic_0));
     EXPECT_EQ(seen[1].load(std::memory_order_acquire), Runtime::thread_index(TestThreads::Logic_1));
+}
+
+TEST_F(RuntimeFixture, PendingAfterResumesOnRequestedThreadAfterDelay) {
+    std::atomic<int> completed{0};
+    std::array<std::atomic<std::uint16_t>, 2> seen{};
+    std::atomic<std::int64_t> elapsed_ms{0};
+    for (auto &value : seen) {
+        value.store(Runtime::invalid_thread_index, std::memory_order_relaxed);
+    }
+
+    ASSERT_TRUE(Runtime::start_task<DelayedPendingTask>(std::chrono::milliseconds(20), &completed,
+                                                        &seen, &elapsed_ms));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+
+    EXPECT_EQ(seen[0].load(std::memory_order_acquire), Runtime::thread_index(TestThreads::Logic_0));
+    EXPECT_EQ(seen[1].load(std::memory_order_acquire), Runtime::thread_index(TestThreads::DB_0));
+    EXPECT_GE(elapsed_ms.load(std::memory_order_acquire), 15);
 }
 
 TEST_F(RuntimeFixture, UnscheduledCreatedTaskIsDestroyedByHandle) {

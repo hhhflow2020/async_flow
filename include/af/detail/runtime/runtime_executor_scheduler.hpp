@@ -79,9 +79,10 @@ void Executor<RuntimeT, TraitsT>::run_loop() noexcept {
     for (;;) {
         bool did_work = false;
         while (Task *task = pop_one()) {
-            did_work = true;
-            execute(task);
+            did_work = handle_inbox_task(task) || did_work;
         }
+
+        did_work = run_due_timers() || did_work;
 
         if (stop_requested_.load(std::memory_order_acquire)) {
             if (!did_work) {
@@ -91,6 +92,9 @@ void Executor<RuntimeT, TraitsT>::run_loop() noexcept {
         }
 
         if (poll_io(0)) {
+            continue;
+        }
+        if (run_due_timers()) {
             continue;
         }
 
@@ -103,21 +107,26 @@ void Executor<RuntimeT, TraitsT>::run_loop() noexcept {
 
         if (Task *task = pop_one()) {
             sleeping_.store(false, std::memory_order_relaxed);
-            execute(task);
+            static_cast<void>(handle_inbox_task(task));
+        } else if (run_due_timers()) {
+            sleeping_.store(false, std::memory_order_relaxed);
+            continue;
         } else {
             if (wake_epoch_.load(std::memory_order_acquire) != observed) {
                 sleeping_.store(false, std::memory_order_relaxed);
                 continue;
             }
+            const int timeout_ms = timer_poll_timeout_ms();
             if (io_thread() && io_backend_available()) {
-                static_cast<void>(poll_io(-1));
+                static_cast<void>(poll_io(timeout_ms));
             } else {
-                wake_epoch_.wait(observed, std::memory_order_acquire);
+                static_cast<void>(wait_for_wake_or_timer(observed, timeout_ms));
             }
             sleeping_.store(false, std::memory_order_relaxed);
         }
     }
 
+    cancel_timer_tasks();
     RuntimeT::current_thread_index_ = invalid_thread_index;
     RuntimeT::current_task_id_ = RuntimeT::invalid_task_id;
 }
@@ -148,7 +157,12 @@ void Executor<RuntimeT, TraitsT>::finish_pending(Task *task) noexcept {
     RuntimeT::register_pending_task(task);
     const detail::RequestedSchedule requested = task->take_requested_schedule();
     if (requested.thread_index != invalid_thread_index) {
-        enqueue_pending_blocking(requested.thread_index, task, requested.mode);
+        if (requested.delayed) {
+            RuntimeT::enqueue_pending_timer_blocking(requested.thread_index, task,
+                                                     requested.deadline_ns, requested.mode);
+        } else {
+            enqueue_pending_blocking(requested.thread_index, task, requested.mode);
+        }
     }
 }
 

@@ -33,6 +33,8 @@ enum class ShutdownPolicy : std::uint8_t {
 enum class TaskState : std::uint8_t {
     Created,
     Queued,
+    TimerArming,
+    TimerPending,
     Starting,
     Running,
     Pending,

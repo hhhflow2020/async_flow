@@ -65,6 +65,18 @@ template <typename TraitsT>
 struct RuntimeTraitsHasIoWaitReserve<TraitsT, std::void_t<decltype(TraitsT::io_wait_reserve)>>
     : std::true_type {};
 
+template <typename TraitsT, typename = void>
+struct RuntimeTraitsHasTimerDrainBudget : std::false_type {};
+template <typename TraitsT>
+struct RuntimeTraitsHasTimerDrainBudget<TraitsT, std::void_t<decltype(TraitsT::timer_drain_budget)>>
+    : std::true_type {};
+
+template <typename TraitsT, typename = void>
+struct RuntimeTraitsHasTimerReserve : std::false_type {};
+template <typename TraitsT>
+struct RuntimeTraitsHasTimerReserve<TraitsT, std::void_t<decltype(TraitsT::timer_reserve)>>
+    : std::true_type {};
+
 template <typename TraitsT> struct RuntimeTraitsConfig {
     static constexpr ShutdownPolicy shutdown_policy = [] {
         if constexpr (RuntimeTraitsHasShutdownPolicy<TraitsT>::value) {
@@ -140,6 +152,22 @@ template <typename TraitsT> struct RuntimeTraitsConfig {
     static constexpr std::size_t io_wait_reserve = [] {
         if constexpr (RuntimeTraitsHasIoWaitReserve<TraitsT>::value) {
             return static_cast<std::size_t>(TraitsT::io_wait_reserve);
+        } else {
+            return static_cast<std::size_t>(1024);
+        }
+    }();
+
+    static constexpr std::size_t timer_drain_budget = [] {
+        if constexpr (RuntimeTraitsHasTimerDrainBudget<TraitsT>::value) {
+            return static_cast<std::size_t>(TraitsT::timer_drain_budget);
+        } else {
+            return static_cast<std::size_t>(256);
+        }
+    }();
+
+    static constexpr std::size_t timer_reserve = [] {
+        if constexpr (RuntimeTraitsHasTimerReserve<TraitsT>::value) {
+            return static_cast<std::size_t>(TraitsT::timer_reserve);
         } else {
             return static_cast<std::size_t>(1024);
         }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cerrno>
@@ -92,6 +93,8 @@ public:
     static constexpr ShutdownPolicy shutdown_policy = Config::shutdown_policy;
     static constexpr bool task_registry_enabled = Config::task_registry_enabled;
     static constexpr std::size_t io_wait_reserve = Config::io_wait_reserve;
+    static constexpr std::size_t timer_drain_budget = Config::timer_drain_budget;
+    static constexpr std::size_t timer_reserve = Config::timer_reserve;
 
     [[nodiscard]] static constexpr af::thread_kind thread_kind(Thread thread) noexcept {
         return Config::thread_kind(thread);
@@ -126,6 +129,8 @@ public:
     [[nodiscard]] static bool start_task(Args &&...args);
 
     static bool post(Thread thread, Task *task, ScheduleMode mode = ScheduleMode::Auto) noexcept;
+    static bool post_after(Thread thread, Task *task, std::chrono::nanoseconds delay,
+                           ScheduleMode mode = ScheduleMode::Auto) noexcept;
 
     [[nodiscard]] static bool net_register_channel(Thread thread, detail::NetIoChannel *channel,
                                                    std::uint32_t events) noexcept;
@@ -278,6 +283,10 @@ private:
                                         ScheduleMode mode) noexcept;
     static void enqueue_pending_blocking(std::uint16_t index, Task *task,
                                          ScheduleMode mode) noexcept;
+    static void enqueue_timer_arming_blocking(std::uint16_t index, Task *task) noexcept;
+    static void enqueue_pending_timer_blocking(std::uint16_t index, Task *task,
+                                               std::int64_t deadline_ns,
+                                               ScheduleMode mode) noexcept;
 
     [[nodiscard]] static bool try_enter_post(std::uint16_t target) noexcept;
     static void leave_post(std::uint16_t target) noexcept;

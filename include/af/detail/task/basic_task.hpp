@@ -65,6 +65,30 @@ protected:
         return schedule(thread, ScheduleMode::Ordered);
     }
 
+    template <typename Rep, typename Period>
+    [[nodiscard]] bool schedule_after(Thread thread, std::chrono::duration<Rep, Period> delay,
+                                      ScheduleMode mode = ScheduleMode::Auto) noexcept {
+        return Runtime::post_after(thread, this, normalize_delay(delay), mode);
+    }
+
+    template <typename Rep, typename Period>
+    [[nodiscard]] bool schedule_after(std::chrono::duration<Rep, Period> delay,
+                                      ScheduleMode mode = ScheduleMode::Auto) noexcept {
+        return schedule_after(current_thread(), delay, mode);
+    }
+
+    template <typename Clock, typename Duration>
+    [[nodiscard]] bool schedule_at(Thread thread, std::chrono::time_point<Clock, Duration> time,
+                                   ScheduleMode mode = ScheduleMode::Auto) noexcept {
+        return Runtime::post_after(thread, this, delay_until(time), mode);
+    }
+
+    template <typename Clock, typename Duration>
+    [[nodiscard]] bool schedule_at(std::chrono::time_point<Clock, Duration> time,
+                                   ScheduleMode mode = ScheduleMode::Auto) noexcept {
+        return schedule_at(current_thread(), time, mode);
+    }
+
     TaskResult pending_on(Thread thread, ScheduleMode mode = ScheduleMode::Auto) noexcept {
         if (!Runtime::post(thread, this, mode)) {
             return TaskResult::Cancelled;
@@ -78,6 +102,36 @@ protected:
 
     TaskResult pending_ordered(Thread thread) noexcept {
         return pending_on(thread, ScheduleMode::Ordered);
+    }
+
+    template <typename Rep, typename Period>
+    TaskResult pending_after(Thread thread, std::chrono::duration<Rep, Period> delay,
+                             ScheduleMode mode = ScheduleMode::Auto) noexcept {
+        if (!Runtime::post_after(thread, this, normalize_delay(delay), mode)) {
+            return TaskResult::Cancelled;
+        }
+        return TaskResult::Pending;
+    }
+
+    template <typename Rep, typename Period>
+    TaskResult pending_after(std::chrono::duration<Rep, Period> delay,
+                             ScheduleMode mode = ScheduleMode::Auto) noexcept {
+        return pending_after(current_thread(), delay, mode);
+    }
+
+    template <typename Clock, typename Duration>
+    TaskResult pending_at(Thread thread, std::chrono::time_point<Clock, Duration> time,
+                          ScheduleMode mode = ScheduleMode::Auto) noexcept {
+        if (!Runtime::post_after(thread, this, delay_until(time), mode)) {
+            return TaskResult::Cancelled;
+        }
+        return TaskResult::Pending;
+    }
+
+    template <typename Clock, typename Duration>
+    TaskResult pending_at(std::chrono::time_point<Clock, Duration> time,
+                          ScheduleMode mode = ScheduleMode::Auto) noexcept {
+        return pending_at(current_thread(), time, mode);
     }
 
     static TaskResult done() noexcept {
@@ -125,9 +179,11 @@ private:
     static constexpr std::uint64_t requested_thread_mask = 0xFFFFULL;
     static constexpr std::uint64_t requested_mode_shift = 16;
     static constexpr std::uint64_t requested_mode_mask = 0x3ULL;
-    static constexpr std::uint64_t requested_epoch_shift = 18;
+    static constexpr std::uint64_t requested_delayed_shift = 18;
+    static constexpr std::uint64_t requested_epoch_shift = 19;
     static constexpr std::uint64_t requested_epoch_mask =
         (std::numeric_limits<std::uint64_t>::max() >> requested_epoch_shift);
+    static constexpr std::int64_t no_timer_deadline_ns = 0;
 
     virtual TaskResult run() = 0;
     virtual void on_runtime_cancel() noexcept {}
@@ -175,11 +231,49 @@ private:
                 break;
 
             case TaskState::Running:
-                return request_wake_while_running(thread_index, mode);
+                return request_wake_while_running(thread_index, mode, false, no_timer_deadline_ns);
 
+            case TaskState::TimerArming:
+            case TaskState::TimerPending:
             case TaskState::Queued:
             case TaskState::Done:
                 AF_ASSERT(false && "task was scheduled more than once or after completion");
+                return {detail::ScheduleAction::Rejected, state};
+            }
+        }
+    }
+
+    detail::ScheduleRequest request_timer_schedule(std::uint16_t thread_index,
+                                                   std::chrono::nanoseconds delay,
+                                                   ScheduleMode mode) noexcept {
+        const std::int64_t deadline_ns = timer_deadline_after(delay);
+        for (;;) {
+            TaskState state = state_.load(std::memory_order_acquire);
+            switch (state) {
+            case TaskState::Created:
+            case TaskState::Pending: {
+                timer_deadline_ns_ = deadline_ns;
+                timer_mode_ = mode;
+                TaskState expected = state;
+                if (state_.compare_exchange_weak(expected, TaskState::TimerArming,
+                                                 std::memory_order_acq_rel,
+                                                 std::memory_order_acquire)) {
+                    return {detail::ScheduleAction::ArmTimer, state};
+                }
+                break;
+            }
+
+            case TaskState::Starting:
+                break;
+
+            case TaskState::Running:
+                return request_wake_while_running(thread_index, mode, true, deadline_ns);
+
+            case TaskState::TimerArming:
+            case TaskState::TimerPending:
+            case TaskState::Queued:
+            case TaskState::Done:
+                AF_ASSERT(false && "task timer was scheduled more than once or after completion");
                 return {detail::ScheduleAction::Rejected, state};
             }
         }
@@ -192,8 +286,43 @@ private:
         AF_ASSERT(ok);
     }
 
+    void cancel_timer_schedule(TaskState previous) noexcept {
+        TaskState expected = TaskState::TimerArming;
+        [[maybe_unused]] const bool ok = state_.compare_exchange_strong(
+            expected, previous, std::memory_order_acq_rel, std::memory_order_acquire);
+        AF_ASSERT(ok);
+        timer_deadline_ns_ = no_timer_deadline_ns;
+        timer_mode_ = ScheduleMode::Auto;
+    }
+
     [[nodiscard]] bool is_created() const noexcept {
         return state_.load(std::memory_order_acquire) == TaskState::Created;
+    }
+
+    [[nodiscard]] bool prepare_timer_from_pending(std::int64_t deadline_ns,
+                                                  ScheduleMode mode) noexcept {
+        timer_deadline_ns_ = deadline_ns;
+        timer_mode_ = mode;
+        TaskState expected = TaskState::Pending;
+        return state_.compare_exchange_strong(expected, TaskState::TimerArming,
+                                              std::memory_order_acq_rel, std::memory_order_acquire);
+    }
+
+    [[nodiscard]] bool mark_timer_pending() noexcept {
+        TaskState expected = TaskState::TimerArming;
+        return state_.compare_exchange_strong(expected, TaskState::TimerPending,
+                                              std::memory_order_acq_rel, std::memory_order_acquire);
+    }
+
+    [[nodiscard]] bool mark_timer_ready() noexcept {
+        TaskState expected = TaskState::TimerPending;
+        if (state_.compare_exchange_strong(expected, TaskState::Queued, std::memory_order_acq_rel,
+                                           std::memory_order_acquire)) {
+            timer_deadline_ns_ = no_timer_deadline_ns;
+            timer_mode_ = ScheduleMode::Auto;
+            return true;
+        }
+        return false;
     }
 
     void set_last_parallel_failures(std::uint32_t failures) noexcept {
@@ -209,10 +338,14 @@ private:
     }
 
     detail::ScheduleRequest request_wake_while_running(std::uint16_t thread_index,
-                                                       ScheduleMode mode) noexcept {
+                                                       ScheduleMode mode, bool delayed,
+                                                       std::int64_t deadline_ns) noexcept {
         for (;;) {
             const std::uint64_t epoch = run_epoch_.load(std::memory_order_acquire);
-            const std::uint64_t desired = pack_requested_thread(epoch, thread_index, mode);
+            if (delayed) {
+                requested_deadline_ns_.store(deadline_ns, std::memory_order_relaxed);
+            }
+            const std::uint64_t desired = pack_requested_thread(epoch, thread_index, mode, delayed);
             std::uint64_t expected = detail::no_requested_thread;
             if (requested_thread_.compare_exchange_strong(
                     expected, desired, std::memory_order_acq_rel, std::memory_order_acquire)) {
@@ -229,7 +362,7 @@ private:
             }
 
             AF_ASSERT(requested_target(expected) == thread_index &&
-                      requested_mode(expected) == mode &&
+                      requested_mode(expected) == mode && requested_delayed(expected) == delayed &&
                       "a running task can only register one wake-up target and mode");
             return {detail::ScheduleAction::Rejected, TaskState::Running};
         }
@@ -239,12 +372,18 @@ private:
         const std::uint64_t value =
             requested_thread_.exchange(detail::no_requested_thread, std::memory_order_acq_rel);
         if (value == detail::no_requested_thread) {
-            return {Runtime::invalid_thread_index, ScheduleMode::Auto};
+            return {Runtime::invalid_thread_index, ScheduleMode::Auto, false, no_timer_deadline_ns};
         }
         if (requested_epoch(value) != run_epoch_.load(std::memory_order_acquire)) {
-            return {Runtime::invalid_thread_index, ScheduleMode::Auto};
+            return {Runtime::invalid_thread_index, ScheduleMode::Auto, false, no_timer_deadline_ns};
         }
-        return {requested_target(value), requested_mode(value)};
+        const bool delayed = requested_delayed(value);
+        const std::int64_t deadline_ns =
+            delayed ? requested_deadline_ns_.load(std::memory_order_acquire) : no_timer_deadline_ns;
+        if (delayed) {
+            requested_deadline_ns_.store(no_timer_deadline_ns, std::memory_order_relaxed);
+        }
+        return {requested_target(value), requested_mode(value), delayed, deadline_ns};
     }
 
     std::uint16_t take_requested_thread() noexcept {
@@ -266,15 +405,26 @@ private:
 
             if (state == TaskState::Pending) {
                 TaskState expected = TaskState::Pending;
-                if (state_.compare_exchange_strong(expected, TaskState::Queued,
-                                                   std::memory_order_acq_rel,
-                                                   std::memory_order_acquire)) {
+                if (requested_delayed(desired)) {
+                    timer_deadline_ns_ = requested_deadline_ns_.load(std::memory_order_acquire);
+                    timer_mode_ = requested_mode(desired);
+                    if (state_.compare_exchange_strong(expected, TaskState::TimerArming,
+                                                       std::memory_order_acq_rel,
+                                                       std::memory_order_acquire)) {
+                        requested_deadline_ns_.store(no_timer_deadline_ns,
+                                                     std::memory_order_relaxed);
+                        return {detail::ScheduleAction::ArmTimer, TaskState::Pending};
+                    }
+                } else if (state_.compare_exchange_strong(expected, TaskState::Queued,
+                                                          std::memory_order_acq_rel,
+                                                          std::memory_order_acquire)) {
                     return {detail::ScheduleAction::Enqueue, TaskState::Pending};
                 }
                 continue;
             }
 
-            if (state == TaskState::Queued || state == TaskState::Starting ||
+            if (state == TaskState::Queued || state == TaskState::TimerArming ||
+                state == TaskState::TimerPending || state == TaskState::Starting ||
                 state == TaskState::Running) {
                 return {detail::ScheduleAction::Deferred, state};
             }
@@ -296,8 +446,10 @@ private:
 
     [[nodiscard]] static constexpr std::uint64_t pack_requested_thread(std::uint64_t epoch,
                                                                        std::uint16_t thread_index,
-                                                                       ScheduleMode mode) noexcept {
+                                                                       ScheduleMode mode,
+                                                                       bool delayed) noexcept {
         return ((epoch & requested_epoch_mask) << requested_epoch_shift) |
+               (static_cast<std::uint64_t>(delayed ? 1U : 0U) << requested_delayed_shift) |
                ((static_cast<std::uint64_t>(mode) & requested_mode_mask) << requested_mode_shift) |
                (static_cast<std::uint64_t>(thread_index) + 1U);
     }
@@ -314,6 +466,10 @@ private:
         return static_cast<ScheduleMode>((request >> requested_mode_shift) & requested_mode_mask);
     }
 
+    [[nodiscard]] static constexpr bool requested_delayed(std::uint64_t request) noexcept {
+        return ((request >> requested_delayed_shift) & 0x1ULL) != 0U;
+    }
+
     static TaskId allocate_task_id() noexcept {
         thread_local TaskId next_local_task_id = invalid_task_id;
         thread_local TaskId local_task_id_limit = invalid_task_id;
@@ -325,15 +481,56 @@ private:
         return next_local_task_id++;
     }
 
+    template <typename Rep, typename Period>
+    [[nodiscard]] static std::chrono::nanoseconds
+    normalize_delay(std::chrono::duration<Rep, Period> delay) noexcept {
+        if (delay <= delay.zero()) {
+            return std::chrono::nanoseconds(0);
+        }
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(delay);
+    }
+
+    template <typename Clock, typename Duration>
+    [[nodiscard]] static std::chrono::nanoseconds
+    delay_until(std::chrono::time_point<Clock, Duration> time) noexcept {
+        const auto now = Clock::now();
+        if (time <= now) {
+            return std::chrono::nanoseconds(0);
+        }
+        return normalize_delay(time - now);
+    }
+
+    [[nodiscard]] static std::int64_t steady_now_ns() noexcept {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(
+                   std::chrono::steady_clock::now().time_since_epoch())
+            .count();
+    }
+
+    [[nodiscard]] static std::int64_t
+    timer_deadline_after(std::chrono::nanoseconds delay) noexcept {
+        const std::int64_t now = steady_now_ns();
+        const std::int64_t count = delay.count();
+        if (count <= 0) {
+            return now;
+        }
+        if (count > std::numeric_limits<std::int64_t>::max() - now) {
+            return std::numeric_limits<std::int64_t>::max();
+        }
+        return now + count;
+    }
+
     std::atomic<TaskState> state_{TaskState::Created};
     std::atomic<std::uint64_t> requested_thread_{detail::no_requested_thread};
+    std::atomic<std::int64_t> requested_deadline_ns_{no_timer_deadline_ns};
     std::atomic<std::uint64_t> run_epoch_{0};
     std::atomic<std::uint32_t> lifetime_refs_{1};
     detail::IntrusiveMpscNode<BasicTask> intrusive_mpsc_node_{this};
     static constexpr TaskId task_id_block_size = 1024;
     alignas(detail::hardware_cache_line_size) static inline std::atomic<TaskId> next_task_id_{1};
     const TaskId task_id_;
+    std::int64_t timer_deadline_ns_{no_timer_deadline_ns};
     std::uint32_t last_parallel_failures_{0};
+    ScheduleMode timer_mode_{ScheduleMode::Auto};
     DestroyFn destroy_fn_{nullptr};
     [[no_unique_address]] std::conditional_t<detail::task_registry_enabled_v<Runtime>,
                                              detail::TaskRegistryLinks<BasicTask>,

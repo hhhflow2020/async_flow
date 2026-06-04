@@ -15,6 +15,8 @@ template <typename RuntimeT, typename TraitsT> class alignas(hardware_cache_line
     static constexpr std::uint16_t thread_count = RuntimeT::thread_count;
     static constexpr std::uint16_t invalid_thread_index = RuntimeT::invalid_thread_index;
     static constexpr std::size_t io_wait_reserve = RuntimeT::io_wait_reserve;
+    static constexpr std::size_t timer_drain_budget = RuntimeT::timer_drain_budget;
+    static constexpr std::size_t timer_reserve = RuntimeT::timer_reserve;
 
     [[nodiscard]] static constexpr Thread thread_from_index(std::uint16_t index) noexcept {
         return RuntimeT::thread_from_index(index);
@@ -61,6 +63,7 @@ template <typename RuntimeT, typename TraitsT> class alignas(hardware_cache_line
 #if AF_DETAIL_HAS_KQUEUE
     struct KqueueTimeoutRegistration;
 #endif
+    struct TimerEntry;
 
 public:
     explicit Executor(std::uint16_t index);
@@ -143,6 +146,12 @@ private:
         uintptr_t ident{0};
     };
 #endif
+
+    struct TimerEntry {
+        std::int64_t deadline_ns{0};
+        std::uint64_t sequence{0};
+        Task *task{nullptr};
+    };
 
     [[nodiscard]] bool io_thread() const noexcept {
         return native_io_thread();
@@ -266,6 +275,17 @@ private:
     void init_io_backend() noexcept;
     void close_io_backend() noexcept;
     [[nodiscard]] bool poll_io(int timeout_ms) noexcept;
+    [[nodiscard]] static std::int64_t steady_now_ns() noexcept;
+    [[nodiscard]] static bool timer_entry_after(const TimerEntry &left,
+                                                const TimerEntry &right) noexcept;
+    [[nodiscard]] int timer_poll_timeout_ms() const noexcept;
+    [[nodiscard]] bool wait_for_wake_or_timer(std::uint32_t observed, int timeout_ms) noexcept;
+    [[nodiscard]] bool handle_inbox_task(Task *task) noexcept;
+    [[nodiscard]] bool arm_timer_from_inbox(Task *task) noexcept;
+    [[nodiscard]] bool push_timer(Task *task) noexcept;
+    [[nodiscard]] bool run_due_timers() noexcept;
+    void cancel_timer_task(Task *task) noexcept;
+    void cancel_timer_tasks() noexcept;
 
     Task *pop_one() noexcept;
     void finish_done(Task *task) noexcept;
@@ -279,6 +299,8 @@ private:
     CacheLineAtomic<bool> sleeping_{false};
     CacheLineAtomic<bool> stop_requested_{false};
     Task *running_task_{nullptr};
+    std::vector<TimerEntry> timers_;
+    std::uint64_t next_timer_sequence_{0};
 #if AF_DETAIL_HAS_NATIVE_IO_WAIT
     absl::flat_hash_map<int, IoWaitEntry> io_waits_;
     IoObjectPool<IoWaitRegistration> io_wait_pool_;
@@ -308,4 +330,5 @@ private:
 #include "af/detail/runtime/runtime_executor_io_backend.hpp"
 #include "af/detail/runtime/runtime_executor_lifecycle.hpp"
 #include "af/detail/runtime/runtime_executor_net_channel.hpp"
+#include "af/detail/runtime/runtime_executor_timer.hpp"
 #include "af/detail/runtime/runtime_executor_scheduler.hpp"

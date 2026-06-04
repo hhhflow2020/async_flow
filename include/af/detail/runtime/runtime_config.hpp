@@ -42,6 +42,8 @@ template <typename TraitsT> struct RuntimeConfig {
     static constexpr std::size_t task_pool_local_cache_capacity =
         TraitConfig::task_pool_local_cache_capacity;
     static constexpr std::size_t io_wait_reserve = TraitConfig::io_wait_reserve;
+    static constexpr std::size_t timer_drain_budget = TraitConfig::timer_drain_budget;
+    static constexpr std::size_t timer_reserve = TraitConfig::timer_reserve;
 
     static_assert(task_pool_remote_release_batch_size > 0,
                   "task_pool_remote_release_batch_size must be greater than zero");
@@ -59,6 +61,7 @@ template <typename TraitsT> struct RuntimeConfig {
     static_assert(task_pool_remote_release_batch_size <= task_pool_local_cache_capacity,
                   "task_pool_remote_release_batch_size must not exceed "
                   "task_pool_local_cache_capacity");
+    static_assert(timer_drain_budget > 0, "timer_drain_budget must be greater than zero");
     [[nodiscard]] static constexpr af::thread_kind thread_kind(Thread thread) noexcept {
         return threads.thread_kind(thread);
     }

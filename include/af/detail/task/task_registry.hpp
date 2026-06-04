@@ -4,6 +4,7 @@ namespace detail {
 
 enum class ScheduleAction : std::uint8_t {
     Enqueue,
+    ArmTimer,
     Deferred,
     Rejected,
 };
@@ -16,6 +17,8 @@ struct ScheduleRequest {
 struct RequestedSchedule {
     std::uint16_t thread_index{0};
     ScheduleMode mode{ScheduleMode::Auto};
+    bool delayed{false};
+    std::int64_t deadline_ns{0};
 };
 
 inline constexpr std::uint64_t no_requested_thread = 0;

@@ -159,6 +159,16 @@ TEST(RuntimeShutdownTests, StopImmediatelyTaskRegistryCancelsAndDestroysPendingT
     EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
 }
 
+TEST(RuntimeShutdownTests, StopImmediatelyCancelsAndDestroysDelayedTasks) {
+    FastShutdownRuntime::init();
+
+    std::atomic<int> destroyed{0};
+    ASSERT_TRUE(FastShutdownRuntime::start_task<FastShutdownDelayedTask>(&destroyed));
+
+    FastShutdownRuntime::shutdown();
+    EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
+}
+
 TEST(RuntimeShutdownTests, StopImmediatelyPolicyEnablesTaskRegistryByDefault) {
     AutoRegistryShutdownRuntime::init();
 

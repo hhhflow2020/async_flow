@@ -64,6 +64,15 @@ return schedule_fast(TargetThread);     // runtime-only 快速路径
 return schedule_ordered(TargetThread);  // 强制目标 MPSC 顺序路径
 ```
 
+延迟调度使用同一套目标 admission 入口，但不会直接进入 ready 队列：
+
+```cpp
+return schedule_after(TargetThread, 20ms);
+return pending_after(TargetThread, 20ms);
+```
+
+延迟 task 先以 `TimerArming` 状态进入目标 executor inbox，目标线程再挂入本地 timer heap。timer 到期后由目标 executor 转为 `Queued` 并执行。这个路径保持 timer 结构单线程访问，不引入锁，也不会恢复旧的 local queue/SPSC 双路径。
+
 不要把 `Fast` 当作“更快版本的 Ordered”。当前实现下二者都进入目标 inbox；`Fast` 的语义是 runtime-thread-only，`Ordered` 的语义是调用点显式要求目标 admission order。
 
 ## 队列满载语义
@@ -80,6 +89,9 @@ task inbox 是 intrusive unbounded MPSC，不再用队列容量拒绝任务投�
 - `RuntimeBackpressureTests.UnboundedInboxAllowsManyExternalProducers`
 - `RuntimeBackpressureTests.RuntimeThreadFanoutUsesUnifiedInbox`
 - `RuntimeBackpressureTests.SameThreadAutoAndOrderedUseUnifiedInbox`
+- `RuntimeFixture.DelayedStartRunsOnRequestedThreadAfterDelay`
+- `RuntimeFixture.PendingAfterResumesOnRequestedThreadAfterDelay`
+- `RuntimeShutdownTests.StopImmediatelyCancelsAndDestroysDelayedTasks`
 
 其中 `SameThreadAutoAndOrderedUseUnifiedInbox` 专门验证 self-post 场景：
 

@@ -324,5 +324,83 @@ private:
     std::array<std::atomic<std::uint16_t>, 2> *seen_{nullptr};
 };
 
+class DelayedStartTask final : public Task {
+public:
+    explicit DelayedStartTask(Task::FactoryToken token) : Task(token) {}
+
+    bool do_it(TestThread target, std::chrono::milliseconds delay, std::atomic<int> *completed,
+               std::atomic<std::uint16_t> *ran_on, std::atomic<std::int64_t> *elapsed_ms) {
+        completed_ = completed;
+        ran_on_ = ran_on;
+        elapsed_ms_ = elapsed_ms;
+        start_ = std::chrono::steady_clock::now();
+        return schedule_after(target, delay);
+    }
+
+private:
+    af::TaskResult run() override {
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start_);
+        elapsed_ms_->store(elapsed.count(), std::memory_order_release);
+        ran_on_->store(Runtime::current_thread_index(), std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::chrono::steady_clock::time_point start_{};
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<std::uint16_t> *ran_on_{nullptr};
+    std::atomic<std::int64_t> *elapsed_ms_{nullptr};
+};
+
+class DelayedPendingTask final : public Task {
+public:
+    explicit DelayedPendingTask(Task::FactoryToken token) : Task(token) {}
+
+    bool do_it(std::chrono::milliseconds delay, std::atomic<int> *completed,
+               std::array<std::atomic<std::uint16_t>, 2> *seen,
+               std::atomic<std::int64_t> *elapsed_ms) {
+        delay_ = delay;
+        completed_ = completed;
+        seen_ = seen;
+        elapsed_ms_ = elapsed_ms;
+        return schedule(TestThreads::Logic_0);
+    }
+
+private:
+    enum class State : std::uint8_t {
+        Start,
+        Finish,
+    };
+
+    af::TaskResult run() override {
+        switch (state_) {
+        case State::Start:
+            (*seen_)[0].store(Runtime::current_thread_index(), std::memory_order_release);
+            start_ = std::chrono::steady_clock::now();
+            state_ = State::Finish;
+            return pending_after(TestThreads::DB_0, delay_);
+
+        case State::Finish: {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start_);
+            elapsed_ms_->store(elapsed.count(), std::memory_order_release);
+            (*seen_)[1].store(Runtime::current_thread_index(), std::memory_order_release);
+            completed_->fetch_add(1, std::memory_order_release);
+            return done();
+        }
+        }
+
+        return failed();
+    }
+
+    State state_{State::Start};
+    std::chrono::milliseconds delay_{0};
+    std::chrono::steady_clock::time_point start_{};
+    std::atomic<int> *completed_{nullptr};
+    std::array<std::atomic<std::uint16_t>, 2> *seen_{nullptr};
+    std::atomic<std::int64_t> *elapsed_ms_{nullptr};
+};
+
 static_assert(!std::is_default_constructible_v<OneShotTask>);
 static_assert(!std::is_constructible_v<UnscheduledTask, std::atomic<int> *>);

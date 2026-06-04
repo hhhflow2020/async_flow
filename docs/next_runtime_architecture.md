@@ -156,10 +156,13 @@ struct timer_config {
     std::chrono::milliseconds tick = 1ms;
     std::size_t wheel_slots = 4096;
     std::size_t drain_budget = 256;
+    std::size_t initial_reserve = 1024;
 };
 ```
 
-每个 executor 自己拥有 timer wheel。跨线程注册定时器时，调度注册操作到目标 executor。
+每个 executor 自己拥有 timer 结构。跨线程注册定时器时，先把 task 以 `TimerArming` 状态投递到目标 executor 的同一个 intrusive MPSC inbox，再由目标 executor 在线程内挂入本地 timer 结构，因此 timer 数据结构不需要锁。
+
+当前实现先使用每 executor 本地 min-heap，按 deadline 和 arm sequence 排序，配置项对应 `timer_drain_budget` 和 `timer_reserve` traits。后续可以在不改变 task API 和 executor 主循环的前提下，把 heap backend 替换成分层时间轮。
 
 ### reactor_config
 
@@ -227,7 +230,7 @@ CPU executor 循环：
 drain task queue with budget
 run due timers with budget
 run service tasks with budget
-empty -> futex park
+empty -> futex park or timed futex wait until nearest timer
 ```
 
 IO executor 循环：
@@ -266,6 +269,10 @@ schedule_after(duration delay);
 schedule_after(thread_ref target, duration delay);
 schedule_at(time_point time);
 schedule_at(thread_ref target, time_point time);
+pending_after(duration delay);
+pending_after(thread_ref target, duration delay);
+pending_at(time_point time);
+pending_at(thread_ref target, time_point time);
 reschedule();
 done();
 cancel();
@@ -299,7 +306,15 @@ local cache
 
 ## Timer
 
-每个 executor 独立管理 timer wheel。`schedule_after()` 和 `schedule_at()` 会把 task 挂到目标 executor 的 timer wheel。跨线程调用时先把注册操作投递到目标 executor。
+每个 executor 独立管理 timer。`schedule_after()`、`schedule_at()`、`pending_after()` 和 `pending_at()` 会把 task 挂到目标 executor 的 timer 结构。跨线程调用时不直接修改目标 timer，而是先投递到目标 executor 的 inbox，目标线程再完成 timer arm。
+
+当前状态机：
+
+```text
+Created/Pending -> TimerArming -> TimerPending -> Queued -> Starting -> Running
+```
+
+`TimerArming` 表示 task 已经进入目标 executor inbox，等待目标线程挂 timer。`TimerPending` 表示 task 已在目标 executor 本地 timer heap 中。timer 到期后目标 executor 将 task 转为 `Queued` 并直接执行。`StopImmediately` 退出时会取消仍在 timer heap 中的 task 并释放生命周期引用。
 
 IO executor 的 `reactor.poll(timeout)` 使用最近 timer 的到期时间作为 timeout。这样不会额外创建 timer 线程，也不会忙等。
 

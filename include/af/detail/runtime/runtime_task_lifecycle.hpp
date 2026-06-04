@@ -117,7 +117,9 @@ void AsyncRuntime<TraitsT>::cancel_registered_task(Task *task) noexcept {
         TaskState state = task->state_.load(std::memory_order_acquire);
         switch (state) {
         case TaskState::Pending:
-        case TaskState::Queued: {
+        case TaskState::Queued:
+        case TaskState::TimerArming:
+        case TaskState::TimerPending: {
             TaskState expected = state;
             if (task->state_.compare_exchange_weak(expected, TaskState::Done,
                                                    std::memory_order_acq_rel,

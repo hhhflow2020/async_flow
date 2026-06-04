@@ -10,7 +10,9 @@ namespace af::detail {
 
 template <typename RuntimeT, typename TraitsT>
 Executor<RuntimeT, TraitsT>::Executor(std::uint16_t index)
-    : index_(index), kind_(thread_kind(thread_from_index(index))) {}
+    : index_(index), kind_(thread_kind(thread_from_index(index))) {
+    timers_.reserve(timer_reserve);
+}
 
 template <typename RuntimeT, typename TraitsT> Executor<RuntimeT, TraitsT>::~Executor() {
     close_io_backend();
