@@ -5,82 +5,79 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <thread>
 #include <vector>
 
 #include "af/detail/log/async_logger.hpp"
 #include "af/detail/runtime/runtime_common_state.hpp"
+#include "af/detail/runtime/runtime_service_task.hpp"
 #include "af/detail/runtime/timed_atomic_wait.hpp"
 #include "af/task.hpp"
 
 namespace af::detail {
 
-template <typename RuntimeT> class RuntimeAsyncLogConsumerTask final : public RuntimeT::Task {
+enum class RuntimeAsyncLogConsumerControlOperation : std::uint8_t {
+    Register,
+    Unregister,
+};
+
+struct RuntimeAsyncLogConsumerControlCompletion {
+    std::atomic<bool> done{false};
+    std::atomic<bool> ok{false};
+};
+
+template <typename RuntimeT>
+class RuntimeAsyncLogConsumerControlTask final : public RuntimeT::Task {
 public:
     using TaskBase = typename RuntimeT::Task;
     using Controller = RuntimeAsyncLogConsumerController<RuntimeT>;
 
-    explicit RuntimeAsyncLogConsumerTask(typename TaskBase::FactoryToken token) : TaskBase(token) {}
+    explicit RuntimeAsyncLogConsumerControlTask(typename TaskBase::FactoryToken token)
+        : TaskBase(token) {}
 
-    [[nodiscard]] bool start(Controller *controller) noexcept {
+    [[nodiscard]] bool do_it(Controller *controller,
+                             RuntimeAsyncLogConsumerControlOperation operation,
+                             RuntimeAsyncLogConsumerControlCompletion *completion) noexcept {
         controller_ = controller;
-        if (!reserve_batch()) {
+        operation_ = operation;
+        completion_ = completion;
+        if (controller_ == nullptr || completion_ == nullptr) [[unlikely]] {
             return false;
         }
         return this->schedule(controller_->thread());
     }
 
-    [[nodiscard]] bool wake() noexcept {
-        return controller_ != nullptr && this->schedule(controller_->thread());
+    TaskResult run() override {
+        bool ok = false;
+        if (controller_ != nullptr) [[likely]] {
+            ok = controller_->run_control(operation_);
+        }
+        if (completion_ != nullptr) {
+            completion_->ok.store(ok, std::memory_order_release);
+            completion_->done.store(true, std::memory_order_release);
+        }
+        return this->done();
     }
 
 private:
-    [[nodiscard]] bool reserve_batch() noexcept {
-        try {
-            batch_.reserve(controller_->max_batch_size());
-            return true;
-        } catch (...) {
-            return false;
-        }
-    }
-
-    TaskResult run() override {
-        if (controller_ == nullptr) [[unlikely]] {
-            return this->done();
-        }
-
-        controller_->mark_running();
-        controller_->drain_some(batch_);
-
-        if (controller_->stop_requested() && controller_->pending_record_count() == 0U) {
-            controller_->mark_finished();
-            return this->done();
-        }
-
-        if (controller_->ready_record_count() != 0U) {
-            return this->again();
-        }
-        if (controller_->mark_idle_or_continue()) {
-            return this->again();
-        }
-        return this->pending();
-    }
-
     Controller *controller_{nullptr};
-    std::vector<LogRecord *> batch_;
+    RuntimeAsyncLogConsumerControlOperation operation_{
+        RuntimeAsyncLogConsumerControlOperation::Register};
+    RuntimeAsyncLogConsumerControlCompletion *completion_{nullptr};
 };
 
 template <typename RuntimeT>
-class RuntimeAsyncLogConsumerController final : public AsyncLogConsumerWakeTarget,
+class RuntimeAsyncLogConsumerController final : public RuntimeServiceTask,
+                                                public AsyncLogConsumerWakeTarget,
                                                 public AsyncLogConsumerController {
 public:
     using Thread = typename RuntimeT::Thread;
-    using Task = RuntimeAsyncLogConsumerTask<RuntimeT>;
+    using ControlTask = RuntimeAsyncLogConsumerControlTask<RuntimeT>;
 
     RuntimeAsyncLogConsumerController(std::shared_ptr<AsyncLogger> logger, Thread thread,
                                       std::size_t max_batches_per_run)
         : logger_(std::move(logger)), thread_(thread),
-          max_batches_per_run_(max_batches_per_run == 0U ? 1U : max_batches_per_run),
-          task_(RuntimeT::template make_task<Task>()) {
+          max_batches_per_run_(max_batches_per_run == 0U ? 1U : max_batches_per_run) {
         AF_ASSERT(logger_ != nullptr);
     }
 
@@ -96,36 +93,42 @@ public:
         if (RuntimeT::thread_index(thread_) >= RuntimeT::thread_count) [[unlikely]] {
             return false;
         }
-        return logger_->start_bound_consumer(*this);
+        if (!reserve_batch()) {
+            return false;
+        }
+        if (!logger_->start_bound_consumer(*this)) {
+            return false;
+        }
+        if (!run_control_and_wait(RuntimeAsyncLogConsumerControlOperation::Register)) {
+            logger_->stop_bound_consumer_admission();
+            logger_->finish_bound_consumer_shutdown();
+            return false;
+        }
+        static_cast<void>(wake_async_log_consumer());
+        return true;
     }
 
     [[nodiscard]] bool wake_async_log_consumer() noexcept override {
-        if (!task_ || finished_.load(std::memory_order_acquire)) {
+        if (!registered_.load(std::memory_order_acquire) ||
+            finished_.load(std::memory_order_acquire)) {
+            return false;
+        }
+        return RuntimeT::wake_service_tasks(thread_);
+    }
+
+    [[nodiscard]] bool run_service(std::size_t budget) noexcept override {
+        if (finished_.load(std::memory_order_acquire)) {
             return false;
         }
 
-        const WakeState previous =
-            wake_state_.exchange(WakeState::Active, std::memory_order_acq_rel);
-        if (previous != WakeState::Idle) {
-            return true;
+        const std::size_t effective_budget = effective_drain_budget(budget);
+        const bool did_work = logger_->drain_some(batch_, effective_budget);
+        if (logger_->consumer_stop_requested() && logger_->pending_record_count() == 0U) {
+            mark_finished();
+            return did_work;
         }
 
-        bool start_expected = false;
-        if (task_started_.compare_exchange_strong(start_expected, true, std::memory_order_acq_rel,
-                                                  std::memory_order_acquire)) {
-            if (task_->start(this)) {
-                return true;
-            }
-            task_started_.store(false, std::memory_order_release);
-            wake_state_.store(previous, std::memory_order_release);
-            return false;
-        }
-
-        if (task_->wake()) {
-            return true;
-        }
-        wake_state_.store(previous, std::memory_order_release);
-        return false;
+        return did_work || logger_->ready_record_count() != 0U;
     }
 
     void shutdown() noexcept override {
@@ -136,15 +139,80 @@ public:
         }
 
         logger_->stop_bound_consumer_admission();
-        if (!task_started_.load(std::memory_order_acquire) &&
-            logger_->pending_record_count() == 0U) {
+        if (!registered_.load(std::memory_order_acquire) && logger_->pending_record_count() == 0U) {
             mark_finished();
-            task_.reset();
             logger_->finish_bound_consumer_shutdown();
             return;
         }
 
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        drain_until_finished(deadline);
+
+        if (registered_.load(std::memory_order_acquire)) {
+            static_cast<void>(
+                run_control_and_wait(RuntimeAsyncLogConsumerControlOperation::Unregister));
+        }
+        logger_->finish_bound_consumer_shutdown();
+    }
+
+    [[nodiscard]] Thread thread() const noexcept {
+        return thread_;
+    }
+
+    [[nodiscard]] bool run_control(RuntimeAsyncLogConsumerControlOperation operation) noexcept {
+        switch (operation) {
+        case RuntimeAsyncLogConsumerControlOperation::Register: {
+            const bool ok = RuntimeT::register_service_task(thread_, this);
+            if (ok) {
+                registered_.store(true, std::memory_order_release);
+            }
+            return ok;
+        }
+        case RuntimeAsyncLogConsumerControlOperation::Unregister: {
+            const bool ok = RuntimeT::unregister_service_task(thread_, this);
+            if (ok) {
+                registered_.store(false, std::memory_order_release);
+            }
+            return ok;
+        }
+        }
+        return false;
+    }
+
+private:
+    [[nodiscard]] bool reserve_batch() noexcept {
+        try {
+            batch_.reserve(logger_->max_batch_size());
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    [[nodiscard]] std::size_t effective_drain_budget(std::size_t service_budget) const noexcept {
+        if (service_budget == 0U || service_budget > max_batches_per_run_) {
+            return max_batches_per_run_;
+        }
+        return service_budget;
+    }
+
+    [[nodiscard]] bool is_owner_runtime_thread() const noexcept {
+        return RuntimeT::is_runtime_thread() &&
+               RuntimeT::current_thread_index() == RuntimeT::thread_index(thread_);
+    }
+
+    void drain_until_finished(std::chrono::steady_clock::time_point deadline) noexcept {
+        if (is_owner_runtime_thread()) {
+            while (!finished_.load(std::memory_order_acquire) &&
+                   std::chrono::steady_clock::now() < deadline) {
+                const bool did_work = run_service(max_batches_per_run_);
+                if (!did_work && !finished_.load(std::memory_order_acquire)) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+            }
+            return;
+        }
+
         while (!finished_.load(std::memory_order_acquire) &&
                std::chrono::steady_clock::now() < deadline) {
             static_cast<void>(wake_async_log_consumer());
@@ -154,81 +222,45 @@ public:
             }
             static_cast<void>(wait_until_finished(retry_deadline));
         }
-        task_.reset();
-        logger_->finish_bound_consumer_shutdown();
     }
 
-    [[nodiscard]] Thread thread() const noexcept {
-        return thread_;
-    }
-
-    [[nodiscard]] std::size_t max_batches_per_run() const noexcept {
-        return max_batches_per_run_;
-    }
-
-    [[nodiscard]] std::size_t max_batch_size() const noexcept {
-        return logger_->max_batch_size();
-    }
-
-    [[nodiscard]] std::size_t pending_record_count() const noexcept {
-        return logger_->pending_record_count();
-    }
-
-    [[nodiscard]] std::size_t ready_record_count() const noexcept {
-        return logger_->ready_record_count();
-    }
-
-    [[nodiscard]] bool stop_requested() const noexcept {
-        return logger_->consumer_stop_requested();
-    }
-
-    void drain_some(std::vector<LogRecord *> &batch) noexcept {
-        static_cast<void>(logger_->drain_some(batch, max_batches_per_run_));
-    }
-
-    void mark_running() noexcept {
-        wake_state_.store(WakeState::Active, std::memory_order_release);
-    }
-
-    [[nodiscard]] bool mark_idle_or_continue() noexcept {
-        wake_state_.store(WakeState::Parking, std::memory_order_release);
-        if (ready_record_count() == 0U && !(stop_requested() && pending_record_count() == 0U)) {
-            WakeState expected = WakeState::Parking;
-            if (wake_state_.compare_exchange_strong(expected, WakeState::Idle,
-                                                    std::memory_order_acq_rel,
-                                                    std::memory_order_acquire)) {
-                return false;
-            }
-            return true;
+    [[nodiscard]] bool
+    run_control_and_wait(RuntimeAsyncLogConsumerControlOperation operation) noexcept {
+        if (is_owner_runtime_thread()) {
+            return run_control(operation);
         }
-        wake_state_.store(WakeState::Active, std::memory_order_release);
-        return true;
-    }
 
-    void mark_finished() noexcept {
-        wake_state_.store(WakeState::Active, std::memory_order_release);
-        finished_.store(true, std::memory_order_release);
-        finished_.notify_all();
-    }
+        auto task = RuntimeT::template try_make_task<ControlTask>();
+        if (!task) {
+            return false;
+        }
 
-private:
-    enum class WakeState : std::uint8_t {
-        Idle,
-        Active,
-        Parking,
-    };
+        RuntimeAsyncLogConsumerControlCompletion completion;
+        if (!task->do_it(this, operation, &completion)) {
+            return false;
+        }
+
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        if (!wait_until_atomic_flag_true(completion.done, deadline)) {
+            return false;
+        }
+        return completion.ok.load(std::memory_order_acquire);
+    }
 
     [[nodiscard]] bool
     wait_until_finished(std::chrono::steady_clock::time_point deadline) noexcept {
         return wait_until_atomic_flag_true(finished_, deadline);
     }
 
+    void mark_finished() noexcept {
+        finished_.store(true, std::memory_order_release);
+    }
+
     std::shared_ptr<AsyncLogger> logger_;
     Thread thread_;
     std::size_t max_batches_per_run_;
-    typename RuntimeT::template TaskHandle<Task> task_;
-    CacheLineAtomic<WakeState> wake_state_{WakeState::Idle};
-    CacheLineAtomic<bool> task_started_{false};
+    std::vector<LogRecord *> batch_;
+    CacheLineAtomic<bool> registered_{false};
     CacheLineAtomic<bool> shutdown_started_{false};
     CacheLineAtomic<bool> finished_{false};
 };

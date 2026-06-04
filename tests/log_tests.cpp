@@ -440,6 +440,29 @@ private:
     const char *marker_{nullptr};
 };
 
+class RuntimeStopLoggingTask final : public LogTestTaskBase {
+public:
+    explicit RuntimeStopLoggingTask(LogTestTaskBase::FactoryToken token) : LogTestTaskBase(token) {}
+
+    bool do_it(LogTestRuntime::Thread target, af::AsyncLogHandle *logging,
+               std::atomic<int> *completed) {
+        logging_ = logging;
+        completed_ = completed;
+        return schedule(target);
+    }
+
+private:
+    af::TaskResult run() override {
+        LOG(INFO) << "runtime owner stops async logging";
+        logging_->stop();
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    af::AsyncLogHandle *logging_{nullptr};
+    std::atomic<int> *completed_{nullptr};
+};
+
 class RuntimeTaskIdLogTask final : public LogTestTaskBase {
 public:
     explicit RuntimeTaskIdLogTask(LogTestTaskBase::FactoryToken token) : LogTestTaskBase(token) {}
@@ -1069,6 +1092,29 @@ TEST(LogTests, RuntimeAwareSinkDrainsOnConfiguredRuntimeThread) {
     EXPECT_TRUE(observing_backend->ran_on_runtime_thread());
     EXPECT_EQ(observing_backend->observed_thread_index(),
               observing_backend->expected_thread_index());
+}
+
+TEST(LogTests, RuntimeAwareSinkCanStopFromConsumerRuntimeThread) {
+    LogTestRuntimeGuard runtime_guard;
+
+    auto backend = std::make_unique<CapturingLogBackend>();
+    auto *capturing_backend = backend.get();
+
+    af::AsyncLogConfig config;
+    config.queue_capacity = 16;
+    config.max_batch_size = 4;
+    config.backends.push_back(std::move(backend));
+    auto logging = af::start_async_logging_for_runtime<LogTestRuntime>(std::move(config),
+                                                                       LogTestThreads::Runtime_1);
+
+    std::atomic<int> completed{0};
+    ASSERT_TRUE(LogTestRuntime::start_task<RuntimeStopLoggingTask>(LogTestThreads::Runtime_1,
+                                                                   logging.get(), &completed));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+
+    const std::vector<std::string> messages = capturing_backend->messages();
+    ASSERT_EQ(messages.size(), 1U);
+    EXPECT_NE(messages.front().find("runtime owner stops async logging"), std::string::npos);
 }
 
 TEST(LogTests, RuntimeAwareSinkDefaultConsumerPrefersIoThread) {
