@@ -246,6 +246,98 @@ private:
     std::atomic<int> phase_{0};
 };
 
+class DelayedRuntimeTask final : public af::runtime_task {
+public:
+    DelayedRuntimeTask(af::runtime_task::factory_token token, af::runtime &owner,
+                       std::atomic<int> &counter, std::atomic<std::uint16_t> &observed_thread,
+                       std::atomic<long long> &elapsed_ns)
+        : af::runtime_task(token, owner), counter_(counter), observed_thread_(observed_thread),
+          elapsed_ns_(elapsed_ns) {}
+
+    template <typename Rep, typename Period>
+    [[nodiscard]] bool do_it(std::uint16_t thread,
+                             std::chrono::duration<Rep, Period> delay) noexcept {
+        start_ = std::chrono::steady_clock::now();
+        return schedule_after(thread, delay);
+    }
+
+private:
+    af::task_result run_task() noexcept override {
+        const auto elapsed = std::chrono::steady_clock::now() - start_;
+        elapsed_ns_.store(std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count(),
+                          std::memory_order_release);
+        observed_thread_.store(af::runtime::current_thread_index(), std::memory_order_release);
+        counter_.fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int> &counter_;
+    std::atomic<std::uint16_t> &observed_thread_;
+    std::atomic<long long> &elapsed_ns_;
+    std::chrono::steady_clock::time_point start_{};
+};
+
+class DelayedTwoHopRuntimeTask final : public af::runtime_task {
+public:
+    DelayedTwoHopRuntimeTask(af::runtime_task::factory_token token, af::runtime &owner,
+                             std::uint16_t second_thread, std::atomic<int> &counter,
+                             std::atomic<std::uint16_t> &first_thread,
+                             std::atomic<std::uint16_t> &second_observed_thread,
+                             std::atomic<bool> &next_schedule_ok)
+        : af::runtime_task(token, owner), second_thread_(second_thread), counter_(counter),
+          first_thread_(first_thread), second_observed_thread_(second_observed_thread),
+          next_schedule_ok_(next_schedule_ok) {}
+
+    [[nodiscard]] bool do_it(std::uint16_t first_thread) noexcept {
+        return schedule_to(first_thread);
+    }
+
+private:
+    af::task_result run_task() noexcept override {
+        const int phase = phase_.fetch_add(1, std::memory_order_acq_rel);
+        if (phase == 0) {
+            first_thread_.store(af::runtime::current_thread_index(), std::memory_order_release);
+            next_schedule_ok_.store(schedule_after(second_thread_, std::chrono::milliseconds(10)),
+                                    std::memory_order_release);
+            return pending();
+        }
+
+        second_observed_thread_.store(af::runtime::current_thread_index(),
+                                      std::memory_order_release);
+        counter_.fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::uint16_t second_thread_;
+    std::atomic<int> &counter_;
+    std::atomic<std::uint16_t> &first_thread_;
+    std::atomic<std::uint16_t> &second_observed_thread_;
+    std::atomic<bool> &next_schedule_ok_;
+    std::atomic<int> phase_{0};
+};
+
+class CancelledDelayedRuntimeTask final : public af::runtime_task {
+public:
+    CancelledDelayedRuntimeTask(af::runtime_task::factory_token token, af::runtime &owner,
+                                std::atomic<int> &destroyed)
+        : af::runtime_task(token, owner), destroyed_(destroyed) {}
+
+    ~CancelledDelayedRuntimeTask() override {
+        destroyed_.fetch_add(1, std::memory_order_release);
+    }
+
+    [[nodiscard]] bool do_it(std::uint16_t thread) noexcept {
+        return schedule_after(thread, std::chrono::hours(1));
+    }
+
+private:
+    af::task_result run_task() noexcept override {
+        return done();
+    }
+
+    std::atomic<int> &destroyed_;
+};
+
 } // namespace
 
 TEST(RuntimeConfigTests, PreservesThreadCountsAboveSixtyFour) {
@@ -633,4 +725,87 @@ TEST(RuntimeConfigTests, RuntimeTaskDefersRunningScheduleUntilRunReturns) {
     EXPECT_EQ(second_thread.load(std::memory_order_acquire), cpu1);
 
     runtime.stop();
+}
+
+TEST(RuntimeConfigTests, RuntimeTaskScheduleAfterRunsOnTargetThread) {
+    af::runtime_config config;
+    config.threads = {
+        af::io_threads("io", 1),
+        af::cpu_threads("logic", 1),
+    };
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    std::atomic<int> counter{0};
+    std::atomic<std::uint16_t> observed_thread{af::runtime_invalid_thread_index};
+    std::atomic<long long> elapsed_ns{0};
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 2));
+
+    const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
+    auto task = af::make_task<DelayedRuntimeTask>(runtime, counter, observed_thread, elapsed_ns);
+    ASSERT_TRUE(task->do_it(cpu_thread, std::chrono::milliseconds(20)));
+    task.reset();
+
+    ASSERT_TRUE(wait_for_counter(counter, 1));
+    EXPECT_EQ(observed_thread.load(std::memory_order_acquire), cpu_thread);
+    EXPECT_GE(elapsed_ns.load(std::memory_order_acquire), 5'000'000LL);
+
+    runtime.stop();
+}
+
+TEST(RuntimeConfigTests, RuntimeTaskCanRequestDelayedNextHopWhileRunning) {
+    af::runtime_config config;
+    config.threads = {
+        af::io_threads("io", 1),
+        af::cpu_threads("logic", 2),
+    };
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    std::atomic<int> counter{0};
+    std::atomic<std::uint16_t> first_thread{af::runtime_invalid_thread_index};
+    std::atomic<std::uint16_t> second_thread{af::runtime_invalid_thread_index};
+    std::atomic<bool> next_schedule_ok{false};
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 3));
+
+    const auto cpu0 = runtime.select_thread(af::thread_selector::cpu(0));
+    const auto cpu1 = runtime.select_thread(af::thread_selector::cpu(1));
+    auto task = af::make_task<DelayedTwoHopRuntimeTask>(runtime, cpu1, counter, first_thread,
+                                                        second_thread, next_schedule_ok);
+    ASSERT_TRUE(task->do_it(cpu0));
+    task.reset();
+
+    ASSERT_TRUE(wait_for_counter(counter, 1));
+    EXPECT_TRUE(next_schedule_ok.load(std::memory_order_acquire));
+    EXPECT_EQ(first_thread.load(std::memory_order_acquire), cpu0);
+    EXPECT_EQ(second_thread.load(std::memory_order_acquire), cpu1);
+
+    runtime.stop();
+}
+
+TEST(RuntimeConfigTests, RuntimeStopCancelsPendingDelayedTask) {
+    af::runtime_config config;
+    config.threads = {
+        af::io_threads("io", 1),
+        af::cpu_threads("logic", 1),
+    };
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    std::atomic<int> destroyed{0};
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 2));
+
+    const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
+    auto task = af::make_task<CancelledDelayedRuntimeTask>(runtime, destroyed);
+    ASSERT_TRUE(task->do_it(cpu_thread));
+    task.reset();
+
+    runtime.stop();
+    EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
 }

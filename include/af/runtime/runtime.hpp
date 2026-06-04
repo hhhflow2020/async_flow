@@ -1,8 +1,10 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -182,7 +184,10 @@ private:
     class executor {
     public:
         executor(runtime &owner, runtime_thread_info thread)
-            : owner_(owner), thread_(std::move(thread)) {}
+            : owner_(owner), thread_(std::move(thread)),
+              timer_drain_budget_(owner_.config().scheduler.timer_drain_budget) {
+            timers_.reserve(owner_.config().timer.initial_reserve);
+        }
 
         executor(const executor &) = delete;
         executor &operator=(const executor &) = delete;
@@ -208,6 +213,19 @@ private:
             detail::atomic_notify_all(wake_epoch_);
         }
 
+        void arm_timer(runtime_task *task) noexcept {
+            if (!detail::runtime_task_access::mark_timer_pending(task)) {
+                return;
+            }
+            try {
+                timers_.push_back(TimerEntry{detail::runtime_task_access::timer_deadline_ns(task),
+                                             next_timer_sequence_++, task});
+                std::push_heap(timers_.begin(), timers_.end(), timer_entry_after);
+            } catch (...) {
+                detail::runtime_task_access::cancel_timer(task);
+            }
+        }
+
         void join() noexcept {
             if (!worker_.joinable()) {
                 return;
@@ -221,6 +239,7 @@ private:
     private:
         void run_loop() noexcept {
             current_runtime_ = &owner_;
+            current_executor_ = this;
             current_thread_index_ = thread_.index;
             if (thread_.set_os_thread_name) {
                 detail::set_current_thread_name(thread_.name, thread_.group_offset);
@@ -228,7 +247,8 @@ private:
 
             owner_.on_executor_started();
             for (;;) {
-                const bool did_work = drain_inbox();
+                bool did_work = drain_inbox();
+                did_work = run_due_timers() || did_work;
                 if (stop_requested_.load(std::memory_order_acquire) && !did_work) {
                     break;
                 }
@@ -239,10 +259,15 @@ private:
                 if (!inbox_.empty()) {
                     continue;
                 }
-                detail::atomic_wait_value(wake_epoch_, observed, std::memory_order_acquire);
+                if (run_due_timers()) {
+                    continue;
+                }
+                wait_for_wake_or_timer(observed);
             }
+            cancel_timers();
             owner_.on_executor_stopped();
             current_thread_index_ = runtime_invalid_thread_index;
+            current_executor_ = nullptr;
             current_runtime_ = nullptr;
         }
 
@@ -255,9 +280,90 @@ private:
             return did_work;
         }
 
+        struct TimerEntry {
+            std::int64_t deadline_ns{0};
+            std::uint64_t sequence{0};
+            runtime_task *task{nullptr};
+        };
+
+        [[nodiscard]] static bool timer_entry_after(const TimerEntry &left,
+                                                    const TimerEntry &right) noexcept {
+            if (left.deadline_ns != right.deadline_ns) {
+                return left.deadline_ns > right.deadline_ns;
+            }
+            return left.sequence > right.sequence;
+        }
+
+        [[nodiscard]] static std::int64_t steady_now_ns() noexcept {
+            return std::chrono::duration_cast<std::chrono::nanoseconds>(
+                       std::chrono::steady_clock::now().time_since_epoch())
+                .count();
+        }
+
+        [[nodiscard]] std::chrono::nanoseconds timer_wait_duration() const noexcept {
+            if (timers_.empty()) {
+                return std::chrono::nanoseconds::max();
+            }
+
+            const std::int64_t now = steady_now_ns();
+            const std::int64_t deadline = timers_.front().deadline_ns;
+            if (deadline <= now) {
+                return std::chrono::nanoseconds(0);
+            }
+            return std::chrono::nanoseconds(deadline - now);
+        }
+
+        void wait_for_wake_or_timer(std::uint32_t observed) noexcept {
+            const auto timeout = timer_wait_duration();
+            if (timeout == std::chrono::nanoseconds(0)) {
+                return;
+            }
+            if (timeout == std::chrono::nanoseconds::max()) {
+                detail::atomic_wait_value(wake_epoch_, observed, std::memory_order_acquire);
+                return;
+            }
+            static_cast<void>(detail::atomic_wait_value_for(wake_epoch_, observed, timeout,
+                                                            std::memory_order_acquire));
+        }
+
+        [[nodiscard]] bool run_due_timers() noexcept {
+            bool did_work = false;
+            std::size_t drained = 0;
+            while (drained < timer_drain_budget_ && !timers_.empty()) {
+                const std::int64_t now = steady_now_ns();
+                if (timers_.front().deadline_ns > now) {
+                    break;
+                }
+
+                std::pop_heap(timers_.begin(), timers_.end(), timer_entry_after);
+                TimerEntry entry = timers_.back();
+                timers_.pop_back();
+                ++drained;
+
+                runtime_task *task = entry.task;
+                if (task == nullptr || !detail::runtime_task_access::mark_timer_ready(task)) {
+                    continue;
+                }
+
+                did_work = true;
+                static_cast<runtime_work *>(task)->run(owner_);
+            }
+            return did_work;
+        }
+
+        void cancel_timers() noexcept {
+            for (TimerEntry &entry : timers_) {
+                detail::runtime_task_access::cancel_timer(entry.task);
+            }
+            timers_.clear();
+        }
+
         runtime &owner_;
         runtime_thread_info thread_;
         detail::IntrusiveMpscQueue<runtime_work> inbox_;
+        std::vector<TimerEntry> timers_;
+        std::size_t timer_drain_budget_{256};
+        std::uint64_t next_timer_sequence_{0};
         std::atomic<std::uint32_t> wake_epoch_{0};
         std::atomic<bool> stop_requested_{false};
         std::thread worker_;
@@ -324,6 +430,14 @@ private:
         detail::atomic_notify_all(active_epoch_);
     }
 
+    void arm_timer_on_current_executor(runtime_task *task) noexcept {
+        if (current_runtime_ != this || current_executor_ == nullptr) {
+            detail::runtime_task_access::cancel_timer(task);
+            return;
+        }
+        current_executor_->arm_timer(task);
+    }
+
     [[nodiscard]] static task_id_type exchange_current_task_id(task_id_type next) noexcept {
         const task_id_type previous = current_task_id_;
         current_task_id_ = next;
@@ -338,6 +452,7 @@ private:
     std::atomic<std::uint32_t> active_epoch_{0};
 
     inline static thread_local runtime *current_runtime_{nullptr};
+    inline static thread_local executor *current_executor_{nullptr};
     inline static thread_local thread_index current_thread_index_{runtime_invalid_thread_index};
     inline static thread_local task_id_type current_task_id_{invalid_task_id};
 

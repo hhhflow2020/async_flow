@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <limits>
 #include <type_traits>
@@ -15,6 +16,10 @@ namespace af {
 
 class runtime;
 class runtime_task;
+
+namespace detail {
+struct runtime_task_access;
+} // namespace detail
 
 using runtime_task_id = std::uint64_t;
 inline constexpr runtime_task_id runtime_invalid_task_id = 0;
@@ -74,6 +79,24 @@ protected:
 
     [[nodiscard]] bool schedule_to(std::uint16_t thread) noexcept;
 
+    template <typename Rep, typename Period>
+    [[nodiscard]] bool schedule_after(std::uint16_t thread,
+                                      std::chrono::duration<Rep, Period> delay) noexcept {
+        return schedule_after_ns(thread, normalize_delay(delay));
+    }
+
+    template <typename Rep, typename Period>
+    [[nodiscard]] bool schedule_after(std::chrono::duration<Rep, Period> delay) noexcept;
+
+    template <typename Clock, typename Duration>
+    [[nodiscard]] bool schedule_at(std::uint16_t thread,
+                                   std::chrono::time_point<Clock, Duration> time) noexcept {
+        return schedule_after_ns(thread, delay_until(time));
+    }
+
+    template <typename Clock, typename Duration>
+    [[nodiscard]] bool schedule_at(std::chrono::time_point<Clock, Duration> time) noexcept;
+
     task_result pending_to(std::uint16_t thread) noexcept {
         return schedule_to(thread) ? task_result::pending : task_result::cancelled;
     }
@@ -81,6 +104,24 @@ protected:
     task_result pending(std::uint16_t thread) noexcept {
         return pending_to(thread);
     }
+
+    template <typename Rep, typename Period>
+    task_result pending_after(std::uint16_t thread,
+                              std::chrono::duration<Rep, Period> delay) noexcept {
+        return schedule_after(thread, delay) ? task_result::pending : task_result::cancelled;
+    }
+
+    template <typename Rep, typename Period>
+    task_result pending_after(std::chrono::duration<Rep, Period> delay) noexcept;
+
+    template <typename Clock, typename Duration>
+    task_result pending_at(std::uint16_t thread,
+                           std::chrono::time_point<Clock, Duration> time) noexcept {
+        return schedule_at(thread, time) ? task_result::pending : task_result::cancelled;
+    }
+
+    template <typename Clock, typename Duration>
+    task_result pending_at(std::chrono::time_point<Clock, Duration> time) noexcept;
 
     [[nodiscard]] static constexpr task_result done() noexcept {
         return task_result::done;
@@ -105,6 +146,7 @@ protected:
 private:
     static constexpr std::uint32_t no_requested_thread = std::numeric_limits<std::uint32_t>::max();
     static constexpr task_id_type task_id_block_size = 1024;
+    static constexpr std::int64_t no_timer_deadline_ns = 0;
 
     virtual task_result run_task() noexcept = 0;
 
@@ -129,9 +171,20 @@ private:
     }
 
     [[nodiscard]] bool request_schedule_after_running(std::uint16_t thread) noexcept;
+    [[nodiscard]] bool request_timer_after_running(std::uint16_t thread,
+                                                   std::int64_t deadline_ns) noexcept;
     [[nodiscard]] bool enqueue_from_state(task_state previous, std::uint16_t thread) noexcept;
+    [[nodiscard]] bool enqueue_timer_from_state(task_state previous, std::uint16_t thread,
+                                                std::int64_t deadline_ns) noexcept;
     [[nodiscard]] bool enqueue_next_from_running(std::uint16_t thread) noexcept;
+    [[nodiscard]] bool enqueue_timer_next_from_running(std::uint16_t thread,
+                                                       std::int64_t deadline_ns) noexcept;
+    [[nodiscard]] bool mark_timer_pending() noexcept;
+    [[nodiscard]] bool mark_timer_ready() noexcept;
+    void cancel_timer() noexcept;
     void finish_after_run(task_result result) noexcept;
+    [[nodiscard]] bool schedule_after_ns(std::uint16_t thread,
+                                         std::chrono::nanoseconds delay) noexcept;
 
     [[nodiscard]] static task_id_type allocate_task_id() noexcept {
         thread_local task_id_type next_local_task_id = invalid_task_id;
@@ -144,13 +197,53 @@ private:
         return next_local_task_id++;
     }
 
+    template <typename Rep, typename Period>
+    [[nodiscard]] static std::chrono::nanoseconds
+    normalize_delay(std::chrono::duration<Rep, Period> delay) noexcept {
+        if (delay <= delay.zero()) {
+            return std::chrono::nanoseconds(0);
+        }
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(delay);
+    }
+
+    template <typename Clock, typename Duration>
+    [[nodiscard]] static std::chrono::nanoseconds
+    delay_until(std::chrono::time_point<Clock, Duration> time) noexcept {
+        const auto now = Clock::now();
+        if (time <= now) {
+            return std::chrono::nanoseconds(0);
+        }
+        return normalize_delay(time - now);
+    }
+
+    [[nodiscard]] static std::int64_t steady_now_ns() noexcept {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(
+                   std::chrono::steady_clock::now().time_since_epoch())
+            .count();
+    }
+
+    [[nodiscard]] static std::int64_t
+    timer_deadline_after(std::chrono::nanoseconds delay) noexcept {
+        const std::int64_t now = steady_now_ns();
+        const std::int64_t count = delay.count();
+        if (count <= 0) {
+            return now;
+        }
+        if (count > std::numeric_limits<std::int64_t>::max() - now) {
+            return std::numeric_limits<std::int64_t>::max();
+        }
+        return now + count;
+    }
+
     runtime *owner_{nullptr};
     std::atomic<task_state> state_{task_state::created};
     std::atomic<std::uint32_t> requested_thread_{no_requested_thread};
+    std::atomic<std::int64_t> requested_deadline_ns_{no_timer_deadline_ns};
     std::atomic<std::uint32_t> lifetime_refs_{1};
     alignas(detail::hardware_cache_line_size) static inline std::atomic<task_id_type> next_task_id_{
         1};
     task_id_type task_id_{invalid_task_id};
+    std::int64_t timer_deadline_ns_{no_timer_deadline_ns};
     destroy_fn destroy_{nullptr};
 
     template <typename TaskT> friend class runtime_task_handle;
@@ -160,7 +253,34 @@ private:
 
     template <typename TaskT, typename... Args>
     friend runtime_task_handle<TaskT> try_make_task(runtime &owner, Args &&...args) noexcept;
+
+    friend class runtime;
+    friend struct detail::runtime_task_access;
 };
+
+namespace detail {
+
+struct runtime_task_access {
+    [[nodiscard]] static bool mark_timer_pending(runtime_task *task) noexcept {
+        return task->mark_timer_pending();
+    }
+
+    [[nodiscard]] static bool mark_timer_ready(runtime_task *task) noexcept {
+        return task->mark_timer_ready();
+    }
+
+    [[nodiscard]] static std::int64_t timer_deadline_ns(const runtime_task *task) noexcept {
+        return task->timer_deadline_ns_;
+    }
+
+    static void cancel_timer(runtime_task *task) noexcept {
+        if (task != nullptr) {
+            task->cancel_timer();
+        }
+    }
+};
+
+} // namespace detail
 
 template <typename TaskT> class [[nodiscard]] runtime_task_handle {
 public:
