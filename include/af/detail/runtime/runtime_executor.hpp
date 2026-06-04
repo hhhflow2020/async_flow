@@ -81,8 +81,8 @@ public:
         return native_io_backend_available();
     }
 
-    [[nodiscard]] bool register_io_wait(int fd, std::uint32_t events, Task *task, IoResult *result,
-                                        bool prefer_rearm = false) noexcept;
+    [[nodiscard]] bool register_io_wait(int fd, std::uint32_t events, Task *task,
+                                        IoResult *result) noexcept;
     [[nodiscard]] bool cancel_io(IoOpState &state) noexcept;
 
     [[nodiscard]] bool register_net_channel(detail::NetIoChannel *channel,
@@ -201,7 +201,7 @@ private:
     [[nodiscard]] static std::uint32_t epoll_events_for_entry(const IoWaitEntry &entry) noexcept;
     [[nodiscard]] bool update_epoll_interest(int fd, const IoWaitEntry &entry) noexcept;
     [[nodiscard]] bool register_native_io_wait(int fd, std::uint32_t events, Task *task,
-                                               IoResult *result, bool prefer_rearm) noexcept;
+                                               IoResult *result) noexcept;
     [[nodiscard]] bool cancel_native_io_wait(IoOpState &state) noexcept;
 #elif AF_DETAIL_HAS_KQUEUE
     static constexpr uintptr_t kqueue_wake_ident = 1;
@@ -229,7 +229,7 @@ private:
     void clear_io_waits() noexcept;
     void reserve_native_io_wait_storage() noexcept;
     [[nodiscard]] bool register_native_io_wait(int fd, std::uint32_t events, Task *task,
-                                               IoResult *result, bool prefer_rearm) noexcept;
+                                               IoResult *result) noexcept;
     [[nodiscard]] bool cancel_native_io_wait(IoOpState &state) noexcept;
     [[nodiscard]] static int fill_kqueue_changes(int fd, std::uint32_t events,
                                                  IoWaitRegistration *registration,
@@ -258,10 +258,9 @@ private:
     }
 
     [[nodiscard]] bool register_native_io_wait(int fd, std::uint32_t events, Task *task,
-                                               IoResult *result, bool prefer_rearm) noexcept {
+                                               IoResult *result) noexcept {
         static_cast<void>(events);
         static_cast<void>(task);
-        static_cast<void>(prefer_rearm);
         return fail_io_result(result, fd, fd < 0 ? EBADF : ENOSYS);
     }
 

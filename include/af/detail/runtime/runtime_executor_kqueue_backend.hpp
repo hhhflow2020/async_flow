@@ -427,8 +427,7 @@ void Executor<RuntimeT, TraitsT>::reserve_native_io_wait_storage() noexcept {
 template <typename RuntimeT, typename TraitsT>
 [[nodiscard]] bool
 Executor<RuntimeT, TraitsT>::register_native_io_wait(int fd, std::uint32_t events, Task *task,
-                                                     IoResult *result, bool prefer_rearm) noexcept {
-    static_cast<void>(prefer_rearm);
+                                                     IoResult *result) noexcept {
     const bool unsupported_events = (events & (io_readable | io_writable)) == 0U;
     auto existing = io_waits_.find(fd);
     if (io_kqueue_fd_ < 0 || fd < 0 || events == 0U || unsupported_events ||
@@ -523,11 +522,11 @@ Executor<RuntimeT, TraitsT>::fill_kqueue_changes(int fd, std::uint32_t events,
     int count = 0;
     if ((events & io_readable) != 0U) {
         EV_SET(&changes[static_cast<std::size_t>(count++)], static_cast<uintptr_t>(fd), EVFILT_READ,
-               EV_ADD | EV_ONESHOT, 0, 0, registration);
+               EV_ADD, 0, 0, registration);
     }
     if ((events & io_writable) != 0U) {
         EV_SET(&changes[static_cast<std::size_t>(count++)], static_cast<uintptr_t>(fd),
-               EVFILT_WRITE, EV_ADD | EV_ONESHOT, 0, 0, registration);
+               EVFILT_WRITE, EV_ADD, 0, 0, registration);
     }
     return count;
 }

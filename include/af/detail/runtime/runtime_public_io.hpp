@@ -33,7 +33,7 @@ public:
     }
 
     [[nodiscard]] static bool io_wait(Thread thread, int fd, std::uint32_t events, Task *task,
-                                      IoResult *result, bool prefer_rearm = false) noexcept {
+                                      IoResult *result) noexcept {
         if (task == nullptr || result == nullptr || fd < 0 || events == 0U) {
             return fail_io_result(result, fd, fd < 0 ? EBADF : EINVAL);
         }
@@ -42,8 +42,7 @@ public:
         if (index >= RuntimeT::executors_.size()) {
             return fail_io_result(result, fd, EINVAL);
         }
-        return RuntimeT::executors_[index]->register_io_wait(fd, events, task, result,
-                                                             prefer_rearm);
+        return RuntimeT::executors_[index]->register_io_wait(fd, events, task, result);
     }
 
     [[nodiscard]] static bool cancel_io(Thread thread, IoOpState &state) noexcept {

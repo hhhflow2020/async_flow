@@ -1,6 +1,6 @@
 # Runtime 绑定日志设计
 
-> 本文记录当前实现和短期演进背景。下一代目标架构中，日志消费者仍绑定 runtime 线程，但以 service task 形式运行；日志队列保留 bounded MPSC，日志 record pool 改为可扩展 slab pool。完整目标方案见 [next_runtime_architecture.md](next_runtime_architecture.md)。
+> 本文记录当前实现。日志消费者绑定 runtime 线程，并以 service task 形式运行；日志队列保留 bounded MPSC，日志 record pool 使用可扩展 slab pool。完整目标方案见 [next_runtime_architecture.md](next_runtime_architecture.md)。
 
 异步日志消费者默认绑定到 runtime 线程，不创建独立消费线程。
 
@@ -16,9 +16,9 @@
 
 - runtime 线程生产日志：进入该线程对应的 bounded MPSC runtime lane。
 - 外部线程生产日志：进入 sharded bounded MPSC ingress。
-- consumer task 在绑定线程上批量 drain。
+- consumer service task 在绑定线程上批量 drain。
 - record pool 批量回收，减少逐条分配。
-- 文件、UDP、TCP 后端由 consumer task 调用。
+- 文件、UDP、TCP 后端由 consumer service task 调用。
 
 ## 顺序策略
 

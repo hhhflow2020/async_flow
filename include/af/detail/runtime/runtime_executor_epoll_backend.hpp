@@ -327,7 +327,7 @@ template <typename RuntimeT, typename TraitsT>
 template <typename RuntimeT, typename TraitsT>
 [[nodiscard]] std::uint32_t
 Executor<RuntimeT, TraitsT>::epoll_events_for_entry(const IoWaitEntry &entry) noexcept {
-    std::uint32_t native_events = EPOLLERR | EPOLLHUP | EPOLLONESHOT;
+    std::uint32_t native_events = EPOLLERR | EPOLLHUP;
     bool has_native_wait = false;
     if (io_wait_registration_uses_native_backend(entry.read)) {
         native_events |= EPOLLIN;
@@ -427,8 +427,7 @@ Executor<RuntimeT, TraitsT>::update_epoll_interest(int fd, const IoWaitEntry &en
 template <typename RuntimeT, typename TraitsT>
 [[nodiscard]] bool
 Executor<RuntimeT, TraitsT>::register_native_io_wait(int fd, std::uint32_t events, Task *task,
-                                                     IoResult *result, bool prefer_rearm) noexcept {
-    static_cast<void>(prefer_rearm);
+                                                     IoResult *result) noexcept {
     const bool unsupported_events = (events & (io_readable | io_writable)) == 0U;
     auto existing = io_waits_.find(fd);
     if (io_epoll_fd_ < 0 || fd < 0 || events == 0U || unsupported_events ||

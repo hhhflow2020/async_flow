@@ -8,8 +8,8 @@ namespace af::detail {
 
 template <typename RuntimeT, typename TraitsT>
 [[nodiscard]] bool Executor<RuntimeT, TraitsT>::register_io_wait(int fd, std::uint32_t events,
-                                                                 Task *task, IoResult *result,
-                                                                 bool prefer_rearm) noexcept {
+                                                                 Task *task,
+                                                                 IoResult *result) noexcept {
     AF_ASSERT(RuntimeT::current_thread_index_ == index_ &&
               "io_wait must be called from its IO thread");
     if (RuntimeT::current_thread_index_ != index_ || task == nullptr || result == nullptr) {
@@ -19,7 +19,7 @@ template <typename RuntimeT, typename TraitsT>
         return false;
     }
 
-    return register_native_io_wait(fd, events, task, result, prefer_rearm);
+    return register_native_io_wait(fd, events, task, result);
 }
 
 template <typename RuntimeT, typename TraitsT>

@@ -2,7 +2,7 @@
 
 > 本文记录当前网络 reactor 设计和已实现 API。下一代目标架构中，reactor 继续作为 epoll/kqueue/select 的统一抽象，线程类型只保留 `thread_kind::io` / `thread_kind::cpu`，跨线程 socket 操作通过 task 显式调度到 owner reactor，不再依赖隐藏 command queue。完整目标方案见 [next_runtime_architecture.md](next_runtime_architecture.md)。
 
-当前网络层以 native readiness 为主路径：Linux 使用 epoll，macOS/BSD 使用 kqueue。IO 线程直接管理 fd、事件、buffer 和连接状态，业务 task 只负责业务计算和跨线程流程。
+当前网络层以 native readiness 为主路径：Linux 使用 epoll，macOS/BSD 使用 kqueue，readiness 默认采用 LT 语义。IO 线程直接管理 fd、事件、buffer 和连接状态，业务 task 只负责业务计算和跨线程流程。
 
 ## 分层
 
@@ -29,6 +29,8 @@
 5. 被 eventfd/user event 唤醒后先 drain task，再处理 fd events。
 
 这样可以避免 IO 线程长期阻塞导致同线程 task 饥饿。
+
+网络 channel 不使用 one-shot rearm；读写事件回调负责按预算 drain 到 `EAGAIN` 或输出队列状态变化，再只在 interest 变化时更新 poller。task 级 `io_wait()` 也是 LT readiness，完成后 runtime 删除或更新该 fd 的等待项，因此不会依赖每次事件触发后的 one-shot rearm。
 
 ## TCP Server API
 
