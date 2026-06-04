@@ -51,6 +51,28 @@ public:
         }
     }
 
+    template <typename OomHandler, typename... Args>
+    [[nodiscard]] T *create_with_oom_handler(OomHandler &&on_oom, Args &&...args) {
+        void *memory = nullptr;
+        try {
+            memory = acquire_slot();
+        } catch (const std::bad_alloc &) {
+            std::forward<OomHandler>(on_oom)();
+            throw;
+        }
+
+        if constexpr (std::is_nothrow_constructible_v<T, Args...>) {
+            return construct(memory, std::forward<Args>(args)...);
+        } else {
+            try {
+                return construct(memory, std::forward<Args>(args)...);
+            } catch (...) {
+                release_slot(memory);
+                throw;
+            }
+        }
+    }
+
     template <typename... Args> [[nodiscard]] T *try_create(Args &&...args) noexcept {
         void *memory = nullptr;
         try {

@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -339,6 +340,33 @@ private:
     }
 
     std::atomic<int> &destroyed_;
+};
+
+class ThrowingRuntimeTask final : public af::runtime_task {
+public:
+    ThrowingRuntimeTask(af::runtime_task::factory_token token, af::runtime &owner,
+                        bool throw_in_constructor)
+        : af::runtime_task(token, owner) {
+        if (throw_in_constructor) {
+            throw std::runtime_error("constructor failed");
+        }
+    }
+
+private:
+    af::task_result run_task() noexcept override {
+        return done();
+    }
+};
+
+class PoolOnlyRuntimeTask final : public af::runtime_task {
+public:
+    PoolOnlyRuntimeTask(af::runtime_task::factory_token token, af::runtime &owner)
+        : af::runtime_task(token, owner) {}
+
+private:
+    af::task_result run_task() noexcept override {
+        return done();
+    }
 };
 
 struct ReactorReadinessState {
@@ -719,6 +747,39 @@ TEST(RuntimeConfigTests, RuntimeInstanceStopCanBeRequestedFromRuntimeThread) {
     runtime.stop();
     EXPECT_EQ(runtime.state(), af::runtime_state::stopped);
     EXPECT_EQ(runtime.active_thread_count(), 0U);
+}
+
+TEST(RuntimeConfigTests, RuntimeTaskPoolConfigAllowsSmallInitialSlabsToExpand) {
+    af::runtime_config config;
+    config.threads = {af::cpu_threads("logic", 1)};
+    config.task_pool.slab_object_count = 1;
+    config.task_pool.oom = af::oom_policy::throw_exception;
+
+    af::runtime runtime(config);
+    std::array<af::runtime_task_handle<PoolOnlyRuntimeTask>, 8> tasks;
+    for (auto &task : tasks) {
+        task = af::make_task<PoolOnlyRuntimeTask>(runtime);
+        EXPECT_TRUE(task);
+        EXPECT_NE(task->task_id(), af::runtime_invalid_task_id);
+    }
+}
+
+TEST(RuntimeConfigTests, RuntimeTryMakeTaskReturnsEmptyHandleWhenConstructorThrows) {
+    af::runtime_config config;
+    config.threads = {af::cpu_threads("logic", 1)};
+    config.task_pool.slab_object_count = 1;
+    config.task_pool.oom = af::oom_policy::throw_exception;
+
+    af::runtime runtime(config);
+
+    auto failed = af::try_make_task<ThrowingRuntimeTask>(runtime, true);
+    EXPECT_FALSE(failed);
+    EXPECT_THROW(static_cast<void>(af::make_task<ThrowingRuntimeTask>(runtime, true)),
+                 std::runtime_error);
+
+    auto task = af::make_task<ThrowingRuntimeTask>(runtime, false);
+    EXPECT_TRUE(task);
+    EXPECT_NE(task->task_id(), af::runtime_invalid_task_id);
 }
 
 TEST(RuntimeConfigTests, RuntimeMakeTaskSchedulesAndTracksTaskId) {

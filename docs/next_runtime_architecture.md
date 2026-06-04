@@ -148,6 +148,8 @@ struct task_pool_config {
 
 对象池不设置总容量上限。只要系统还能分配内存，就继续申请新的 slab。需要可恢复失败的业务可使用 `try_make_task<T>()`。
 
+当前实例 runtime 的 typed task pool 仍基于模板化 `ObjectPool`，以保持 slot 布局、local cache 和 remote release 批量参数在编译期固定。`task_pool.slab_object_count` 已作为每个 Task 类型静态池的 reserve-at-least 初始预热容量生效，`task_pool.oom` 已作用于 `make_task<T>()` 的对象池分配失败；用户构造函数抛出的异常不会被改写为对象池 OOM。`local_cache_size`、真正 per-runtime slab 大小和统计开关还需要后续引入 runtime-parameterized pool 或 size-class pool 后完整接入。
+
 ### timer_config
 
 ```cpp
@@ -614,7 +616,7 @@ include/af/reactor/select_reactor.hpp
 - 当前旧网络 readiness 路径已使用 LT 语义，网络 channel 不使用 one-shot rearm；新的实例 runtime 已提供 `reactor` / `fd_event_source` 抽象、Linux epoll backend、macOS/BSD kqueue backend 和 select fallback，IO executor 可在 `reactor.poll(timeout)` 中同时等待 fd readiness、task wake 和 timer deadline。
 - 当前日志 relaxed 模式已使用 bounded MPSC runtime lane 和 sharded MPSC ingress，日志 record pool 已改为可扩展 slab pool。
 - 当前 TCP stream 和 UDP/datagram 跨线程操作已迁移为显式 runtime task 调度到 owner reactor；后续继续收敛 API 命名、目录结构和对象池实现。
-- 当前 runtime 已提供 `try_make_task<T>()` 可恢复创建路径；对象池 `try_create()` 在分配或构造失败时返回空指针，并释放已获取 slot。
+- 当前 runtime 已提供 `try_make_task<T>()` 可恢复创建路径；对象池 `try_create()` 在分配或构造失败时返回空指针，并释放已获取 slot；实例 runtime 的 `make_task<T>()` 已接入 `task_pool.slab_object_count` 预热和 `task_pool.oom` 分配失败策略。
 - 当前 executor 已提供通用 service task 注册、注销和唤醒入口；runtime async logger 消费者已迁移为 service task，只有注册/注销使用短 control task 切到 owner executor。
 - 当前日志队列仍是有界队列，record 对象池不再用固定总容量承担背压职责。
 - 当前网络 public API 已补 lower_case 类型别名和 enum 值别名，例如 `tcp_server`、`tcp_client`、`udp_socket`、`send_result::backpressure`、`close_reason::error` 和 Unix socket 相关别名；TCP echo/login 示例已使用新命名作为迁移样板。
@@ -623,6 +625,6 @@ include/af/reactor/select_reactor.hpp
 - 当前已提供 public `runtime_config`、`scheduler_config`、`task_pool_config`、`timer_config`、`reactor_config`、`log_config`、`shutdown_config` 和 `diagnostics_config` 普通结构体，`io_threads()` / `cpu_threads()` 配置值工厂，以及 `resolve_runtime_config()` / `validate_runtime_config()` 解析校验入口。
 - 当前已提供 `af::runtime` 实例生命周期外壳和低层投递通道：构造时使用结构化配置解析校验，`start()` 按配置启动 runtime 线程，每个 executor 拥有 intrusive MPSC inbox，`post()` 可把 `runtime_work` 投递到指定线程执行，空闲线程使用 atomic/futex wait，`stop()` 可由外部线程完成 join/回收，也可由 runtime 线程内请求停止而不自 join。
 - 当前实例 runtime 已提供 `af::runtime_task`、`af::make_task<T>(runtime, ...)`、`af::try_make_task<T>(runtime, ...)` 和 `runtime_task_handle<T>`：任务创建走 typed slab object pool，任务 id 使用每线程 block 分配，`schedule_to()` 投递到目标 executor，运行中请求下一跳会延后到当前 `run_task()` 返回后再入队，避免同一个任务对象并发重入。
-- 当前实例 runtime 已接入每 executor 本地 timer min-heap：`schedule_after()` / `schedule_at()` / `pending_after()` / `pending_at()` 先把 task 以 `timer_arming` 状态投递到目标 inbox，目标线程再挂入本地 heap；executor 空闲等待使用最近 timer deadline 作为 atomic/futex timeout，IO executor 则把最近 timer deadline 传给 `reactor.poll(timeout)`；`stop()` 会取消未到期 timer 并释放 task 生命周期引用。后续还需要把 logger 和动态 task pool 配置接入该实例 runtime，并可在不改变 task API 的前提下把 min-heap backend 替换为分层时间轮。
+- 当前实例 runtime 已接入每 executor 本地 timer min-heap：`schedule_after()` / `schedule_at()` / `pending_after()` / `pending_at()` 先把 task 以 `timer_arming` 状态投递到目标 inbox，目标线程再挂入本地 heap；executor 空闲等待使用最近 timer deadline 作为 atomic/futex timeout，IO executor 则把最近 timer deadline 传给 `reactor.poll(timeout)`；`stop()` 会取消未到期 timer 并释放 task 生命周期引用。后续还需要把 logger 接入该实例 runtime，并可在不改变 task API 的前提下把 min-heap backend 替换为分层时间轮。
 
 后续迁移应先补齐测试和 benchmark，再逐步替换旧路径，避免一次性重写导致行为不可控。

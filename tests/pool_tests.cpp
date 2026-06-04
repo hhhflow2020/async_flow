@@ -1,6 +1,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <new>
 #include <stdexcept>
 #include <thread>
 
@@ -43,6 +44,28 @@ TEST(PoolTests, ObjectPoolReturnsSlotAfterConstructorThrows) {
 
     Payload *object = pool.create(false, nullptr);
     EXPECT_EQ(static_cast<void *>(object), attempted);
+    pool.destroy(object);
+}
+
+TEST(PoolTests, ObjectPoolOomHandlerDoesNotHandleConstructorBadAlloc) {
+    struct Payload {
+        explicit Payload(bool fail) {
+            if (fail) {
+                throw std::bad_alloc();
+            }
+        }
+    };
+
+    af::detail::ObjectPool<Payload, 1> pool;
+    bool oom_handler_called = false;
+
+    EXPECT_THROW(
+        static_cast<void>(pool.create_with_oom_handler([&] { oom_handler_called = true; }, true)),
+        std::bad_alloc);
+    EXPECT_FALSE(oom_handler_called);
+
+    Payload *object = pool.create_with_oom_handler([&] { oom_handler_called = true; }, false);
+    EXPECT_FALSE(oom_handler_called);
     pool.destroy(object);
 }
 

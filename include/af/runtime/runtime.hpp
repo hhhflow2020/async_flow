@@ -4,8 +4,10 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <exception>
 #include <limits>
 #include <memory>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -486,6 +488,21 @@ inline reactor *runtime::current_reactor() noexcept {
     }
     return current_executor_->reactor_backend();
 }
+
+namespace detail {
+
+inline const task_pool_config &runtime_task_pool_config(const runtime &owner) noexcept {
+    return owner.config().task_pool;
+}
+
+[[noreturn]] inline void handle_runtime_task_bad_alloc(const runtime &owner) {
+    if (owner.config().task_pool.oom == oom_policy::fatal) {
+        std::terminate();
+    }
+    throw std::bad_alloc();
+}
+
+} // namespace detail
 
 } // namespace af
 
