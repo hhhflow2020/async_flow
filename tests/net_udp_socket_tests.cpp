@@ -29,8 +29,8 @@ struct NetUdpIoTag;
 struct NetUdpTwoIoTag;
 
 struct NetUdpRuntimeTraits {
-    static constexpr auto threads = af::thread_layout(
-        af::thread_group<NetUdpIoTag, 1, af::preferred_io_thread_kind>("net-udp-io"));
+    static constexpr auto threads =
+        af::thread_layout(af::thread_group<NetUdpIoTag, 1, af::thread_kind::io>("net-udp-io"));
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
@@ -40,8 +40,8 @@ struct NetUdpRuntimeTraits {
 using NetUdpRuntime = af::AsyncRuntime<NetUdpRuntimeTraits>;
 
 struct NetUdpTwoIoRuntimeTraits {
-    static constexpr auto threads = af::thread_layout(
-        af::thread_group<NetUdpTwoIoTag, 2, af::preferred_io_thread_kind>("net-udp-io"));
+    static constexpr auto threads =
+        af::thread_layout(af::thread_group<NetUdpTwoIoTag, 2, af::thread_kind::io>("net-udp-io"));
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;

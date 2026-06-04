@@ -9,6 +9,4 @@ enum class thread_kind : std::uint8_t {
     io,
 };
 
-using ThreadKind = thread_kind;
-
 } // namespace af

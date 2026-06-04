@@ -35,7 +35,7 @@ struct LoginComputeThreadTag;
 
 struct LoginRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
-        af::thread_group<LoginIoThreadTag, 2, af::preferred_io_thread_kind>("login-io"),
+        af::thread_group<LoginIoThreadTag, 2, af::thread_kind::io>("login-io"),
         af::thread_group<LoginComputeThreadTag, 1, af::thread_kind::cpu>("login-cpu"));
     static constexpr std::size_t external_queue_capacity = 4096;
     static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;

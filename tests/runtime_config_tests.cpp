@@ -85,8 +85,6 @@ static_assert(af::supports_sendfile == af::platform_linux);
 static_assert(af::supports_splice == af::platform_linux);
 static_assert(af::supports_zero_copy_send == af::platform_linux);
 static_assert(af::platform_posix != af::platform_windows);
-static_assert(af::native_io_thread_kind == af::thread_kind::io);
-static_assert(af::preferred_io_thread_kind == af::native_io_thread_kind);
 
 } // namespace
 
