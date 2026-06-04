@@ -67,6 +67,55 @@ private:
     std::atomic<std::uint16_t> *ran_on_{nullptr};
 };
 
+class ScheduleToAliasTask final : public Task {
+public:
+    explicit ScheduleToAliasTask(Task::FactoryToken token) : Task(token) {}
+
+    bool do_it(TestThread target, std::atomic<int> *completed, std::atomic<std::uint16_t> *ran_on) {
+        completed_ = completed;
+        ran_on_ = ran_on;
+        return schedule_to(target);
+    }
+
+private:
+    af::TaskResult run() override {
+        ran_on_->store(Runtime::current_thread_index(), std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int> *completed_{nullptr};
+    std::atomic<std::uint16_t> *ran_on_{nullptr};
+};
+
+class PendingToAliasTask final : public Task {
+public:
+    explicit PendingToAliasTask(Task::FactoryToken token) : Task(token) {}
+
+    bool do_it(std::atomic<int> *completed, std::array<std::atomic<std::uint16_t>, 2> *seen) {
+        completed_ = completed;
+        seen_ = seen;
+        return schedule_to(TestThreads::Logic_0);
+    }
+
+private:
+    af::TaskResult run() override {
+        if (phase_ == 0U) {
+            (*seen_)[0].store(Runtime::current_thread_index(), std::memory_order_release);
+            phase_ = 1U;
+            return pending_to(TestThreads::Logic_1);
+        }
+
+        (*seen_)[1].store(Runtime::current_thread_index(), std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int> *completed_{nullptr};
+    std::array<std::atomic<std::uint16_t>, 2> *seen_{nullptr};
+    std::uint8_t phase_{0};
+};
+
 class ManualStartTask final : public Task {
 public:
     explicit ManualStartTask(Task::FactoryToken token) : Task(token) {}

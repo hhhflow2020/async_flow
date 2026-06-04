@@ -41,7 +41,7 @@ runtime 每个固定线程拥有一个入口：
 普通状态机切线程优先使用默认 API：
 
 ```cpp
-return pending_on(TargetThread);
+return pending_to(TargetThread);
 ```
 
 如果调用点已经确认在 runtime 线程内，并且外部线程调用应被拒绝，可以使用 fast API：
@@ -59,9 +59,9 @@ return pending_ordered(TargetThread);
 首次启动任务时同理：
 
 ```cpp
-return schedule(TargetThread);          // 默认 Auto
-return schedule_fast(TargetThread);     // runtime-only 快速路径
-return schedule_ordered(TargetThread);  // 强制目标 MPSC 顺序路径
+return schedule_to(TargetThread);          // 默认 Auto
+return schedule_to_fast(TargetThread);     // runtime-only 快速路径
+return schedule_to_ordered(TargetThread);  // 强制目标 MPSC 顺序路径
 ```
 
 延迟调度使用同一套目标 admission 入口，但不会直接进入 ready 队列：
@@ -74,6 +74,8 @@ return pending_after(TargetThread, 20ms);
 延迟 task 先以 `TimerArming` 状态进入目标 executor inbox，目标线程再挂入本地 timer heap。timer 到期后由目标 executor 转为 `Queued` 并执行。这个路径保持 timer 结构单线程访问，不引入锁，也不会恢复旧的 local queue/SPSC 双路径。
 
 不要把 `Fast` 当作“更快版本的 Ordered”。当前实现下二者都进入目标 inbox；`Fast` 的语义是 runtime-thread-only，`Ordered` 的语义是调用点显式要求目标 admission order。
+
+`schedule(...)` / `pending_on(...)` 仍保留为兼容入口；新代码推荐使用 `schedule_to(...)` / `pending_to(...)`，让“切到目标线程”的语义更直接。
 
 ## 队列满载语义
 
@@ -89,6 +91,8 @@ task inbox 是 intrusive unbounded MPSC，不再用队列容量拒绝任务投�
 - `RuntimeBackpressureTests.UnboundedInboxAllowsManyExternalProducers`
 - `RuntimeBackpressureTests.RuntimeThreadFanoutUsesUnifiedInbox`
 - `RuntimeBackpressureTests.SameThreadAutoAndOrderedUseUnifiedInbox`
+- `RuntimeFixture.ScheduleToAliasRunsOnRequestedThread`
+- `RuntimeFixture.PendingToAliasResumesOnRequestedThread`
 - `RuntimeFixture.DelayedStartRunsOnRequestedThreadAfterDelay`
 - `RuntimeFixture.PendingAfterResumesOnRequestedThreadAfterDelay`
 - `RuntimeShutdownTests.StopImmediatelyCancelsAndDestroysDelayedTasks`

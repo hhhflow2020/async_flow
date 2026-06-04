@@ -29,7 +29,7 @@ public:
     bool do_it(PlayerChangeBatch batch) {
         batch_ = std::move(batch);
         state_ = State::Apply;
-        return schedule(player_logic_begin);
+        return schedule_to(player_logic_begin);
     }
 
 private:
@@ -115,7 +115,7 @@ public:
 
     bool do_it(PlayerChangeBatch batch) {
         batch_ = std::move(batch);
-        return schedule(AppThreads::IO_0);
+        return schedule_to(AppThreads::IO_0);
     }
 
 private:

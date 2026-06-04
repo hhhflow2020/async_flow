@@ -23,7 +23,7 @@ public:
         shard_hits_ = shard_hits;
         sharded_ops_ = async::split_by_shard(std::move(ops), player_logic_shard_count,
                                              [](const AddGoldOp &op) { return op.player_id; });
-        return schedule(AppThreads::Logic_0);
+        return schedule_to(AppThreads::Logic_0);
     }
 
 private:

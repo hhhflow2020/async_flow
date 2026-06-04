@@ -46,7 +46,7 @@ public:
     bool do_it(std::uint32_t task_id, std::atomic<int> *completed) {
         task_id_ = task_id;
         completed_ = completed;
-        return schedule(RuntimeTcpThreads::logic.shard(task_id));
+        return schedule_to(RuntimeTcpThreads::logic.shard(task_id));
     }
 
 private:

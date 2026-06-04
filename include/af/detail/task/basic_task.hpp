@@ -57,12 +57,24 @@ protected:
         return Runtime::post(thread, this, mode);
     }
 
+    [[nodiscard]] bool schedule_to(Thread thread, ScheduleMode mode = ScheduleMode::Auto) noexcept {
+        return schedule(thread, mode);
+    }
+
     [[nodiscard]] bool schedule_fast(Thread thread) noexcept {
         return schedule(thread, ScheduleMode::Fast);
     }
 
+    [[nodiscard]] bool schedule_to_fast(Thread thread) noexcept {
+        return schedule_fast(thread);
+    }
+
     [[nodiscard]] bool schedule_ordered(Thread thread) noexcept {
         return schedule(thread, ScheduleMode::Ordered);
+    }
+
+    [[nodiscard]] bool schedule_to_ordered(Thread thread) noexcept {
+        return schedule_ordered(thread);
     }
 
     template <typename Rep, typename Period>
@@ -96,12 +108,24 @@ protected:
         return TaskResult::Pending;
     }
 
+    TaskResult pending_to(Thread thread, ScheduleMode mode = ScheduleMode::Auto) noexcept {
+        return pending_on(thread, mode);
+    }
+
     TaskResult pending_fast(Thread thread) noexcept {
         return pending_on(thread, ScheduleMode::Fast);
     }
 
+    TaskResult pending_to_fast(Thread thread) noexcept {
+        return pending_fast(thread);
+    }
+
     TaskResult pending_ordered(Thread thread) noexcept {
         return pending_on(thread, ScheduleMode::Ordered);
+    }
+
+    TaskResult pending_to_ordered(Thread thread) noexcept {
+        return pending_ordered(thread);
     }
 
     template <typename Rep, typename Period>

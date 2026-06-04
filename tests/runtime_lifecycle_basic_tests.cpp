@@ -143,6 +143,29 @@ TEST_F(RuntimeFixture, OneShotTaskRunsOnRequestedThread) {
     EXPECT_EQ(ran_on.load(std::memory_order_acquire), Runtime::thread_index(TestThreads::Logic_2));
 }
 
+TEST_F(RuntimeFixture, ScheduleToAliasRunsOnRequestedThread) {
+    std::atomic<int> completed{0};
+    std::atomic<std::uint16_t> ran_on{Runtime::invalid_thread_index};
+
+    ASSERT_TRUE(
+        Runtime::start_task<ScheduleToAliasTask>(TestThreads::Logic_2, &completed, &ran_on));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(ran_on.load(std::memory_order_acquire), Runtime::thread_index(TestThreads::Logic_2));
+}
+
+TEST_F(RuntimeFixture, PendingToAliasResumesOnRequestedThread) {
+    std::atomic<int> completed{0};
+    std::array<std::atomic<std::uint16_t>, 2> seen{};
+    for (auto &value : seen) {
+        value.store(Runtime::invalid_thread_index, std::memory_order_relaxed);
+    }
+
+    ASSERT_TRUE(Runtime::start_task<PendingToAliasTask>(&completed, &seen));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    EXPECT_EQ(seen[0].load(std::memory_order_acquire), Runtime::thread_index(TestThreads::Logic_0));
+    EXPECT_EQ(seen[1].load(std::memory_order_acquire), Runtime::thread_index(TestThreads::Logic_1));
+}
+
 TEST_F(RuntimeFixture, FileLifecycleSyscallsRunOnTargetRuntimeThread) {
     const std::filesystem::path path = unique_temp_path("file-lifecycle");
     std::atomic<int> completed{0};

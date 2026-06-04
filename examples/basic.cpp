@@ -17,7 +17,7 @@ public:
     bool do_it(std::uint64_t player_id, int gold) {
         player_id_ = player_id;
         gold_ = gold;
-        return schedule(player_thread(player_id_));
+        return schedule_to(player_thread(player_id_));
     }
 
 private:
@@ -39,7 +39,7 @@ public:
     bool do_it(std::uint64_t player_id) {
         player_id_ = player_id;
         state_ = State::Start;
-        return schedule(player_thread(player_id_));
+        return schedule_to(player_thread(player_id_));
     }
 
 private:

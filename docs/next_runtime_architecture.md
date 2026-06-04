@@ -614,5 +614,6 @@ include/af/reactor/select_reactor.hpp
 - 当前 executor 已提供通用 service task 注册、注销和唤醒入口；runtime async logger 消费者已迁移为 service task，只有注册/注销使用短 control task 切到 owner executor。
 - 当前日志队列仍是有界队列，record 对象池不再用固定总容量承担背压职责。
 - 当前网络 public API 已补 lower_case 类型别名和 enum 值别名，例如 `tcp_server`、`tcp_client`、`udp_socket`、`send_result::backpressure`、`close_reason::error` 和 Unix socket 相关别名；TCP echo/login 示例已使用新命名作为迁移样板。
+- 当前 task API 已补 `schedule_to(...)` / `pending_to(...)` 及 fast/ordered 变体作为清晰调度入口，旧 `schedule(...)` / `pending_on(...)` 保留兼容。
 
 后续迁移应先补齐测试和 benchmark，再逐步替换旧路径，避免一次性重写导致行为不可控。

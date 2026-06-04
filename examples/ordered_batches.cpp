@@ -27,7 +27,7 @@ public:
         for (std::size_t i = 0; i < batch_.deltas.size(); ++i) {
             sharded_deltas_.shards[i % player_logic_shard_count].push_back(batch_.deltas[i]);
         }
-        return schedule(AppThreads::Logic_0);
+        return schedule_to(AppThreads::Logic_0);
     }
 
 private:
@@ -82,7 +82,7 @@ public:
 
     bool do_it(PlayerDeltaBatch batch) {
         batch_ = std::move(batch);
-        return schedule(AppThreads::IO_0);
+        return schedule_to(AppThreads::IO_0);
     }
 
 private:

@@ -149,7 +149,7 @@ public:
         conn_ = conn;
         user_id_ = std::move(user_id);
         token_ = std::move(token);
-        return schedule(LoginRuntime::thread_group<LoginComputeThreadTag>().template at<0>());
+        return schedule_to(LoginRuntime::thread_group<LoginComputeThreadTag>().template at<0>());
     }
 
 private:
@@ -264,7 +264,7 @@ public:
         port_ = port;
         ipv6_ = ipv6;
         lifecycle_ = std::move(lifecycle);
-        return schedule_ordered(login_control_thread());
+        return schedule_to_ordered(login_control_thread());
     }
 
 private:
@@ -329,7 +329,7 @@ public:
 
     bool do_it(af::net::tcp_server<LoginRuntime> *server) {
         server_ = server;
-        return schedule_ordered(login_control_thread());
+        return schedule_to_ordered(login_control_thread());
     }
 
 private:

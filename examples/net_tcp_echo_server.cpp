@@ -58,7 +58,7 @@ public:
     bool do_it(EchoConnectionHandle conn, af::Buffer payload) {
         conn_ = conn;
         payload_ = std::move(payload);
-        return schedule(EchoRuntime::thread_group<EchoComputeThreadTag>().template at<0>());
+        return schedule_to(EchoRuntime::thread_group<EchoComputeThreadTag>().template at<0>());
     }
 
 private:
@@ -147,7 +147,7 @@ public:
         port_ = port;
         ipv6_ = ipv6;
         lifecycle_ = std::move(lifecycle);
-        return schedule_ordered(echo_control_thread());
+        return schedule_to_ordered(echo_control_thread());
     }
 
 private:
@@ -212,7 +212,7 @@ public:
 
     bool do_it(af::net::tcp_server<EchoRuntime> *server) {
         server_ = server;
-        return schedule_ordered(echo_control_thread());
+        return schedule_to_ordered(echo_control_thread());
     }
 
 private:
