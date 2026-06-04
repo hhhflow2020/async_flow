@@ -41,7 +41,7 @@ struct LoginRuntimeTraits {
 };
 
 using LoginRuntime = af::AsyncRuntime<LoginRuntimeTraits>;
-using LoginConnectionHandle = af::net::TcpConnectionHandle<LoginRuntime>;
+using LoginConnectionHandle = af::net::tcp_connection_handle<LoginRuntime>;
 
 struct ServerLifecycleState {
     std::atomic<bool> started{false};
@@ -173,11 +173,11 @@ private:
             return done();
         }
 
-        const af::net::SendResult result = conn_.send(std::move(packet));
-        if (result == af::net::SendResult::Backpressure) {
+        const af::net::send_result result = conn_.send(std::move(packet));
+        if (result == af::net::send_result::backpressure) {
             LOG(WARNING) << "login response backpressure user=" << user_id_
                          << " slot=" << conn_.slot();
-        } else if (result == af::net::SendResult::Closed) {
+        } else if (result == af::net::send_result::closed) {
             LOG(INFO) << "login response skipped closed user=" << user_id_
                       << " slot=" << conn_.slot();
         }
@@ -193,14 +193,14 @@ struct LoginHandler {
     std::shared_ptr<ServerLifecycleState> lifecycle;
     absl::flat_hash_map<std::uint64_t, StreamParser> parsers;
 
-    void on_accept(af::net::TcpConnectionRef<LoginRuntime> conn) {
+    void on_accept(af::net::tcp_connection_ref<LoginRuntime> conn) {
         static_cast<void>(conn.set_no_delay(true));
         static_cast<void>(conn.set_keepalive(true));
         LOG(INFO) << "login connection accepted listener=" << conn.listener_name()
                   << " slot=" << conn.slot() << " generation=" << conn.generation();
     }
 
-    void on_read(af::net::TcpConnectionRef<LoginRuntime> conn, af::BufferView bytes) {
+    void on_read(af::net::tcp_connection_ref<LoginRuntime> conn, af::BufferView bytes) {
         const LoginConnectionHandle handle = conn.handle();
         StreamParser &parser = parsers[connection_key(handle)];
         const PacketParseResult result =
@@ -230,22 +230,22 @@ struct LoginHandler {
         if (result == PacketParseResult::ProtocolError) {
             LOG(WARNING) << "login protocol error slot=" << conn.slot()
                          << " generation=" << conn.generation();
-            conn.close(af::net::CloseReason::Error);
+            conn.close(af::net::close_reason::error);
         } else if (result == PacketParseResult::OutOfMemory) {
             LOG(ERROR) << "login parser out of memory slot=" << conn.slot()
                        << " generation=" << conn.generation();
-            conn.close(af::net::CloseReason::Error);
+            conn.close(af::net::close_reason::error);
         }
     }
 
-    void on_close(af::net::TcpConnectionHandle<LoginRuntime> conn, af::net::CloseReason reason) {
+    void on_close(af::net::tcp_connection_handle<LoginRuntime> conn, af::net::close_reason reason) {
         parsers.erase(connection_key(conn));
         LOG(INFO) << "login connection closed slot=" << conn.slot()
                   << " generation=" << conn.generation()
                   << " reason=" << static_cast<unsigned>(reason);
     }
 
-    void on_error(af::net::TcpListenerHandle listener, int error) noexcept {
+    void on_error(af::net::tcp_listener_handle listener, int error) noexcept {
         LOG(ERROR) << "login listener error slot=" << listener.slot()
                    << " generation=" << listener.generation() << " error=" << error;
         if (lifecycle != nullptr) {
@@ -258,7 +258,7 @@ class StartServerTask final : public LoginRuntime::Task {
 public:
     explicit StartServerTask(LoginRuntime::Task::FactoryToken token) : LoginRuntime::Task(token) {}
 
-    bool do_it(af::net::TcpServer<LoginRuntime> *server, std::uint16_t port, bool ipv6,
+    bool do_it(af::net::tcp_server<LoginRuntime> *server, std::uint16_t port, bool ipv6,
                std::shared_ptr<ServerLifecycleState> lifecycle) {
         server_ = server;
         port_ = port;
@@ -276,11 +276,11 @@ private:
             return done();
         }
 
-        const af::net::ListenerResult listener = server_->add_listener<LoginHandler>(
+        const af::net::listener_result listener = server_->add_listener<LoginHandler>(
             {
                 .name = ipv6_ ? "login-v6" : "login-v4",
-                .endpoint =
-                    ipv6_ ? af::net::TcpEndpoint::any_v6(port_) : af::net::TcpEndpoint::any(port_),
+                .endpoint = ipv6_ ? af::net::tcp_endpoint::any_v6(port_)
+                                  : af::net::tcp_endpoint::any(port_),
                 .threads = login_io_threads(),
                 .options =
                     {
@@ -292,7 +292,7 @@ private:
                         .read_buffer_size = 16U * 1024U,
                         .output_high_watermark = 8U * 1024U * 1024U,
                     },
-                .accept_strategy = af::net::AcceptStrategy::ReusePortPerIoThread,
+                .accept_strategy = af::net::accept_strategy::reuse_port_per_io_thread,
             },
             LoginHandler{lifecycle_});
         if (!listener.ok()) {
@@ -317,7 +317,7 @@ private:
         return done();
     }
 
-    af::net::TcpServer<LoginRuntime> *server_{nullptr};
+    af::net::tcp_server<LoginRuntime> *server_{nullptr};
     std::shared_ptr<ServerLifecycleState> lifecycle_;
     std::uint16_t port_{0};
     bool ipv6_{false};
@@ -327,7 +327,7 @@ class StopServerTask final : public LoginRuntime::Task {
 public:
     explicit StopServerTask(LoginRuntime::Task::FactoryToken token) : LoginRuntime::Task(token) {}
 
-    bool do_it(af::net::TcpServer<LoginRuntime> *server) {
+    bool do_it(af::net::tcp_server<LoginRuntime> *server) {
         server_ = server;
         return schedule_ordered(login_control_thread());
     }
@@ -342,7 +342,7 @@ private:
         return done();
     }
 
-    af::net::TcpServer<LoginRuntime> *server_{nullptr};
+    af::net::tcp_server<LoginRuntime> *server_{nullptr};
 };
 
 [[nodiscard]] bool wait_for_shutdown_signal(af::SignalSet &signals,
@@ -381,7 +381,7 @@ int main(int argc, char **argv) {
 
     LoginRuntime::init();
 
-    af::net::TcpServer<LoginRuntime> server;
+    af::net::tcp_server<LoginRuntime> server;
     auto lifecycle = std::make_shared<ServerLifecycleState>();
     if (!LoginRuntime::start_task<StartServerTask>(&server, port, ipv6, lifecycle)) {
         std::cerr << "failed to schedule tcp login server start\n";

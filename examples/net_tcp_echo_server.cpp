@@ -30,7 +30,7 @@ struct EchoRuntimeTraits {
 };
 
 using EchoRuntime = af::AsyncRuntime<EchoRuntimeTraits>;
-using EchoConnectionHandle = af::net::TcpConnectionHandle<EchoRuntime>;
+using EchoConnectionHandle = af::net::tcp_connection_handle<EchoRuntime>;
 
 struct ServerLifecycleState {
     std::atomic<bool> started{false};
@@ -73,11 +73,11 @@ private:
 
         LOG(INFO) << "tcp echo lowercased bytes=" << size << " slot=" << conn_.slot()
                   << " generation=" << conn_.generation();
-        const af::net::SendResult result = conn_.send(std::move(payload_));
-        if (result == af::net::SendResult::Backpressure) {
+        const af::net::send_result result = conn_.send(std::move(payload_));
+        if (result == af::net::send_result::backpressure) {
             LOG(WARNING) << "tcp echo send backpressure slot=" << conn_.slot()
                          << " generation=" << conn_.generation();
-        } else if (result == af::net::SendResult::Closed) {
+        } else if (result == af::net::send_result::closed) {
             LOG(INFO) << "tcp echo send skipped closed slot=" << conn_.slot()
                       << " generation=" << conn_.generation();
         }
@@ -91,14 +91,14 @@ private:
 struct EchoHandler {
     std::shared_ptr<ServerLifecycleState> lifecycle;
 
-    void on_accept(af::net::TcpConnectionRef<EchoRuntime> conn) noexcept {
+    void on_accept(af::net::tcp_connection_ref<EchoRuntime> conn) noexcept {
         static_cast<void>(conn.set_no_delay(true));
         static_cast<void>(conn.set_keepalive(true));
         LOG(INFO) << "tcp echo accepted listener=" << conn.listener_name()
                   << " slot=" << conn.slot() << " generation=" << conn.generation();
     }
 
-    void on_read(af::net::TcpConnectionRef<EchoRuntime> conn, af::BufferView bytes) noexcept {
+    void on_read(af::net::tcp_connection_ref<EchoRuntime> conn, af::BufferView bytes) noexcept {
         LOG(INFO) << "tcp echo received bytes=" << bytes.size() << " slot=" << conn.slot()
                   << " generation=" << conn.generation();
         if (bytes.empty()) {
@@ -111,24 +111,24 @@ struct EchoHandler {
         } catch (...) {
             LOG(ERROR) << "tcp echo failed to copy payload slot=" << conn.slot()
                        << " generation=" << conn.generation();
-            conn.close(af::net::CloseReason::Error);
+            conn.close(af::net::close_reason::error);
             return;
         }
 
         if (!EchoRuntime::start_task<LowercaseEchoTask>(conn.handle(), std::move(payload))) {
             LOG(ERROR) << "tcp echo failed to schedule compute task slot=" << conn.slot()
                        << " generation=" << conn.generation();
-            conn.close(af::net::CloseReason::Error);
+            conn.close(af::net::close_reason::error);
         }
     }
 
-    void on_close(af::net::TcpConnectionHandle<EchoRuntime> conn,
-                  af::net::CloseReason reason) noexcept {
+    void on_close(af::net::tcp_connection_handle<EchoRuntime> conn,
+                  af::net::close_reason reason) noexcept {
         LOG(INFO) << "tcp echo closed slot=" << conn.slot() << " generation=" << conn.generation()
                   << " reason=" << static_cast<unsigned>(reason);
     }
 
-    void on_error(af::net::TcpListenerHandle listener, int error) noexcept {
+    void on_error(af::net::tcp_listener_handle listener, int error) noexcept {
         LOG(ERROR) << "tcp echo listener error slot=" << listener.slot()
                    << " generation=" << listener.generation() << " error=" << error;
         if (lifecycle != nullptr) {
@@ -141,7 +141,7 @@ class StartServerTask final : public EchoRuntime::Task {
 public:
     explicit StartServerTask(EchoRuntime::Task::FactoryToken token) : EchoRuntime::Task(token) {}
 
-    bool do_it(af::net::TcpServer<EchoRuntime> *server, std::uint16_t port, bool ipv6,
+    bool do_it(af::net::tcp_server<EchoRuntime> *server, std::uint16_t port, bool ipv6,
                std::shared_ptr<ServerLifecycleState> lifecycle) {
         server_ = server;
         port_ = port;
@@ -159,11 +159,11 @@ private:
             return done();
         }
 
-        const af::net::ListenerResult listener = server_->add_listener<EchoHandler>(
+        const af::net::listener_result listener = server_->add_listener<EchoHandler>(
             {
                 .name = ipv6_ ? "echo-v6" : "echo-v4",
-                .endpoint =
-                    ipv6_ ? af::net::TcpEndpoint::any_v6(port_) : af::net::TcpEndpoint::any(port_),
+                .endpoint = ipv6_ ? af::net::tcp_endpoint::any_v6(port_)
+                                  : af::net::tcp_endpoint::any(port_),
                 .threads = echo_io_threads(),
                 .options =
                     {
@@ -175,7 +175,7 @@ private:
                         .read_buffer_size = 16U * 1024U,
                         .output_high_watermark = 8U * 1024U * 1024U,
                     },
-                .accept_strategy = af::net::AcceptStrategy::ReusePortPerIoThread,
+                .accept_strategy = af::net::accept_strategy::reuse_port_per_io_thread,
             },
             EchoHandler{lifecycle_});
         if (!listener.ok()) {
@@ -200,7 +200,7 @@ private:
         return done();
     }
 
-    af::net::TcpServer<EchoRuntime> *server_{nullptr};
+    af::net::tcp_server<EchoRuntime> *server_{nullptr};
     std::shared_ptr<ServerLifecycleState> lifecycle_;
     std::uint16_t port_{0};
     bool ipv6_{false};
@@ -210,7 +210,7 @@ class StopServerTask final : public EchoRuntime::Task {
 public:
     explicit StopServerTask(EchoRuntime::Task::FactoryToken token) : EchoRuntime::Task(token) {}
 
-    bool do_it(af::net::TcpServer<EchoRuntime> *server) {
+    bool do_it(af::net::tcp_server<EchoRuntime> *server) {
         server_ = server;
         return schedule_ordered(echo_control_thread());
     }
@@ -225,7 +225,7 @@ private:
         return done();
     }
 
-    af::net::TcpServer<EchoRuntime> *server_{nullptr};
+    af::net::tcp_server<EchoRuntime> *server_{nullptr};
 };
 
 [[nodiscard]] bool wait_for_shutdown_signal(af::SignalSet &signals,
@@ -264,7 +264,7 @@ int main(int argc, char **argv) {
 
     EchoRuntime::init();
 
-    af::net::TcpServer<EchoRuntime> server;
+    af::net::tcp_server<EchoRuntime> server;
     auto lifecycle = std::make_shared<ServerLifecycleState>();
     if (!EchoRuntime::start_task<StartServerTask>(&server, port, ipv6, lifecycle)) {
         std::cerr << "failed to schedule tcp echo server start\n";

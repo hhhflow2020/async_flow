@@ -36,6 +36,11 @@ enum class UdpSendResult : std::uint8_t {
     Backpressure,
     Closed,
     Unsupported,
+    accepted = Accepted,
+    queued = Queued,
+    backpressure = Backpressure,
+    closed = Closed,
+    unsupported = Unsupported,
 };
 
 struct UdpSocketOptions {

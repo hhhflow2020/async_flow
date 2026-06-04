@@ -27,10 +27,20 @@ TEST(NetSocketAddressTests, LowerCaseNetAliasesMatchPublicTypes) {
     static_assert(std::is_same_v<af::net::send_result, af::net::SendResult>);
     static_assert(std::is_same_v<af::net::close_reason, af::net::CloseReason>);
     static_assert(std::is_same_v<af::net::accept_strategy, af::net::AcceptStrategy>);
+    static_assert(std::is_same_v<af::net::listener_state, af::net::ListenerState>);
     static_assert(std::is_same_v<af::net::remove_listener_policy, af::net::RemoveListenerPolicy>);
     static_assert(std::is_same_v<af::net::tcp_listener_options, af::net::TcpListenerOptions>);
+    static_assert(std::is_same_v<af::net::tcp_server_config, af::net::TcpServerConfig>);
+    static_assert(std::is_same_v<af::net::listener_id, af::net::ListenerId>);
+    static_assert(std::is_same_v<af::net::tcp_listener_handle, af::net::TcpListenerHandle>);
+    static_assert(std::is_same_v<af::net::listener_result, af::net::ListenerResult>);
     static_assert(std::is_same_v<af::net::tcp_client_options, af::net::TcpClientOptions>);
+    static_assert(
+        std::is_same_v<af::net::tcp_client_runtime_config, af::net::TcpClientRuntimeConfig>);
+    static_assert(std::is_same_v<af::net::udp_send_result, af::net::UdpSendResult>);
     static_assert(std::is_same_v<af::net::udp_socket_options, af::net::UdpSocketOptions>);
+    static_assert(
+        std::is_same_v<af::net::udp_socket_runtime_config, af::net::UdpSocketRuntimeConfig>);
     static_assert(std::is_same_v<af::net::udp_peer, af::net::UdpPeer>);
 
     static_assert(
@@ -45,6 +55,38 @@ TEST(NetSocketAddressTests, LowerCaseNetAliasesMatchPublicTypes) {
                                  af::net::UnixStreamClient<NetAliasRuntime>>);
     static_assert(std::is_same_v<af::net::unix_datagram_socket<NetAliasRuntime>,
                                  af::net::UnixDatagramSocket<NetAliasRuntime>>);
+
+    static_assert(af::net::address_family::unspecified == af::net::AddressFamily::Unspecified);
+    static_assert(af::net::address_family::ipv4 == af::net::AddressFamily::IPv4);
+    static_assert(af::net::address_family::ipv6 == af::net::AddressFamily::IPv6);
+    static_assert(af::net::address_family::unix_domain == af::net::AddressFamily::Unix);
+    static_assert(af::net::send_result::accepted == af::net::SendResult::Accepted);
+    static_assert(af::net::send_result::queued == af::net::SendResult::Queued);
+    static_assert(af::net::send_result::backpressure == af::net::SendResult::Backpressure);
+    static_assert(af::net::send_result::closed == af::net::SendResult::Closed);
+    static_assert(af::net::send_result::unsupported == af::net::SendResult::Unsupported);
+    static_assert(af::net::close_reason::local == af::net::CloseReason::Local);
+    static_assert(af::net::close_reason::peer == af::net::CloseReason::Peer);
+    static_assert(af::net::close_reason::error == af::net::CloseReason::Error);
+    static_assert(af::net::accept_strategy::auto_select == af::net::AcceptStrategy::Auto);
+    static_assert(af::net::accept_strategy::reuse_port_per_io_thread ==
+                  af::net::AcceptStrategy::ReusePortPerIoThread);
+    static_assert(af::net::accept_strategy::single_acceptor ==
+                  af::net::AcceptStrategy::SingleAcceptor);
+    static_assert(af::net::listener_state::configured == af::net::ListenerState::Configured);
+    static_assert(af::net::listener_state::starting == af::net::ListenerState::Starting);
+    static_assert(af::net::listener_state::active == af::net::ListenerState::Active);
+    static_assert(af::net::listener_state::failed == af::net::ListenerState::Failed);
+    static_assert(af::net::listener_state::removed == af::net::ListenerState::Removed);
+    static_assert(af::net::remove_listener_policy::stop_accept_only ==
+                  af::net::RemoveListenerPolicy::StopAcceptOnly);
+    static_assert(af::net::remove_listener_policy::close_existing_connections ==
+                  af::net::RemoveListenerPolicy::CloseExistingConnections);
+    static_assert(af::net::udp_send_result::accepted == af::net::UdpSendResult::Accepted);
+    static_assert(af::net::udp_send_result::queued == af::net::UdpSendResult::Queued);
+    static_assert(af::net::udp_send_result::backpressure == af::net::UdpSendResult::Backpressure);
+    static_assert(af::net::udp_send_result::closed == af::net::UdpSendResult::Closed);
+    static_assert(af::net::udp_send_result::unsupported == af::net::UdpSendResult::Unsupported);
 }
 
 TEST(NetSocketAddressTests, ConvertsIpv4EndpointToSocketAddress) {

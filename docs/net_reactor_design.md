@@ -38,16 +38,16 @@ select fallback 每次 poll 从当前 channel/wait 表重建 `fd_set`，用非�
 
 `TcpServer` 不以 handler 作为模板参数。handler 绑定在 listener 上，因此同一个 server 可以管理多个监听地址和多种业务入口。
 
-当前 public API 保留 `TcpServer` / `TcpClient` / `UdpSocket` 等历史类型名，同时提供 `tcp_server` / `tcp_client` / `udp_socket` / `unix_stream_server` / `unix_stream_client` / `unix_datagram_socket` 等 lower_case 类型别名，便于新代码逐步迁移到下一代命名风格。
+当前 public API 保留 `TcpServer` / `TcpClient` / `UdpSocket` 等历史类型名，同时提供 `tcp_server` / `tcp_client` / `udp_socket` / `unix_stream_server` / `unix_stream_client` / `unix_datagram_socket` 等 lower_case 类型别名，以及 `send_result::backpressure`、`close_reason::error`、`accept_strategy::reuse_port_per_io_thread` 等 enum 值别名，便于新代码逐步迁移到下一代命名风格。
 
 ```cpp
-af::net::TcpServer<Runtime> server;
+af::net::tcp_server<Runtime> server;
 
 // 在 runtime task 中执行，且后续控制操作固定在同一个 reactor 线程上。
 server.bind_threads(Runtime::thread_group<IoTag>());
 auto public_listener = server.add_listener<PublicHandler>({
     .name = "public",
-    .endpoint = af::net::TcpEndpoint::any(8080),
+    .endpoint = af::net::tcp_endpoint::any(8080),
     .options = {.reuse_port = true},
 });
 const bool scheduled = public_listener.ok() && server.start();
@@ -60,32 +60,32 @@ const bool scheduled = public_listener.ok() && server.start();
 `start()` / 动态 `add_listener()` 表示控制任务已成功提交；真正的 `bind/listen/register channel` 在目标 IO shard 上异步完成。监听 fd 打开失败会通过 handler 的 `on_error(listener, error)` 或 `on_listener_error(listener, error)` 回调报告。这样控制面不需要 mutex、condition variable 或跨线程 barrier，也不会在 IO 线程上等待自身任务。
 
 ```cpp
-const af::net::ListenerResult result = server.add_listener<MetricsHandler>({
+const af::net::listener_result result = server.add_listener<MetricsHandler>({
     .name = "metrics",
-    .endpoint = af::net::TcpEndpoint::loopback(9100),
+    .endpoint = af::net::tcp_endpoint::loopback(9100),
 });
 
 if (result.ok()) {
     server.remove_listener(result.listener,
-                           af::net::RemoveListenerPolicy::StopAcceptOnly);
+                           af::net::remove_listener_policy::stop_accept_only);
 }
 ```
 
-`RemoveListenerPolicy::StopAcceptOnly` 只停止 accept，不影响已建立连接；`CloseExistingConnections` 会同时关闭该 listener 下已有连接。
+`remove_listener_policy::stop_accept_only` 只停止 accept，不影响已建立连接；`close_existing_connections` 会同时关闭该 listener 下已有连接。
 
 ## TCP Client API
 
 `TcpClient` 负责主动出站连接。调用方选择绑定的 IO 线程组，`connect()` 会按配置线程轮询选择一个 IO shard，在目标 IO 线程上创建 nonblocking socket 并调用 `connect`。如果返回 `EINPROGRESS`，连接 task 通过 runtime IO wait 挂起；等待期间 IO 线程可以继续运行其他 task 和网络事件。
 
 ```cpp
-af::net::TcpClient<Runtime> client;
+af::net::tcp_client<Runtime> client;
 
 // 在 runtime task 中执行，且后续控制操作固定在同一个 reactor 线程上。
 client.bind_threads(Runtime::thread_group<IoTag>());
 
 client.connect<ClientHandler>({
     .name = "upstream",
-    .remote_endpoint = af::net::TcpEndpoint::host("127.0.0.1", 9000),
+    .remote_endpoint = af::net::tcp_endpoint::host("127.0.0.1", 9000),
     .connect_timeout = std::chrono::seconds(3),
 });
 ```
@@ -94,15 +94,15 @@ client.connect<ClientHandler>({
 
 ```cpp
 struct ClientHandler {
-    void on_connect(af::net::TcpConnectionRef<Runtime> conn) {
+    void on_connect(af::net::tcp_connection_ref<Runtime> conn) {
         conn.send(af::Buffer::copy("hello", 5));
     }
 
-    void on_read(af::net::TcpConnectionRef<Runtime> conn,
+    void on_read(af::net::tcp_connection_ref<Runtime> conn,
                  af::BufferView bytes) {}
 
-    void on_close(af::net::TcpConnectionHandle<Runtime> conn,
-                  af::net::CloseReason reason) {}
+    void on_close(af::net::tcp_connection_handle<Runtime> conn,
+                  af::net::close_reason reason) {}
 
     void on_connect_error(int error) {}
 };
@@ -116,77 +116,77 @@ TCP stream 连接建立后的跨线程发送、关闭和控制操作已经通过
 
 ## Unix Stream API
 
-Unix domain stream socket 使用专门的 `UnixStreamServer` / `UnixStreamClient` API，避免用户直接把 Unix path 塞进 TCP API。底层仍然复用 `TcpServer`、`TcpClient`、`TcpConnection` 和 `TcpConnectionHandle`，所以读写、关闭、跨线程发送和 generation 校验与 TCP stream 完全一致。
+Unix domain stream socket 使用专门的 `unix_stream_server` / `unix_stream_client` API，避免用户直接把 Unix path 塞进 TCP API。底层仍然复用 TCP stream 热路径，所以读写、关闭、跨线程发送和 generation 校验与 TCP stream 完全一致。
 
 ```cpp
-af::net::UnixStreamServer<Runtime> server;
+af::net::unix_stream_server<Runtime> server;
 server.bind_threads(Runtime::thread_group<IoTag>());
 
 const auto listener = server.add_listener<UnixHandler>({
     .name = "admin",
-    .endpoint = af::net::UnixEndpoint::unix_path("/tmp/af-admin.sock"),
+    .endpoint = af::net::unix_endpoint::unix_path("/tmp/af-admin.sock"),
 });
 
 server.start();
 ```
 
-Unix stream listener 强制使用 `AcceptStrategy::SingleAcceptor`：只有一个 IO shard 负责 bind/listen/accept，accepted fd 再按 stream connection 逻辑进入目标 IO shard。这样可以避免多个线程同时 bind 同一个 filesystem path。默认会在 bind 前 unlink 已存在的 path，并在 listener close/stop 后 unlink 绑定 path；可通过 `TcpListenerOptions::unlink_existing_unix_path` 和 `unlink_unix_path_on_close` 调整。
+Unix stream listener 强制使用 `accept_strategy::single_acceptor`：只有一个 IO shard 负责 bind/listen/accept，accepted fd 再按 stream connection 逻辑进入目标 IO shard。这样可以避免多个线程同时 bind 同一个 filesystem path。默认会在 bind 前 unlink 已存在的 path，并在 listener close/stop 后 unlink 绑定 path；可通过 `tcp_listener_options::unlink_existing_unix_path` 和 `unlink_unix_path_on_close` 调整。
 
 ```cpp
-af::net::UnixStreamClient<Runtime> client;
+af::net::unix_stream_client<Runtime> client;
 
 // 在 runtime task 中执行，且后续控制操作固定在同一个 reactor 线程上。
 client.bind_threads(Runtime::thread_group<IoTag>());
 
 client.connect<ClientHandler>({
     .name = "admin-client",
-    .endpoint = af::net::UnixEndpoint::unix_path("/tmp/af-admin.sock"),
+    .endpoint = af::net::unix_endpoint::unix_path("/tmp/af-admin.sock"),
     .connect_timeout = std::chrono::seconds(3),
 });
 ```
 
 ## Unix Datagram API
 
-Unix domain datagram socket 使用专门的 `UnixDatagramSocket` API。它和 IP UDP 一样是无连接 datagram 模型，但 filesystem path 的 bind/unlink 生命周期不同，所以对外不复用 `UdpSocket` 的配置入口。底层仍复用 datagram shard、读预算和跨线程 runtime task 发送逻辑。
+Unix domain datagram socket 使用专门的 `unix_datagram_socket` API。它和 IP UDP 一样是无连接 datagram 模型，但 filesystem path 的 bind/unlink 生命周期不同，所以对外不复用 `udp_socket` 的配置入口。底层仍复用 datagram shard、读预算和跨线程 runtime task 发送逻辑。
 
 ```cpp
-af::net::UnixDatagramSocket<Runtime> server;
+af::net::unix_datagram_socket<Runtime> server;
 server.bind_threads(Runtime::thread_group<IoTag>());
 
 server.bind<UnixDatagramHandler>({
     .name = "unix-dgram-server",
-    .local_endpoint = af::net::UnixEndpoint::unix_path("/tmp/af-dgram.sock"),
+    .local_endpoint = af::net::unix_endpoint::unix_path("/tmp/af-dgram.sock"),
 });
 ```
 
 连接式 client 可以绑定自己的本地 path，并指定 remote path：
 
 ```cpp
-af::net::UnixDatagramSocket<Runtime> client;
+af::net::unix_datagram_socket<Runtime> client;
 client.bind_threads(Runtime::thread_group<IoTag>());
 
 client.connect<ClientHandler>({
     .name = "unix-dgram-client",
-    .local_endpoint = af::net::UnixEndpoint::unix_path("/tmp/af-dgram-client.sock"),
-    .remote_endpoint = af::net::UnixEndpoint::unix_path("/tmp/af-dgram.sock"),
+    .local_endpoint = af::net::unix_endpoint::unix_path("/tmp/af-dgram-client.sock"),
+    .remote_endpoint = af::net::unix_endpoint::unix_path("/tmp/af-dgram.sock"),
 });
 
 client.handle().send(af::Buffer::copy("ping", 4));
 ```
 
-Unix datagram 默认在 bind 前 unlink 已存在 path，并在 stop/close 后 unlink 绑定 path；可通过 `UdpSocketOptions::unlink_existing_unix_path` 和 `unlink_unix_path_on_close` 调整。Unix datagram 只允许单个 IO shard 绑定一个 local path；如果需要多线程扩展，应显式创建多个不同 path 或在业务层做分片。
+Unix datagram 默认在 bind 前 unlink 已存在 path，并在 stop/close 后 unlink 绑定 path；可通过 `udp_socket_options::unlink_existing_unix_path` 和 `unlink_unix_path_on_close` 调整。Unix datagram 只允许单个 IO shard 绑定一个 local path；如果需要多线程扩展，应显式创建多个不同 path 或在业务层做分片。
 
 ## UDP Socket API
 
-`UdpSocket` 是 IP UDP 的统一 server/client 抽象。server 只绑定本地 IPv4/IPv6 endpoint；client 可以绑定本地 endpoint 并设置 `remote_endpoint + connect_remote=true`。每个绑定 IO shard 拥有独立 fd、handler 副本和读 buffer；跨线程发送通过 runtime task 显式调度到 owner reactor。
+`udp_socket` 是 IP UDP 的统一 server/client 抽象。server 只绑定本地 IPv4/IPv6 endpoint；client 可以绑定本地 endpoint 并设置 `remote_endpoint + connect_remote=true`。每个绑定 IO shard 拥有独立 fd、handler 副本和读 buffer；跨线程发送通过 runtime task 显式调度到 owner reactor。
 
 ```cpp
-af::net::UdpSocket<Runtime> server;
+af::net::udp_socket<Runtime> server;
 server.bind_threads(Runtime::thread_group<IoTag>());
 
 server.start<UdpEchoHandler>({
     .name = "udp-echo",
-    .local_endpoint = af::net::UdpEndpoint::any(9000),
+    .local_endpoint = af::net::udp_endpoint::any(9000),
     .options = {.reuse_port = true},
 });
 ```
@@ -195,32 +195,32 @@ server.start<UdpEchoHandler>({
 
 ```cpp
 struct UdpEchoHandler {
-    void on_datagram(af::net::UdpSocketRef<Runtime> socket,
+    void on_datagram(af::net::udp_socket_ref<Runtime> socket,
                      af::BufferView bytes,
-                     const af::net::UdpEndpoint& peer) {
+                     const af::net::udp_endpoint& peer) {
         socket.send_to(bytes, peer);
     }
 
-    void on_error(af::net::UdpSocketHandle<Runtime> socket, int error) {}
+    void on_error(af::net::udp_socket_handle<Runtime> socket, int error) {}
 };
 ```
 
 UDP client 示例：
 
 ```cpp
-af::net::UdpSocket<Runtime> client;
+af::net::udp_socket<Runtime> client;
 client.bind_threads(Runtime::thread_group<IoTag>());
 client.start<ClientHandler>({
     .name = "udp-client",
-    .local_endpoint = af::net::UdpEndpoint::any(0),
-    .remote_endpoint = af::net::UdpEndpoint::host("127.0.0.1", 9000),
+    .local_endpoint = af::net::udp_endpoint::any(0),
+    .remote_endpoint = af::net::udp_endpoint::host("127.0.0.1", 9000),
     .connect_remote = true,
 });
 
 client.handle().send(af::Buffer::copy("ping", 4));
 ```
 
-`UdpSocket::handle()` 在每个调用线程本地轮询 active shard，避免外部生产者默认全部集中到第一个 IO 线程，同时避免所有生产者争用一个全局原子计数器。业务需要固定亲和性时，可以启动后缓存 `handles()`，或用 `handle_for_shard()` 按业务 hash 选择目标 shard。`UdpSocketRef::send_to()` 在 IO 线程同线程发送，走直接 syscall。`UdpSocketHandle::send()` / `send_to()` 从业务线程调用时会创建 runtime task 并调度到 socket 所属 IO shard。`UdpSendResult::Queued` 表示发送 task 已提交；真正的非阻塞 send 在 IO 线程执行。
+`udp_socket::handle()` 在每个调用线程本地轮询 active shard，避免外部生产者默认全部集中到第一个 IO 线程，同时避免所有生产者争用一个全局原子计数器。业务需要固定亲和性时，可以启动后缓存 `handles()`，或用 `handle_for_shard()` 按业务 hash 选择目标 shard。`udp_socket_ref::send_to()` 在 IO 线程同线程发送，走直接 syscall。`udp_socket_handle::send()` / `send_to()` 从业务线程调用时会创建 runtime task 并调度到 socket 所属 IO shard。`udp_send_result::queued` 表示发送 task 已提交；真正的非阻塞 send 在 IO 线程执行。
 
 ## Listener 与 Handler
 
@@ -232,23 +232,23 @@ UDP socket 控制面同样是 reactor-only：`bind_threads()`、`start()`、`sto
 
 ## Accept 策略
 
-- `AcceptStrategy::Auto`：默认策略。`reuse_port=true` 时每个目标 IO 线程各自创建 listener fd；`reuse_port=false` 时只在首个 IO 线程监听，保证不会重复 bind。
-- `AcceptStrategy::ReusePortPerIoThread`：强制每个目标 IO 线程创建 listener fd，要求 `reuse_port=true`。
-- `AcceptStrategy::SingleAcceptor`：只在首个目标 IO 线程 accept，适合不希望或不能使用 `SO_REUSEPORT` 的场景。accepted fd 会通过 runtime task 分发到绑定的 IO 线程，并在目标 IO 线程创建 `TcpConnection`。
+- `accept_strategy::auto_select`：默认策略。`reuse_port=true` 时每个目标 IO 线程各自创建 listener fd；`reuse_port=false` 时只在首个 IO 线程监听，保证不会重复 bind。
+- `accept_strategy::reuse_port_per_io_thread`：强制每个目标 IO 线程创建 listener fd，要求 `reuse_port=true`。
+- `accept_strategy::single_acceptor`：只在首个目标 IO 线程 accept，适合不希望或不能使用 `SO_REUSEPORT` 的场景。accepted fd 会通过 runtime task 分发到绑定的 IO 线程，并在目标 IO 线程创建 `tcp_connection`。
 
 `reuse_port=true` 是 TCP/UDP 多 IO 线程绑定同一端口的最高性能路径：内核把新连接或 datagram 分配给各 IO 线程自己的 fd，后续处理保持本地化。
 
 ## 写入策略
 
-业务 task 要写 TCP 连接时，推荐调用 `TcpConnectionHandle::send()`。handle 内部把写请求投递到连接所属 IO 线程，由 IO 线程合并写队列、执行 syscall，并按 writable readiness 继续 flush。业务 task 不应直接跨线程操作 fd。
+业务 task 要写 TCP 连接时，推荐调用 `tcp_connection_handle::send()`。handle 内部把写请求投递到连接所属 IO 线程，由 IO 线程合并写队列、执行 syscall，并按 writable readiness 继续 flush。业务 task 不应直接跨线程操作 fd。
 
-业务 task 要写 UDP socket 时，推荐调用 `UdpSocketHandle::send()` 或 `send_to()`。UDP datagram 不维护连接写队列，发送 task 到达 owner IO 线程后直接执行非阻塞 `send`/`sendto`。
+业务 task 要写 UDP socket 时，推荐调用 `udp_socket_handle::send()` 或 `send_to()`。UDP datagram 不维护连接写队列，发送 task 到达 owner IO 线程后直接执行非阻塞 `send`/`sendto`。
 
 ## 连接管理
 
-登录完成后，业务层可维护 `user_id -> TcpConnectionHandle`。handle 带 generation，目标 IO 线程执行写入/关闭命令时会校验 generation；连接关闭或 slot 复用后，旧 handle 不会误发到新连接。
+登录完成后，业务层可维护 `user_id -> tcp_connection_handle`。handle 带 generation，目标 IO 线程执行写入/关闭命令时会校验 generation；连接关闭或 slot 复用后，旧 handle 不会误发到新连接。
 
-UDP 无连接状态。业务层如果需要会话语义，可以维护 `peer endpoint -> session`，在 `on_datagram` 中解析包头、更新 session，并用 `UdpSocketHandle::send_to()` 回包。
+UDP 无连接状态。业务层如果需要会话语义，可以维护 `peer endpoint -> session`，在 `on_datagram` 中解析包头、更新 session，并用 `udp_socket_handle::send_to()` 回包。
 
 ## 性能原则
 
