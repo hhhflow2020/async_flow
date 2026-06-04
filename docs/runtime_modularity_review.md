@@ -2,7 +2,8 @@
 
 ## 当前拆分
 
-- `runtime_config.hpp`：traits 归一化和静态校验。
+- `detail/runtime/runtime_config.hpp`：traits 归一化和静态校验。
+- `runtime/config_types.hpp`、`runtime/config_resolution.hpp`：public 结构化 runtime 配置类型与解析校验入口，`runtime_config.hpp` 只保留 umbrella include。
 - `runtime_executor.hpp`：executor 声明和对象布局。
 - `runtime_executor_lifecycle.hpp`：启动、停止、线程命名和通知。
 - `runtime_executor_scheduler.hpp`：intrusive MPSC inbox、task 执行循环。

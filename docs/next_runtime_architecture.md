@@ -582,6 +582,8 @@ task 不强杀正在运行的业务逻辑；pending task 可以取消，running 
 ```text
 include/af/
   runtime/
+    config_types.hpp
+    config_resolution.hpp
   task/
   queue/
   memory/
