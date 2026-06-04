@@ -28,7 +28,6 @@ static_assert(!AboveSixtyFourRuntime::Config::task_pool_cache_slot_index);
 static_assert(AboveSixtyFourRuntime::Config::task_pool_local_cache_set_size == 1U);
 static_assert(AboveSixtyFourRuntime::Config::task_pool_direct_release_set_size == 4U);
 static_assert(AboveSixtyFourRuntime::Config::task_pool_local_cache_capacity == 64U);
-static_assert(AboveSixtyFourRuntime::Config::queue_full_spin_count == 64U);
 
 struct ThreadLayoutMetadataTraits {
     static constexpr auto threads =
@@ -53,18 +52,9 @@ struct RemoteBatchOverrideTraits {
     static constexpr std::size_t task_pool_local_cache_set_size = 16;
     static constexpr std::size_t task_pool_direct_release_set_size = 8;
     static constexpr std::size_t task_pool_local_cache_capacity = 128;
-    static constexpr std::size_t queue_full_spin_count = 7;
 };
 
 using RemoteBatchOverrideRuntime = af::AsyncRuntime<RemoteBatchOverrideTraits>;
-
-struct SplitQueuePolicyTraits {
-    static constexpr auto threads = af::thread_layout(af::thread_group<ConfigThreadTag, 1>());
-    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
-    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Reject;
-};
-
-using SplitQueuePolicyRuntime = af::AsyncRuntime<SplitQueuePolicyTraits>;
 
 static_assert(RemoteBatchOverrideRuntime::Config::task_pool_remote_release_batch_size == 32U);
 static_assert(RemoteBatchOverrideRuntime::Config::task_pool_chunk_size == 512U);
@@ -72,11 +62,6 @@ static_assert(RemoteBatchOverrideRuntime::Config::task_pool_cache_slot_index);
 static_assert(RemoteBatchOverrideRuntime::Config::task_pool_local_cache_set_size == 16U);
 static_assert(RemoteBatchOverrideRuntime::Config::task_pool_direct_release_set_size == 8U);
 static_assert(RemoteBatchOverrideRuntime::Config::task_pool_local_cache_capacity == 128U);
-static_assert(RemoteBatchOverrideRuntime::Config::queue_full_spin_count == 7U);
-static_assert(SplitQueuePolicyRuntime::Config::runtime_queue_full_policy ==
-              af::QueueFullPolicy::Yield);
-static_assert(SplitQueuePolicyRuntime::Config::external_queue_full_policy ==
-              af::QueueFullPolicy::Reject);
 static_assert(af::supports_native_io_wait == (af::supports_epoll || af::supports_kqueue));
 static_assert(af::supports_eventfd == af::platform_linux);
 static_assert(af::supports_timerfd == af::platform_linux);
@@ -126,16 +111,10 @@ TEST(RuntimeConfigTests, DefaultsAndOverridesTaskPoolRemoteReleaseBatchSize) {
     EXPECT_EQ(AboveSixtyFourRuntime::Config::task_pool_local_cache_set_size, 1U);
     EXPECT_EQ(AboveSixtyFourRuntime::Config::task_pool_direct_release_set_size, 4U);
     EXPECT_EQ(AboveSixtyFourRuntime::Config::task_pool_local_cache_capacity, 64U);
-    EXPECT_EQ(AboveSixtyFourRuntime::Config::queue_full_spin_count, 64U);
     EXPECT_EQ(RemoteBatchOverrideRuntime::Config::task_pool_remote_release_batch_size, 32U);
     EXPECT_EQ(RemoteBatchOverrideRuntime::Config::task_pool_chunk_size, 512U);
     EXPECT_TRUE(RemoteBatchOverrideRuntime::Config::task_pool_cache_slot_index);
     EXPECT_EQ(RemoteBatchOverrideRuntime::Config::task_pool_local_cache_set_size, 16U);
     EXPECT_EQ(RemoteBatchOverrideRuntime::Config::task_pool_direct_release_set_size, 8U);
     EXPECT_EQ(RemoteBatchOverrideRuntime::Config::task_pool_local_cache_capacity, 128U);
-    EXPECT_EQ(RemoteBatchOverrideRuntime::Config::queue_full_spin_count, 7U);
-    EXPECT_EQ(SplitQueuePolicyRuntime::Config::runtime_queue_full_policy,
-              af::QueueFullPolicy::Yield);
-    EXPECT_EQ(SplitQueuePolicyRuntime::Config::external_queue_full_policy,
-              af::QueueFullPolicy::Reject);
 }

@@ -2,7 +2,7 @@
 
 namespace af::test::runtime_lifecycle {
 
-TEST(RuntimeBackpressureTests, UnboundedInboxAcceptsTasksPastLegacyQueueCapacity) {
+TEST(RuntimeBackpressureTests, UnboundedInboxAcceptsTasksBehindBlockingOwner) {
     TinyRuntime::init();
 
     constexpr int queued_task_count = 16;
@@ -51,8 +51,8 @@ TEST(RuntimeBackpressureTests, SameThreadAutoAndOrderedUseUnifiedInbox) {
     TinyRuntime::shutdown();
 }
 
-TEST(RuntimeBackpressureTests, YieldPolicyAllowsManyExternalProducers) {
-    YieldRuntime::init();
+TEST(RuntimeBackpressureTests, UnboundedInboxAllowsManyExternalProducers) {
+    TwoThreadRuntime::init();
 
     constexpr int producer_count = 4;
     constexpr int tasks_per_producer = 200;
@@ -63,9 +63,9 @@ TEST(RuntimeBackpressureTests, YieldPolicyAllowsManyExternalProducers) {
     for (int producer = 0; producer < producer_count; ++producer) {
         producers[producer] = std::thread([producer, &completed, &all_started] {
             for (int i = 0; i < tasks_per_producer; ++i) {
-                const YieldThread target =
-                    ((producer + i) & 1) == 0 ? YieldThreads::Logic_0 : YieldThreads::Logic_1;
-                if (!YieldRuntime::start_task<YieldCountTask>(target, &completed)) {
+                const TwoThread target =
+                    ((producer + i) & 1) == 0 ? TwoThreads::Logic_0 : TwoThreads::Logic_1;
+                if (!TwoThreadRuntime::start_task<TwoThreadCountTask>(target, &completed)) {
                     all_started.store(false, std::memory_order_release);
                     return;
                 }
@@ -79,61 +79,22 @@ TEST(RuntimeBackpressureTests, YieldPolicyAllowsManyExternalProducers) {
 
     EXPECT_TRUE(all_started.load(std::memory_order_acquire));
     EXPECT_TRUE(wait_until_at_least(completed, producer_count * tasks_per_producer));
-    YieldRuntime::shutdown();
+    TwoThreadRuntime::shutdown();
 }
 
-TEST(RuntimeBackpressureTests, YieldPolicyHandlesSameThreadFanoutWithUnifiedInbox) {
-    YieldRuntime::init();
+TEST(RuntimeBackpressureTests, RuntimeThreadFanoutUsesUnifiedInbox) {
+    TwoThreadRuntime::init();
 
     constexpr int child_count = 128;
     std::atomic<int> completed{0};
     std::atomic<bool> all_started{true};
 
-    ASSERT_TRUE(YieldRuntime::start_task<YieldFanoutTask>(child_count, &completed, &all_started));
-    EXPECT_TRUE(wait_until_at_least(completed, child_count + 1));
-    EXPECT_TRUE(all_started.load(std::memory_order_acquire));
-
-    YieldRuntime::shutdown();
-}
-
-TEST(RuntimeBackpressureTests, SplitQueuePoliciesDoNotBoundUnifiedTaskInbox) {
-    SplitPolicyRuntime::init();
-
-    constexpr int queued_task_count = 16;
-    std::atomic<int> started{0};
-    std::atomic<bool> release{false};
-    std::atomic<int> completed{0};
-    std::atomic<int> destroyed{0};
-
     ASSERT_TRUE(
-        SplitPolicyRuntime::start_task<SplitPolicyBlockingTask>(&started, &release, &completed));
-    ASSERT_TRUE(wait_until_at_least(started, 1));
-
-    for (int i = 0; i < queued_task_count; ++i) {
-        EXPECT_TRUE(SplitPolicyRuntime::start_task<SplitPolicyCountTask>(&completed, &destroyed));
-    }
-    EXPECT_EQ(destroyed.load(std::memory_order_acquire), 0);
-
-    release.store(true, std::memory_order_release);
-    af::detail::atomic_notify_one(release);
-    EXPECT_TRUE(wait_until_at_least(completed, queued_task_count + 1));
-    EXPECT_TRUE(wait_until_at_least(destroyed, queued_task_count));
-
-    SplitPolicyRuntime::shutdown();
-}
-
-TEST(RuntimeBackpressureTests, SplitQueuePoliciesKeepRuntimeThreadFanoutOnUnifiedInbox) {
-    SplitPolicyRuntime::init();
-
-    constexpr int child_count = 32;
-    std::atomic<int> completed{0};
-    std::atomic<bool> all_started{true};
-
-    ASSERT_TRUE(SplitPolicyRuntime::start_task<SplitPolicyFanoutTask>(child_count, &completed,
-                                                                      &all_started));
+        TwoThreadRuntime::start_task<TwoThreadFanoutTask>(child_count, &completed, &all_started));
     EXPECT_TRUE(wait_until_at_least(completed, child_count + 1));
     EXPECT_TRUE(all_started.load(std::memory_order_acquire));
 
-    SplitPolicyRuntime::shutdown();
+    TwoThreadRuntime::shutdown();
 }
+
 } // namespace af::test::runtime_lifecycle

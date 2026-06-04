@@ -70,31 +70,20 @@ return schedule_ordered(TargetThread);  // 强制目标 MPSC 顺序路径
 
 task inbox 是 intrusive unbounded MPSC，不再用队列容量拒绝任务投递。只要 task 对象已经成功创建，目标 inbox 不会因为容量满而返回失败。
 
-历史 traits 只保留非 task 子系统仍需要的容量来源：
-
-- `external_queue_capacity`：历史字段名，task 调度不再使用它限制外部 ingress。
-
-该字段不再约束 task 调度热路径。旧的满队列策略字段也不再决定 task inbox 行为：
-
-- `Reject`：入队失败时立即返回 `false`，不会阻塞生产者。
-- `Yield`：生产者等待空位，等待过程会执行 CPU relax / yield backoff。
-
-后续配置收敛时，应把这些历史字段从 task runtime API 中移除，只保留日志、网络缓冲等确实有界的队列配置。
+历史 task 队列容量和满载策略 traits 已移除。runtime task 调度不再暴露 `external_queue_capacity`、`runtime_queue_full_policy`、`external_queue_full_policy` 或 `queue_full_spin_count`。日志、网络 batch 等确实有界的队列继续使用各自子系统的配置。
 
 ## 正确性覆盖
 
 相关测试：
 
-- `RuntimeBackpressureTests.UnboundedInboxAcceptsTasksPastLegacyQueueCapacity`
-- `RuntimeBackpressureTests.YieldPolicyAllowsManyExternalProducers`
-- `RuntimeBackpressureTests.YieldPolicyHandlesSameThreadFanoutWithUnifiedInbox`
-- `RuntimeBackpressureTests.SplitQueuePoliciesDoNotBoundUnifiedTaskInbox`
-- `RuntimeBackpressureTests.SplitQueuePoliciesKeepRuntimeThreadFanoutOnUnifiedInbox`
+- `RuntimeBackpressureTests.UnboundedInboxAcceptsTasksBehindBlockingOwner`
+- `RuntimeBackpressureTests.UnboundedInboxAllowsManyExternalProducers`
+- `RuntimeBackpressureTests.RuntimeThreadFanoutUsesUnifiedInbox`
 - `RuntimeBackpressureTests.SameThreadAutoAndOrderedUseUnifiedInbox`
 
 其中 `SameThreadAutoAndOrderedUseUnifiedInbox` 专门验证 self-post 场景：
 
 - runtime 线程投递自身目标时，`Auto` 与 `Ordered` 都进入统一 inbox。
-- 任务数量超过旧容量字段时仍能完成，证明旧 bounded 队列容量不再限制 task 调度。
+- owner 正在运行阻塞任务时，后续任务仍能进入同一个 unbounded inbox，证明 task 调度不再受旧 bounded 队列容量限制。
 
 这个测试直接证明 runtime 内部线程投递自身目标时，不再存在 local queue 和 MPSC 的双路径顺序差异。

@@ -28,9 +28,6 @@ struct NetUnixMultiIoTag;
 struct NetUnixRuntimeTraits {
     static constexpr auto threads =
         af::thread_layout(af::thread_group<NetUnixIoTag, 1, af::thread_kind::io>("net-unix-io"));
-    static constexpr std::size_t external_queue_capacity = 1024;
-    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
-    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 };
 
@@ -39,9 +36,6 @@ using NetUnixRuntime = af::AsyncRuntime<NetUnixRuntimeTraits>;
 struct NetUnixMultiRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
         af::thread_group<NetUnixMultiIoTag, 2, af::thread_kind::io>("net-unix-mio"));
-    static constexpr std::size_t external_queue_capacity = 1024;
-    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
-    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 };
 

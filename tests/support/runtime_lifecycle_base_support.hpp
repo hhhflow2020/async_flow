@@ -17,9 +17,6 @@ struct TestDbThreadTag;
 struct TestRuntimeTraits {
     static constexpr auto threads = af::thread_layout(af::thread_group<TestLogicThreadTag, 4>(),
                                                       af::thread_group<TestDbThreadTag, 1>());
-    static constexpr std::size_t external_queue_capacity = 1024;
-    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Reject;
-    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Reject;
 };
 
 using Runtime = af::AsyncRuntime<TestRuntimeTraits>;

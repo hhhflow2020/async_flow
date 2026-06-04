@@ -4,9 +4,6 @@ struct WideHopThreadTag;
 
 struct WideHopRuntimeTraits {
     static constexpr auto threads = af::thread_layout(af::thread_group<WideHopThreadTag, 65>());
-    static constexpr std::size_t external_queue_capacity = 256;
-    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
-    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::StopImmediately;
     static constexpr bool enable_task_registry = true;
 };

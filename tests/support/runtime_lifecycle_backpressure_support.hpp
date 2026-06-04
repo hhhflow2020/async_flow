@@ -4,9 +4,6 @@ struct TinyThreadTag;
 
 struct TinyRuntimeTraits {
     static constexpr auto threads = af::thread_layout(af::thread_group<TinyThreadTag, 1>());
-    static constexpr std::size_t external_queue_capacity = 2;
-    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Reject;
-    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Reject;
 };
 
 using TinyRuntime = af::AsyncRuntime<TinyRuntimeTraits>;
@@ -109,31 +106,28 @@ private:
     std::atomic<int> *destroyed_{nullptr};
 };
 
-struct YieldThreadTag;
+struct TwoThreadTag;
 
-struct YieldRuntimeTraits {
-    static constexpr auto threads = af::thread_layout(af::thread_group<YieldThreadTag, 2>());
-    static constexpr std::size_t external_queue_capacity = 64;
-    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
-    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
+struct TwoThreadRuntimeTraits {
+    static constexpr auto threads = af::thread_layout(af::thread_group<TwoThreadTag, 2>());
 };
 
-using YieldRuntime = af::AsyncRuntime<YieldRuntimeTraits>;
-using YieldTask = YieldRuntime::Task;
-using YieldThread = YieldRuntime::Thread;
+using TwoThreadRuntime = af::AsyncRuntime<TwoThreadRuntimeTraits>;
+using TwoThreadTask = TwoThreadRuntime::Task;
+using TwoThread = TwoThreadRuntime::Thread;
 
-struct YieldThreads {
-    static constexpr YieldThread Logic_0 =
-        YieldRuntime::thread_group<YieldThreadTag>().template at<0>();
-    static constexpr YieldThread Logic_1 =
-        YieldRuntime::thread_group<YieldThreadTag>().template at<1>();
+struct TwoThreads {
+    static constexpr TwoThread Logic_0 =
+        TwoThreadRuntime::thread_group<TwoThreadTag>().template at<0>();
+    static constexpr TwoThread Logic_1 =
+        TwoThreadRuntime::thread_group<TwoThreadTag>().template at<1>();
 };
 
-class YieldCountTask final : public YieldTask {
+class TwoThreadCountTask final : public TwoThreadTask {
 public:
-    explicit YieldCountTask(YieldTask::FactoryToken token) : YieldTask(token) {}
+    explicit TwoThreadCountTask(TwoThreadTask::FactoryToken token) : TwoThreadTask(token) {}
 
-    bool do_it(YieldThread thread, std::atomic<int> *completed) {
+    bool do_it(TwoThread thread, std::atomic<int> *completed) {
         completed_ = completed;
         return schedule(thread);
     }
@@ -147,121 +141,22 @@ private:
     std::atomic<int> *completed_{nullptr};
 };
 
-class YieldFanoutTask final : public YieldTask {
+class TwoThreadFanoutTask final : public TwoThreadTask {
 public:
-    explicit YieldFanoutTask(YieldTask::FactoryToken token) : YieldTask(token) {}
+    explicit TwoThreadFanoutTask(TwoThreadTask::FactoryToken token) : TwoThreadTask(token) {}
 
     bool do_it(int child_count, std::atomic<int> *completed, std::atomic<bool> *all_started) {
         child_count_ = child_count;
         completed_ = completed;
         all_started_ = all_started;
-        return schedule(YieldThreads::Logic_0);
+        return schedule(TwoThreads::Logic_0);
     }
 
 private:
     af::TaskResult run() override {
         for (int i = 0; i < child_count_; ++i) {
-            if (!YieldRuntime::start_task<YieldCountTask>(YieldThreads::Logic_0, completed_)) {
-                all_started_->store(false, std::memory_order_release);
-                return failed();
-            }
-        }
-        completed_->fetch_add(1, std::memory_order_release);
-        return done();
-    }
-
-    int child_count_{0};
-    std::atomic<int> *completed_{nullptr};
-    std::atomic<bool> *all_started_{nullptr};
-};
-
-struct SplitPolicyThreadTag;
-
-struct SplitPolicyRuntimeTraits {
-    static constexpr auto threads = af::thread_layout(af::thread_group<SplitPolicyThreadTag, 1>());
-    static constexpr std::size_t external_queue_capacity = 2;
-    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
-    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Reject;
-};
-
-using SplitPolicyRuntime = af::AsyncRuntime<SplitPolicyRuntimeTraits>;
-using SplitPolicyTask = SplitPolicyRuntime::Task;
-using SplitPolicyThread = SplitPolicyRuntime::Thread;
-
-struct SplitPolicyThreads {
-    static constexpr SplitPolicyThread Logic_0 =
-        SplitPolicyRuntime::thread_group<SplitPolicyThreadTag>().template at<0>();
-};
-
-class SplitPolicyBlockingTask final : public SplitPolicyTask {
-public:
-    explicit SplitPolicyBlockingTask(SplitPolicyTask::FactoryToken token)
-        : SplitPolicyTask(token) {}
-
-    bool do_it(std::atomic<int> *started, std::atomic<bool> *release, std::atomic<int> *completed) {
-        started_ = started;
-        release_ = release;
-        completed_ = completed;
-        return schedule(SplitPolicyThreads::Logic_0);
-    }
-
-private:
-    af::TaskResult run() override {
-        started_->fetch_add(1, std::memory_order_release);
-        af::detail::atomic_notify_one(*started_);
-        while (!release_->load(std::memory_order_acquire)) {
-            af::detail::atomic_wait_value(*release_, false, std::memory_order_acquire);
-        }
-        completed_->fetch_add(1, std::memory_order_release);
-        return done();
-    }
-
-    std::atomic<int> *started_{nullptr};
-    std::atomic<bool> *release_{nullptr};
-    std::atomic<int> *completed_{nullptr};
-};
-
-class SplitPolicyCountTask final : public SplitPolicyTask {
-public:
-    explicit SplitPolicyCountTask(SplitPolicyTask::FactoryToken token) : SplitPolicyTask(token) {}
-
-    bool do_it(std::atomic<int> *completed, std::atomic<int> *destroyed = nullptr) {
-        completed_ = completed;
-        destroyed_ = destroyed;
-        return schedule(SplitPolicyThreads::Logic_0);
-    }
-
-    ~SplitPolicyCountTask() override {
-        if (destroyed_ != nullptr) {
-            destroyed_->fetch_add(1, std::memory_order_release);
-        }
-    }
-
-private:
-    af::TaskResult run() override {
-        completed_->fetch_add(1, std::memory_order_release);
-        return done();
-    }
-
-    std::atomic<int> *completed_{nullptr};
-    std::atomic<int> *destroyed_{nullptr};
-};
-
-class SplitPolicyFanoutTask final : public SplitPolicyTask {
-public:
-    explicit SplitPolicyFanoutTask(SplitPolicyTask::FactoryToken token) : SplitPolicyTask(token) {}
-
-    bool do_it(int child_count, std::atomic<int> *completed, std::atomic<bool> *all_started) {
-        child_count_ = child_count;
-        completed_ = completed;
-        all_started_ = all_started;
-        return schedule(SplitPolicyThreads::Logic_0);
-    }
-
-private:
-    af::TaskResult run() override {
-        for (int i = 0; i < child_count_; ++i) {
-            if (!SplitPolicyRuntime::start_task<SplitPolicyCountTask>(completed_)) {
+            if (!TwoThreadRuntime::start_task<TwoThreadCountTask>(TwoThreads::Logic_0,
+                                                                  completed_)) {
                 all_started_->store(false, std::memory_order_release);
                 return failed();
             }

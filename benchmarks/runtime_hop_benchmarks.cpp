@@ -12,7 +12,6 @@ template <std::size_t TaskPoolRemoteReleaseBatchSize, bool TaskPoolCacheSlotInde
           std::size_t TaskPoolDirectReleaseSetSize = 4, std::size_t TaskPoolLocalCacheCapacity = 64>
 struct BatchRuntimeTraits {
     static constexpr auto threads = af_bench::runtime::BenchRuntimeTraits::threads;
-    static constexpr std::size_t external_queue_capacity = 65536;
     static constexpr std::size_t task_pool_remote_release_batch_size =
         TaskPoolRemoteReleaseBatchSize;
     static constexpr std::size_t task_pool_chunk_size = TaskPoolChunkSize;
@@ -20,8 +19,6 @@ struct BatchRuntimeTraits {
     static constexpr std::size_t task_pool_local_cache_set_size = TaskPoolLocalCacheSetSize;
     static constexpr std::size_t task_pool_direct_release_set_size = TaskPoolDirectReleaseSetSize;
     static constexpr std::size_t task_pool_local_cache_capacity = TaskPoolLocalCacheCapacity;
-    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
-    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
 };
 
 template <typename RuntimeT> class BatchHopTask final : public RuntimeT::Task {

@@ -28,9 +28,6 @@ struct NetTcpClientIoTag;
 struct NetTcpClientRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
         af::thread_group<NetTcpClientIoTag, 1, af::thread_kind::io>("net-client-io"));
-    static constexpr std::size_t external_queue_capacity = 1024;
-    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
-    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 };
 

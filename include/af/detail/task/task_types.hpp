@@ -14,11 +14,6 @@ enum class TaskResult : std::uint8_t {
     Cancelled,
 };
 
-enum class QueueFullPolicy : std::uint8_t {
-    Reject,
-    Yield,
-};
-
 enum class ScheduleMode : std::uint8_t {
     // Default task admission path. The next runtime architecture routes every
     // producer through the target executor intrusive MPSC inbox.

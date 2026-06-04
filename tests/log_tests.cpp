@@ -345,9 +345,6 @@ struct LogTestRuntimeThreadTag;
 struct LogTestRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
         af::thread_group<LogTestRuntimeThreadTag, 2, af::thread_kind::cpu>("log-src"));
-    static constexpr std::size_t external_queue_capacity = 1024;
-    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
-    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
 };
 
 using LogTestRuntime = af::AsyncRuntime<LogTestRuntimeTraits>;
@@ -480,9 +477,6 @@ inline constexpr af::thread_kind log_udp_io_thread_kind = af::thread_kind::io;
 struct LogUdpIoRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
         af::thread_group<LogUdpIoThreadTag, 1, log_udp_io_thread_kind>("log-udp-io"));
-    static constexpr std::size_t external_queue_capacity = 1024;
-    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
-    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 };
 
@@ -500,9 +494,6 @@ struct LogDefaultIoRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
         af::thread_group<DefaultConsumerLogicThreadTag, 1, af::thread_kind::cpu>("log-def-cpu"),
         af::thread_group<DefaultConsumerIoThreadTag, 1, af::thread_kind::io>("log-def-io"));
-    static constexpr std::size_t external_queue_capacity = 1024;
-    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
-    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
 };
 
 using LogDefaultIoRuntime = af::AsyncRuntime<LogDefaultIoRuntimeTraits>;

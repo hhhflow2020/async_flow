@@ -33,9 +33,6 @@ struct NetServerIoWorkerCpuTag;
 struct NetServerRuntimeTraits {
     static constexpr auto threads =
         af::thread_layout(af::thread_group<NetServerIoTag, 1, af::thread_kind::io>("net-test-io"));
-    static constexpr std::size_t external_queue_capacity = 1024;
-    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
-    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 };
 
@@ -44,9 +41,6 @@ using NetServerRuntime = af::AsyncRuntime<NetServerRuntimeTraits>;
 struct NetServerTwoIoRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
         af::thread_group<NetServerTwoIoTag, 2, af::thread_kind::io>("net-test-io"));
-    static constexpr std::size_t external_queue_capacity = 1024;
-    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
-    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 };
 
@@ -56,9 +50,6 @@ struct NetServerIoWorkerRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
         af::thread_group<NetServerIoWorkerIoTag, 1, af::thread_kind::io>("net-test-io"),
         af::thread_group<NetServerIoWorkerCpuTag, 1, af::thread_kind::cpu>("net-test-cpu"));
-    static constexpr std::size_t external_queue_capacity = 1024;
-    static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
-    static constexpr af::QueueFullPolicy external_queue_full_policy = af::QueueFullPolicy::Yield;
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
 };
 
