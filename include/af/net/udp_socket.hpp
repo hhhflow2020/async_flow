@@ -147,6 +147,41 @@ public:
     virtual void on_error(UdpSocketHandle<Runtime> socket, int error) noexcept = 0;
 };
 
+template <typename Handler, typename Runtime, typename = void>
+struct UdpHandlerHasOnDatagramPeer : std::false_type {};
+template <typename Handler, typename Runtime>
+struct UdpHandlerHasOnDatagramPeer<
+    Handler, Runtime,
+    std::void_t<decltype(std::declval<Handler &>().on_datagram(
+        std::declval<UdpSocketRef<Runtime>>(), std::declval<af::BufferView>(),
+        std::declval<const UdpPeer &>()))>> : std::true_type {};
+
+template <typename Handler, typename Runtime, typename = void>
+struct UdpHandlerHasOnDatagramEndpoint : std::false_type {};
+template <typename Handler, typename Runtime>
+struct UdpHandlerHasOnDatagramEndpoint<
+    Handler, Runtime,
+    std::void_t<decltype(std::declval<Handler &>().on_datagram(
+        std::declval<UdpSocketRef<Runtime>>(), std::declval<af::BufferView>(),
+        std::declval<const UdpEndpoint &>()))>> : std::true_type {};
+
+template <typename Handler, typename Runtime, typename = void>
+struct UdpHandlerHasOnDatagram : std::false_type {};
+template <typename Handler, typename Runtime>
+struct UdpHandlerHasOnDatagram<
+    Handler, Runtime,
+    std::void_t<decltype(std::declval<Handler &>().on_datagram(
+        std::declval<UdpSocketRef<Runtime>>(), std::declval<af::BufferView>()))>> : std::true_type {
+};
+
+template <typename Handler, typename Runtime, typename = void>
+struct UdpHandlerHasOnError : std::false_type {};
+template <typename Handler, typename Runtime>
+struct UdpHandlerHasOnError<Handler, Runtime,
+                            std::void_t<decltype(std::declval<Handler &>().on_error(
+                                std::declval<UdpSocketHandle<Runtime>>(), std::declval<int>()))>>
+    : std::true_type {};
+
 template <typename Runtime, typename Handler>
 class UdpHandlerModel final : public UdpHandlerBase<Runtime> {
 public:
@@ -158,24 +193,20 @@ public:
 
     void on_datagram(UdpSocketRef<Runtime> socket, af::BufferView bytes,
                      const UdpPeer &peer) noexcept override {
-        if constexpr (requires(Handler h, UdpSocketRef<Runtime> s, af::BufferView b,
-                               const UdpPeer &p) { h.on_datagram(s, b, p); }) {
+        if constexpr (UdpHandlerHasOnDatagramPeer<Handler, Runtime>::value) {
             try {
                 handler_.on_datagram(socket, bytes, peer);
             } catch (...) {
                 on_error(socket.handle(), EIO);
             }
-        } else if constexpr (requires(Handler h, UdpSocketRef<Runtime> s, af::BufferView b,
-                                      const UdpEndpoint &p) { h.on_datagram(s, b, p); }) {
+        } else if constexpr (UdpHandlerHasOnDatagramEndpoint<Handler, Runtime>::value) {
             try {
                 const UdpEndpoint endpoint = peer.endpoint();
                 handler_.on_datagram(socket, bytes, endpoint);
             } catch (...) {
                 on_error(socket.handle(), EIO);
             }
-        } else if constexpr (requires(Handler h, UdpSocketRef<Runtime> s, af::BufferView b) {
-                                 h.on_datagram(s, b);
-                             }) {
+        } else if constexpr (UdpHandlerHasOnDatagram<Handler, Runtime>::value) {
             try {
                 handler_.on_datagram(socket, bytes);
             } catch (...) {
@@ -189,9 +220,7 @@ public:
     }
 
     void on_error(UdpSocketHandle<Runtime> socket, int error) noexcept override {
-        if constexpr (requires(Handler h, UdpSocketHandle<Runtime> s, int e) {
-                          h.on_error(s, e);
-                      }) {
+        if constexpr (UdpHandlerHasOnError<Handler, Runtime>::value) {
             try {
                 handler_.on_error(socket, error);
             } catch (...) {

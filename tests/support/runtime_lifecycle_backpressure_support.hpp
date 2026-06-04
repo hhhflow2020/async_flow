@@ -33,9 +33,9 @@ public:
 private:
     af::TaskResult run() override {
         started_->fetch_add(1, std::memory_order_release);
-        started_->notify_one();
+        af::detail::atomic_notify_one(*started_);
         while (!release_->load(std::memory_order_acquire)) {
-            release_->wait(false, std::memory_order_acquire);
+            af::detail::atomic_wait_value(*release_, false, std::memory_order_acquire);
         }
         completed_->fetch_add(1, std::memory_order_release);
         return done();
@@ -211,9 +211,9 @@ public:
 private:
     af::TaskResult run() override {
         started_->fetch_add(1, std::memory_order_release);
-        started_->notify_one();
+        af::detail::atomic_notify_one(*started_);
         while (!release_->load(std::memory_order_acquire)) {
-            release_->wait(false, std::memory_order_acquire);
+            af::detail::atomic_wait_value(*release_, false, std::memory_order_acquire);
         }
         completed_->fetch_add(1, std::memory_order_release);
         return done();

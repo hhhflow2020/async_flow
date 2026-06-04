@@ -34,6 +34,7 @@ public:
     }
 
     [[nodiscard]] T *try_pop() noexcept {
+        QueueFullBackoff inconsistent_backoff(inconsistent_spin_count);
         for (;;) {
             Node *tail = tail_;
             Node *next = tail->next.load(std::memory_order_acquire);
@@ -62,11 +63,13 @@ public:
                 if (consumed_stub) {
                     continue;
                 }
-                return nullptr;
+                inconsistent_backoff.wait();
+                continue;
             }
             if (tail == &stub_) {
                 return nullptr;
             }
+            inconsistent_backoff.reset();
             push_node(&stub_);
         }
     }

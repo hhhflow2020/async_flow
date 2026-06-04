@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <span>
+#include "af/span.hpp"
 #include <stdexcept>
 #include <string_view>
 #include <utility>
@@ -40,7 +40,7 @@ public:
     RuntimeLogQueueState(const RuntimeLogQueueState &) = delete;
     RuntimeLogQueueState &operator=(const RuntimeLogQueueState &) = delete;
 
-    [[nodiscard]] bool enqueue(std::span<LogRecord *const> records) noexcept {
+    [[nodiscard]] bool enqueue(af::Span<LogRecord *const> records) noexcept {
         if (records.empty() || stopping.load(std::memory_order_relaxed)) {
             return false;
         }
@@ -168,7 +168,7 @@ private:
     }
 
     [[nodiscard]] static std::size_t
-    count_non_empty_records(std::span<LogRecord *const> records) noexcept {
+    count_non_empty_records(af::Span<LogRecord *const> records) noexcept {
         std::size_t count = 0;
         for (const LogRecord *record : records) {
             if (record != nullptr && !record->message().empty()) {
@@ -253,7 +253,7 @@ public:
         return *state_;
     }
 
-    [[nodiscard]] bool enqueue_and_wake(std::span<LogRecord *const> records) noexcept {
+    [[nodiscard]] bool enqueue_and_wake(af::Span<LogRecord *const> records) noexcept {
         return state_->enqueue(records) && wake();
     }
 

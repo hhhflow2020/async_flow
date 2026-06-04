@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
-#include <span>
+#include "af/span.hpp"
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -31,7 +31,7 @@ public:
         return size_ == 0U;
     }
 
-    [[nodiscard]] constexpr std::span<const std::byte> span() const noexcept {
+    [[nodiscard]] constexpr af::Span<const std::byte> span() const noexcept {
         return {data_, size_};
     }
 
@@ -244,7 +244,7 @@ public:
         return buffers_;
     }
 
-    [[nodiscard]] std::size_t fill_views(std::span<BufferView> views) const noexcept {
+    [[nodiscard]] std::size_t fill_views(af::Span<BufferView> views) const noexcept {
         std::size_t count = 0;
         for (std::size_t i = first_; i < buffers_.size() && count < views.size(); ++i) {
             if (buffers_[i].empty()) {

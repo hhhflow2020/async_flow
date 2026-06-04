@@ -22,7 +22,7 @@ TEST(RuntimeBackpressureTests, UnboundedInboxAcceptsTasksPastLegacyQueueCapacity
               static_cast<std::uint32_t>(queued_task_count + 1));
 
     release.store(true, std::memory_order_release);
-    release.notify_one();
+    af::detail::atomic_notify_one(release);
     EXPECT_TRUE(wait_until_at_least(completed, queued_task_count + 1));
     EXPECT_TRUE(wait_until_at_least(destroyed, queued_task_count));
     EXPECT_EQ(TinyRuntime::unfinished_task_count(), 0U);
@@ -115,7 +115,7 @@ TEST(RuntimeBackpressureTests, SplitQueuePoliciesDoNotBoundUnifiedTaskInbox) {
     EXPECT_EQ(destroyed.load(std::memory_order_acquire), 0);
 
     release.store(true, std::memory_order_release);
-    release.notify_one();
+    af::detail::atomic_notify_one(release);
     EXPECT_TRUE(wait_until_at_least(completed, queued_task_count + 1));
     EXPECT_TRUE(wait_until_at_least(destroyed, queued_task_count));
 

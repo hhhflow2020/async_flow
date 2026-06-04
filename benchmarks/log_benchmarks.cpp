@@ -4,7 +4,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
-#include <span>
+#include "af/span.hpp"
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -15,7 +15,7 @@ namespace {
 
 class CountingLogBackend final : public af::LogBackend {
 public:
-    void write_batch(std::span<af::detail::LogRecord *const> records) noexcept override {
+    void write_batch(af::Span<af::detail::LogRecord *const> records) noexcept override {
         records_.fetch_add(records.size(), std::memory_order_relaxed);
     }
 

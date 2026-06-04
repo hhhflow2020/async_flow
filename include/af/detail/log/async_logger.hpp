@@ -633,12 +633,12 @@ private:
 
             for (auto &backend : backends_) {
                 backend->write_batch(
-                    std::span<detail::LogRecord *const>(batch.data(), batch.size()));
+                    af::Span<detail::LogRecord *const>(batch.data(), batch.size()));
             }
 
             const auto drained = batch.size();
             detail::release_async_log_records(
-                std::span<detail::LogRecord *const>(batch.data(), drained));
+                af::Span<detail::LogRecord *const>(batch.data(), drained));
             const auto previous_ready = ready_.fetch_sub(drained, std::memory_order_relaxed);
             AF_ASSERT(previous_ready >= drained);
             const auto previous = pending_.fetch_sub(drained, std::memory_order_release);

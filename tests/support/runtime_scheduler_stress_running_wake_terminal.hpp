@@ -99,7 +99,7 @@ private:
 
     void complete() noexcept {
         if (remaining_->fetch_sub(1, std::memory_order_acq_rel) == 1) {
-            remaining_->notify_one();
+            af::detail::atomic_notify_one(*remaining_);
         }
     }
 
@@ -130,6 +130,6 @@ inline af::TaskResult RunningWakeTerminalWakerTask::run() {
     }
     wake_flag_->store(1, std::memory_order_release);
     wake_attempts_->fetch_add(1, std::memory_order_release);
-    wake_attempts_->notify_one();
+    af::detail::atomic_notify_one(*wake_attempts_);
     return done();
 }

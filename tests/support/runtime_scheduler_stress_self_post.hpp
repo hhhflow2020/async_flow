@@ -50,7 +50,7 @@ private:
             failures_->fetch_add(1, std::memory_order_relaxed);
         }
         if (remaining_->fetch_sub(1, std::memory_order_acq_rel) == 1) {
-            remaining_->notify_one();
+            af::detail::atomic_notify_one(*remaining_);
         }
         return done();
     }
@@ -88,14 +88,14 @@ private:
                     id, remaining_, failures_, sequence_, order_, child_count_, root_completed_)) {
                 failures_->fetch_add(1, std::memory_order_relaxed);
                 if (remaining_->fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                    remaining_->notify_one();
+                    af::detail::atomic_notify_one(*remaining_);
                 }
             }
         }
 
         root_completed_->store(1, std::memory_order_release);
         if (remaining_->fetch_sub(1, std::memory_order_acq_rel) == 1) {
-            remaining_->notify_one();
+            af::detail::atomic_notify_one(*remaining_);
         }
         return done();
     }
@@ -126,7 +126,7 @@ private:
             return again();
         }
         if (remaining_->fetch_sub(1, std::memory_order_acq_rel) == 1) {
-            remaining_->notify_one();
+            af::detail::atomic_notify_one(*remaining_);
         }
         return done();
     }

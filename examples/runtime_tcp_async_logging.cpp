@@ -24,8 +24,8 @@ inline constexpr std::uint32_t runtime_tcp_records_per_task = 32;
 
 struct RuntimeTcpTraits {
     static constexpr auto threads = af::thread_layout(
-        af::thread_group<RuntimeTcpLogicThreadTag, 2, af::thread_kind::cpu, "tcp-log-cpu">(),
-        af::thread_group<RuntimeTcpIoThreadTag, 1, af::preferred_io_thread_kind, "tcp-log-io">());
+        af::thread_group<RuntimeTcpLogicThreadTag, 2, af::thread_kind::cpu>("tcp-log-cpu"),
+        af::thread_group<RuntimeTcpIoThreadTag, 1, af::preferred_io_thread_kind>("tcp-log-io"));
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;

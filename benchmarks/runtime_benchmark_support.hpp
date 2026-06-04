@@ -14,8 +14,8 @@ struct BenchIoThreadTag;
 
 struct BenchRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
-        af::thread_group<BenchLogicThreadTag, 4, af::thread_kind::cpu, "bench-log">(),
-        af::thread_group<BenchIoThreadTag, 1, af::thread_kind::io, "bench-io">());
+        af::thread_group<BenchLogicThreadTag, 4, af::thread_kind::cpu>("bench-log"),
+        af::thread_group<BenchIoThreadTag, 1, af::thread_kind::io>("bench-io"));
     static constexpr std::size_t spsc_queue_capacity = 65536;
     static constexpr std::size_t external_queue_capacity = 65536;
     static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
@@ -42,14 +42,14 @@ inline void wait_zero(std::atomic<int> &remaining) {
     while (remaining.load(std::memory_order_acquire) != 0) {
         const int observed = remaining.load(std::memory_order_acquire);
         if (observed != 0) {
-            remaining.wait(observed, std::memory_order_acquire);
+            af::detail::atomic_wait_value(remaining, observed, std::memory_order_acquire);
         }
     }
 }
 
 inline void undo_remaining(std::atomic<int> &remaining) {
     if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-        remaining.notify_one();
+        af::detail::atomic_notify_one(remaining);
     }
 }
 
@@ -65,7 +65,7 @@ public:
 private:
     af::TaskResult run() override {
         if (remaining_->fetch_sub(1, std::memory_order_acq_rel) == 1) {
-            remaining_->notify_one();
+            af::detail::atomic_notify_one(*remaining_);
         }
         return done();
     }
@@ -93,7 +93,7 @@ private:
         }
 
         if (remaining_->fetch_sub(1, std::memory_order_acq_rel) == 1) {
-            remaining_->notify_one();
+            af::detail::atomic_notify_one(*remaining_);
         }
         return done();
     }
@@ -126,7 +126,7 @@ private:
 
         case State::Io:
             if (remaining_->fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                remaining_->notify_one();
+                af::detail::atomic_notify_one(*remaining_);
             }
             return done();
         }
@@ -173,7 +173,7 @@ private:
 
         case State::Finish:
             if (remaining_->fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                remaining_->notify_one();
+                af::detail::atomic_notify_one(*remaining_);
             }
             return done();
         }

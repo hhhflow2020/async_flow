@@ -102,6 +102,10 @@ struct ListenerId {
     [[nodiscard]] friend bool operator==(ListenerId lhs, ListenerId rhs) noexcept {
         return lhs.slot == rhs.slot && lhs.generation == rhs.generation;
     }
+
+    [[nodiscard]] friend bool operator!=(ListenerId lhs, ListenerId rhs) noexcept {
+        return !(lhs == rhs);
+    }
 };
 
 struct TcpListenerHandle {
@@ -156,6 +160,45 @@ template <typename Runtime> struct TcpListenerContext;
 template <typename Runtime> struct TcpListenerEntry;
 template <typename Runtime> struct TcpServerState;
 
+template <typename Handler, typename Runtime, typename = void>
+struct TcpHandlerHasOnAccept : std::false_type {};
+template <typename Handler, typename Runtime>
+struct TcpHandlerHasOnAccept<Handler, Runtime,
+                             std::void_t<decltype(std::declval<Handler &>().on_accept(
+                                 std::declval<TcpConnectionRef<Runtime>>()))>> : std::true_type {};
+
+template <typename Handler, typename Runtime, typename = void>
+struct TcpHandlerHasOnRead : std::false_type {};
+template <typename Handler, typename Runtime>
+struct TcpHandlerHasOnRead<
+    Handler, Runtime,
+    std::void_t<decltype(std::declval<Handler &>().on_read(
+        std::declval<TcpConnectionRef<Runtime>>(), std::declval<af::BufferView>()))>>
+    : std::true_type {};
+
+template <typename Handler, typename Runtime, typename = void>
+struct TcpHandlerHasOnClose : std::false_type {};
+template <typename Handler, typename Runtime>
+struct TcpHandlerHasOnClose<
+    Handler, Runtime,
+    std::void_t<decltype(std::declval<Handler &>().on_close(
+        std::declval<TcpConnectionHandle<Runtime>>(), std::declval<CloseReason>()))>>
+    : std::true_type {};
+
+template <typename Handler, typename = void>
+struct TcpHandlerHasOnListenerErrorAlias : std::false_type {};
+template <typename Handler>
+struct TcpHandlerHasOnListenerErrorAlias<
+    Handler, std::void_t<decltype(std::declval<Handler &>().on_error(
+                 std::declval<TcpListenerHandle>(), std::declval<int>()))>> : std::true_type {};
+
+template <typename Handler, typename = void>
+struct TcpHandlerHasOnListenerError : std::false_type {};
+template <typename Handler>
+struct TcpHandlerHasOnListenerError<
+    Handler, std::void_t<decltype(std::declval<Handler &>().on_listener_error(
+                 std::declval<TcpListenerHandle>(), std::declval<int>()))>> : std::true_type {};
+
 template <typename Runtime> class TcpHandlerBase {
 public:
     virtual ~TcpHandlerBase() = default;
@@ -176,7 +219,7 @@ public:
     }
 
     void on_accept(TcpConnectionRef<Runtime> conn) noexcept override {
-        if constexpr (requires(Handler h, TcpConnectionRef<Runtime> c) { h.on_accept(c); }) {
+        if constexpr (TcpHandlerHasOnAccept<Handler, Runtime>::value) {
             try {
                 handler_.on_accept(conn);
             } catch (...) {
@@ -188,9 +231,7 @@ public:
     }
 
     void on_read(TcpConnectionRef<Runtime> conn, af::BufferView bytes) noexcept override {
-        if constexpr (requires(Handler h, TcpConnectionRef<Runtime> c, af::BufferView v) {
-                          h.on_read(c, v);
-                      }) {
+        if constexpr (TcpHandlerHasOnRead<Handler, Runtime>::value) {
             try {
                 handler_.on_read(conn, bytes);
             } catch (...) {
@@ -203,9 +244,7 @@ public:
     }
 
     void on_close(TcpConnectionHandle<Runtime> conn, CloseReason reason) noexcept override {
-        if constexpr (requires(Handler h, TcpConnectionHandle<Runtime> c, CloseReason r) {
-                          h.on_close(c, r);
-                      }) {
+        if constexpr (TcpHandlerHasOnClose<Handler, Runtime>::value) {
             try {
                 handler_.on_close(conn, reason);
             } catch (...) {
@@ -217,14 +256,12 @@ public:
     }
 
     void on_listener_error(TcpListenerHandle listener, int error) noexcept override {
-        if constexpr (requires(Handler h, TcpListenerHandle l, int e) { h.on_error(l, e); }) {
+        if constexpr (TcpHandlerHasOnListenerErrorAlias<Handler>::value) {
             try {
                 handler_.on_error(listener, error);
             } catch (...) {
             }
-        } else if constexpr (requires(Handler h, TcpListenerHandle l, int e) {
-                                 h.on_listener_error(l, e);
-                             }) {
+        } else if constexpr (TcpHandlerHasOnListenerError<Handler>::value) {
             try {
                 handler_.on_listener_error(listener, error);
             } catch (...) {

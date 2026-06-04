@@ -1,6 +1,5 @@
 #pragma once
 
-#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -11,11 +10,16 @@
 
 namespace af::detail {
 
+template <typename TraitsT, typename = void> struct RuntimeTraitsHasThreads : std::false_type {};
+
+template <typename TraitsT>
+struct RuntimeTraitsHasThreads<TraitsT, std::void_t<decltype(TraitsT::threads)>> : std::true_type {
+};
+
 template <typename TraitsT> struct RuntimeConfig {
-    static_assert(
-        requires { TraitsT::threads; },
-        "AsyncRuntime traits must define static constexpr auto threads = "
-        "af::thread_layout(...)");
+    static_assert(RuntimeTraitsHasThreads<TraitsT>::value,
+                  "AsyncRuntime traits must define static constexpr auto threads = "
+                  "af::thread_layout(...)");
 
     using ThreadLayout = std::remove_cv_t<decltype(TraitsT::threads)>;
     using Thread = typename ThreadLayout::Thread;
@@ -65,15 +69,15 @@ template <typename TraitsT> struct RuntimeConfig {
                   "task_pool_remote_release_batch_size must not exceed "
                   "task_pool_local_cache_capacity");
     [[nodiscard]] static constexpr af::thread_kind thread_kind(Thread thread) noexcept {
-        return ThreadLayout::thread_kind(thread);
+        return threads.thread_kind(thread);
     }
 
-    [[nodiscard]] static constexpr std::string_view thread_name(Thread thread) noexcept {
-        return ThreadLayout::thread_name(thread);
+    [[nodiscard]] static std::string_view thread_name(Thread thread) noexcept {
+        return threads.thread_name(thread);
     }
 
     [[nodiscard]] static constexpr std::uint16_t thread_group_offset(Thread thread) noexcept {
-        return ThreadLayout::thread_group_offset(thread);
+        return threads.thread_group_offset(thread);
     }
 
     template <typename Tag> [[nodiscard]] static constexpr auto thread_group() noexcept {

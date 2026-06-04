@@ -32,7 +32,7 @@ TEST(RuntimeStressTests, SameThreadFanoutUsesUnifiedInboxAndPreservesFifo) {
         if (!SelfPostRuntime::start_task<SelfPostFanoutTask>(
                 child_count, &remaining, &failures, &sequence, order.data(), &root_completed)) {
             if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                remaining.notify_one();
+                af::detail::atomic_notify_one(remaining);
             }
             ADD_FAILURE() << "SelfPostRuntime::start_task failed at burst " << burst;
             SelfPostRuntime::shutdown();
@@ -74,7 +74,7 @@ TEST(RuntimeStressTests, SameThreadAgainUsesUnifiedInboxWithoutCrossThreadHints)
         if (!SelfPostRuntime::start_task<SelfAgainTask>(iteration_count, &remaining,
                                                         &runs[static_cast<std::size_t>(i)])) {
             if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                remaining.notify_one();
+                af::detail::atomic_notify_one(remaining);
             }
             ADD_FAILURE() << "SelfPostRuntime::start_task failed at task " << i;
             SelfPostRuntime::shutdown();

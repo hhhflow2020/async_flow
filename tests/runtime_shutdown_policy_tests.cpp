@@ -37,14 +37,14 @@ TEST(RuntimeShutdownTests, WaitForTasksPolicyBlocksUntilAcceptedTasksComplete) {
     std::thread shutdown_thread([&] {
         WaitShutdownRuntime::shutdown();
         shutdown_done.store(true, std::memory_order_release);
-        shutdown_done.notify_one();
+        af::detail::atomic_notify_one(shutdown_done);
     });
 
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
     EXPECT_FALSE(shutdown_done.load(std::memory_order_acquire));
 
     release.store(true, std::memory_order_release);
-    release.notify_one();
+    af::detail::atomic_notify_one(release);
     shutdown_thread.join();
 
     EXPECT_TRUE(shutdown_done.load(std::memory_order_acquire));
@@ -70,14 +70,14 @@ TEST(RuntimeShutdownTests, WaitForTasksPolicyAllowsRuntimeThreadRescheduleWhileS
     std::thread shutdown_thread([&] {
         WaitShutdownRuntime::shutdown();
         shutdown_done.store(true, std::memory_order_release);
-        shutdown_done.notify_one();
+        af::detail::atomic_notify_one(shutdown_done);
     });
 
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
     EXPECT_FALSE(shutdown_done.load(std::memory_order_acquire));
 
     release.store(true, std::memory_order_release);
-    release.notify_one();
+    af::detail::atomic_notify_one(release);
     shutdown_thread.join();
 
     EXPECT_TRUE(shutdown_done.load(std::memory_order_acquire));
@@ -105,7 +105,7 @@ TEST(RuntimeShutdownTests, WaitForTasksPolicyRejectsExternalStartsWhileStopping)
     std::thread shutdown_thread([&] {
         WaitShutdownRuntime::shutdown();
         shutdown_done.store(true, std::memory_order_release);
-        shutdown_done.notify_one();
+        af::detail::atomic_notify_one(shutdown_done);
     });
 
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -119,7 +119,7 @@ TEST(RuntimeShutdownTests, WaitForTasksPolicyRejectsExternalStartsWhileStopping)
     }
     if (!saw_stopping) {
         release.store(true, std::memory_order_release);
-        release.notify_one();
+        af::detail::atomic_notify_one(release);
         shutdown_thread.join();
         FAIL() << "runtime did not enter stopping";
     }
@@ -129,7 +129,7 @@ TEST(RuntimeShutdownTests, WaitForTasksPolicyRejectsExternalStartsWhileStopping)
     EXPECT_FALSE(shutdown_done.load(std::memory_order_acquire));
 
     release.store(true, std::memory_order_release);
-    release.notify_one();
+    af::detail::atomic_notify_one(release);
     shutdown_thread.join();
 
     EXPECT_TRUE(shutdown_done.load(std::memory_order_acquire));

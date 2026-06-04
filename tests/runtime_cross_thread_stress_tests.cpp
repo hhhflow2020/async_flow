@@ -35,7 +35,7 @@ TEST(RuntimeStressTests, RepeatedCrossThreadHopBurstsComplete) {
                                                              &post_failures, progress.data(),
                                                              last_thread.data())) {
                 if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                    remaining.notify_one();
+                    af::detail::atomic_notify_one(remaining);
                 }
                 ADD_FAILURE() << "RepeatHopRuntime::start_task failed at burst " << burst;
                 RepeatHopRuntime::shutdown();
@@ -89,7 +89,7 @@ TEST(RuntimeStressTests, AboveSixtyFourThreadCrossWordHopCompletes) {
         if (!WideHopRuntime::start_task<WideHopTask>(hops_per_task, &remaining, &runs,
                                                      &post_failures)) {
             if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                remaining.notify_one();
+                af::detail::atomic_notify_one(remaining);
             }
             ADD_FAILURE() << "WideHopRuntime::start_task failed at task " << i;
             WideHopRuntime::shutdown();

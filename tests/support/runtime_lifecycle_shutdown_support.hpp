@@ -72,12 +72,12 @@ public:
 private:
     af::TaskResult run() override {
         started_->fetch_add(1, std::memory_order_release);
-        started_->notify_one();
+        af::detail::atomic_notify_one(*started_);
         while (!release_->load(std::memory_order_acquire)) {
-            release_->wait(false, std::memory_order_acquire);
+            af::detail::atomic_wait_value(*release_, false, std::memory_order_acquire);
         }
         completed_->fetch_add(1, std::memory_order_release);
-        completed_->notify_one();
+        af::detail::atomic_notify_one(*completed_);
         return done();
     }
 
@@ -112,9 +112,9 @@ private:
             (*seen_)[0].store(WaitShutdownRuntime::current_thread_index(),
                               std::memory_order_release);
             started_->fetch_add(1, std::memory_order_release);
-            started_->notify_one();
+            af::detail::atomic_notify_one(*started_);
             while (!release_->load(std::memory_order_acquire)) {
-                release_->wait(false, std::memory_order_acquire);
+                af::detail::atomic_wait_value(*release_, false, std::memory_order_acquire);
             }
             state_ = State::Db;
             return pending_on(WaitShutdownThreads::DB_0);
@@ -123,7 +123,7 @@ private:
             (*seen_)[1].store(WaitShutdownRuntime::current_thread_index(),
                               std::memory_order_release);
             completed_->fetch_add(1, std::memory_order_release);
-            completed_->notify_one();
+            af::detail::atomic_notify_one(*completed_);
             return done();
         }
 
@@ -198,7 +198,7 @@ public:
 private:
     af::TaskResult run() override {
         entered_->fetch_add(1, std::memory_order_release);
-        entered_->notify_one();
+        af::detail::atomic_notify_one(*entered_);
         return pending();
     }
 
@@ -241,7 +241,7 @@ public:
 private:
     af::TaskResult run() override {
         entered_->fetch_add(1, std::memory_order_release);
-        entered_->notify_one();
+        af::detail::atomic_notify_one(*entered_);
         return pending();
     }
 

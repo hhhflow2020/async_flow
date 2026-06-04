@@ -20,18 +20,31 @@ struct RequestedSchedule {
 
 inline constexpr std::uint64_t no_requested_thread = 0;
 
+template <typename TraitsT, typename = void>
+struct TaskRegistryTraitsHasEnableTaskRegistry : std::false_type {};
+template <typename TraitsT>
+struct TaskRegistryTraitsHasEnableTaskRegistry<TraitsT,
+                                               std::void_t<decltype(TraitsT::enable_task_registry)>>
+    : std::true_type {};
+
+template <typename TraitsT, typename = void>
+struct TaskRegistryTraitsHasShutdownPolicy : std::false_type {};
+template <typename TraitsT>
+struct TaskRegistryTraitsHasShutdownPolicy<TraitsT, std::void_t<decltype(TraitsT::shutdown_policy)>>
+    : std::true_type {};
+
 template <typename RuntimeT>
 inline constexpr bool task_registry_enabled_v = [] {
+    using Traits = typename RuntimeT::Traits;
     constexpr bool explicitly_enabled = [] {
-        if constexpr (requires { RuntimeT::Traits::enable_task_registry; }) {
-            return static_cast<bool>(RuntimeT::Traits::enable_task_registry);
+        if constexpr (TaskRegistryTraitsHasEnableTaskRegistry<Traits>::value) {
+            return static_cast<bool>(Traits::enable_task_registry);
         } else {
             return false;
         }
     }();
-    if constexpr (requires { RuntimeT::Traits::shutdown_policy; }) {
-        return explicitly_enabled ||
-               RuntimeT::Traits::shutdown_policy == ShutdownPolicy::StopImmediately;
+    if constexpr (TaskRegistryTraitsHasShutdownPolicy<Traits>::value) {
+        return explicitly_enabled || Traits::shutdown_policy == ShutdownPolicy::StopImmediately;
     } else {
         return explicitly_enabled;
     }

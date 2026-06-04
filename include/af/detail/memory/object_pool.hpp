@@ -40,10 +40,10 @@ public:
     template <typename... Args> [[nodiscard]] T *create(Args &&...args) {
         void *memory = acquire_slot();
         if constexpr (std::is_nothrow_constructible_v<T, Args...>) {
-            return std::construct_at(static_cast<T *>(memory), std::forward<Args>(args)...);
+            return construct(memory, std::forward<Args>(args)...);
         } else {
             try {
-                return std::construct_at(static_cast<T *>(memory), std::forward<Args>(args)...);
+                return construct(memory, std::forward<Args>(args)...);
             } catch (...) {
                 release_slot(memory);
                 throw;
@@ -54,10 +54,10 @@ public:
     template <typename... Args> [[nodiscard]] T *create_uncached(Args &&...args) {
         void *memory = acquire_slot_uncached();
         if constexpr (std::is_nothrow_constructible_v<T, Args...>) {
-            return std::construct_at(static_cast<T *>(memory), std::forward<Args>(args)...);
+            return construct(memory, std::forward<Args>(args)...);
         } else {
             try {
-                return std::construct_at(static_cast<T *>(memory), std::forward<Args>(args)...);
+                return construct(memory, std::forward<Args>(args)...);
             } catch (...) {
                 release_slot_uncached(memory);
                 throw;
@@ -90,6 +90,10 @@ public:
     }
 
 private:
+    template <typename... Args> [[nodiscard]] static T *construct(void *memory, Args &&...args) {
+        return ::new (memory) T(std::forward<Args>(args)...);
+    }
+
     static constexpr std::size_t local_cache_capacity = LocalCacheCapacity;
     static constexpr std::size_t local_cache_flush_count = local_cache_capacity / 2;
     static constexpr std::size_t remote_release_batch_size = RemoteReleaseBatchSize;

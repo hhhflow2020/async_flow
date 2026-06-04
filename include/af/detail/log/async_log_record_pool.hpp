@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
-#include <span>
+#include "af/span.hpp"
 #include <stdexcept>
 #include <string_view>
 
@@ -71,7 +71,7 @@ public:
         static_cast<AsyncLogRecordPool *>(slot->owner)->release(slot);
     }
 
-    void release_records(std::span<LogRecord *const> records) noexcept {
+    void release_records(af::Span<LogRecord *const> records) noexcept {
         if (records.empty()) {
             return;
         }
@@ -177,7 +177,7 @@ inline void release_async_log_record(LogRecord *record) noexcept {
     AF_ASSERT(false);
 }
 
-inline void release_async_log_records(std::span<LogRecord *const> records) noexcept {
+inline void release_async_log_records(af::Span<LogRecord *const> records) noexcept {
     std::size_t begin = 0;
     while (begin < records.size()) {
         auto *first_slot = static_cast<AsyncLogRecordPoolSlot *>(records[begin]->pool_slot());

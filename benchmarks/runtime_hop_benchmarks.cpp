@@ -48,7 +48,7 @@ private:
         }
 
         if (remaining_->fetch_sub(1, std::memory_order_acq_rel) == 1) {
-            remaining_->notify_one();
+            af::detail::atomic_notify_one(*remaining_);
         }
         return this->done();
     }
@@ -81,7 +81,7 @@ private:
         }
 
         if (remaining_->fetch_sub(1, std::memory_order_acq_rel) == 1) {
-            remaining_->notify_one();
+            af::detail::atomic_notify_one(*remaining_);
         }
         return done();
     }

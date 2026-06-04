@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
-#include <span>
+#include "af/span.hpp"
 #include <string>
 #include <string_view>
 #include <utility>
@@ -413,7 +413,7 @@ public:
         shutdown();
     }
 
-    void write_batch(std::span<detail::LogRecord *const> records) noexcept override {
+    void write_batch(af::Span<detail::LogRecord *const> records) noexcept override {
         static_cast<void>(binding_.enqueue_and_wake(records));
     }
 

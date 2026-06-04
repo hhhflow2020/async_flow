@@ -11,7 +11,7 @@
 #include <iterator>
 #include <mutex>
 #include <new>
-#include <span>
+#include "af/span.hpp"
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -190,7 +190,7 @@ TEST(LogTests, AsyncLogConfigProfilesSelectQueueStrategy) {
 
 class BlockingLogBackend final : public af::LogBackend {
 public:
-    void write_batch(std::span<af::detail::LogRecord *const> records) noexcept override {
+    void write_batch(af::Span<af::detail::LogRecord *const> records) noexcept override {
         static_cast<void>(records);
         std::unique_lock lock(mutex_);
         entered_ = true;
@@ -219,7 +219,7 @@ private:
 
 class CountingLogBackend final : public af::LogBackend {
 public:
-    void write_batch(std::span<af::detail::LogRecord *const> records) noexcept override {
+    void write_batch(af::Span<af::detail::LogRecord *const> records) noexcept override {
         record_count_.fetch_add(records.size(), std::memory_order_relaxed);
     }
 
@@ -233,7 +233,7 @@ private:
 
 class CapturingLogBackend final : public af::LogBackend {
 public:
-    void write_batch(std::span<af::detail::LogRecord *const> records) noexcept override {
+    void write_batch(af::Span<af::detail::LogRecord *const> records) noexcept override {
         std::lock_guard lock(mutex_);
         for (af::detail::LogRecord *record : records) {
             messages_.emplace_back(record->message());
@@ -255,7 +255,7 @@ public:
     explicit RuntimeThreadObservingLogBackend(typename RuntimeT::Thread expected_thread)
         : expected_thread_index_(RuntimeT::thread_index(expected_thread)) {}
 
-    void write_batch(std::span<af::detail::LogRecord *const> records) noexcept override {
+    void write_batch(af::Span<af::detail::LogRecord *const> records) noexcept override {
         record_count_.fetch_add(records.size(), std::memory_order_relaxed);
         const bool on_runtime_thread = RuntimeT::is_runtime_thread();
         ran_on_runtime_thread_.store(on_runtime_thread, std::memory_order_release);
@@ -318,7 +318,7 @@ template <typename T> bool wait_until_at_least(std::atomic<T> &value, T expected
 #if defined(__linux__) || defined(__APPLE__)
 class ThreadNameLogBackend final : public af::LogBackend {
 public:
-    void write_batch(std::span<af::detail::LogRecord *const> records) noexcept override {
+    void write_batch(af::Span<af::detail::LogRecord *const> records) noexcept override {
         static_cast<void>(records);
         std::array<char, 16> name{};
         if (::pthread_getname_np(::pthread_self(), name.data(), name.size()) != 0) {
@@ -344,7 +344,7 @@ struct LogTestRuntimeThreadTag;
 
 struct LogTestRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
-        af::thread_group<LogTestRuntimeThreadTag, 2, af::thread_kind::cpu, "log-src">());
+        af::thread_group<LogTestRuntimeThreadTag, 2, af::thread_kind::cpu>("log-src"));
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
@@ -480,7 +480,7 @@ inline constexpr af::thread_kind log_udp_io_thread_kind = af::thread_kind::io;
 
 struct LogUdpIoRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
-        af::thread_group<LogUdpIoThreadTag, 1, log_udp_io_thread_kind, "log-udp-io">());
+        af::thread_group<LogUdpIoThreadTag, 1, log_udp_io_thread_kind>("log-udp-io"));
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
@@ -500,8 +500,8 @@ struct DefaultConsumerIoThreadTag;
 
 struct LogDefaultIoRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
-        af::thread_group<DefaultConsumerLogicThreadTag, 1, af::thread_kind::cpu, "log-def-cpu">(),
-        af::thread_group<DefaultConsumerIoThreadTag, 1, af::thread_kind::io, "log-def-io">());
+        af::thread_group<DefaultConsumerLogicThreadTag, 1, af::thread_kind::cpu>("log-def-cpu"),
+        af::thread_group<DefaultConsumerIoThreadTag, 1, af::thread_kind::io>("log-def-io"));
     static constexpr std::size_t spsc_queue_capacity = 1024;
     static constexpr std::size_t external_queue_capacity = 1024;
     static constexpr af::QueueFullPolicy runtime_queue_full_policy = af::QueueFullPolicy::Yield;
@@ -523,9 +523,9 @@ struct DefaultConsumerLogThreadTag;
 
 struct LogDefaultLogRuntimeTraits {
     static constexpr auto threads = af::thread_layout(
-        af::thread_group<DefaultConsumerWorkerThreadTag, 1, af::thread_kind::cpu, "log-pref-cpu">(),
-        af::thread_group<DefaultConsumerIoThreadTag, 1, af::thread_kind::io, "log-pref-io">(),
-        af::thread_group<DefaultConsumerLogThreadTag, 1, af::thread_kind::cpu, "log-pref-log">());
+        af::thread_group<DefaultConsumerWorkerThreadTag, 1, af::thread_kind::cpu>("log-pref-cpu"),
+        af::thread_group<DefaultConsumerIoThreadTag, 1, af::thread_kind::io>("log-pref-io"),
+        af::thread_group<DefaultConsumerLogThreadTag, 1, af::thread_kind::cpu>("log-pref-log"));
 };
 
 using LogDefaultLogRuntime = af::AsyncRuntime<LogDefaultLogRuntimeTraits>;
@@ -766,7 +766,7 @@ TEST(LogTests, RuntimeFileBackendWritesBatchesOnIoThread) {
     };
 
     backend.write_batch(
-        std::span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
+        af::Span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
     const bool flushed = backend.flush(std::chrono::seconds(2));
     const af::RuntimeFileLogBackendStats stats = backend.stats();
     backend.shutdown();
@@ -805,7 +805,7 @@ TEST(LogTests, RuntimeFileBackendSkipsEmptyRecordsWithoutLeakingBatch) {
     std::array<af::detail::LogRecord *, 1> empty_ptrs{&empty_record};
 
     backend.write_batch(
-        std::span<af::detail::LogRecord *const>(empty_ptrs.data(), empty_ptrs.size()));
+        af::Span<af::detail::LogRecord *const>(empty_ptrs.data(), empty_ptrs.size()));
     ASSERT_TRUE(backend.flush(std::chrono::seconds(2)));
 
     af::RuntimeFileLogBackendStats stats = backend.stats();
@@ -818,7 +818,7 @@ TEST(LogTests, RuntimeFileBackendSkipsEmptyRecordsWithoutLeakingBatch) {
     std::array<af::detail::LogRecord *, 1> record_ptrs{&record};
 
     backend.write_batch(
-        std::span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
+        af::Span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
     ASSERT_TRUE(backend.flush(std::chrono::seconds(2)));
     backend.shutdown();
 
@@ -1148,7 +1148,7 @@ TEST(LogTests, SharedRecordPoolBatchReleaseReusesSlots) {
     EXPECT_EQ(pool.try_acquire("shared pool should be full\n"), nullptr);
 
     af::detail::release_async_log_records(
-        std::span<af::detail::LogRecord *const>(records.data(), records.size()));
+        af::Span<af::detail::LogRecord *const>(records.data(), records.size()));
 
     for (std::size_t i = 0; i < records.size(); ++i) {
         records[i] = pool.try_acquire("shared batch release reused log record\n");
@@ -1156,7 +1156,7 @@ TEST(LogTests, SharedRecordPoolBatchReleaseReusesSlots) {
     }
 
     af::detail::release_async_log_records(
-        std::span<af::detail::LogRecord *const>(records.data(), records.size()));
+        af::Span<af::detail::LogRecord *const>(records.data(), records.size()));
 }
 
 TEST(LogTests, RuntimeAwareSinkTagsFirstUserLogFieldWithRuntimeTaskId) {
@@ -1655,7 +1655,7 @@ TEST(LogTests, TcpBackendWritesBatchedRecordsToLoopbackStream) {
     for (int attempt = 0; attempt < 250 && !server_done.load(std::memory_order_acquire);
          ++attempt) {
         backend.write_batch(
-            std::span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
+            af::Span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
 
@@ -1690,7 +1690,7 @@ TEST(LogTests, UdpBackendWritesBatchedRecordsToLoopbackDatagrams) {
     };
 
     backend.write_batch(
-        std::span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
+        af::Span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
 
     std::array<std::string, 4> received{};
     const std::size_t received_count = recv_datagrams_until(
@@ -1737,7 +1737,7 @@ TEST(LogTests, RuntimeUdpBackendSendsBatchesOnIoThread) {
     };
 
     backend.write_batch(
-        std::span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
+        af::Span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
     ASSERT_TRUE(backend.flush(std::chrono::seconds(2)));
     const af::RuntimeUdpLogBackendStats stats = backend.stats();
     EXPECT_EQ(stats.queued_records, record_ptrs.size());
@@ -1804,7 +1804,7 @@ TEST(LogTests, RuntimeTcpBackendSendsBatchesOnIoThread) {
     };
 
     backend.write_batch(
-        std::span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
+        af::Span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
     const bool flushed = backend.flush(std::chrono::seconds(2));
     const af::RuntimeTcpLogBackendStats stats = backend.stats();
 

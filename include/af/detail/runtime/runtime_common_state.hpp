@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "af/detail/config.hpp"
+#include "af/detail/runtime/atomic_wait.hpp"
 
 namespace af::detail {
 
@@ -58,15 +59,15 @@ template <typename T> struct alignas(hardware_cache_line_size) CacheLineAtomic {
     }
 
     void wait(T old, std::memory_order order) const noexcept {
-        value.wait(old, order);
+        atomic_wait_value(value, old, order);
     }
 
     void notify_one() noexcept {
-        value.notify_one();
+        atomic_notify_one(value);
     }
 
     void notify_all() noexcept {
-        value.notify_all();
+        atomic_notify_all(value);
     }
 };
 

@@ -34,6 +34,27 @@ template <typename Runtime> class TcpClient;
 
 namespace detail {
 
+template <typename Handler, typename Runtime, typename = void>
+struct TcpClientHandlerHasOnConnect : std::false_type {};
+template <typename Handler, typename Runtime>
+struct TcpClientHandlerHasOnConnect<Handler, Runtime,
+                                    std::void_t<decltype(std::declval<Handler &>().on_connect(
+                                        std::declval<TcpConnectionRef<Runtime>>()))>>
+    : std::true_type {};
+
+template <typename Handler, typename = void>
+struct TcpClientHandlerHasOnConnectError : std::false_type {};
+template <typename Handler>
+struct TcpClientHandlerHasOnConnectError<
+    Handler, std::void_t<decltype(std::declval<Handler &>().on_connect_error(std::declval<int>()))>>
+    : std::true_type {};
+
+template <typename Handler, typename = void> struct TcpClientHandlerHasOnError : std::false_type {};
+template <typename Handler>
+struct TcpClientHandlerHasOnError<
+    Handler, std::void_t<decltype(std::declval<Handler &>().on_error(std::declval<int>()))>>
+    : std::true_type {};
+
 template <typename Runtime, typename Handler>
 class TcpClientHandlerModel final : public TcpHandlerBase<Runtime> {
 public:
@@ -44,13 +65,13 @@ public:
     }
 
     void on_accept(TcpConnectionRef<Runtime> conn) noexcept override {
-        if constexpr (requires(Handler h, TcpConnectionRef<Runtime> c) { h.on_connect(c); }) {
+        if constexpr (TcpClientHandlerHasOnConnect<Handler, Runtime>::value) {
             try {
                 handler_.on_connect(conn);
             } catch (...) {
                 conn.close(CloseReason::Error);
             }
-        } else if constexpr (requires(Handler h, TcpConnectionRef<Runtime> c) { h.on_accept(c); }) {
+        } else if constexpr (TcpHandlerHasOnAccept<Handler, Runtime>::value) {
             try {
                 handler_.on_accept(conn);
             } catch (...) {
@@ -62,9 +83,7 @@ public:
     }
 
     void on_read(TcpConnectionRef<Runtime> conn, af::BufferView bytes) noexcept override {
-        if constexpr (requires(Handler h, TcpConnectionRef<Runtime> c, af::BufferView v) {
-                          h.on_read(c, v);
-                      }) {
+        if constexpr (TcpHandlerHasOnRead<Handler, Runtime>::value) {
             try {
                 handler_.on_read(conn, bytes);
             } catch (...) {
@@ -77,9 +96,7 @@ public:
     }
 
     void on_close(TcpConnectionHandle<Runtime> conn, CloseReason reason) noexcept override {
-        if constexpr (requires(Handler h, TcpConnectionHandle<Runtime> c, CloseReason r) {
-                          h.on_close(c, r);
-                      }) {
+        if constexpr (TcpHandlerHasOnClose<Handler, Runtime>::value) {
             try {
                 handler_.on_close(conn, reason);
             } catch (...) {
@@ -91,19 +108,17 @@ public:
     }
 
     void on_listener_error(TcpListenerHandle listener, int error) noexcept override {
-        if constexpr (requires(Handler h, int e) { h.on_connect_error(e); }) {
+        if constexpr (TcpClientHandlerHasOnConnectError<Handler>::value) {
             try {
                 handler_.on_connect_error(error);
             } catch (...) {
             }
-        } else if constexpr (requires(Handler h, int e) { h.on_error(e); }) {
+        } else if constexpr (TcpClientHandlerHasOnError<Handler>::value) {
             try {
                 handler_.on_error(error);
             } catch (...) {
             }
-        } else if constexpr (requires(Handler h, TcpListenerHandle l, int e) {
-                                 h.on_error(l, e);
-                             }) {
+        } else if constexpr (TcpHandlerHasOnListenerErrorAlias<Handler>::value) {
             try {
                 handler_.on_error(listener, error);
             } catch (...) {

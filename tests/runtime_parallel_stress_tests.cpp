@@ -37,7 +37,7 @@ TEST(RuntimeStressTests, ParallelShardOwnerResumesUnderBursts) {
                     i, &remaining, &completed, &failures, &shard_runs, &sum, task_stage.data(),
                     task_shards.data())) {
                 if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                    remaining.notify_one();
+                    af::detail::atomic_notify_one(remaining);
                 }
                 ADD_FAILURE() << "ParallelResumeRuntime::start_task failed at burst " << burst
                               << " task " << i;

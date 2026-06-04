@@ -31,10 +31,10 @@ static_assert(AboveSixtyFourRuntime::Config::task_pool_local_cache_capacity == 6
 static_assert(AboveSixtyFourRuntime::Config::queue_full_spin_count == 64U);
 
 struct ThreadLayoutMetadataTraits {
-    static constexpr auto threads = af::thread_layout(
-        af::thread_group<ConfigLogicThreadTag, 3, af::thread_kind::cpu, "logic">(),
-        af::thread_group<ConfigIoThreadTag, 2, af::thread_kind::io, "io">(),
-        af::thread_group<ConfigLogThreadTag, 1, af::thread_kind::cpu, "log">());
+    static constexpr auto threads =
+        af::thread_layout(af::thread_group<ConfigLogicThreadTag, 3, af::thread_kind::cpu>("logic"),
+                          af::thread_group<ConfigIoThreadTag, 2, af::thread_kind::io>("io"),
+                          af::thread_group<ConfigLogThreadTag, 1, af::thread_kind::cpu>("log"));
 };
 
 using ThreadLayoutMetadataRuntime = af::AsyncRuntime<ThreadLayoutMetadataTraits>;

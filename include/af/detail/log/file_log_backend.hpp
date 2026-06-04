@@ -36,7 +36,7 @@ public:
         close_file();
     }
 
-    void write_batch(std::span<detail::LogRecord *const> records) noexcept override {
+    void write_batch(af::Span<detail::LogRecord *const> records) noexcept override {
         if (records.empty() || !open_if_needed()) {
             return;
         }

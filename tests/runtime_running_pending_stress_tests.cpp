@@ -31,7 +31,7 @@ void run_terminal_wake_case(RunningWakeTerminalMode mode) {
                     mode, i, &remaining, &completed, &wake_attempts, &failures,
                     wake_flags.data())) {
                 if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                    remaining.notify_one();
+                    af::detail::atomic_notify_one(remaining);
                 }
                 ADD_FAILURE() << "RunningPendingRuntime::start_task failed at burst " << burst
                               << " task " << i;
@@ -85,7 +85,7 @@ TEST(RuntimeStressTests, RunningToPendingWakeDoesNotStrandOwner) {
                     i, &remaining, &completed, &wake_attempts, &failures, stages.data(),
                     wake_flags.data())) {
                 if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                    remaining.notify_one();
+                    af::detail::atomic_notify_one(remaining);
                 }
                 ADD_FAILURE() << "RunningPendingRuntime::start_task failed at burst " << burst
                               << " task " << i;

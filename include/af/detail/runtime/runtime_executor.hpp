@@ -24,7 +24,7 @@ template <typename RuntimeT, typename TraitsT> class alignas(hardware_cache_line
         return RuntimeT::thread_kind(thread);
     }
 
-    [[nodiscard]] static constexpr std::string_view thread_name(Thread thread) noexcept {
+    [[nodiscard]] static std::string_view thread_name(Thread thread) noexcept {
         return RuntimeT::thread_name(thread);
     }
 

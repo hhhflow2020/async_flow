@@ -2,7 +2,6 @@
 
 #include <array>
 #include <atomic>
-#include <bit>
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
@@ -104,7 +103,7 @@ public:
         return Config::thread_kind(thread);
     }
 
-    [[nodiscard]] static constexpr std::string_view thread_name(Thread thread) noexcept {
+    [[nodiscard]] static std::string_view thread_name(Thread thread) noexcept {
         return Config::thread_name(thread);
     }
 

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <chrono>
-#include <span>
+#include "af/span.hpp"
 
 #include "af/detail/log/log_record.hpp"
 
@@ -14,7 +14,7 @@ public:
     LogBackend &operator=(const LogBackend &) = delete;
     virtual ~LogBackend() = default;
 
-    virtual void write_batch(std::span<detail::LogRecord *const> records) noexcept = 0;
+    virtual void write_batch(af::Span<detail::LogRecord *const> records) noexcept = 0;
     virtual void flush() noexcept {}
     [[nodiscard]] virtual bool flush(std::chrono::milliseconds timeout) noexcept {
         static_cast<void>(timeout);

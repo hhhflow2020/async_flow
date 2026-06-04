@@ -9,9 +9,7 @@ namespace af::detail {
 template <typename RuntimeT, typename TraitsT>
 void Executor<RuntimeT, TraitsT>::enqueue(Task *task) noexcept {
     inbox_.push(task);
-    if (sleeping_.load(std::memory_order_acquire)) {
-        notify();
-    }
+    notify();
 }
 
 template <typename RuntimeT, typename TraitsT>

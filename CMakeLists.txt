@@ -5,7 +5,7 @@ project(AsyncFlow LANGUAGES CXX)
 add_library(asyncflow INTERFACE)
 add_library(AsyncFlow::AsyncFlow ALIAS asyncflow)
 
-target_compile_features(asyncflow INTERFACE cxx_std_20)
+target_compile_features(asyncflow INTERFACE cxx_std_17)
 target_include_directories(
     asyncflow
     INTERFACE
