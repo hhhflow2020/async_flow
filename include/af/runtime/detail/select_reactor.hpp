@@ -52,9 +52,11 @@ public:
             sources_.push_back(source);
         } catch (...) {
             source->active_ = false;
+            source->backend_interests_ = 0;
             source->backend_index_ = fd_event_source::invalid_backend_index;
             return false;
         }
+        source->backend_interests_ = source->interests;
         return true;
 #else
         static_cast<void>(source);
@@ -70,6 +72,7 @@ public:
         if ((source->interests & (reactor_readable | reactor_writable)) == 0U) {
             return del(source);
         }
+        source->backend_interests_ = source->interests;
         return fd_supported(source->fd);
 #else
         static_cast<void>(source);
@@ -88,6 +91,7 @@ public:
             index = find_source(source);
             if (index == fd_event_source::invalid_backend_index) {
                 source->active_ = false;
+                source->backend_interests_ = 0;
                 source->backend_index_ = fd_event_source::invalid_backend_index;
                 return false;
             }
@@ -100,6 +104,7 @@ public:
             last->backend_index_ = index;
         }
         source->active_ = false;
+        source->backend_interests_ = 0;
         source->backend_index_ = fd_event_source::invalid_backend_index;
         return true;
 #else
@@ -250,6 +255,7 @@ private:
         for (fd_event_source *source : sources_) {
             if (source != nullptr) {
                 source->active_ = false;
+                source->backend_interests_ = 0;
                 source->backend_index_ = fd_event_source::invalid_backend_index;
             }
         }

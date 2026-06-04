@@ -12,6 +12,7 @@ namespace af {
 
 namespace detail {
 class epoll_reactor;
+class kqueue_reactor;
 class select_reactor;
 } // namespace detail
 
@@ -33,10 +34,12 @@ struct fd_event_source {
 
 private:
     bool active_{false};
+    std::uint32_t backend_interests_{0};
     std::size_t backend_index_{invalid_backend_index};
     static constexpr std::size_t invalid_backend_index = static_cast<std::size_t>(-1);
 
     friend class detail::epoll_reactor;
+    friend class detail::kqueue_reactor;
     friend class detail::select_reactor;
 };
 
@@ -56,12 +59,14 @@ public:
 
 namespace detail {
 [[nodiscard]] inline std::unique_ptr<reactor> make_epoll_reactor(const reactor_config &config);
+[[nodiscard]] inline std::unique_ptr<reactor> make_kqueue_reactor(const reactor_config &config);
 [[nodiscard]] inline std::unique_ptr<reactor> make_select_reactor(const reactor_config &config);
 } // namespace detail
 
 } // namespace af
 
 #include "af/runtime/detail/epoll_reactor.hpp"
+#include "af/runtime/detail/kqueue_reactor.hpp"
 #include "af/runtime/detail/select_reactor.hpp"
 
 namespace af {
@@ -74,11 +79,16 @@ namespace af {
             return result;
         }
 #endif
+#if AF_DETAIL_HAS_KQUEUE
+        if (auto result = detail::make_kqueue_reactor(config)) {
+            return result;
+        }
+#endif
         return detail::make_select_reactor(config);
     case reactor_backend::epoll:
         return detail::make_epoll_reactor(config);
     case reactor_backend::kqueue:
-        return nullptr;
+        return detail::make_kqueue_reactor(config);
     case reactor_backend::select:
         return detail::make_select_reactor(config);
     }

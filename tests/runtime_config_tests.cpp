@@ -920,3 +920,10 @@ TEST(RuntimeConfigTests, RuntimeEpollReactorDispatchesReadinessOnIoThread) {
     }
     run_reactor_readiness_test(af::reactor_backend::epoll);
 }
+
+TEST(RuntimeConfigTests, RuntimeKqueueReactorDispatchesReadinessOnIoThread) {
+    if (!af::supports_kqueue) {
+        GTEST_SKIP() << "kqueue is not supported on this platform";
+    }
+    run_reactor_readiness_test(af::reactor_backend::kqueue);
+}

@@ -59,6 +59,7 @@ public:
                 return false;
             }
         }
+        source->backend_interests_ = source->interests;
         return true;
     }
 
@@ -74,10 +75,15 @@ public:
         event.events = native_events_for_interests(source->interests);
         event.data.ptr = source;
         if (::epoll_ctl(epoll_fd_, EPOLL_CTL_MOD, source->fd, &event) == 0) {
+            source->backend_interests_ = source->interests;
             return true;
         }
         if (errno == ENOENT) {
-            return ::epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, source->fd, &event) == 0;
+            const bool added = ::epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, source->fd, &event) == 0;
+            if (added) {
+                source->backend_interests_ = source->interests;
+            }
+            return added;
         }
         return false;
     }
@@ -174,6 +180,7 @@ private:
         for (fd_event_source *source : sources_) {
             if (source != nullptr) {
                 source->active_ = false;
+                source->backend_interests_ = 0;
                 source->backend_index_ = fd_event_source::invalid_backend_index;
             }
         }
@@ -212,6 +219,7 @@ private:
             sources_.push_back(source);
         } catch (...) {
             source->active_ = false;
+            source->backend_interests_ = 0;
             source->backend_index_ = fd_event_source::invalid_backend_index;
             return false;
         }
@@ -224,6 +232,7 @@ private:
             index = find_source(source);
             if (index == fd_event_source::invalid_backend_index) {
                 source->active_ = false;
+                source->backend_interests_ = 0;
                 source->backend_index_ = fd_event_source::invalid_backend_index;
                 return;
             }
@@ -236,6 +245,7 @@ private:
             last->backend_index_ = index;
         }
         source->active_ = false;
+        source->backend_interests_ = 0;
         source->backend_index_ = fd_event_source::invalid_backend_index;
     }
 
