@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "af/detail/runtime/atomic_wait.hpp"
+#include "af/detail/runtime/runtime_service_task.hpp"
 #include "af/detail/thread/thread_name.hpp"
 #include "af/runtime/config_resolution.hpp"
 #include "af/runtime/reactor.hpp"
@@ -157,6 +158,30 @@ public:
         return true;
     }
 
+    [[nodiscard]] bool register_service_task(thread_index thread,
+                                             detail::RuntimeServiceTask *service) noexcept {
+        if (service == nullptr || thread >= executors_.size()) {
+            return false;
+        }
+        return executors_[thread]->register_service_task(service);
+    }
+
+    [[nodiscard]] bool unregister_service_task(thread_index thread,
+                                               detail::RuntimeServiceTask *service) noexcept {
+        if (service == nullptr || thread >= executors_.size()) {
+            return false;
+        }
+        return executors_[thread]->unregister_service_task(service);
+    }
+
+    [[nodiscard]] bool wake_service_tasks(thread_index thread) noexcept {
+        if (thread >= executors_.size()) {
+            return false;
+        }
+        executors_[thread]->notify();
+        return true;
+    }
+
     void stop() noexcept {
         const bool called_from_runtime_thread = current_runtime_ == this;
         runtime_state observed = state_.load(std::memory_order_acquire);
@@ -190,7 +215,8 @@ private:
     public:
         executor(runtime &owner, runtime_thread_info thread)
             : owner_(owner), thread_(std::move(thread)),
-              timer_drain_budget_(owner_.config().scheduler.timer_drain_budget) {
+              timer_drain_budget_(owner_.config().scheduler.timer_drain_budget),
+              service_task_budget_(owner_.config().scheduler.service_task_budget) {
             timers_.reserve(owner_.config().timer.initial_reserve);
             if (thread_.kind == thread_kind::io) {
                 reactor_ = make_reactor(owner_.config().reactor);
@@ -211,6 +237,10 @@ private:
 
         void request_stop() noexcept {
             stop_requested_.store(true, std::memory_order_release);
+            notify();
+        }
+
+        void notify() noexcept {
             wake_epoch_.fetch_add(1, std::memory_order_release);
             if (reactor_ != nullptr) {
                 reactor_->wake();
@@ -220,11 +250,7 @@ private:
 
         void enqueue(runtime_work *work) noexcept {
             inbox_.push(work);
-            wake_epoch_.fetch_add(1, std::memory_order_release);
-            if (reactor_ != nullptr) {
-                reactor_->wake();
-            }
-            detail::atomic_notify_all(wake_epoch_);
+            notify();
         }
 
         void arm_timer(runtime_task *task) noexcept {
@@ -254,6 +280,46 @@ private:
             return reactor_.get();
         }
 
+        [[nodiscard]] bool register_service_task(detail::RuntimeServiceTask *service) noexcept {
+            AF_ASSERT(current_runtime_ == &owner_ && current_thread_index_ == thread_.index &&
+                      "service task registration must run on the owner runtime thread");
+            if (current_runtime_ != &owner_ || current_thread_index_ != thread_.index ||
+                service == nullptr) {
+                return false;
+            }
+            if (std::find(service_tasks_.begin(), service_tasks_.end(), service) !=
+                service_tasks_.end()) {
+                return true;
+            }
+            try {
+                service_tasks_.push_back(service);
+                return true;
+            } catch (...) {
+                return false;
+            }
+        }
+
+        [[nodiscard]] bool unregister_service_task(detail::RuntimeServiceTask *service) noexcept {
+            AF_ASSERT(current_runtime_ == &owner_ && current_thread_index_ == thread_.index &&
+                      "service task unregister must run on the owner runtime thread");
+            if (current_runtime_ != &owner_ || current_thread_index_ != thread_.index ||
+                service == nullptr) {
+                return false;
+            }
+            auto it = std::find(service_tasks_.begin(), service_tasks_.end(), service);
+            if (it == service_tasks_.end()) {
+                return false;
+            }
+            const std::size_t removed_index = static_cast<std::size_t>(it - service_tasks_.begin());
+            service_tasks_.erase(it);
+            if (next_service_task_ > service_tasks_.size()) {
+                next_service_task_ = 0;
+            } else if (next_service_task_ != 0U && next_service_task_ > removed_index) {
+                --next_service_task_;
+            }
+            return true;
+        }
+
     private:
         void run_loop() noexcept {
             current_runtime_ = &owner_;
@@ -267,6 +333,7 @@ private:
             for (;;) {
                 bool did_work = drain_inbox();
                 did_work = run_due_timers() || did_work;
+                did_work = run_service_tasks() || did_work;
                 if (stop_requested_.load(std::memory_order_acquire) && !did_work) {
                     break;
                 }
@@ -278,6 +345,9 @@ private:
                     continue;
                 }
                 if (run_due_timers()) {
+                    continue;
+                }
+                if (run_service_tasks()) {
                     continue;
                 }
                 wait_for_wake_or_timer(observed);
@@ -294,6 +364,27 @@ private:
             while (runtime_work *work = inbox_.try_pop()) {
                 did_work = true;
                 work->run(owner_);
+            }
+            return did_work;
+        }
+
+        [[nodiscard]] bool run_service_tasks() noexcept {
+            if (service_tasks_.empty()) {
+                return false;
+            }
+            bool did_work = false;
+            const std::size_t count = service_tasks_.size();
+            const std::size_t budget = service_task_budget_ < count ? service_task_budget_ : count;
+            for (std::size_t i = 0; i < budget; ++i) {
+                if (next_service_task_ >= service_tasks_.size()) {
+                    next_service_task_ = 0;
+                }
+                detail::RuntimeServiceTask *service = service_tasks_[next_service_task_];
+                ++next_service_task_;
+                if (service == nullptr) [[unlikely]] {
+                    continue;
+                }
+                did_work = service->run_service(service_task_budget_) || did_work;
             }
             return did_work;
         }
@@ -384,8 +475,11 @@ private:
         runtime_thread_info thread_;
         detail::IntrusiveMpscQueue<runtime_work> inbox_;
         std::vector<TimerEntry> timers_;
+        std::vector<detail::RuntimeServiceTask *> service_tasks_;
         std::unique_ptr<reactor> reactor_;
         std::size_t timer_drain_budget_{256};
+        std::size_t service_task_budget_{32};
+        std::size_t next_service_task_{0};
         std::uint64_t next_timer_sequence_{0};
         std::atomic<std::uint32_t> wake_epoch_{0};
         std::atomic<bool> stop_requested_{false};

@@ -183,6 +183,60 @@ private:
     std::atomic<int> &counter_;
 };
 
+class CountingRuntimeService final : public af::detail::RuntimeServiceTask {
+public:
+    CountingRuntimeService(std::atomic<int> &counter, std::atomic<std::uint16_t> &observed_thread,
+                           std::atomic<std::size_t> &observed_budget)
+        : counter_(counter), observed_thread_(observed_thread), observed_budget_(observed_budget) {}
+
+    void mark_pending() noexcept {
+        pending_.store(true, std::memory_order_release);
+    }
+
+    [[nodiscard]] bool run_service(std::size_t budget) noexcept override {
+        observed_budget_.store(budget, std::memory_order_release);
+        if (!pending_.exchange(false, std::memory_order_acq_rel)) {
+            return false;
+        }
+        observed_thread_.store(af::runtime::current_thread_index(), std::memory_order_release);
+        counter_.fetch_add(1, std::memory_order_release);
+        return true;
+    }
+
+private:
+    std::atomic<int> &counter_;
+    std::atomic<std::uint16_t> &observed_thread_;
+    std::atomic<std::size_t> &observed_budget_;
+    std::atomic<bool> pending_{false};
+};
+
+class ServiceTaskControlWork final : public af::runtime_work {
+public:
+    enum class action {
+        register_service,
+        unregister_service,
+    };
+
+    ServiceTaskControlWork(action op, std::uint16_t thread, af::detail::RuntimeServiceTask &service,
+                           std::atomic<int> &counter, std::atomic<bool> &ok)
+        : op_(op), thread_(thread), service_(service), counter_(counter), ok_(ok) {}
+
+    void run(af::runtime &owner) noexcept override {
+        const bool result = op_ == action::register_service
+                                ? owner.register_service_task(thread_, &service_)
+                                : owner.unregister_service_task(thread_, &service_);
+        ok_.store(result, std::memory_order_release);
+        counter_.fetch_add(1, std::memory_order_release);
+    }
+
+private:
+    action op_;
+    std::uint16_t thread_;
+    af::detail::RuntimeServiceTask &service_;
+    std::atomic<int> &counter_;
+    std::atomic<bool> &ok_;
+};
+
 class InstanceRuntimeTask final : public af::runtime_task {
 public:
     InstanceRuntimeTask(af::runtime_task::factory_token token, af::runtime &owner,
@@ -747,6 +801,56 @@ TEST(RuntimeConfigTests, RuntimeInstanceStopCanBeRequestedFromRuntimeThread) {
     runtime.stop();
     EXPECT_EQ(runtime.state(), af::runtime_state::stopped);
     EXPECT_EQ(runtime.active_thread_count(), 0U);
+}
+
+TEST(RuntimeConfigTests, RuntimeInstanceRunsRegisteredServiceTasksOnTargetThread) {
+    af::runtime_config config;
+    config.threads = {
+        af::io_threads("io", 1),
+        af::cpu_threads("logic", 1),
+    };
+    config.scheduler.service_task_budget = 7;
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    std::atomic<int> service_counter{0};
+    std::atomic<int> control_counter{0};
+    std::atomic<std::uint16_t> observed_thread{af::runtime_invalid_thread_index};
+    std::atomic<std::size_t> observed_budget{0};
+    std::atomic<bool> register_ok{false};
+    std::atomic<bool> unregister_ok{false};
+    CountingRuntimeService service(service_counter, observed_thread, observed_budget);
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 2));
+
+    const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
+    service.mark_pending();
+    ServiceTaskControlWork register_work(ServiceTaskControlWork::action::register_service,
+                                         cpu_thread, service, control_counter, register_ok);
+    ASSERT_TRUE(runtime.post(cpu_thread, &register_work));
+    ASSERT_TRUE(wait_for_counter(control_counter, 1));
+    EXPECT_TRUE(register_ok.load(std::memory_order_acquire));
+    ASSERT_TRUE(wait_for_counter(service_counter, 1));
+    EXPECT_EQ(observed_thread.load(std::memory_order_acquire), cpu_thread);
+    EXPECT_EQ(observed_budget.load(std::memory_order_acquire), 7U);
+
+    service.mark_pending();
+    ASSERT_TRUE(runtime.wake_service_tasks(cpu_thread));
+    ASSERT_TRUE(wait_for_counter(service_counter, 2));
+
+    ServiceTaskControlWork unregister_work(ServiceTaskControlWork::action::unregister_service,
+                                           cpu_thread, service, control_counter, unregister_ok);
+    ASSERT_TRUE(runtime.post(cpu_thread, &unregister_work));
+    ASSERT_TRUE(wait_for_counter(control_counter, 2));
+    EXPECT_TRUE(unregister_ok.load(std::memory_order_acquire));
+
+    service.mark_pending();
+    ASSERT_TRUE(runtime.wake_service_tasks(cpu_thread));
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    EXPECT_EQ(service_counter.load(std::memory_order_acquire), 2);
+
+    runtime.stop();
 }
 
 TEST(RuntimeConfigTests, RuntimeTaskPoolConfigAllowsSmallInitialSlabsToExpand) {
