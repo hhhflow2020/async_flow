@@ -177,6 +177,25 @@ TEST_F(RuntimeFixture, MakeTaskSupportsCustomStartFunction) {
     ASSERT_TRUE(wait_until_at_least(completed, 1));
 }
 
+TEST_F(RuntimeFixture, TryMakeTaskReturnsEmptyHandleWhenConstructorThrows) {
+    auto failed = Runtime::try_make_task<TryMakeTask>(true);
+    EXPECT_FALSE(failed);
+    EXPECT_FALSE(failed.scheduled());
+    Runtime::wait_for_idle();
+    EXPECT_EQ(Runtime::unfinished_task_count(), 0U);
+}
+
+TEST_F(RuntimeFixture, TryMakeTaskSupportsCustomStartFunction) {
+    std::atomic<int> completed{0};
+
+    auto task = Runtime::try_make_task<TryMakeTask>(false);
+    ASSERT_TRUE(task);
+    EXPECT_FALSE(task.scheduled());
+    ASSERT_TRUE(task->begin_on(TestThreads::Logic_3, &completed));
+    EXPECT_TRUE(task.scheduled());
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+}
+
 TEST_F(RuntimeFixture, FastScheduleModeRequiresRuntimeProducer) {
     std::atomic<int> completed{0};
     std::atomic<std::uint16_t> ran_on{Runtime::invalid_thread_index};

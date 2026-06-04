@@ -85,6 +85,28 @@ private:
     std::atomic<int> *completed_{nullptr};
 };
 
+class TryMakeTask final : public Task {
+public:
+    TryMakeTask(Task::FactoryToken token, bool fail) : Task(token) {
+        if (fail) {
+            throw std::runtime_error("try make task failure");
+        }
+    }
+
+    bool begin_on(TestThread target, std::atomic<int> *completed) {
+        completed_ = completed;
+        return schedule(target);
+    }
+
+private:
+    af::TaskResult run() override {
+        completed_->fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int> *completed_{nullptr};
+};
+
 class ScheduleModeStartTask final : public Task {
 public:
     explicit ScheduleModeStartTask(Task::FactoryToken token) : Task(token) {}

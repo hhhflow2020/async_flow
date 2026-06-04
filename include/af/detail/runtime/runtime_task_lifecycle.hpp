@@ -44,6 +44,18 @@ TaskT *AsyncRuntime<TraitsT>::allocate_task(Args &&...args) {
 }
 
 template <typename TraitsT>
+template <typename TaskT, typename... Args>
+TaskT *AsyncRuntime<TraitsT>::try_allocate_task(Args &&...args) noexcept {
+    auto *task =
+        task_pool<TaskT>().try_create(typename Task::FactoryToken{}, std::forward<Args>(args)...);
+    if (task == nullptr) {
+        return nullptr;
+    }
+    task->set_destroy_fn(&destroy_task<TaskT>);
+    return task;
+}
+
+template <typename TraitsT>
 template <typename TaskT>
 void AsyncRuntime<TraitsT>::destroy_task(Task *task) noexcept {
     task_pool<TaskT>().destroy(static_cast<TaskT *>(task));

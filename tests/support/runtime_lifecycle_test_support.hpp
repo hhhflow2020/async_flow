@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <stdexcept>
 #include <thread>
 #include <type_traits>
 

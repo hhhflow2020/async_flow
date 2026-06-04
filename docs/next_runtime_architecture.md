@@ -255,10 +255,15 @@ auto* task = af::make_task<login_task>(rt);
 task->do_it(conn, req);
 ```
 
-`make_task<T>()` 默认保证返回非空指针。对象池耗尽时继续扩展 slab；真正 OOM 时按配置执行 fatal 或 throw。需要可恢复失败时使用：
+`make_task<T>()` 默认保证返回非空任务对象或抛出。对象池耗尽时继续扩展 slab；真正 OOM 时按配置执行 fatal 或 throw。当前静态 runtime 实现返回 `TaskHandle<T>`，用于持有任务启动前后的生命周期引用；handle 为空只会出现在可恢复创建 API。
+
+需要可恢复失败时使用：
 
 ```cpp
-auto* task = af::try_make_task<login_task>(rt);
+auto task = Runtime::try_make_task<login_task>();
+if (!task) {
+    // recover or reject request
+}
 ```
 
 调度 API：
@@ -602,6 +607,7 @@ include/af/reactor/select_reactor.hpp
 - 当前线程类型已只保留 `thread_kind::io` 和 `thread_kind::cpu`，epoll/kqueue/select 属于 reactor backend。
 - 当前日志 relaxed 模式已使用 bounded MPSC runtime lane 和 sharded MPSC ingress，日志 record pool 已改为可扩展 slab pool。
 - 当前 TCP stream 和 UDP/datagram 跨线程操作已迁移为显式 runtime task 调度到 owner reactor；后续继续收敛 API 命名、目录结构和对象池实现。
+- 当前 runtime 已提供 `try_make_task<T>()` 可恢复创建路径；对象池 `try_create()` 在分配或构造失败时返回空指针，并释放已获取 slot。
 - 当前日志队列仍是有界队列，record 对象池不再用固定总容量承担背压职责。
 
 后续迁移应先补齐测试和 benchmark，再逐步替换旧路径，避免一次性重写导致行为不可控。

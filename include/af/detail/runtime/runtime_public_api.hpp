@@ -90,6 +90,19 @@ auto AsyncRuntime<TraitsT>::make_task(CtorArgs &&...ctor_args) ->
 
 template <typename TraitsT>
 template <typename TaskT, typename... CtorArgs>
+auto AsyncRuntime<TraitsT>::try_make_task(CtorArgs &&...ctor_args) noexcept ->
+    typename AsyncRuntime<TraitsT>::template TaskHandle<TaskT> {
+    static_assert(std::is_base_of_v<Task, TaskT>, "TaskT must derive from Runtime::Task");
+    auto *task = try_allocate_task<TaskT>(std::forward<CtorArgs>(ctor_args)...);
+    if (task == nullptr) {
+        return TaskHandle<TaskT>();
+    }
+    task->attach_start_handle();
+    return TaskHandle<TaskT>(task);
+}
+
+template <typename TraitsT>
+template <typename TaskT, typename... CtorArgs>
 auto AsyncRuntime<TraitsT>::create_task(CtorArgs &&...ctor_args) ->
     typename AsyncRuntime<TraitsT>::template TaskHandle<TaskT> {
     return make_task<TaskT>(std::forward<CtorArgs>(ctor_args)...);

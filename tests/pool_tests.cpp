@@ -69,6 +69,54 @@ TEST(PoolTests, ObjectPoolUncachedReturnsSlotAfterConstructorThrows) {
     pool.destroy_uncached(object);
 }
 
+TEST(PoolTests, ObjectPoolTryCreateReturnsNullAndReusesSlotAfterConstructorThrows) {
+    struct Payload {
+        Payload(bool fail, void **attempted_address) {
+            if (attempted_address != nullptr) {
+                *attempted_address = this;
+            }
+            if (fail) {
+                throw std::runtime_error("constructor failed");
+            }
+        }
+    };
+
+    af::detail::ObjectPool<Payload, 1> pool;
+    void *attempted = nullptr;
+
+    EXPECT_EQ(pool.try_create(true, &attempted), nullptr);
+    ASSERT_NE(attempted, nullptr);
+
+    Payload *object = pool.try_create(false, nullptr);
+    ASSERT_NE(object, nullptr);
+    EXPECT_EQ(static_cast<void *>(object), attempted);
+    pool.destroy(object);
+}
+
+TEST(PoolTests, ObjectPoolTryCreateUncachedReturnsNullAndReusesSlotAfterConstructorThrows) {
+    struct Payload {
+        Payload(bool fail, void **attempted_address) {
+            if (attempted_address != nullptr) {
+                *attempted_address = this;
+            }
+            if (fail) {
+                throw std::runtime_error("constructor failed");
+            }
+        }
+    };
+
+    af::detail::ObjectPool<Payload, 1> pool;
+    void *attempted = nullptr;
+
+    EXPECT_EQ(pool.try_create_uncached(true, &attempted), nullptr);
+    ASSERT_NE(attempted, nullptr);
+
+    Payload *object = pool.try_create_uncached(false, nullptr);
+    ASSERT_NE(object, nullptr);
+    EXPECT_EQ(static_cast<void *>(object), attempted);
+    pool.destroy_uncached(object);
+}
+
 TEST(PoolTests, ObjectPoolSupportsCrossThreadDestroy) {
     struct Payload {
         explicit Payload(std::uint64_t value) : value(value) {}

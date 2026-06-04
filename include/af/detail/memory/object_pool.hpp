@@ -51,6 +51,25 @@ public:
         }
     }
 
+    template <typename... Args> [[nodiscard]] T *try_create(Args &&...args) noexcept {
+        void *memory = nullptr;
+        try {
+            memory = acquire_slot();
+            if constexpr (std::is_nothrow_constructible_v<T, Args...>) {
+                return construct(memory, std::forward<Args>(args)...);
+            } else {
+                try {
+                    return construct(memory, std::forward<Args>(args)...);
+                } catch (...) {
+                    release_slot(memory);
+                    return nullptr;
+                }
+            }
+        } catch (...) {
+            return nullptr;
+        }
+    }
+
     template <typename... Args> [[nodiscard]] T *create_uncached(Args &&...args) {
         void *memory = acquire_slot_uncached();
         if constexpr (std::is_nothrow_constructible_v<T, Args...>) {
@@ -62,6 +81,25 @@ public:
                 release_slot_uncached(memory);
                 throw;
             }
+        }
+    }
+
+    template <typename... Args> [[nodiscard]] T *try_create_uncached(Args &&...args) noexcept {
+        void *memory = nullptr;
+        try {
+            memory = acquire_slot_uncached();
+            if constexpr (std::is_nothrow_constructible_v<T, Args...>) {
+                return construct(memory, std::forward<Args>(args)...);
+            } else {
+                try {
+                    return construct(memory, std::forward<Args>(args)...);
+                } catch (...) {
+                    release_slot_uncached(memory);
+                    return nullptr;
+                }
+            }
+        } catch (...) {
+            return nullptr;
         }
     }
 

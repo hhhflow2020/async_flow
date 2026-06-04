@@ -123,6 +123,9 @@ public:
     [[nodiscard]] static TaskHandle<TaskT> make_task(CtorArgs &&...ctor_args);
 
     template <typename TaskT, typename... CtorArgs>
+    [[nodiscard]] static TaskHandle<TaskT> try_make_task(CtorArgs &&...ctor_args) noexcept;
+
+    template <typename TaskT, typename... CtorArgs>
     [[nodiscard]] static TaskHandle<TaskT> create_task(CtorArgs &&...ctor_args);
 
     template <typename TaskT, typename... Args>
@@ -250,6 +253,9 @@ private:
 
     template <typename TaskT, typename... Args>
     [[nodiscard]] static TaskT *allocate_task(Args &&...args);
+
+    template <typename TaskT, typename... Args>
+    [[nodiscard]] static TaskT *try_allocate_task(Args &&...args) noexcept;
 
     template <typename TaskT> static void destroy_task(Task *task) noexcept;
 
