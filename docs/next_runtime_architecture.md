@@ -483,6 +483,15 @@ Unix stream 和 Unix datagram 使用独立 API，避免把 Unix path 混入 TCP/
 
 logger 由 runtime 拥有，消费者是绑定到 runtime 线程的 service task，不创建独立线程，也不创建长期 consumer task。
 
+当前实例 runtime 已提供两类启动入口：
+
+```cpp
+auto logging = af::start_async_logging_for_runtime(runtime, async_log_config);
+auto logging = af::start_async_logging_for_runtime(runtime); // 使用 runtime.config().logger
+```
+
+第二种入口把 `runtime_config.logger` 转换为 `AsyncLogConfig`，按 `consumer_thread` 选择目标 runtime 线程，并把消费者注册为该 executor 上的 service task。handle 仍需要在 `runtime.stop()` 前停止；后续 runtime-owned logger 会把这个 handle 纳入 runtime 生命周期，用户只保留配置。
+
 前端流程：
 
 ```text
@@ -536,7 +545,7 @@ struct tcp_log_backend_config {
 };
 ```
 
-网络日志后端可以由日志消费者聚合 batch，再调度到指定 IO executor，通过 reactor 发送。
+网络日志后端可以由日志消费者聚合 batch，再调度到指定 IO executor，通过 reactor 发送。当前 `runtime_config.logger` 的 `io_thread` 已参与配置校验；实际 file/udp/tcp 后端先复用现有 `LogBackend` 实现，网络后端完全 reactor 化发送仍在后续迁移项中。
 
 ### 日志生命周期
 
@@ -625,8 +634,8 @@ include/af/reactor/select_reactor.hpp
 - 当前已提供 public `runtime_config`、`scheduler_config`、`task_pool_config`、`timer_config`、`reactor_config`、`log_config`、`shutdown_config` 和 `diagnostics_config` 普通结构体，`io_threads()` / `cpu_threads()` 配置值工厂，以及 `resolve_runtime_config()` / `validate_runtime_config()` 解析校验入口。
 - 当前已提供 `af::runtime` 实例生命周期外壳和低层投递通道：构造时使用结构化配置解析校验，`start()` 按配置启动 runtime 线程，每个 executor 拥有 intrusive MPSC inbox，`post()` 可把 `runtime_work` 投递到指定线程执行，空闲线程使用 atomic/futex wait，`stop()` 可由外部线程完成 join/回收，也可由 runtime 线程内请求停止而不自 join。
 - 当前实例 runtime 已提供 service task 注册、注销和唤醒入口：service 列表只在目标 executor 线程内修改，executor 主循环按 `scheduler.service_task_budget` 轮询，外部唤醒不加锁。
-- 当前实例 runtime 已提供手动启动的 runtime-aware async logger 入口：`start_async_logging_for_runtime(runtime&, config, thread)` 复用 `AsyncLogger` 队列、Abseil sink 和 service task 消费，不创建独立 consumer 线程；handle 仍需在 `runtime.stop()` 前停止，后续再迁移为 runtime-owned logger。
+- 当前实例 runtime 已提供手动启动的 runtime-aware async logger 入口：`start_async_logging_for_runtime(runtime&, config, thread)` / `start_async_logging_for_runtime(runtime&)` 复用 `AsyncLogger` 队列、Abseil sink 和 service task 消费，不创建独立 consumer 线程；无参数入口会读取 `runtime.config().logger` 并构造 file/udp/tcp 后端。handle 仍需在 `runtime.stop()` 前停止，后续再迁移为 runtime-owned logger。
 - 当前实例 runtime 已提供 `af::runtime_task`、`af::make_task<T>(runtime, ...)`、`af::try_make_task<T>(runtime, ...)` 和 `runtime_task_handle<T>`：任务创建走 typed slab object pool，任务 id 使用每线程 block 分配，`schedule_to()` 投递到目标 executor，运行中请求下一跳会延后到当前 `run_task()` 返回后再入队，避免同一个任务对象并发重入。
-- 当前实例 runtime 已接入每 executor 本地 timer min-heap：`schedule_after()` / `schedule_at()` / `pending_after()` / `pending_at()` 先把 task 以 `timer_arming` 状态投递到目标 inbox，目标线程再挂入本地 heap；executor 空闲等待使用最近 timer deadline 作为 atomic/futex timeout，IO executor 则把最近 timer deadline 传给 `reactor.poll(timeout)`；`stop()` 会取消未到期 timer 并释放 task 生命周期引用。后续还需要把 logger 接入该实例 runtime，并可在不改变 task API 的前提下把 min-heap backend 替换为分层时间轮。
+- 当前实例 runtime 已接入每 executor 本地 timer min-heap：`schedule_after()` / `schedule_at()` / `pending_after()` / `pending_at()` 先把 task 以 `timer_arming` 状态投递到目标 inbox，目标线程再挂入本地 heap；executor 空闲等待使用最近 timer deadline 作为 atomic/futex timeout，IO executor 则把最近 timer deadline 传给 `reactor.poll(timeout)`；`stop()` 会取消未到期 timer 并释放 task 生命周期引用。后续可在不改变 task API 的前提下把 min-heap backend 替换为分层时间轮。
 
 后续迁移应先补齐测试和 benchmark，再逐步替换旧路径，避免一次性重写导致行为不可控。

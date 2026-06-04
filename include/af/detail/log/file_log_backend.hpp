@@ -1,6 +1,6 @@
 #pragma once
 
-#include <array>
+#include <algorithm>
 #include <cerrno>
 #include <cstddef>
 #include <filesystem>
@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "af/detail/log/log_backend.hpp"
 
@@ -21,13 +22,16 @@ struct FileLogBackendConfig {
     std::filesystem::path path;
     bool append{true};
     bool close_on_exec{true};
+    bool fsync_on_flush{true};
+    std::size_t write_batch_iov{64};
 };
 
 class FileLogBackend final : public LogBackend {
 public:
     explicit FileLogBackend(FileLogBackendConfig config)
-        : path_(config.path.string()), append_(config.append),
-          close_on_exec_(config.close_on_exec) {}
+        : path_(config.path.string()), append_(config.append), close_on_exec_(config.close_on_exec),
+          fsync_on_flush_(config.fsync_on_flush),
+          iovecs_(normalize_write_batch_iov(config.write_batch_iov)) {}
 
     FileLogBackend(const FileLogBackend &) = delete;
     FileLogBackend &operator=(const FileLogBackend &) = delete;
@@ -56,13 +60,20 @@ public:
     }
 
     void flush() noexcept override {
-        if (fd_ >= 0) {
+        if (fsync_on_flush_ && fd_ >= 0) {
             static_cast<void>(::fsync(fd_));
         }
     }
 
 private:
-    static constexpr std::size_t max_iov_count = 64;
+    static constexpr std::size_t max_iov_count = 1024;
+
+    [[nodiscard]] static std::size_t normalize_write_batch_iov(std::size_t requested) noexcept {
+        if (requested == 0U) {
+            return 1U;
+        }
+        return std::min(requested, max_iov_count);
+    }
 
     [[nodiscard]] bool open_if_needed() noexcept {
         if (fd_ >= 0) {
@@ -117,8 +128,9 @@ private:
     std::string path_;
     bool append_{true};
     bool close_on_exec_{true};
+    bool fsync_on_flush_{true};
     int fd_{-1};
-    std::array<iovec, max_iov_count> iovecs_{};
+    std::vector<iovec> iovecs_;
 };
 
 [[nodiscard]] inline std::unique_ptr<LogBackend>

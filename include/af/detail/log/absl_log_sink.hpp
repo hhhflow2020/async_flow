@@ -11,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <variant>
 
 #include "absl/base/log_severity.h"
 #include "absl/log/initialize.h"
@@ -21,6 +22,8 @@
 
 #include "af/detail/config.hpp"
 #include "af/detail/log/async_logger.hpp"
+#include "af/detail/log/file_log_backend.hpp"
+#include "af/detail/log/network_log_backend.hpp"
 #include "af/detail/log/runtime_async_log_consumer.hpp"
 #include "af/detail/log/runtime_instance_async_log_consumer.hpp"
 #include "af/runtime/runtime.hpp"
@@ -29,6 +32,60 @@
 namespace af {
 
 namespace detail {
+
+[[nodiscard]] inline std::chrono::milliseconds
+async_log_flush_poll_interval_from_batch_delay(std::chrono::microseconds delay) noexcept {
+    if (delay <= std::chrono::microseconds::zero()) {
+        return std::chrono::milliseconds(1);
+    }
+
+    auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(delay);
+    if (milliseconds == std::chrono::milliseconds::zero() ||
+        std::chrono::duration_cast<std::chrono::microseconds>(milliseconds) < delay) {
+        ++milliseconds;
+    }
+    return milliseconds;
+}
+
+inline void append_async_log_backend(AsyncLogConfig &target,
+                                     const file_log_backend_config &source) {
+    FileLogBackendConfig backend_config;
+    backend_config.path = source.path;
+    backend_config.append = source.append;
+    backend_config.fsync_on_flush = source.fsync_on_flush;
+    backend_config.write_batch_iov = source.write_batch_iov;
+    target.backends.push_back(make_file_log_backend(std::move(backend_config)));
+}
+
+inline void append_async_log_backend(AsyncLogConfig &target, const udp_log_backend_config &source) {
+    UdpLogBackendConfig backend_config;
+    backend_config.host = source.host;
+    backend_config.port = source.port;
+    backend_config.max_datagram_size = source.max_datagram_size;
+    target.backends.push_back(std::make_unique<UdpLogBackend>(std::move(backend_config)));
+}
+
+inline void append_async_log_backend(AsyncLogConfig &target, const tcp_log_backend_config &source) {
+    TcpLogBackendConfig backend_config;
+    backend_config.host = source.host;
+    backend_config.port = source.port;
+    backend_config.reconnect_interval = source.reconnect_interval;
+    target.backends.push_back(std::make_unique<TcpLogBackend>(std::move(backend_config)));
+}
+
+inline void append_async_log_backend(AsyncLogConfig &target, const log_backend_config &source) {
+    if (const auto *file = std::get_if<file_log_backend_config>(&source)) {
+        append_async_log_backend(target, *file);
+        return;
+    }
+    if (const auto *udp = std::get_if<udp_log_backend_config>(&source)) {
+        append_async_log_backend(target, *udp);
+        return;
+    }
+    if (const auto *tcp = std::get_if<tcp_log_backend_config>(&source)) {
+        append_async_log_backend(target, *tcp);
+    }
+}
 
 [[nodiscard]] inline std::size_t user_log_field_offset(std::string_view message,
                                                        std::string_view user_message) noexcept {
@@ -100,6 +157,34 @@ template <typename TaskId>
 }
 
 } // namespace detail
+
+[[nodiscard]] inline AsyncLogConfig make_async_log_config(
+    const log_config &source,
+    std::size_t runtime_thread_count = AsyncLogConfig::auto_runtime_thread_count) {
+    AsyncLogConfig target;
+    if (source.ordering == log_ordering::relaxed) {
+        const std::size_t resolved_thread_count =
+            source.runtime_thread_count == 0U ? runtime_thread_count : source.runtime_thread_count;
+        target.use_relaxed(resolved_thread_count, source.queue_shard_count);
+    } else {
+        target.use_ordered(source.queue_shard_count);
+    }
+
+    target.queue_capacity = source.queue_capacity;
+    target.max_batch_size = source.max_batch_records;
+    target.overflow_policy = source.overflow;
+    target.flush_poll_interval =
+        detail::async_log_flush_poll_interval_from_batch_delay(source.max_batch_delay);
+    target.backends.reserve(source.backends.size());
+    for (const log_backend_config &backend : source.backends) {
+        detail::append_async_log_backend(target, backend);
+    }
+    return target;
+}
+
+[[nodiscard]] inline AsyncLogConfig make_async_log_config(runtime &owner) {
+    return make_async_log_config(owner.config().logger, owner.thread_count());
+}
 
 namespace detail {
 
@@ -342,6 +427,13 @@ start_async_logging_for_runtime(runtime &owner, AsyncLogConfig config,
 start_async_logging_for_runtime(runtime &owner, AsyncLogConfig config) {
     return start_async_logging_for_runtime(owner, std::move(config),
                                            default_async_log_consumer_thread(owner));
+}
+
+[[nodiscard]] inline std::unique_ptr<AsyncLogHandle>
+start_async_logging_for_runtime(runtime &owner) {
+    const runtime::thread_index consumer_thread =
+        owner.select_thread(owner.config().logger.consumer_thread);
+    return start_async_logging_for_runtime(owner, make_async_log_config(owner), consumer_thread);
 }
 
 } // namespace af
