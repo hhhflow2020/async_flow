@@ -583,8 +583,8 @@ include/af/reactor/select_reactor.hpp
 
 ## 与当前实现的主要差异
 
-- 当前调度仍包含 local queue 和 SPSC；目标架构统一为每 executor 一个 intrusive MPSC。
-- 当前 `ThreadKind` 包含 Worker/Log/Io/Epoll/Kqueue；目标架构只保留 `io` 和 `cpu`。
+- 当前调度已经统一为每 executor 一个 intrusive MPSC task inbox，后续继续收敛配置 API 和命名。
+- 当前 `ThreadKind` 已只保留 `io` 和 `cpu`，后续继续收敛旧文档和示例中的历史叫法。
 - 当前日志 relaxed 模式包含 SPSC lane；目标架构不再使用 SPSC。
 - 当前部分网络对象仍有 command queue；目标架构要求跨线程操作显式 task 调度到 owner reactor。
 - 当前日志 record pool 是固定容量；目标架构改为可扩展 slab pool。

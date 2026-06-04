@@ -329,7 +329,7 @@ private:
     std::atomic<std::uint64_t> requested_thread_{detail::no_requested_thread};
     std::atomic<std::uint64_t> run_epoch_{0};
     std::atomic<std::uint32_t> lifetime_refs_{1};
-    std::atomic<BasicTask *> intrusive_mpsc_next_{nullptr};
+    detail::IntrusiveMpscNode<BasicTask> intrusive_mpsc_node_{this};
     static constexpr TaskId task_id_block_size = 1024;
     alignas(detail::hardware_cache_line_size) static inline std::atomic<TaskId> next_task_id_{1};
     const TaskId task_id_;

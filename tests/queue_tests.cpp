@@ -8,6 +8,17 @@
 #include <gtest/gtest.h>
 
 #include "af/detail/queue/bounded_queues.hpp"
+#include "af/detail/queue/intrusive_mpsc_queue.hpp"
+
+namespace {
+
+struct IntrusiveQueueValue {
+    int producer{0};
+    int sequence{0};
+    af::detail::IntrusiveMpscNode<IntrusiveQueueValue> intrusive_mpsc_node_{this};
+};
+
+} // namespace
 
 TEST(QueueTests, BoundedQueueSequenceBeforeHandlesUnsignedWrapWindow) {
     constexpr std::size_t max = std::numeric_limits<std::size_t>::max();
@@ -267,6 +278,75 @@ TEST(QueueTests, BoundedMpscPushManySupportsConcurrentProducers) {
 
     EXPECT_EQ(pushed.load(std::memory_order_acquire), total_values);
     EXPECT_EQ(queue.try_pop(), nullptr);
+}
+
+TEST(QueueTests, IntrusiveMpscReturnsSingleNodeAndAllowsImmediateReuse) {
+    af::detail::IntrusiveMpscQueue<IntrusiveQueueValue> queue;
+    IntrusiveQueueValue value;
+
+    EXPECT_TRUE(queue.empty());
+    queue.push(&value);
+    EXPECT_FALSE(queue.empty());
+    EXPECT_EQ(queue.try_pop(), &value);
+    EXPECT_TRUE(queue.empty());
+    EXPECT_EQ(queue.try_pop(), nullptr);
+
+    queue.push(&value);
+    EXPECT_EQ(queue.try_pop(), &value);
+    EXPECT_TRUE(queue.empty());
+}
+
+TEST(QueueTests, IntrusiveMpscSupportsConcurrentProducersInPerProducerOrder) {
+    constexpr int producer_count = 4;
+    constexpr int values_per_producer = 256;
+    constexpr int total_values = producer_count * values_per_producer;
+
+    af::detail::IntrusiveMpscQueue<IntrusiveQueueValue> queue;
+    std::array<std::array<IntrusiveQueueValue, values_per_producer>, producer_count> values{};
+    std::array<std::thread, producer_count> producers;
+    std::array<int, producer_count> next_sequence{};
+    std::atomic<int> pushed{0};
+    std::atomic<bool> start{false};
+
+    for (int producer = 0; producer < producer_count; ++producer) {
+        for (int sequence = 0; sequence < values_per_producer; ++sequence) {
+            values[producer][sequence].producer = producer;
+            values[producer][sequence].sequence = sequence;
+        }
+
+        producers[producer] = std::thread([producer, &queue, &values, &pushed, &start] {
+            while (!start.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            for (int sequence = 0; sequence < values_per_producer; ++sequence) {
+                queue.push(&values[producer][sequence]);
+                pushed.fetch_add(1, std::memory_order_release);
+            }
+        });
+    }
+
+    start.store(true, std::memory_order_release);
+    int popped = 0;
+    while (popped < total_values) {
+        IntrusiveQueueValue *value = queue.try_pop();
+        if (value == nullptr) {
+            std::this_thread::yield();
+            continue;
+        }
+        EXPECT_EQ(value->sequence, next_sequence[value->producer]);
+        ++next_sequence[value->producer];
+        ++popped;
+    }
+
+    for (auto &producer : producers) {
+        producer.join();
+    }
+
+    EXPECT_EQ(pushed.load(std::memory_order_acquire), total_values);
+    for (int producer = 0; producer < producer_count; ++producer) {
+        EXPECT_EQ(next_sequence[producer], values_per_producer);
+    }
+    EXPECT_TRUE(queue.empty());
 }
 
 TEST(QueueTests, BoundedMpmcRejectsWhenFull) {

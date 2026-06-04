@@ -2,46 +2,39 @@
 
 日期：2026-06-03
 
-本文档说明 AsyncFlow runtime 的任务投递语义，重点是 runtime 内部线程、自身目标线程、外部线程三类生产者在 `Auto` / `Fast` / `Ordered` 模式下分别走哪条队列。
+本文档说明 AsyncFlow runtime 的任务投递语义，重点是 runtime 内部线程、自身目标线程、外部线程三类生产者在 `Auto` / `Fast` / `Ordered` 模式下如何进入目标 executor。
 
 ## 队列拓扑
 
-runtime 每个固定线程都有三类入口：
+runtime 每个固定线程拥有一个入口：
 
-- executor 本地 bounded queue：只服务当前 executor 自身生产的 same-thread work，不需要跨线程同步。
-- source -> target bounded SPSC queue：runtime 线程之间一对一投递，每个 source 到每个 target 一条队列。
-- target bounded MPSC ingress queue：多个生产者共享一个目标线程入队顺序，外部线程和显式 ordered runtime 投递都会使用它。
+- target intrusive unbounded MPSC inbox：所有生产者都通过目标 executor 的 inbox 入队。
 
-这个拓扑的目标是把默认热路径保持在最低同步成本：
+这个拓扑的目标是把调度正确性放在一个清晰的入队点上：
 
-- runtime 线程投递给自己时默认走本地队列。
-- runtime 线程投递给其他 runtime 线程时默认走 SPSC。
-- 非 runtime 线程只能通过目标 MPSC 进入 runtime。
+- 没有 local queue 和 source -> target SPSC 的双路径顺序问题。
+- same-thread、cross-thread、external producer 共享同一个目标 admission order。
+- 生产者使用 intrusive node，不为每次 task 投递分配队列节点。
 
 ## 调度模式
 
-`ScheduleMode::Auto` 是默认模式。它优先选择最低开销的 runtime 路由：
+`ScheduleMode::Auto` 是默认模式：
 
-- runtime 线程 -> 自身目标线程：executor 本地 bounded queue。
-- runtime 线程 -> 其他 runtime 线程：source -> target SPSC queue。
-- 外部线程 -> runtime 目标线程：target MPSC ingress queue。
+- runtime 线程 -> 自身目标线程：target intrusive MPSC inbox。
+- runtime 线程 -> 其他 runtime 线程：target intrusive MPSC inbox。
+- 外部线程 -> runtime 目标线程：target intrusive MPSC inbox。
 
-`ScheduleMode::Fast` 表示调用者明确要求 runtime 线程低开销路径：
+`ScheduleMode::Fast` 表示调用者明确要求 runtime 线程生产者：
 
-- runtime 线程 -> 自身目标线程：executor 本地 bounded queue。
-- runtime 线程 -> 其他 runtime 线程：source -> target SPSC queue。
-- 外部线程调用会失败，不会隐式降级到 MPSC。
+- runtime 线程 -> 目标线程：target intrusive MPSC inbox。
+- 外部线程调用会失败。
 
-`ScheduleMode::Ordered` 表示调用者明确要求目标线程上的统一入队顺序：
+`ScheduleMode::Ordered` 表示调用者明确强调目标线程上的统一入队顺序：
 
-- runtime 线程 -> 自身目标线程：target MPSC ingress queue。
-- runtime 线程 -> 其他 runtime 线程：target MPSC ingress queue。
-- 外部线程 -> runtime 目标线程：target MPSC ingress queue。
+- runtime 线程 -> 目标线程：target intrusive MPSC inbox。
+- 外部线程 -> runtime 目标线程：target intrusive MPSC inbox。
 
-因此，runtime 内部线程投递到自身目标时也可以选择语义：
-
-- 使用 `schedule_fast(thread)` / `pending_fast(thread)`：保持本地队列快速路径。
-- 使用 `schedule_ordered(thread)` / `pending_ordered(thread)`：强制走目标 MPSC，与其他生产者共享同一个目标入队顺序。
+因此，runtime 内部线程投递到自身目标时不再有隐藏 local queue；需要表达“只允许 runtime 线程调用”时使用 `Fast`，需要在调用点强调统一顺序语义时使用 `Ordered`。
 
 ## API 选择建议
 
@@ -51,7 +44,7 @@ runtime 每个固定线程都有三类入口：
 return pending_on(TargetThread);
 ```
 
-如果调用点已经确认在 runtime 线程内，并且只需要低开销投递，不需要和外部生产者共享目标顺序，可以使用 fast API：
+如果调用点已经确认在 runtime 线程内，并且外部线程调用应被拒绝，可以使用 fast API：
 
 ```cpp
 return pending_fast(TargetThread);
@@ -71,42 +64,38 @@ return schedule_fast(TargetThread);     // runtime-only 快速路径
 return schedule_ordered(TargetThread);  // 强制目标 MPSC 顺序路径
 ```
 
-不要把 `Fast` 当作“更快版本的 Ordered”。`Fast` 的语义是 runtime-thread-only 低同步成本路径；它不提供多个生产者汇聚到同一个目标线程时的全局入队顺序。
+不要把 `Fast` 当作“更快版本的 Ordered”。当前实现下二者都进入目标 inbox；`Fast` 的语义是 runtime-thread-only，`Ordered` 的语义是调用点显式要求目标 admission order。
 
 ## 队列满载语义
 
-队列容量由 runtime traits 配置：
+task inbox 是 intrusive unbounded MPSC，不再用队列容量拒绝任务投递。只要 task 对象已经成功创建，目标 inbox 不会因为容量满而返回失败。
+
+历史 traits 仍保留以下字段作为兼容配置和非 task 子系统的容量来源：
 
 - `spsc_queue_capacity`：runtime 内部 local/SPSC 路径容量。
 - `external_queue_capacity`：目标 MPSC ingress 容量。
 
-满队列策略由 `QueueFullPolicy` 控制：
+这些字段不再约束 task 调度热路径。旧的满队列策略字段也不再决定 task inbox 行为：
 
 - `Reject`：入队失败时立即返回 `false`，不会阻塞生产者。
 - `Yield`：生产者等待空位，等待过程会执行 CPU relax / yield backoff。
 
-满队列策略需要按生产者类型分别配置，旧的单一 `queue_full_policy` 不再作为 traits 入口：
-
-- `runtime_queue_full_policy`：runtime 线程生产者策略。
-- `external_queue_full_policy`：外部线程生产者策略。
-
-这允许 runtime 内部高优先级路径使用 `Yield`，外部入口仍保持 `Reject`，避免外部生产者在满载时拖住业务线程。
+后续配置收敛时，应把这些历史字段从 task runtime API 中移除，只保留日志、网络缓冲等确实有界的队列配置。
 
 ## 正确性覆盖
 
 相关测试：
 
-- `RuntimeBackpressureTests.RejectPolicyReturnsFalseAndDeletesRejectedTask`
+- `RuntimeBackpressureTests.UnboundedInboxAcceptsTasksPastLegacyQueueCapacity`
 - `RuntimeBackpressureTests.YieldPolicyAllowsManyExternalProducers`
-- `RuntimeBackpressureTests.YieldPolicyHandlesSameThreadFanoutWithBoundedLocalQueue`
-- `RuntimeBackpressureTests.SplitQueuePoliciesRejectFullExternalQueueWithoutBlockingProducer`
-- `RuntimeBackpressureTests.SplitQueuePoliciesKeepRuntimeThreadFanoutOnYieldPolicy`
-- `RuntimeBackpressureTests.OrderedSelfPostUsesMpscWhenLocalQueueIsFull`
+- `RuntimeBackpressureTests.YieldPolicyHandlesSameThreadFanoutWithUnifiedInbox`
+- `RuntimeBackpressureTests.SplitQueuePoliciesDoNotBoundUnifiedTaskInbox`
+- `RuntimeBackpressureTests.SplitQueuePoliciesKeepRuntimeThreadFanoutOnUnifiedInbox`
+- `RuntimeBackpressureTests.SameThreadAutoAndOrderedUseUnifiedInbox`
 
-其中 `OrderedSelfPostUsesMpscWhenLocalQueueIsFull` 专门验证 self-post 场景：
+其中 `SameThreadAutoAndOrderedUseUnifiedInbox` 专门验证 self-post 场景：
 
-- 先让 runtime 线程把自身 local queue 填满。
-- 再用默认 `Auto` 投递自身目标，预期因为 local queue 满而失败。
-- 再用 `ScheduleMode::Ordered` 投递自身目标，预期成功进入目标 MPSC。
+- runtime 线程投递自身目标时，`Auto` 与 `Ordered` 都进入统一 inbox。
+- 任务数量超过旧容量字段时仍能完成，证明旧 bounded 队列容量不再限制 task 调度。
 
-这个测试直接证明 runtime 内部线程投递自身目标时，可以显式选择走 MPSC 顺序路径。
+这个测试直接证明 runtime 内部线程投递自身目标时，不再存在 local queue 和 MPSC 的双路径顺序差异。

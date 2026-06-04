@@ -12,7 +12,7 @@ using namespace af::test::runtime_scheduler_stress;
 
 } // namespace
 
-TEST(RuntimeStressTests, SameThreadFanoutUsesLocalQueueAndPreservesFifo) {
+TEST(RuntimeStressTests, SameThreadFanoutUsesUnifiedInboxAndPreservesFifo) {
     SelfPostRuntime::shutdown();
     SelfPostRuntime::init();
 
@@ -61,7 +61,7 @@ TEST(RuntimeStressTests, SameThreadFanoutUsesLocalQueueAndPreservesFifo) {
     SelfPostRuntime::shutdown();
 }
 
-TEST(RuntimeStressTests, SameThreadAgainUsesLocalQueueWithoutCrossThreadHints) {
+TEST(RuntimeStressTests, SameThreadAgainUsesUnifiedInboxWithoutCrossThreadHints) {
     SelfPostRuntime::shutdown();
     SelfPostRuntime::init();
 

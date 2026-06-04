@@ -51,7 +51,9 @@ void run_terminal_wake_case(RunningWakeTerminalMode mode) {
             return;
         }
 
-        ASSERT_EQ(failures.load(std::memory_order_acquire), 0) << "burst=" << burst;
+        ASSERT_EQ(failures.load(std::memory_order_acquire), 0)
+            << "burst=" << burst << " completed=" << completed.load(std::memory_order_acquire)
+            << " wake_attempts=" << wake_attempts.load(std::memory_order_acquire);
         ASSERT_EQ(completed.load(std::memory_order_acquire), tasks_per_burst) << "burst=" << burst;
         ASSERT_EQ(wake_attempts.load(std::memory_order_acquire), tasks_per_burst)
             << "burst=" << burst;

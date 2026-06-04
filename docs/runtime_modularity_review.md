@@ -5,7 +5,7 @@
 - `runtime_config.hpp`：traits 归一化和静态校验。
 - `runtime_executor.hpp`：executor 声明和对象布局。
 - `runtime_executor_lifecycle.hpp`：启动、停止、线程命名和通知。
-- `runtime_executor_scheduler.hpp`：local queue、ready source、task 执行循环。
+- `runtime_executor_scheduler.hpp`：intrusive MPSC inbox、task 执行循环。
 - `runtime_executor_io_backend.hpp`：IO backend 入口、wait/cancel 通用逻辑。
 - `runtime_executor_epoll_backend.hpp`：Linux epoll 实现。
 - `runtime_executor_kqueue_backend.hpp`：macOS/BSD kqueue 实现。

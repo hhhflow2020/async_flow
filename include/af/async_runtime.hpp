@@ -30,7 +30,6 @@
 #include "af/detail/runtime/runtime_config.hpp"
 #include "af/detail/runtime/runtime_platform_headers.hpp"
 #include "af/detail/runtime/runtime_public_io.hpp"
-#include "af/detail/runtime/runtime_ready_source_set.hpp"
 #include "af/detail/runtime/runtime_task_registry.hpp"
 #include "af/detail/runtime/runtime_task_handle.hpp"
 #include "af/task.hpp"

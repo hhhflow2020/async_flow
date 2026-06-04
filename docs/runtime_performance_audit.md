@@ -2,16 +2,17 @@
 
 ## 调度
 
-- runtime 线程之间使用 source -> target SPSC 队列。
-- 外部入口使用 bounded MPSC 队列。
-- 自身投递自身可走 local queue，顺序语义可强制走 MPSC。
+- 每个 executor 使用一个 intrusive unbounded MPSC inbox。
+- runtime 线程、外部线程和 same-thread self-post 共享目标 executor admission order。
+- `Fast` 只表达 runtime-thread-only；`Ordered` 表达显式顺序语义，二者不再切换到不同物理队列。
 - executor 阻塞前先 drain task，避免事件线程饥饿。
 
 ## Cache 与 false sharing
 
 - executor 独立对象按 cache line 对齐。
 - 热原子状态拆分，避免多个线程频繁写同一 cache line。
-- SPSC 队列按线程对拆分，减少多生产者共享写指针。
+- task inbox 的生产者热路径是单次 atomic exchange 和前驱 next 写入。
+- inbox producer/consumer 游标按 cache line 拆分，降低 false sharing。
 - 日志 record pool 和 runtime task pool 都应按线程局部复用。
 
 ## 分支与系统调用

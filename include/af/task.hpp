@@ -9,13 +9,10 @@
 #include <type_traits>
 
 #include "af/detail/config.hpp"
+#include "af/detail/queue/intrusive_mpsc_queue.hpp"
 #include "af/thread_kind.hpp"
 
 namespace af {
-
-namespace detail {
-template <typename T> class IntrusiveMpscQueue;
-}
 
 // clang-format off
 #include "af/detail/task/task_types.hpp"

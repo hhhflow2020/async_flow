@@ -3,62 +3,105 @@
 #include <atomic>
 
 #include "af/detail/config.hpp"
+#include "af/detail/queue/queue_backoff.hpp"
 
 namespace af::detail {
 
+template <typename T> struct IntrusiveMpscNode {
+    IntrusiveMpscNode() noexcept = default;
+
+    explicit IntrusiveMpscNode(T *owner) noexcept : owner(owner) {}
+
+    std::atomic<IntrusiveMpscNode *> next{nullptr};
+    T *owner{nullptr};
+};
+
 template <typename T> class IntrusiveMpscQueue {
 public:
-    IntrusiveMpscQueue() = default;
+    using Node = IntrusiveMpscNode<T>;
+
+    IntrusiveMpscQueue() noexcept {
+        head_.store(&stub_, std::memory_order_relaxed);
+        tail_ = &stub_;
+    }
+
     IntrusiveMpscQueue(const IntrusiveMpscQueue &) = delete;
     IntrusiveMpscQueue &operator=(const IntrusiveMpscQueue &) = delete;
 
     void push(T *value) noexcept {
         AF_ASSERT(value != nullptr);
-        next(value).store(nullptr, std::memory_order_relaxed);
-        T *head = head_.load(std::memory_order_relaxed);
-        do {
-            next(value).store(head, std::memory_order_relaxed);
-        } while (!head_.compare_exchange_weak(head, value, std::memory_order_release,
-                                              std::memory_order_relaxed));
+        push_node(&node(*value));
     }
 
     [[nodiscard]] T *try_pop() noexcept {
-        if (consumer_head_ == nullptr) {
-            refill_consumer_cache();
-        }
-        if (consumer_head_ == nullptr) {
-            return nullptr;
-        }
+        for (;;) {
+            Node *tail = tail_;
+            Node *next = tail->next.load(std::memory_order_acquire);
+            if (next != nullptr) {
+                T *value = consume_linked(tail, next);
+                if (value == nullptr) {
+                    continue;
+                }
+                return value;
+            }
 
-        T *value = consumer_head_;
-        consumer_head_ = next(value).load(std::memory_order_relaxed);
-        next(value).store(nullptr, std::memory_order_relaxed);
-        return value;
+            if (tail != head_.load(std::memory_order_acquire)) {
+                bool consumed_stub = false;
+                for (std::size_t spin = 0; spin < inconsistent_spin_count; ++spin) {
+                    queue_full_cpu_relax();
+                    next = tail->next.load(std::memory_order_acquire);
+                    if (next != nullptr) {
+                        T *value = consume_linked(tail, next);
+                        if (value == nullptr) {
+                            consumed_stub = true;
+                            break;
+                        }
+                        return value;
+                    }
+                }
+                if (consumed_stub) {
+                    continue;
+                }
+                return nullptr;
+            }
+            if (tail == &stub_) {
+                return nullptr;
+            }
+            push_node(&stub_);
+        }
     }
 
     [[nodiscard]] bool empty() const noexcept {
-        return consumer_head_ == nullptr && head_.load(std::memory_order_acquire) == nullptr;
+        Node *tail = tail_;
+        return tail->next.load(std::memory_order_acquire) == nullptr &&
+               tail == head_.load(std::memory_order_acquire);
     }
 
 private:
-    [[nodiscard]] static std::atomic<T *> &next(T *value) noexcept {
-        return value->intrusive_mpsc_next_;
+    static constexpr std::size_t inconsistent_spin_count = 64;
+
+    [[nodiscard]] static Node &node(T &value) noexcept {
+        return value.intrusive_mpsc_node_;
     }
 
-    void refill_consumer_cache() noexcept {
-        T *list = head_.exchange(nullptr, std::memory_order_acquire);
-        T *reversed = nullptr;
-        while (list != nullptr) {
-            T *next_value = next(list).load(std::memory_order_relaxed);
-            next(list).store(reversed, std::memory_order_relaxed);
-            reversed = list;
-            list = next_value;
+    T *consume_linked(Node *tail, Node *next) noexcept {
+        tail_ = next;
+        tail->next.store(nullptr, std::memory_order_relaxed);
+        if (tail == &stub_) {
+            return nullptr;
         }
-        consumer_head_ = reversed;
+        return tail->owner;
     }
 
-    alignas(hardware_cache_line_size) std::atomic<T *> head_{nullptr};
-    alignas(hardware_cache_line_size) T *consumer_head_{nullptr};
+    void push_node(Node *node) noexcept {
+        node->next.store(nullptr, std::memory_order_relaxed);
+        Node *previous = head_.exchange(node, std::memory_order_acq_rel);
+        previous->next.store(node, std::memory_order_release);
+    }
+
+    alignas(hardware_cache_line_size) std::atomic<Node *> head_{nullptr};
+    alignas(hardware_cache_line_size) Node *tail_{nullptr};
+    Node stub_{};
 };
 
 } // namespace af::detail
