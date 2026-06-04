@@ -1,4 +1,5 @@
 #include <chrono>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -135,6 +136,48 @@ static_assert(af::log_overflow_policy::block == af::LogOverflowPolicy::Block);
     }
     return runtime.active_thread_count() == expected;
 }
+
+[[nodiscard]] bool wait_for_counter(std::atomic<int> &counter, int expected) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (counter.load(std::memory_order_acquire) == expected) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return counter.load(std::memory_order_acquire) == expected;
+}
+
+class PostedRuntimeWork final : public af::runtime_work {
+public:
+    PostedRuntimeWork(std::atomic<int> &counter, std::atomic<std::uint16_t> &thread,
+                      std::atomic<bool> &owner_matches)
+        : counter_(counter), thread_(thread), owner_matches_(owner_matches) {}
+
+    void run(af::runtime &owner) noexcept override {
+        thread_.store(af::runtime::current_thread_index(), std::memory_order_release);
+        owner_matches_.store(af::runtime::current() == &owner, std::memory_order_release);
+        counter_.fetch_add(1, std::memory_order_release);
+    }
+
+private:
+    std::atomic<int> &counter_;
+    std::atomic<std::uint16_t> &thread_;
+    std::atomic<bool> &owner_matches_;
+};
+
+class StopRuntimeWork final : public af::runtime_work {
+public:
+    explicit StopRuntimeWork(std::atomic<int> &counter) : counter_(counter) {}
+
+    void run(af::runtime &owner) noexcept override {
+        owner.stop();
+        counter_.fetch_add(1, std::memory_order_release);
+    }
+
+private:
+    std::atomic<int> &counter_;
+};
 
 } // namespace
 
@@ -389,5 +432,72 @@ TEST(RuntimeConfigTests, RuntimeInstanceStartStopRunsConfiguredThreads) {
     EXPECT_TRUE(runtime.start());
     EXPECT_TRUE(wait_for_active_threads(runtime, 3));
     runtime.stop();
+    EXPECT_EQ(runtime.active_thread_count(), 0U);
+}
+
+TEST(RuntimeConfigTests, RuntimeInstancePostRunsWorkOnTargetThread) {
+    af::runtime_config config;
+    config.threads = {
+        af::io_threads("io", 1),
+        af::cpu_threads("logic", 2),
+    };
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    std::atomic<int> counter{0};
+    std::atomic<std::uint16_t> first_thread{af::runtime_invalid_thread_index};
+    std::atomic<std::uint16_t> second_thread{af::runtime_invalid_thread_index};
+    std::atomic<std::uint16_t> drain_thread{af::runtime_invalid_thread_index};
+    std::atomic<bool> first_owner_matches{false};
+    std::atomic<bool> second_owner_matches{false};
+    std::atomic<bool> drain_owner_matches{false};
+    PostedRuntimeWork first(counter, first_thread, first_owner_matches);
+    PostedRuntimeWork second(counter, second_thread, second_owner_matches);
+    PostedRuntimeWork drain(counter, drain_thread, drain_owner_matches);
+
+    EXPECT_FALSE(runtime.post(runtime.select_thread(af::thread_selector::cpu(0)), &first));
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 3));
+
+    const auto io_thread = runtime.select_thread(af::thread_selector::io(0));
+    const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(1));
+    ASSERT_TRUE(runtime.post(io_thread, &first));
+    ASSERT_TRUE(runtime.post(cpu_thread, &second));
+    ASSERT_TRUE(wait_for_counter(counter, 2));
+    EXPECT_EQ(first_thread.load(std::memory_order_acquire), io_thread);
+    EXPECT_EQ(second_thread.load(std::memory_order_acquire), cpu_thread);
+    EXPECT_TRUE(first_owner_matches.load(std::memory_order_acquire));
+    EXPECT_TRUE(second_owner_matches.load(std::memory_order_acquire));
+
+    ASSERT_TRUE(runtime.post(cpu_thread, &drain));
+    runtime.stop();
+    EXPECT_EQ(counter.load(std::memory_order_acquire), 3);
+    EXPECT_EQ(drain_thread.load(std::memory_order_acquire), cpu_thread);
+    EXPECT_TRUE(drain_owner_matches.load(std::memory_order_acquire));
+    EXPECT_FALSE(runtime.post(cpu_thread, &first));
+}
+
+TEST(RuntimeConfigTests, RuntimeInstanceStopCanBeRequestedFromRuntimeThread) {
+    af::runtime_config config;
+    config.threads = {
+        af::io_threads("io", 1),
+        af::cpu_threads("logic", 1),
+    };
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    std::atomic<int> counter{0};
+    StopRuntimeWork work(counter);
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 2));
+
+    const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
+    ASSERT_TRUE(runtime.post(cpu_thread, &work));
+    ASSERT_TRUE(wait_for_counter(counter, 1));
+    EXPECT_TRUE(wait_for_active_threads(runtime, 0));
+
+    runtime.stop();
+    EXPECT_EQ(runtime.state(), af::runtime_state::stopped);
     EXPECT_EQ(runtime.active_thread_count(), 0U);
 }
