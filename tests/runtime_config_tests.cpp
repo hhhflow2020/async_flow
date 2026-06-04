@@ -1,6 +1,10 @@
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <stdexcept>
+#include <string>
+#include <thread>
 #include <type_traits>
 #include <variant>
 
@@ -8,6 +12,7 @@
 
 #include "af/async_runtime.hpp"
 #include "af/platform.hpp"
+#include "af/runtime.hpp"
 #include "af/runtime_config.hpp"
 
 namespace {
@@ -119,6 +124,17 @@ static_assert(af::log_ordering::ordered == af::LogOrdering::Ordered);
 static_assert(af::log_ordering::relaxed == af::LogOrdering::Relaxed);
 static_assert(af::log_overflow_policy::drop_newest == af::LogOverflowPolicy::DropNewest);
 static_assert(af::log_overflow_policy::block == af::LogOverflowPolicy::Block);
+
+[[nodiscard]] bool wait_for_active_threads(af::runtime &runtime, std::uint16_t expected) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (runtime.active_thread_count() == expected) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return runtime.active_thread_count() == expected;
+}
 
 } // namespace
 
@@ -310,4 +326,68 @@ TEST(RuntimeConfigTests, RuntimeConfigValidationReportsInvalidFields) {
     validation = af::validate_runtime_config(config);
     EXPECT_EQ(validation.status, af::runtime_config_status::log_file_backend_path_empty);
     EXPECT_EQ(validation.index, 0U);
+}
+
+TEST(RuntimeConfigTests, RuntimeInstanceRejectsInvalidConfig) {
+    af::runtime_config config;
+
+    try {
+        af::runtime runtime(config);
+        static_cast<void>(runtime);
+        FAIL() << "runtime construction should reject an empty thread layout";
+    } catch (const std::invalid_argument &error) {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("no_threads"), std::string::npos);
+    }
+}
+
+TEST(RuntimeConfigTests, RuntimeInstanceExposesResolvedThreadMetadata) {
+    af::runtime_config config;
+    config.threads = {
+        af::io_threads("io", 2),
+        af::cpu_threads("logic", 1),
+    };
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+
+    EXPECT_EQ(runtime.state(), af::runtime_state::stopped);
+    EXPECT_EQ(runtime.thread_count(), 3U);
+    EXPECT_EQ(runtime.invalid_thread_index(), 3U);
+    EXPECT_TRUE(runtime.valid_thread(0));
+    EXPECT_FALSE(runtime.valid_thread(3));
+    EXPECT_EQ(runtime.select_thread(af::thread_selector::io(1)), 1U);
+    EXPECT_EQ(runtime.select_thread(af::thread_selector::cpu(0)), 2U);
+    EXPECT_EQ(runtime.thread_kind_of(0), af::thread_kind::io);
+    EXPECT_EQ(runtime.thread_kind_of(2), af::thread_kind::cpu);
+    EXPECT_EQ(runtime.thread_name(0), "io");
+    EXPECT_EQ(runtime.thread_name(2), "logic");
+    EXPECT_EQ(runtime.thread_group_offset(1), 1U);
+    EXPECT_EQ(runtime.thread_group_offset(2), 0U);
+    EXPECT_EQ(runtime.resolved_config().cpu_threads.size(), 1U);
+    EXPECT_EQ(runtime.resolved_config().io_threads.size(), 2U);
+}
+
+TEST(RuntimeConfigTests, RuntimeInstanceStartStopRunsConfiguredThreads) {
+    af::runtime_config config;
+    config.threads = {
+        af::io_threads("io", 1),
+        af::cpu_threads("logic", 2),
+    };
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    ASSERT_TRUE(runtime.start());
+    EXPECT_FALSE(runtime.start());
+    EXPECT_EQ(runtime.state(), af::runtime_state::running);
+    EXPECT_TRUE(wait_for_active_threads(runtime, 3));
+    EXPECT_EQ(runtime.active_thread_count(), 3U);
+
+    runtime.stop();
+    EXPECT_EQ(runtime.state(), af::runtime_state::stopped);
+    EXPECT_EQ(runtime.active_thread_count(), 0U);
+    EXPECT_TRUE(runtime.start());
+    EXPECT_TRUE(wait_for_active_threads(runtime, 3));
+    runtime.stop();
+    EXPECT_EQ(runtime.active_thread_count(), 0U);
 }
