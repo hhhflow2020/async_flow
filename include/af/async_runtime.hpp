@@ -24,6 +24,7 @@
 #include "af/detail/net/reactor/net_io_channel.hpp"
 #include "af/detail/memory/contiguous_object_storage.hpp"
 #include "af/detail/memory/object_pool.hpp"
+#include "af/detail/queue/intrusive_mpsc_queue.hpp"
 #include "af/detail/queue/queue_backoff.hpp"
 #include "af/detail/runtime/runtime_common_state.hpp"
 #include "af/detail/runtime/runtime_config.hpp"
@@ -199,8 +200,6 @@ private:
     using OrderedBatchState = detail::OrderedBatchState;
     using ExternalPostCounter = detail::ExternalPostCounter;
     using ParallelGroup = detail::RuntimeParallelGroup<AsyncRuntime>;
-    using SpscQueue = detail::BoundedSpscQueue<Task>;
-    using ExternalQueue = detail::BoundedMpscQueue<Task>;
     using TaskRegistryState = detail::RuntimeTaskRegistryState<Task, task_registry_enabled>;
     template <typename TaskT>
     using TaskPool = detail::ObjectPool<
@@ -211,11 +210,6 @@ private:
         ParallelGroup, Config::task_pool_chunk_size, Config::task_pool_remote_release_batch_size,
         Config::task_pool_cache_slot_index, Config::task_pool_local_cache_set_size,
         Config::task_pool_direct_release_set_size, Config::task_pool_local_cache_capacity>;
-
-    enum class ReadyQueueRoute : std::uint8_t {
-        Local,
-        Spsc,
-    };
 
     static void set_task_parallel_failures(Task *task, std::uint32_t failures) noexcept {
         task->set_last_parallel_failures(failures);
@@ -274,31 +268,18 @@ private:
     static void on_task_finished(Task *task) noexcept;
 
     static void init_queues();
-    [[nodiscard]] static SpscQueue &spsc_queue(std::uint16_t source, std::uint16_t target) noexcept;
-
-    [[nodiscard]] static constexpr ReadyQueueRoute
-    ready_route_from_runtime_thread(std::uint16_t source, std::uint16_t target) noexcept;
-
     static bool try_enqueue_ready(std::uint16_t index, Task *task,
                                   ScheduleMode mode = ScheduleMode::Auto) noexcept;
     static bool try_enqueue_ready_from_runtime_thread(std::uint16_t source, std::uint16_t target,
                                                       Task *task, ScheduleMode mode) noexcept;
-    static bool try_enqueue_local_from_runtime_thread(std::uint16_t target, Task *task) noexcept;
-    static bool try_enqueue_cross_thread_spsc(std::uint16_t source, std::uint16_t target,
-                                              Task *task) noexcept;
-    static bool try_enqueue_external_mpsc(std::uint16_t target, Task *task) noexcept;
-    static void mark_source_ready(std::uint16_t source, std::uint16_t target) noexcept;
+    static bool try_enqueue_inbox(std::uint16_t target, Task *task) noexcept;
 
     static void enqueue_ready_blocking(std::uint16_t index, Task *task,
                                        ScheduleMode mode = ScheduleMode::Auto) noexcept;
     static void enqueue_ready_blocking_from_runtime_thread(std::uint16_t source,
                                                            std::uint16_t target, Task *task,
                                                            ScheduleMode mode) noexcept;
-    static void enqueue_local_from_runtime_thread_blocking(std::uint16_t target,
-                                                           Task *task) noexcept;
-    static void enqueue_cross_thread_spsc_blocking(std::uint16_t source, std::uint16_t target,
-                                                   Task *task) noexcept;
-    static void enqueue_external_mpsc_blocking(std::uint16_t target, Task *task) noexcept;
+    static void enqueue_inbox_blocking(std::uint16_t target, Task *task) noexcept;
 
     static void post_blocking(Thread thread, Task *task,
                               ScheduleMode mode = ScheduleMode::Auto) noexcept;
@@ -318,8 +299,6 @@ private:
     static inline CacheLineAtomic<std::uint32_t> unfinished_tasks_{0};
     static inline CacheLineAtomic<std::uint64_t> generation_{0};
     static inline std::vector<std::unique_ptr<Executor>> executors_;
-    static inline detail::ContiguousObjectStorage<SpscQueue> spsc_queues_;
-    static inline detail::ContiguousObjectStorage<ExternalQueue> external_queues_;
     static inline std::vector<OrderedBatchState> ordered_batch_state_;
     static inline TaskRegistryState task_registry_;
     static inline thread_local std::uint16_t current_thread_index_ = invalid_thread_index;

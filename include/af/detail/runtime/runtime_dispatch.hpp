@@ -6,112 +6,39 @@
 
 namespace af {
 
-template <typename TraitsT> void AsyncRuntime<TraitsT>::init_queues() {
-    spsc_queues_.clear();
-    spsc_queues_.reserve_exact(static_cast<std::size_t>(thread_count) * thread_count);
-    for (std::uint16_t source = 0; source < thread_count; ++source) {
-        for (std::uint16_t target = 0; target < thread_count; ++target) {
-            static_cast<void>(target);
-            spsc_queues_.emplace_back(spsc_queue_capacity);
-        }
-    }
-
-    external_queues_.clear();
-    external_queues_.reserve_exact(thread_count);
-    for (std::uint16_t target = 0; target < thread_count; ++target) {
-        static_cast<void>(target);
-        external_queues_.emplace_back(external_queue_capacity);
-    }
-}
-
-template <typename TraitsT>
-auto AsyncRuntime<TraitsT>::spsc_queue(std::uint16_t source, std::uint16_t target) noexcept
-    -> SpscQueue & {
-    return *spsc_queues_[static_cast<std::size_t>(source) * thread_count + target];
-}
-
-template <typename TraitsT>
-constexpr auto AsyncRuntime<TraitsT>::ready_route_from_runtime_thread(std::uint16_t source,
-                                                                      std::uint16_t target) noexcept
-    -> ReadyQueueRoute {
-    return source == target ? ReadyQueueRoute::Local : ReadyQueueRoute::Spsc;
-}
+template <typename TraitsT> void AsyncRuntime<TraitsT>::init_queues() {}
 
 template <typename TraitsT>
 bool AsyncRuntime<TraitsT>::try_enqueue_ready(std::uint16_t index, Task *task,
                                               ScheduleMode mode) noexcept {
-    if (current_thread_index_ < thread_count) {
-        return try_enqueue_ready_from_runtime_thread(current_thread_index_, index, task, mode);
-    }
-
-    if (mode == ScheduleMode::Fast) {
-        return false;
-    }
-    return try_enqueue_external_mpsc(index, task);
+    static_cast<void>(mode);
+    return try_enqueue_inbox(index, task);
 }
 
 template <typename TraitsT>
 bool AsyncRuntime<TraitsT>::try_enqueue_ready_from_runtime_thread(std::uint16_t source,
                                                                   std::uint16_t target, Task *task,
                                                                   ScheduleMode mode) noexcept {
-    if (mode == ScheduleMode::Ordered) {
-        return try_enqueue_external_mpsc(target, task);
-    }
-
-    const ReadyQueueRoute route = ready_route_from_runtime_thread(source, target);
-    if (route == ReadyQueueRoute::Local) {
-        return try_enqueue_local_from_runtime_thread(target, task);
-    }
-
-    AF_ASSERT(route == ReadyQueueRoute::Spsc);
-    return try_enqueue_cross_thread_spsc(source, target, task);
+    static_cast<void>(source);
+    static_cast<void>(mode);
+    return try_enqueue_inbox(target, task);
 }
 
 template <typename TraitsT>
-bool AsyncRuntime<TraitsT>::try_enqueue_local_from_runtime_thread(std::uint16_t target,
-                                                                  Task *task) noexcept {
-    return executors_[target]->try_push_local(task);
-}
-
-template <typename TraitsT>
-bool AsyncRuntime<TraitsT>::try_enqueue_cross_thread_spsc(std::uint16_t source,
-                                                          std::uint16_t target,
-                                                          Task *task) noexcept {
-    const bool ok = spsc_queue(source, target).try_push(task);
-    if (ok) {
-        mark_source_ready(source, target);
-        executors_[target]->notify();
+bool AsyncRuntime<TraitsT>::try_enqueue_inbox(std::uint16_t target, Task *task) noexcept {
+    AF_ASSERT(target < executors_.size());
+    if (target >= executors_.size()) {
+        return false;
     }
-    return ok;
-}
-
-template <typename TraitsT>
-bool AsyncRuntime<TraitsT>::try_enqueue_external_mpsc(std::uint16_t target, Task *task) noexcept {
-    const bool ok = external_queues_[target]->try_push(task);
-    if (ok) {
-        executors_[target]->notify_external_ready();
-    }
-    return ok;
-}
-
-template <typename TraitsT>
-void AsyncRuntime<TraitsT>::mark_source_ready(std::uint16_t source, std::uint16_t target) noexcept {
-    executors_[target]->mark_ready(source);
+    executors_[target]->enqueue(task);
+    return true;
 }
 
 template <typename TraitsT>
 void AsyncRuntime<TraitsT>::enqueue_ready_blocking(std::uint16_t index, Task *task,
                                                    ScheduleMode mode) noexcept {
-    if (current_thread_index_ < thread_count) {
-        enqueue_ready_blocking_from_runtime_thread(current_thread_index_, index, task, mode);
-        return;
-    }
-
-    if (mode == ScheduleMode::Fast) {
-        AF_ASSERT(false && "ScheduleMode::Fast requires a runtime producer thread");
-        return;
-    }
-    enqueue_external_mpsc_blocking(index, task);
+    static_cast<void>(mode);
+    enqueue_inbox_blocking(index, task);
 }
 
 template <typename TraitsT>
@@ -119,56 +46,14 @@ void AsyncRuntime<TraitsT>::enqueue_ready_blocking_from_runtime_thread(std::uint
                                                                        std::uint16_t target,
                                                                        Task *task,
                                                                        ScheduleMode mode) noexcept {
-    if (mode == ScheduleMode::Ordered) {
-        enqueue_external_mpsc_blocking(target, task);
-        return;
-    }
-
-    const ReadyQueueRoute route = ready_route_from_runtime_thread(source, target);
-    if (route == ReadyQueueRoute::Local) {
-        enqueue_local_from_runtime_thread_blocking(target, task);
-        return;
-    }
-
-    AF_ASSERT(route == ReadyQueueRoute::Spsc);
-    enqueue_cross_thread_spsc_blocking(source, target, task);
+    static_cast<void>(source);
+    static_cast<void>(mode);
+    enqueue_inbox_blocking(target, task);
 }
 
 template <typename TraitsT>
-void AsyncRuntime<TraitsT>::enqueue_local_from_runtime_thread_blocking(std::uint16_t target,
-                                                                       Task *task) noexcept {
-    Executor &executor = *executors_[target];
-    detail::QueueFullBackoff backoff(queue_full_spin_count);
-    while (!executor.try_push_local(task)) {
-        if (Task *ready = executor.try_pop_local()) {
-            executor.execute(ready);
-            backoff.reset();
-        } else {
-            backoff.wait();
-        }
-    }
-}
-
-template <typename TraitsT>
-void AsyncRuntime<TraitsT>::enqueue_cross_thread_spsc_blocking(std::uint16_t source,
-                                                               std::uint16_t target,
-                                                               Task *task) noexcept {
-    detail::QueueFullBackoff backoff(queue_full_spin_count);
-    while (!spsc_queue(source, target).try_push(task)) {
-        backoff.wait();
-    }
-    mark_source_ready(source, target);
-    executors_[target]->notify();
-}
-
-template <typename TraitsT>
-void AsyncRuntime<TraitsT>::enqueue_external_mpsc_blocking(std::uint16_t target,
-                                                           Task *task) noexcept {
-    detail::QueueFullBackoff backoff(queue_full_spin_count);
-    while (!external_queues_[target]->try_push(task)) {
-        backoff.wait();
-    }
-    executors_[target]->notify_external_ready();
+void AsyncRuntime<TraitsT>::enqueue_inbox_blocking(std::uint16_t target, Task *task) noexcept {
+    static_cast<void>(try_enqueue_inbox(target, task));
 }
 
 template <typename TraitsT>
@@ -182,7 +67,7 @@ void AsyncRuntime<TraitsT>::post_blocking(Thread thread, Task *task, ScheduleMod
         if (request.previous == TaskState::Created) {
             on_task_started(task);
         }
-        enqueue_ready_blocking(index, task, mode);
+        enqueue_inbox_blocking(index, task);
         return;
     case detail::ScheduleAction::Deferred:
         return;
@@ -195,24 +80,8 @@ void AsyncRuntime<TraitsT>::post_blocking(Thread thread, Task *task, ScheduleMod
 template <typename TraitsT>
 bool AsyncRuntime<TraitsT>::enqueue_ready_by_policy(std::uint16_t index, Task *task,
                                                     ScheduleMode mode) noexcept {
-    if (current_thread_index_ < thread_count) {
-        if constexpr (runtime_queue_full_policy == QueueFullPolicy::Yield) {
-            enqueue_ready_blocking_from_runtime_thread(current_thread_index_, index, task, mode);
-            return true;
-        } else {
-            return try_enqueue_ready_from_runtime_thread(current_thread_index_, index, task, mode);
-        }
-    }
-
-    if (mode == ScheduleMode::Fast) {
-        return false;
-    }
-    if constexpr (external_queue_full_policy == QueueFullPolicy::Yield) {
-        enqueue_external_mpsc_blocking(index, task);
-        return true;
-    } else {
-        return try_enqueue_external_mpsc(index, task);
-    }
+    static_cast<void>(mode);
+    return try_enqueue_inbox(index, task);
 }
 
 template <typename TraitsT>

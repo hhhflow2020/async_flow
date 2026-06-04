@@ -9,13 +9,11 @@ namespace af::detail {
 template <typename RuntimeT, typename TraitsT> class alignas(hardware_cache_line_size) Executor {
     using Thread = typename RuntimeT::Thread;
     using Task = BasicTask<RuntimeT>;
-    using ExternalQueue = typename RuntimeT::ExternalQueue;
     template <typename T> using CacheLineAtomic = detail::CacheLineAtomic<T>;
     template <typename T> using IoObjectPool = detail::ObjectPool<T, 256, 1, false, 1>;
 
     static constexpr std::uint16_t thread_count = RuntimeT::thread_count;
     static constexpr std::uint16_t invalid_thread_index = RuntimeT::invalid_thread_index;
-    static constexpr std::size_t spsc_queue_capacity = RuntimeT::spsc_queue_capacity;
     static constexpr std::size_t io_wait_reserve = RuntimeT::io_wait_reserve;
 
     [[nodiscard]] static constexpr Thread thread_from_index(std::uint16_t index) noexcept {
@@ -32,10 +30,6 @@ template <typename RuntimeT, typename TraitsT> class alignas(hardware_cache_line
 
     [[nodiscard]] static constexpr std::uint16_t thread_group_offset(Thread thread) noexcept {
         return RuntimeT::thread_group_offset(thread);
-    }
-
-    [[nodiscard]] static auto &spsc_queue(std::uint16_t source, std::uint16_t target) noexcept {
-        return RuntimeT::spsc_queue(source, target);
     }
 
     static void on_task_finished(Task *task) noexcept {
@@ -104,10 +98,8 @@ public:
 #endif
     }
 
-    void mark_ready(std::uint16_t source) noexcept;
-    void notify_external_ready() noexcept;
-    [[nodiscard]] bool try_push_local(Task *task) noexcept;
-    [[nodiscard]] Task *try_pop_local() noexcept;
+    void enqueue(Task *task) noexcept;
+    [[nodiscard]] Task *try_pop_inbox() noexcept;
     void execute(Task *task) noexcept;
 
 private:
@@ -275,7 +267,6 @@ private:
     void close_io_backend() noexcept;
     [[nodiscard]] bool poll_io(int timeout_ms) noexcept;
 
-    void advance_ready_word_cursor_after(std::size_t word) noexcept;
     Task *pop_one() noexcept;
     void finish_done(Task *task) noexcept;
     void finish_pending(Task *task) noexcept;
@@ -283,17 +274,7 @@ private:
 
     std::uint16_t index_;
     ThreadKind kind_{ThreadKind::Worker};
-    std::uint16_t next_source_{0};
-    std::uint16_t next_ready_word_{0};
-    std::vector<Task *> local_queue_;
-    std::size_t local_capacity_{0};
-    std::size_t local_mask_{0};
-    std::size_t local_head_{0};
-    std::size_t local_tail_{0};
-    std::size_t local_size_{0};
-    ExternalQueue *external_queue_{nullptr};
-    detail::ReadySourceSet<thread_count> ready_sources_;
-    CacheLineAtomic<bool> external_ready_{false};
+    detail::IntrusiveMpscQueue<Task> inbox_;
     CacheLineAtomic<std::uint32_t> wake_epoch_{0};
     CacheLineAtomic<bool> sleeping_{false};
     CacheLineAtomic<bool> stop_requested_{false};

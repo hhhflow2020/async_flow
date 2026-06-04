@@ -2,9 +2,10 @@
 
 namespace af::test::runtime_lifecycle {
 
-TEST(RuntimeBackpressureTests, RejectPolicyReturnsFalseAndDeletesRejectedTask) {
+TEST(RuntimeBackpressureTests, UnboundedInboxAcceptsTasksPastLegacyQueueCapacity) {
     TinyRuntime::init();
 
+    constexpr int queued_task_count = 16;
     std::atomic<int> started{0};
     std::atomic<bool> release{false};
     std::atomic<int> completed{0};
@@ -13,37 +14,38 @@ TEST(RuntimeBackpressureTests, RejectPolicyReturnsFalseAndDeletesRejectedTask) {
     ASSERT_TRUE(TinyRuntime::start_task<BlockingTinyTask>(&started, &release, &completed));
     ASSERT_TRUE(wait_until_at_least(started, 1));
 
-    EXPECT_TRUE(TinyRuntime::start_task<TinyNoopTask>(&completed, &destroyed));
-    EXPECT_TRUE(TinyRuntime::start_task<TinyNoopTask>(&completed, &destroyed));
-    EXPECT_FALSE(TinyRuntime::start_task<TinyNoopTask>(&completed, &destroyed));
-    EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
-    EXPECT_EQ(TinyRuntime::unfinished_task_count(), 3U);
+    for (int i = 0; i < queued_task_count; ++i) {
+        EXPECT_TRUE(TinyRuntime::start_task<TinyNoopTask>(&completed, &destroyed));
+    }
+    EXPECT_EQ(destroyed.load(std::memory_order_acquire), 0);
+    EXPECT_EQ(TinyRuntime::unfinished_task_count(),
+              static_cast<std::uint32_t>(queued_task_count + 1));
 
     release.store(true, std::memory_order_release);
     release.notify_one();
-    EXPECT_TRUE(wait_until_at_least(completed, 3));
-    EXPECT_TRUE(wait_until_at_least(destroyed, 3));
+    EXPECT_TRUE(wait_until_at_least(completed, queued_task_count + 1));
+    EXPECT_TRUE(wait_until_at_least(destroyed, queued_task_count));
     EXPECT_EQ(TinyRuntime::unfinished_task_count(), 0U);
 
     TinyRuntime::shutdown();
 }
 
-TEST(RuntimeBackpressureTests, OrderedSelfPostUsesMpscWhenLocalQueueIsFull) {
+TEST(RuntimeBackpressureTests, SameThreadAutoAndOrderedUseUnifiedInbox) {
     TinyRuntime::init();
 
     std::atomic<int> child_completed{0};
     std::atomic<int> parent_completed{0};
-    std::atomic<int> auto_rejected{0};
+    std::atomic<int> auto_accepted{0};
     std::atomic<int> ordered_accepted{0};
     std::atomic<int> destroyed{0};
 
     ASSERT_TRUE(TinyRuntime::start_task<TinySelfOrderedRouteTask>(
-        &child_completed, &parent_completed, &auto_rejected, &ordered_accepted, &destroyed));
+        &child_completed, &parent_completed, &auto_accepted, &ordered_accepted, &destroyed));
     ASSERT_TRUE(wait_until_at_least(parent_completed, 1));
 
-    EXPECT_EQ(auto_rejected.load(std::memory_order_acquire), 1);
+    EXPECT_EQ(auto_accepted.load(std::memory_order_acquire), 1);
     EXPECT_EQ(ordered_accepted.load(std::memory_order_acquire), 1);
-    EXPECT_TRUE(wait_until_at_least(child_completed, 3));
+    EXPECT_TRUE(wait_until_at_least(child_completed, 4));
     EXPECT_TRUE(wait_until_at_least(destroyed, 4));
 
     TinyRuntime::shutdown();
@@ -80,7 +82,7 @@ TEST(RuntimeBackpressureTests, YieldPolicyAllowsManyExternalProducers) {
     YieldRuntime::shutdown();
 }
 
-TEST(RuntimeBackpressureTests, YieldPolicyHandlesSameThreadFanoutWithBoundedLocalQueue) {
+TEST(RuntimeBackpressureTests, YieldPolicyHandlesSameThreadFanoutWithUnifiedInbox) {
     YieldRuntime::init();
 
     constexpr int child_count = 128;
@@ -94,9 +96,10 @@ TEST(RuntimeBackpressureTests, YieldPolicyHandlesSameThreadFanoutWithBoundedLoca
     YieldRuntime::shutdown();
 }
 
-TEST(RuntimeBackpressureTests, SplitQueuePoliciesRejectFullExternalQueueWithoutBlockingProducer) {
+TEST(RuntimeBackpressureTests, SplitQueuePoliciesDoNotBoundUnifiedTaskInbox) {
     SplitPolicyRuntime::init();
 
+    constexpr int queued_task_count = 16;
     std::atomic<int> started{0};
     std::atomic<bool> release{false};
     std::atomic<int> completed{0};
@@ -106,20 +109,20 @@ TEST(RuntimeBackpressureTests, SplitQueuePoliciesRejectFullExternalQueueWithoutB
         SplitPolicyRuntime::start_task<SplitPolicyBlockingTask>(&started, &release, &completed));
     ASSERT_TRUE(wait_until_at_least(started, 1));
 
-    EXPECT_TRUE(SplitPolicyRuntime::start_task<SplitPolicyCountTask>(&completed, &destroyed));
-    EXPECT_TRUE(SplitPolicyRuntime::start_task<SplitPolicyCountTask>(&completed, &destroyed));
-    EXPECT_FALSE(SplitPolicyRuntime::start_task<SplitPolicyCountTask>(&completed, &destroyed));
-    EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
+    for (int i = 0; i < queued_task_count; ++i) {
+        EXPECT_TRUE(SplitPolicyRuntime::start_task<SplitPolicyCountTask>(&completed, &destroyed));
+    }
+    EXPECT_EQ(destroyed.load(std::memory_order_acquire), 0);
 
     release.store(true, std::memory_order_release);
     release.notify_one();
-    EXPECT_TRUE(wait_until_at_least(completed, 3));
-    EXPECT_TRUE(wait_until_at_least(destroyed, 3));
+    EXPECT_TRUE(wait_until_at_least(completed, queued_task_count + 1));
+    EXPECT_TRUE(wait_until_at_least(destroyed, queued_task_count));
 
     SplitPolicyRuntime::shutdown();
 }
 
-TEST(RuntimeBackpressureTests, SplitQueuePoliciesKeepRuntimeThreadFanoutOnYieldPolicy) {
+TEST(RuntimeBackpressureTests, SplitQueuePoliciesKeepRuntimeThreadFanoutOnUnifiedInbox) {
     SplitPolicyRuntime::init();
 
     constexpr int child_count = 32;

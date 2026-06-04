@@ -13,6 +13,10 @@
 
 namespace af {
 
+namespace detail {
+template <typename T> class IntrusiveMpscQueue;
+}
+
 // clang-format off
 #include "af/detail/task/task_types.hpp"
 // clang-format on

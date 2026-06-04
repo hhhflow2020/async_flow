@@ -76,11 +76,11 @@ public:
     explicit TinySelfOrderedRouteTask(TinyTask::FactoryToken token) : TinyTask(token) {}
 
     bool do_it(std::atomic<int> *child_completed, std::atomic<int> *parent_completed,
-               std::atomic<int> *auto_rejected, std::atomic<int> *ordered_accepted,
+               std::atomic<int> *auto_accepted, std::atomic<int> *ordered_accepted,
                std::atomic<int> *destroyed) {
         child_completed_ = child_completed;
         parent_completed_ = parent_completed;
-        auto_rejected_ = auto_rejected;
+        auto_accepted_ = auto_accepted;
         ordered_accepted_ = ordered_accepted;
         destroyed_ = destroyed;
         return schedule(TinyThreads::Logic_0);
@@ -91,8 +91,8 @@ private:
         static_cast<void>(TinyRuntime::start_task<TinyNoopTask>(child_completed_, destroyed_));
         static_cast<void>(TinyRuntime::start_task<TinyNoopTask>(child_completed_, destroyed_));
 
-        if (!TinyRuntime::start_task<TinyNoopTask>(child_completed_, destroyed_)) {
-            auto_rejected_->fetch_add(1, std::memory_order_release);
+        if (TinyRuntime::start_task<TinyNoopTask>(child_completed_, destroyed_)) {
+            auto_accepted_->fetch_add(1, std::memory_order_release);
         }
         if (TinyRuntime::start_task<TinyNoopTask>(child_completed_, destroyed_,
                                                   af::ScheduleMode::Ordered)) {
@@ -105,7 +105,7 @@ private:
 
     std::atomic<int> *child_completed_{nullptr};
     std::atomic<int> *parent_completed_{nullptr};
-    std::atomic<int> *auto_rejected_{nullptr};
+    std::atomic<int> *auto_accepted_{nullptr};
     std::atomic<int> *ordered_accepted_{nullptr};
     std::atomic<int> *destroyed_{nullptr};
 };

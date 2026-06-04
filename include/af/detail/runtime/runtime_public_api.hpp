@@ -58,8 +58,6 @@ template <typename TraitsT> void AsyncRuntime<TraitsT>::shutdown() {
     }
 
     executors_.clear();
-    spsc_queues_.clear();
-    external_queues_.clear();
     ordered_batch_state_.clear();
     unfinished_tasks_.store(0, std::memory_order_release);
     unfinished_tasks_.notify_all();

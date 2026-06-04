@@ -7,43 +7,17 @@
 namespace af::detail {
 
 template <typename RuntimeT, typename TraitsT>
-void Executor<RuntimeT, TraitsT>::mark_ready(std::uint16_t source) noexcept {
-    ready_sources_.mark(source);
-}
-
-template <typename RuntimeT, typename TraitsT>
-void Executor<RuntimeT, TraitsT>::notify_external_ready() noexcept {
-    if (!external_ready_.load(std::memory_order_relaxed)) {
-        external_ready_.store(true, std::memory_order_relaxed);
-        notify_force();
-        return;
+void Executor<RuntimeT, TraitsT>::enqueue(Task *task) noexcept {
+    inbox_.push(task);
+    if (sleeping_.load(std::memory_order_acquire)) {
+        notify();
     }
-    notify();
-}
-
-template <typename RuntimeT, typename TraitsT>
-[[nodiscard]] bool Executor<RuntimeT, TraitsT>::try_push_local(Task *task) noexcept {
-    if (local_size_ == local_capacity_) {
-        return false;
-    }
-
-    local_queue_[local_tail_ & local_mask_] = task;
-    ++local_tail_;
-    ++local_size_;
-    return true;
 }
 
 template <typename RuntimeT, typename TraitsT>
 [[nodiscard]] typename Executor<RuntimeT, TraitsT>::Task *
-Executor<RuntimeT, TraitsT>::try_pop_local() noexcept {
-    if (local_size_ == 0) {
-        return nullptr;
-    }
-
-    Task *task = local_queue_[local_head_ & local_mask_];
-    ++local_head_;
-    --local_size_;
-    return task;
+Executor<RuntimeT, TraitsT>::try_pop_inbox() noexcept {
+    return inbox_.try_pop();
 }
 
 template <typename RuntimeT, typename TraitsT>
@@ -151,85 +125,8 @@ void Executor<RuntimeT, TraitsT>::run_loop() noexcept {
 }
 
 template <typename RuntimeT, typename TraitsT>
-void Executor<RuntimeT, TraitsT>::advance_ready_word_cursor_after(std::size_t word) noexcept {
-    if constexpr (decltype(ready_sources_)::word_count > 1U) {
-        std::size_t next = word + 1U;
-        if (next == decltype(ready_sources_)::word_count) {
-            next = 0;
-        }
-        next_ready_word_ = static_cast<std::uint16_t>(next);
-    } else {
-        static_cast<void>(word);
-    }
-}
-
-template <typename RuntimeT, typename TraitsT>
 typename Executor<RuntimeT, TraitsT>::Task *Executor<RuntimeT, TraitsT>::pop_one() noexcept {
-    if (Task *task = try_pop_local()) {
-        return task;
-    }
-
-    for (std::size_t checked_word = 0; checked_word < decltype(ready_sources_)::word_count;
-         ++checked_word) {
-        std::size_t word = checked_word;
-        if constexpr (decltype(ready_sources_)::word_count > 1U) {
-            word += next_ready_word_;
-            if (word >= decltype(ready_sources_)::word_count) {
-                word -= decltype(ready_sources_)::word_count;
-            }
-        }
-        std::uint64_t mask = ready_sources_.load_word(word);
-        while (mask != 0U) {
-            const std::uint16_t source = static_cast<std::uint16_t>(
-                decltype(ready_sources_)::word_base(word) + std::countr_zero(mask));
-            const std::uint64_t bit = 1ULL << (source & 63U);
-            mask &= ~bit;
-            if (source == index_) {
-                continue;
-            }
-            if (Task *task = spsc_queue(source, index_).try_pop()) {
-                advance_ready_word_cursor_after(word);
-                next_source_ = static_cast<std::uint16_t>((source + 1U) % thread_count);
-                return task;
-            }
-            ready_sources_.clear(source);
-            if (Task *task = spsc_queue(source, index_).try_pop()) {
-                advance_ready_word_cursor_after(word);
-                next_source_ = static_cast<std::uint16_t>((source + 1U) % thread_count);
-                mark_ready(source);
-                return task;
-            }
-        }
-    }
-
-    // Drain cross-thread SPSC fallback before accepting more external starts:
-    // bounded SPSC links can otherwise fill and block runtime-thread producers.
-    for (std::uint16_t checked = 0; checked < thread_count; ++checked) {
-        const std::uint16_t source =
-            static_cast<std::uint16_t>((next_source_ + checked) % thread_count);
-        if (source == index_) {
-            continue;
-        }
-        if (Task *task = spsc_queue(source, index_).try_pop()) {
-            next_source_ = static_cast<std::uint16_t>((source + 1U) % thread_count);
-            mark_ready(source);
-            return task;
-        }
-    }
-
-    if (external_ready_.load(std::memory_order_relaxed)) {
-        if (Task *task = external_queue_->try_pop()) {
-            return task;
-        }
-
-        external_ready_.store(false, std::memory_order_relaxed);
-        if (Task *task = external_queue_->try_pop()) {
-            external_ready_.store(true, std::memory_order_relaxed);
-            return task;
-        }
-    }
-
-    return external_queue_->try_pop();
+    return try_pop_inbox();
 }
 
 template <typename RuntimeT, typename TraitsT>
@@ -245,9 +142,6 @@ void Executor<RuntimeT, TraitsT>::finish_pending(Task *task) noexcept {
     task->state_.store(TaskState::Pending, std::memory_order_release);
     const detail::RequestedSchedule requested = task->take_requested_schedule();
     if (requested.thread_index != invalid_thread_index) {
-        // A running-task wake request is converted into a real queue entry only
-        // if the task is still Pending; a concurrent Pending->Queued wake wins
-        // otherwise.
         enqueue_pending_blocking(requested.thread_index, task, requested.mode);
     }
 }
@@ -256,7 +150,7 @@ template <typename RuntimeT, typename TraitsT>
 void Executor<RuntimeT, TraitsT>::finish_again(Task *task) noexcept {
     task->state_.store(TaskState::Queued, std::memory_order_release);
     static_cast<void>(task->take_requested_thread());
-    enqueue_ready_blocking_from_runtime_thread(index_, index_, task);
+    enqueue_ready_blocking_from_runtime_thread(index_, index_, task, ScheduleMode::Auto);
 }
 
 } // namespace af::detail

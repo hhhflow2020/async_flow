@@ -10,10 +10,7 @@ namespace af::detail {
 
 template <typename RuntimeT, typename TraitsT>
 Executor<RuntimeT, TraitsT>::Executor(std::uint16_t index)
-    : index_(index), kind_(thread_kind(thread_from_index(index))),
-      local_queue_(detail::normalize_bounded_queue_capacity(spsc_queue_capacity)),
-      local_capacity_(local_queue_.size()), local_mask_(local_capacity_ - 1U),
-      external_queue_(RuntimeT::external_queues_[index]) {}
+    : index_(index), kind_(thread_kind(thread_from_index(index))) {}
 
 template <typename RuntimeT, typename TraitsT> Executor<RuntimeT, TraitsT>::~Executor() {
     close_io_backend();
