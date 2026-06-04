@@ -1,11 +1,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
+#include <variant>
 
 #include <gtest/gtest.h>
 
 #include "af/async_runtime.hpp"
 #include "af/platform.hpp"
+#include "af/runtime_config.hpp"
 
 namespace {
 
@@ -110,6 +112,12 @@ static_assert(af::parallel_mode::all_shards == af::ParallelMode::AllShards);
 static_assert(af::ordered_batch_replay_policy::strict == af::OrderedBatchReplayPolicy::Strict);
 static_assert(af::ordered_batch_replay_policy::skip_already_applied ==
               af::OrderedBatchReplayPolicy::SkipAlreadyApplied);
+static_assert(std::is_same_v<af::log_ordering, af::LogOrdering>);
+static_assert(std::is_same_v<af::log_overflow_policy, af::LogOverflowPolicy>);
+static_assert(af::log_ordering::ordered == af::LogOrdering::Ordered);
+static_assert(af::log_ordering::relaxed == af::LogOrdering::Relaxed);
+static_assert(af::log_overflow_policy::drop_newest == af::LogOverflowPolicy::DropNewest);
+static_assert(af::log_overflow_policy::block == af::LogOverflowPolicy::Block);
 
 } // namespace
 
@@ -163,4 +171,61 @@ TEST(RuntimeConfigTests, DefaultsAndOverridesTaskPoolRemoteReleaseBatchSize) {
     EXPECT_EQ(RemoteBatchOverrideRuntime::Config::timer_drain_budget, 64U);
     EXPECT_EQ(RemoteBatchOverrideRuntime::Config::timer_reserve, 2048U);
     EXPECT_EQ(RemoteBatchOverrideRuntime::Config::service_task_budget, 8U);
+}
+
+TEST(RuntimeConfigTests, RuntimeConfigUsesPlainStructDefaultsAndFactories) {
+    af::runtime_config config;
+
+    EXPECT_TRUE(config.threads.empty());
+    EXPECT_EQ(config.scheduler.task_drain_budget, 256U);
+    EXPECT_EQ(config.scheduler.timer_drain_budget, 256U);
+    EXPECT_EQ(config.scheduler.service_task_budget, 32U);
+    EXPECT_EQ(config.scheduler.max_task_run_slice.count(), 0);
+    EXPECT_EQ(config.scheduler.idle_wait, af::idle_wait_strategy::futex);
+    EXPECT_EQ(config.scheduler.wake, af::wake_policy::empty_to_non_empty);
+    EXPECT_EQ(config.task_pool.local_cache_size, 256U);
+    EXPECT_EQ(config.task_pool.slab_object_count, 4096U);
+    EXPECT_EQ(config.task_pool.oom, af::oom_policy::fatal);
+    EXPECT_EQ(config.timer.kind, af::timer_kind::hierarchical_wheel);
+    EXPECT_EQ(config.timer.tick, std::chrono::milliseconds(1));
+    EXPECT_EQ(config.reactor.backend, af::reactor_backend::auto_select);
+    EXPECT_EQ(config.reactor.event_capacity, 1024U);
+    EXPECT_EQ(config.logger.ordering, af::log_ordering::ordered);
+    EXPECT_EQ(config.logger.consumer_thread.kind, af::thread_selector_kind::cpu);
+    EXPECT_EQ(config.logger.consumer_thread.index, 0U);
+    EXPECT_EQ(config.logger.overflow, af::log_overflow_policy::drop_newest);
+    EXPECT_EQ(config.shutdown.drain_timeout, std::chrono::seconds(5));
+    EXPECT_TRUE(config.diagnostics.enable_task_id);
+
+    config.threads = {
+        af::io_threads("io", 2),
+        af::cpu_threads("logic", 4),
+    };
+    ASSERT_EQ(config.threads.size(), 2U);
+    EXPECT_EQ(config.threads[0].name, "io");
+    EXPECT_EQ(config.threads[0].kind, af::thread_kind::io);
+    EXPECT_EQ(config.threads[0].count, 2U);
+    EXPECT_TRUE(config.threads[0].set_os_thread_name);
+    EXPECT_EQ(config.threads[1].name, "logic");
+    EXPECT_EQ(config.threads[1].kind, af::thread_kind::cpu);
+    EXPECT_EQ(config.threads[1].count, 4U);
+
+    config.logger = af::log_config::relaxed();
+    EXPECT_EQ(config.logger.ordering, af::log_ordering::relaxed);
+    config.logger = af::log_config::ordered();
+    config.logger.consumer_thread = af::thread_selector::io(1);
+    config.logger.backends = {
+        af::file_log_backend_config{"server.log"},
+        af::udp_log_backend_config{"127.0.0.1", 9000},
+        af::tcp_log_backend_config{"127.0.0.1", 9001},
+    };
+    ASSERT_EQ(config.logger.backends.size(), 3U);
+    ASSERT_TRUE(std::holds_alternative<af::file_log_backend_config>(config.logger.backends[0]));
+    ASSERT_TRUE(std::holds_alternative<af::udp_log_backend_config>(config.logger.backends[1]));
+    ASSERT_TRUE(std::holds_alternative<af::tcp_log_backend_config>(config.logger.backends[2]));
+    EXPECT_EQ(std::get<af::file_log_backend_config>(config.logger.backends[0]).path, "server.log");
+    EXPECT_EQ(std::get<af::udp_log_backend_config>(config.logger.backends[1]).port, 9000U);
+    EXPECT_EQ(std::get<af::tcp_log_backend_config>(config.logger.backends[2]).port, 9001U);
+    EXPECT_EQ(config.logger.consumer_thread.kind, af::thread_selector_kind::io);
+    EXPECT_EQ(config.logger.consumer_thread.index, 1U);
 }

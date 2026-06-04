@@ -54,12 +54,19 @@ template <typename RuntimeT> class RuntimeAsyncLogConsumerController;
 enum class LogOverflowPolicy : std::uint8_t {
     DropNewest,
     Block,
+    drop_newest = DropNewest,
+    block = Block,
 };
 
 enum class LogOrdering : std::uint8_t {
     Ordered,
     Relaxed,
+    ordered = Ordered,
+    relaxed = Relaxed,
 };
+
+using log_overflow_policy = LogOverflowPolicy;
+using log_ordering = LogOrdering;
 
 struct AsyncLogConfig {
     static constexpr std::size_t default_queue_capacity = 1U << 16U;

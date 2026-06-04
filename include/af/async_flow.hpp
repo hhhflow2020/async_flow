@@ -6,5 +6,6 @@
 #include "af/io.hpp"
 #include "af/log.hpp"
 #include "af/platform.hpp"
+#include "af/runtime_config.hpp"
 #include "af/signal.hpp"
 #include "af/task.hpp"
