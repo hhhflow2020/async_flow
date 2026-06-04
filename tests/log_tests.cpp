@@ -23,6 +23,7 @@
 
 #include "af/async_runtime.hpp"
 #include "af/log.hpp"
+#include "af/runtime.hpp"
 
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -286,6 +287,46 @@ private:
     std::atomic<std::size_t> record_count_{0};
     std::atomic<bool> ran_on_runtime_thread_{false};
     std::atomic<std::uint16_t> observed_thread_index_{RuntimeT::invalid_thread_index};
+};
+
+class RuntimeInstanceThreadObservingLogBackend final : public af::LogBackend {
+public:
+    RuntimeInstanceThreadObservingLogBackend(af::runtime &owner,
+                                             af::runtime::thread_index expected_thread)
+        : owner_(owner), expected_thread_index_(expected_thread) {}
+
+    void write_batch(af::Span<af::detail::LogRecord *const> records) noexcept override {
+        record_count_.fetch_add(records.size(), std::memory_order_relaxed);
+        const bool on_runtime_thread = af::runtime::current() == &owner_;
+        ran_on_runtime_thread_.store(on_runtime_thread, std::memory_order_release);
+        if (on_runtime_thread) {
+            observed_thread_index_.store(af::runtime::current_thread_index(),
+                                         std::memory_order_release);
+        }
+    }
+
+    [[nodiscard]] std::size_t record_count() const noexcept {
+        return record_count_.load(std::memory_order_acquire);
+    }
+
+    [[nodiscard]] bool ran_on_runtime_thread() const noexcept {
+        return ran_on_runtime_thread_.load(std::memory_order_acquire);
+    }
+
+    [[nodiscard]] af::runtime::thread_index observed_thread_index() const noexcept {
+        return observed_thread_index_.load(std::memory_order_acquire);
+    }
+
+    [[nodiscard]] af::runtime::thread_index expected_thread_index() const noexcept {
+        return expected_thread_index_;
+    }
+
+private:
+    af::runtime &owner_;
+    const af::runtime::thread_index expected_thread_index_;
+    std::atomic<std::size_t> record_count_{0};
+    std::atomic<bool> ran_on_runtime_thread_{false};
+    std::atomic<af::runtime::thread_index> observed_thread_index_{af::runtime_invalid_thread_index};
 };
 
 template <typename T> bool wait_until_at_least(std::atomic<T> &value, T expected) {
@@ -1087,6 +1128,41 @@ TEST(LogTests, RuntimeAwareSinkDrainsOnConfiguredRuntimeThread) {
 
     ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
     logging->stop();
+
+    EXPECT_EQ(observing_backend->record_count(), 1U);
+    EXPECT_TRUE(observing_backend->ran_on_runtime_thread());
+    EXPECT_EQ(observing_backend->observed_thread_index(),
+              observing_backend->expected_thread_index());
+}
+
+TEST(LogTests, RuntimeInstanceAwareSinkDrainsOnConfiguredRuntimeThread) {
+    af::runtime_config runtime_config;
+    runtime_config.threads = {
+        af::io_threads("io", 1),
+        af::cpu_threads("logic", 1),
+    };
+    runtime_config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(runtime_config);
+    ASSERT_TRUE(runtime.start());
+
+    const auto consumer_thread = runtime.select_thread(af::thread_selector::cpu(0));
+    auto backend =
+        std::make_unique<RuntimeInstanceThreadObservingLogBackend>(runtime, consumer_thread);
+    auto *observing_backend = backend.get();
+
+    af::AsyncLogConfig log_config;
+    log_config.queue_capacity = 16;
+    log_config.max_batch_size = 4;
+    log_config.backends.push_back(std::move(backend));
+    auto logging =
+        af::start_async_logging_for_runtime(runtime, std::move(log_config), consumer_thread);
+
+    LOG(INFO) << "runtime instance-bound consumer external log";
+
+    ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
+    logging->stop();
+    runtime.stop();
 
     EXPECT_EQ(observing_backend->record_count(), 1U);
     EXPECT_TRUE(observing_backend->ran_on_runtime_thread());

@@ -24,6 +24,7 @@
 namespace af {
 
 template <typename RuntimeT> class RuntimeAbslAsyncLogSink;
+class RuntimeInstanceAbslAsyncLogSink;
 
 namespace detail {
 
@@ -48,6 +49,7 @@ public:
 };
 
 template <typename RuntimeT> class RuntimeAsyncLogConsumerController;
+class RuntimeInstanceAsyncLogConsumerController;
 
 } // namespace detail
 
@@ -223,7 +225,9 @@ public:
 
 private:
     template <typename RuntimeT> friend class detail::RuntimeAsyncLogConsumerController;
+    friend class detail::RuntimeInstanceAsyncLogConsumerController;
     template <typename RuntimeT> friend class RuntimeAbslAsyncLogSink;
+    friend class RuntimeInstanceAbslAsyncLogSink;
 
     [[nodiscard]] bool try_log_from_runtime_thread(std::uint16_t thread_index,
                                                    std::string_view message) noexcept {

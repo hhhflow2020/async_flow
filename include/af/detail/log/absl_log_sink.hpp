@@ -22,6 +22,8 @@
 #include "af/detail/config.hpp"
 #include "af/detail/log/async_logger.hpp"
 #include "af/detail/log/runtime_async_log_consumer.hpp"
+#include "af/detail/log/runtime_instance_async_log_consumer.hpp"
+#include "af/runtime/runtime.hpp"
 #include "af/thread_kind.hpp"
 
 namespace af {
@@ -126,6 +128,16 @@ template <typename RuntimeT>
     return detail::select_default_async_log_consumer_thread<RuntimeT>();
 }
 
+[[nodiscard]] inline runtime::thread_index
+default_async_log_consumer_thread(runtime &owner) noexcept {
+    for (runtime::thread_index i = 0; i < owner.thread_count(); ++i) {
+        if (detail::async_log_consumer_prefers_io_thread_kind(owner.thread_kind_of(i))) {
+            return i;
+        }
+    }
+    return owner.valid_thread(0U) ? 0U : owner.invalid_thread_index();
+}
+
 template <typename RuntimeT> class RuntimeAbslAsyncLogSink final : public absl::LogSink {
 public:
     explicit RuntimeAbslAsyncLogSink(std::shared_ptr<AsyncLogger> logger)
@@ -158,6 +170,42 @@ public:
     }
 
 private:
+    std::shared_ptr<AsyncLogger> logger_;
+};
+
+class RuntimeInstanceAbslAsyncLogSink final : public absl::LogSink {
+public:
+    RuntimeInstanceAbslAsyncLogSink(runtime &owner, std::shared_ptr<AsyncLogger> logger)
+        : owner_(owner), logger_(std::move(logger)) {}
+
+    void Send(const absl::LogEntry &entry) override {
+        const auto message = entry.text_message_with_prefix_and_newline();
+        bool accepted = false;
+        if (runtime::current() == &owner_) {
+            const auto task_id = runtime::current_task_id();
+            if (task_id == runtime::invalid_task_id) {
+                accepted =
+                    logger_->try_log_from_runtime_thread(runtime::current_thread_index(), message);
+            } else {
+                const std::string tagged_message = detail::task_id_tagged_user_log_message(
+                    message, entry.text_message_with_newline(), task_id);
+                accepted = logger_->try_log_from_runtime_thread(runtime::current_thread_index(),
+                                                                tagged_message);
+            }
+        } else {
+            accepted = logger_->try_log(message);
+        }
+        if (accepted && entry.log_severity() == absl::LogSeverity::kFatal) {
+            static_cast<void>(logger_->flush(logger_->fatal_flush_timeout()));
+        }
+    }
+
+    void Flush() override {
+        static_cast<void>(logger_->flush(std::chrono::seconds(5)));
+    }
+
+private:
+    runtime &owner_;
     std::shared_ptr<AsyncLogger> logger_;
 };
 
@@ -204,6 +252,13 @@ private:
     friend std::unique_ptr<AsyncLogHandle>
     start_async_logging_for_runtime(AsyncLogConfig config,
                                     typename RuntimeT::Thread consumer_thread);
+
+    friend std::unique_ptr<AsyncLogHandle> start_async_logging_for_runtime(runtime &owner,
+                                                                           AsyncLogConfig config);
+
+    friend std::unique_ptr<AsyncLogHandle>
+    start_async_logging_for_runtime(runtime &owner, AsyncLogConfig config,
+                                    runtime::thread_index consumer_thread);
 
     void register_sink() {
         absl::AddLogSink(sink_.get());
@@ -258,6 +313,35 @@ template <typename RuntimeT>
 start_async_logging_for_runtime(AsyncLogConfig config) {
     return start_async_logging_for_runtime<RuntimeT>(std::move(config),
                                                      default_async_log_consumer_thread<RuntimeT>());
+}
+
+[[nodiscard]] inline std::unique_ptr<AsyncLogHandle>
+start_async_logging_for_runtime(runtime &owner, AsyncLogConfig config,
+                                runtime::thread_index consumer_thread) {
+    if (config.runtime_thread_count == 0U) {
+        config.runtime_thread_count = owner.thread_count();
+    }
+    const std::size_t max_consumer_batches_per_run = config.max_consumer_batches_per_run;
+
+    auto logger = std::make_shared<AsyncLogger>(std::move(config));
+    auto consumer_controller = std::make_unique<detail::RuntimeInstanceAsyncLogConsumerController>(
+        owner, logger, consumer_thread, max_consumer_batches_per_run);
+    if (!consumer_controller->start()) {
+        throw std::runtime_error("failed to start runtime async log consumer");
+    }
+    initialize_absl_log_once();
+
+    auto handle = std::make_unique<AsyncLogHandle>(
+        logger, std::make_unique<RuntimeInstanceAbslAsyncLogSink>(owner, logger),
+        std::move(consumer_controller));
+    handle->register_sink();
+    return handle;
+}
+
+[[nodiscard]] inline std::unique_ptr<AsyncLogHandle>
+start_async_logging_for_runtime(runtime &owner, AsyncLogConfig config) {
+    return start_async_logging_for_runtime(owner, std::move(config),
+                                           default_async_log_consumer_thread(owner));
 }
 
 } // namespace af
