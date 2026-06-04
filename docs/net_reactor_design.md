@@ -228,7 +228,7 @@ UDP socket 控制面同样是 reactor-only：`bind_threads()`、`start()`、`sto
 
 - `AcceptStrategy::Auto`：默认策略。`reuse_port=true` 时每个目标 IO 线程各自创建 listener fd；`reuse_port=false` 时只在首个 IO 线程监听，保证不会重复 bind。
 - `AcceptStrategy::ReusePortPerIoThread`：强制每个目标 IO 线程创建 listener fd，要求 `reuse_port=true`。
-- `AcceptStrategy::SingleAcceptor`：只在首个目标 IO 线程 accept，适合不希望或不能使用 `SO_REUSEPORT` 的场景。accepted fd 会通过 shard command 分发到绑定的 IO 线程，并在目标 IO 线程创建 `TcpConnection`。
+- `AcceptStrategy::SingleAcceptor`：只在首个目标 IO 线程 accept，适合不希望或不能使用 `SO_REUSEPORT` 的场景。accepted fd 会通过 runtime task 分发到绑定的 IO 线程，并在目标 IO 线程创建 `TcpConnection`。
 
 `reuse_port=true` 是 TCP/UDP 多 IO 线程绑定同一端口的最高性能路径：内核把新连接或 datagram 分配给各 IO 线程自己的 fd，后续处理保持本地化。
 

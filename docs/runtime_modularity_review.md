@@ -14,7 +14,7 @@
 
 ## 本次收敛结果
 
-复杂 ring 后端已经移除，executor 对象布局只保留 native poller 状态。核心头不再保存 SQ/CQ 指针、operation pool、注册资源表或专属 submit 代码。
+复杂 ring 后端已经移除，executor 对象布局只保留 native poller 状态。核心头不再保存 SQ/CQ 指针、operation pool、注册资源表或专属 submit 代码。`runtime_public_io.hpp` 当前只负责 IO wait、cancel 和 timer wait 的公开桥接，不再保留 submit stub。
 
 ## 模块边界
 
@@ -25,7 +25,6 @@
 
 ## 后续拆分建议
 
-- 将 `runtime_public_io.hpp` 中不再推荐的 submit stub 继续收缩为更小的兼容边界。
 - 将 `io_file_*` POSIX helper 按生命周期、读写、metadata 保持独立。
 - 网络 reactor 继续按 poller、channel、tcp server、tcp connection、udp socket、unix socket 拆分。
 - 示例和测试保持按功能命名，避免历史后端名进入文件名。
