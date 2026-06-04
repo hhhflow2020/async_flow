@@ -17,11 +17,8 @@
 #include "af/async_runtime.hpp"
 #include "af/buffer/buffer.hpp"
 #include "af/detail/config.hpp"
-#include "af/detail/memory/object_pool.hpp"
 #include "af/detail/net/reactor/net_io_channel.hpp"
 #include "af/detail/net/socket_address.hpp"
-#include "af/detail/queue/bounded_mpsc_queue.hpp"
-#include "af/detail/queue/queue_backoff.hpp"
 #include "af/net/tcp_endpoint.hpp"
 #include "af/thread_kind.hpp"
 
@@ -30,10 +27,6 @@
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <unistd.h>
-
-#if defined(__linux__)
-#include <sys/eventfd.h>
-#endif
 
 namespace af::net {
 
@@ -55,9 +48,7 @@ struct UdpSocketOptions {
     bool unlink_unix_path_on_close{true};
 };
 
-struct UdpSocketRuntimeConfig {
-    std::size_t command_queue_capacity{4096};
-};
+struct UdpSocketRuntimeConfig {};
 
 template <typename Runtime> class UdpSocketHandle;
 template <typename Runtime> class UdpSocketRef;
@@ -66,6 +57,12 @@ namespace detail {
 
 template <typename Runtime> class UdpSocketShard;
 template <typename Runtime> struct UdpSocketState;
+template <typename Runtime> class UdpSendTask;
+
+enum class UdpSendKind : std::uint8_t {
+    Send,
+    SendTo,
+};
 
 } // namespace detail
 
@@ -235,18 +232,6 @@ private:
     Handler handler_;
 };
 
-template <typename Runtime> struct UdpCommand {
-    enum class Kind : std::uint8_t {
-        Send,
-        SendTo,
-    };
-
-    Kind kind{Kind::Send};
-    std::uint32_t generation{0};
-    af::Buffer buffer;
-    af::detail::SocketAddress address;
-};
-
 template <typename Runtime> struct UdpSocketContext {
     std::string name;
     UdpEndpoint local_endpoint;
@@ -263,6 +248,7 @@ template <typename Runtime> struct UdpSocketState {
     UdpSocketRuntimeConfig config;
     std::uint16_t control_thread_index{Runtime::invalid_thread_index};
     bool running{false};
+    alignas(af::detail::hardware_cache_line_size) std::atomic<bool> accepting_send_tasks{false};
     std::vector<Thread> default_threads;
     std::vector<std::uint16_t> active_shards;
     std::vector<std::unique_ptr<Shard>> shards;
@@ -290,22 +276,16 @@ template <typename Runtime> class UdpSocketShard {
 public:
     using State = UdpSocketState<Runtime>;
     using Thread = typename Runtime::Thread;
-    using Command = UdpCommand<Runtime>;
-    using CommandPool = af::detail::ObjectPool<Command, 256, 1, false, 4>;
     using Context = UdpSocketContext<Runtime>;
 
-    UdpSocketShard(std::weak_ptr<State> state, std::uint16_t shard_index, Thread thread,
-                   std::size_t command_queue_capacity)
-        : state_(std::move(state)), shard_index_(shard_index), thread_(thread),
-          commands_(command_queue_capacity) {}
+    UdpSocketShard(std::weak_ptr<State> state, std::uint16_t shard_index, Thread thread)
+        : state_(std::move(state)), shard_index_(shard_index), thread_(thread) {}
 
     UdpSocketShard(const UdpSocketShard &) = delete;
     UdpSocketShard &operator=(const UdpSocketShard &) = delete;
 
     ~UdpSocketShard() {
         udp_close_fd(fd_);
-        udp_close_fd(wake_fd_);
-        udp_close_fd(wake_write_fd_);
     }
 
     [[nodiscard]] Thread thread() const noexcept {
@@ -328,10 +308,6 @@ public:
         return generation != 0U && generation_.load(std::memory_order_acquire) == generation;
     }
 
-    [[nodiscard]] bool accepting_commands() const noexcept {
-        return accepting_commands_.load(std::memory_order_acquire);
-    }
-
     [[nodiscard]] bool resolve_peer_endpoint(const UdpEndpoint &endpoint,
                                              af::detail::SocketAddress &address) const noexcept {
         int address_error = 0;
@@ -343,22 +319,6 @@ public:
     supports_peer_address(const af::detail::SocketAddress &address) const noexcept {
         return address.size != 0U &&
                address.family == socket_family_.load(std::memory_order_acquire);
-    }
-
-    [[nodiscard]] bool enqueue(Command *command) noexcept {
-        if (command == nullptr) {
-            return false;
-        }
-        active_enqueues_.fetch_add(1U, std::memory_order_acquire);
-        const bool accepting = accepting_commands_.load(std::memory_order_acquire);
-        const bool pushed = accepting && commands_.try_push(command);
-        if (!pushed) {
-            active_enqueues_.fetch_sub(1U, std::memory_order_release);
-            return false;
-        }
-        wake();
-        active_enqueues_.fetch_sub(1U, std::memory_order_release);
-        return true;
     }
 
     [[nodiscard]] UdpSendResult send(af::Buffer buffer) noexcept {
@@ -407,29 +367,21 @@ public:
             return EALREADY;
         }
         advance_generation_on_owner();
-        const int wake_error = open_wake_channel();
-        if (wake_error != 0) {
-            return wake_error;
-        }
 
         af::detail::SocketAddress local{};
         int address_error = 0;
         if (!af::detail::socket_address_from_endpoint(context->local_endpoint, local,
                                                       address_error)) {
-            close_wake_channel_if_idle();
             return address_error == 0 ? EINVAL : address_error;
         }
 
         int socket_fd = ::socket(local.family, SOCK_DGRAM, 0);
         if (socket_fd < 0) {
-            const int error = errno;
-            close_wake_channel_if_idle();
-            return error;
+            return errno;
         }
         if (!udp_set_nonblocking(socket_fd) || !udp_set_cloexec(socket_fd)) {
             const int error = errno == 0 ? EIO : errno;
             udp_close_fd(socket_fd);
-            close_wake_channel_if_idle();
             return error;
         }
 
@@ -456,7 +408,6 @@ public:
             0) {
             const int error = errno;
             udp_close_fd(socket_fd);
-            close_wake_channel_if_idle();
             return error;
         }
         if (unix_socket) {
@@ -468,7 +419,6 @@ public:
                 if (context->options.unlink_unix_path_on_close) {
                     static_cast<void>(::unlink(context->local_endpoint.address.c_str()));
                 }
-                close_wake_channel_if_idle();
                 return ENOMEM;
             }
         }
@@ -479,7 +429,6 @@ public:
                                                           address_error)) {
                 udp_close_fd(socket_fd);
                 cleanup_bound_unix_path();
-                close_wake_channel_if_idle();
                 return address_error == 0 ? EINVAL : address_error;
             }
             if (::connect(socket_fd, reinterpret_cast<const sockaddr *>(&remote.storage),
@@ -487,7 +436,6 @@ public:
                 const int error = errno;
                 udp_close_fd(socket_fd);
                 cleanup_bound_unix_path();
-                close_wake_channel_if_idle();
                 return error;
             }
         }
@@ -502,7 +450,6 @@ public:
             static_cast<void>(Runtime::net_unregister_channel(thread_, &channel_));
             udp_close_fd(fd_);
             cleanup_bound_unix_path();
-            close_wake_channel_if_idle();
             return error;
         }
         context_ = std::move(context);
@@ -510,8 +457,6 @@ public:
     }
 
     void stop_on_owner() noexcept {
-        stop_accepting_commands();
-        discard_pending_commands();
         if (fd_ >= 0) {
             static_cast<void>(Runtime::net_unregister_channel(thread_, &channel_));
         }
@@ -520,28 +465,15 @@ public:
         cleanup_bound_unix_path();
         context_.reset();
         read_buffer_.clear();
-        discard_pending_commands();
-        close_wake_channel();
-    }
-
-    void seal_commands_from_control() noexcept {
-        stop_accepting_commands();
-    }
-
-    void resume_commands_from_control() noexcept {
-        start_accepting_commands();
     }
 
 private:
     template <typename RuntimeT> friend class ::af::net::UdpSocketRef;
     template <typename RuntimeT> friend class ::af::net::UdpSocketHandle;
+    friend class UdpSendTask<Runtime>;
 
     static void on_socket_event(void *owner, std::uint32_t events) noexcept {
         static_cast<UdpSocketShard *>(owner)->handle_socket(events);
-    }
-
-    static void on_wake_event(void *owner, std::uint32_t events) noexcept {
-        static_cast<UdpSocketShard *>(owner)->handle_wake(events);
     }
 
     [[nodiscard]] UdpSocketHandle<Runtime> handle() const noexcept {
@@ -691,195 +623,12 @@ private:
         }
     }
 
-    [[nodiscard]] int open_wake_channel() noexcept {
-        if (wake_fd_ >= 0) {
-            start_accepting_commands();
-            return 0;
-        }
-#if defined(__linux__)
-        wake_fd_ = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-        if (wake_fd_ < 0) {
-            return errno;
-        }
-        wake_channel_.fd = wake_fd_;
-        wake_channel_.owner = this;
-        wake_channel_.on_event = &UdpSocketShard::on_wake_event;
-        if (!Runtime::net_register_channel(thread_, &wake_channel_, af::detail::net_io_readable)) {
-            const int error = errno == 0 ? EIO : errno;
-            udp_close_fd(wake_fd_);
-            return error;
-        }
-        start_accepting_commands();
-        return 0;
-#else
-        int fds[2]{-1, -1};
-        if (::pipe(fds) != 0) {
-            return errno;
-        }
-        wake_fd_ = fds[0];
-        wake_write_fd_ = fds[1];
-        if (!udp_set_nonblocking(wake_fd_) || !udp_set_cloexec(wake_fd_) ||
-            !udp_set_nonblocking(wake_write_fd_) || !udp_set_cloexec(wake_write_fd_)) {
-            const int error = errno == 0 ? EIO : errno;
-            udp_close_fd(wake_fd_);
-            udp_close_fd(wake_write_fd_);
-            return error;
-        }
-        wake_channel_.fd = wake_fd_;
-        wake_channel_.owner = this;
-        wake_channel_.on_event = &UdpSocketShard::on_wake_event;
-        if (!Runtime::net_register_channel(thread_, &wake_channel_, af::detail::net_io_readable)) {
-            const int error = errno == 0 ? EIO : errno;
-            udp_close_fd(wake_fd_);
-            udp_close_fd(wake_write_fd_);
-            return error;
-        }
-        start_accepting_commands();
-        return 0;
-#endif
-    }
-
-    void close_wake_channel() noexcept {
-        stop_accepting_commands();
-        discard_pending_commands();
-        if (wake_fd_ >= 0) {
-            static_cast<void>(Runtime::net_unregister_channel(thread_, &wake_channel_));
-        }
-        udp_close_fd(wake_fd_);
-        udp_close_fd(wake_write_fd_);
-        wake_pending_.store(false, std::memory_order_relaxed);
-    }
-
-    void close_wake_channel_if_idle() noexcept {
-        if (fd_ < 0) {
-            close_wake_channel();
-        }
-    }
-
-    void handle_wake(std::uint32_t events) noexcept {
-        static_cast<void>(events);
-        drain_wake_fd();
-        wake_pending_.store(false, std::memory_order_relaxed);
-        drain_commands();
-    }
-
-    void drain_wake_fd() noexcept {
-#if defined(__linux__)
-        std::uint64_t value = 0;
-        while (::read(wake_fd_, &value, sizeof(value)) == sizeof(value)) {
-        }
-#else
-        std::array<std::byte, 256> buffer{};
-        while (::read(wake_fd_, buffer.data(), buffer.size()) > 0) {
-        }
-#endif
-    }
-
-    void drain_commands() noexcept {
-        std::array<Command *, 64> batch{};
-        for (;;) {
-            const std::size_t count = commands_.try_pop_many(batch.data(), batch.size());
-            if (count == 0U) {
-                return;
-            }
-            for (std::size_t i = 0; i < count; ++i) {
-                Command *command = batch[i];
-                if (command->generation != generation()) {
-                    destroy_command(command);
-                    continue;
-                }
-                switch (command->kind) {
-                case Command::Kind::Send:
-                    static_cast<void>(send(std::move(command->buffer)));
-                    break;
-                case Command::Kind::SendTo:
-                    static_cast<void>(
-                        send_to_address(std::move(command->buffer), command->address));
-                    break;
-                }
-                destroy_command(command);
-            }
-        }
-    }
-
-    void wake() noexcept {
-#if defined(__linux__)
-        if (wake_fd_ < 0) {
-            return;
-        }
-        bool expected = false;
-        if (!wake_pending_.compare_exchange_strong(expected, true, std::memory_order_relaxed,
-                                                   std::memory_order_relaxed)) {
-            return;
-        }
-        const std::uint64_t value = 1;
-        if (::write(wake_fd_, &value, sizeof(value)) != static_cast<ssize_t>(sizeof(value))) {
-            wake_pending_.store(false, std::memory_order_relaxed);
-        }
-#else
-        if (wake_write_fd_ < 0) {
-            return;
-        }
-        bool expected = false;
-        if (!wake_pending_.compare_exchange_strong(expected, true, std::memory_order_relaxed,
-                                                   std::memory_order_relaxed)) {
-            return;
-        }
-        const std::byte value{1};
-        if (::write(wake_write_fd_, &value, 1) != 1) {
-            wake_pending_.store(false, std::memory_order_relaxed);
-        }
-#endif
-    }
-
     void advance_generation_on_owner() noexcept {
         std::uint32_t next = generation_.load(std::memory_order_relaxed) + 1U;
         if (next == 0U) {
             next = 1U;
         }
         generation_.store(next, std::memory_order_release);
-    }
-
-    void start_accepting_commands() noexcept {
-        accepting_commands_.store(true, std::memory_order_release);
-    }
-
-    void stop_accepting_commands() noexcept {
-        accepting_commands_.store(false, std::memory_order_release);
-        while (active_enqueues_.load(std::memory_order_acquire) != 0U) {
-            af::detail::queue_full_cpu_relax();
-        }
-    }
-
-    [[nodiscard]] Command *create_command() noexcept {
-        try {
-            return command_pool_.create_uncached();
-        } catch (...) {
-            return nullptr;
-        }
-    }
-
-    void destroy_command(Command *command) noexcept {
-        if (command != nullptr) {
-            command_pool_.destroy_uncached(command);
-        }
-    }
-
-    void discard_command(Command *command) noexcept {
-        destroy_command(command);
-    }
-
-    void discard_pending_commands() noexcept {
-        std::array<Command *, 64> batch{};
-        for (;;) {
-            const std::size_t count = commands_.try_pop_many(batch.data(), batch.size());
-            if (count == 0U) {
-                return;
-            }
-            for (std::size_t i = 0; i < count; ++i) {
-                discard_command(batch[i]);
-            }
-        }
     }
 
     void notify_error(int error) noexcept {
@@ -899,18 +648,10 @@ private:
     std::weak_ptr<State> state_;
     std::uint16_t shard_index_{0};
     Thread thread_;
-    af::detail::BoundedMpscQueue<Command> commands_;
-    CommandPool command_pool_;
     int fd_{-1};
-    int wake_fd_{-1};
-    int wake_write_fd_{-1};
     af::detail::NetIoChannel channel_{};
-    af::detail::NetIoChannel wake_channel_{};
     std::atomic<int> socket_family_{AF_UNSPEC};
     alignas(af::detail::hardware_cache_line_size) std::atomic<std::uint32_t> generation_{0};
-    alignas(af::detail::hardware_cache_line_size) std::atomic<bool> wake_pending_{false};
-    alignas(af::detail::hardware_cache_line_size) std::atomic<bool> accepting_commands_{false};
-    alignas(af::detail::hardware_cache_line_size) std::atomic<std::uint32_t> active_enqueues_{0};
     std::shared_ptr<Context> context_;
     std::vector<std::byte> read_buffer_;
     std::string bound_unix_path_;
@@ -958,6 +699,7 @@ private:
             if (state_->running) {
                 publish_udp_active_shard_snapshot<Runtime>(*state_, active);
             } else {
+                state_->accepting_send_tasks.store(false, std::memory_order_release);
                 clear_udp_active_shard_snapshot<Runtime>(*state_);
             }
         }
@@ -998,6 +740,7 @@ void complete_udp_start_from_shard(std::shared_ptr<UdpSocketState<Runtime>> stat
             if (state->running) {
                 publish_udp_active_shard_snapshot<Runtime>(*state, active);
             } else {
+                state->accepting_send_tasks.store(false, std::memory_order_release);
                 clear_udp_active_shard_snapshot<Runtime>(*state);
             }
         }
@@ -1086,12 +829,76 @@ private:
     std::uint16_t shard_index_{0};
 };
 
+template <typename Runtime> class UdpSendTask final : public Runtime::Task {
+    using Base = typename Runtime::Task;
+    using State = UdpSocketState<Runtime>;
+
+public:
+    explicit UdpSendTask(typename Base::FactoryToken token) : Base(token) {}
+
+    bool do_it(std::shared_ptr<State> state, std::uint16_t shard_index, std::uint32_t generation,
+               af::Buffer buffer) {
+        state_ = std::move(state);
+        shard_index_ = shard_index;
+        generation_ = generation;
+        kind_ = UdpSendKind::Send;
+        buffer_ = std::move(buffer);
+        return schedule_on_owner();
+    }
+
+    bool do_it(std::shared_ptr<State> state, std::uint16_t shard_index, std::uint32_t generation,
+               af::Buffer buffer, af::detail::SocketAddress address) {
+        state_ = std::move(state);
+        shard_index_ = shard_index;
+        generation_ = generation;
+        kind_ = UdpSendKind::SendTo;
+        buffer_ = std::move(buffer);
+        address_ = address;
+        return schedule_on_owner();
+    }
+
+private:
+    [[nodiscard]] bool schedule_on_owner() noexcept {
+        if (state_ == nullptr || shard_index_ >= state_->shards.size() ||
+            state_->shards[shard_index_] == nullptr || generation_ == 0U) {
+            return false;
+        }
+        return this->schedule(Runtime::thread_from_index(shard_index_));
+    }
+
+    af::TaskResult run() override {
+        if (state_ == nullptr || shard_index_ >= state_->shards.size() ||
+            state_->shards[shard_index_] == nullptr) {
+            return this->done();
+        }
+        auto *shard = state_->shards[shard_index_].get();
+        if (!shard->matches_generation(generation_)) {
+            return this->done();
+        }
+        switch (kind_) {
+        case UdpSendKind::Send:
+            static_cast<void>(shard->send(std::move(buffer_)));
+            break;
+        case UdpSendKind::SendTo:
+            static_cast<void>(shard->send_to_address(std::move(buffer_), address_));
+            break;
+        }
+        return this->done();
+    }
+
+    std::shared_ptr<State> state_;
+    std::uint16_t shard_index_{0};
+    std::uint32_t generation_{0};
+    UdpSendKind kind_{UdpSendKind::Send};
+    af::Buffer buffer_;
+    af::detail::SocketAddress address_{};
+};
+
 } // namespace detail
 
 template <typename Runtime> class UdpSocketHandle {
 public:
     using State = detail::UdpSocketState<Runtime>;
-    using Command = detail::UdpCommand<Runtime>;
 
     UdpSocketHandle() = default;
 
@@ -1119,7 +926,10 @@ public:
             }
             return shard->send(std::move(buffer));
         }
-        return enqueue_send(*shard, Command::Kind::Send, std::move(buffer));
+        if (!state->accepting_send_tasks.load(std::memory_order_acquire)) {
+            return UdpSendResult::Closed;
+        }
+        return schedule_send(std::move(state), std::move(buffer));
     }
 
     [[nodiscard]] UdpSendResult send(af::BufferView view) const {
@@ -1138,11 +948,11 @@ public:
             }
             return shard->send(view);
         }
-        if (!shard->accepting_commands()) {
+        if (!state->accepting_send_tasks.load(std::memory_order_acquire)) {
             return UdpSendResult::Closed;
         }
         try {
-            return enqueue_send(*shard, Command::Kind::Send, af::Buffer::copy(view));
+            return schedule_send(std::move(state), af::Buffer::copy(view));
         } catch (...) {
             return UdpSendResult::Backpressure;
         }
@@ -1164,14 +974,14 @@ public:
             }
             return shard->send_to(std::move(buffer), endpoint);
         }
-        if (!shard->accepting_commands()) {
+        if (!state->accepting_send_tasks.load(std::memory_order_acquire)) {
             return UdpSendResult::Closed;
         }
         af::detail::SocketAddress address{};
         if (!shard->resolve_peer_endpoint(endpoint, address)) {
             return UdpSendResult::Unsupported;
         }
-        return enqueue_send(*shard, Command::Kind::SendTo, std::move(buffer), address);
+        return schedule_send_to(std::move(state), std::move(buffer), address);
     }
 
     [[nodiscard]] UdpSendResult send_to(af::BufferView view, UdpEndpoint endpoint) const {
@@ -1190,7 +1000,7 @@ public:
             }
             return shard->send_to(view, endpoint);
         }
-        if (!shard->accepting_commands()) {
+        if (!state->accepting_send_tasks.load(std::memory_order_acquire)) {
             return UdpSendResult::Closed;
         }
         af::detail::SocketAddress address{};
@@ -1198,7 +1008,7 @@ public:
             return UdpSendResult::Unsupported;
         }
         try {
-            return enqueue_send(*shard, Command::Kind::SendTo, af::Buffer::copy(view), address);
+            return schedule_send_to(std::move(state), af::Buffer::copy(view), address);
         } catch (...) {
             return UdpSendResult::Backpressure;
         }
@@ -1220,14 +1030,14 @@ public:
             }
             return shard->send_to(std::move(buffer), peer);
         }
-        if (!shard->accepting_commands()) {
+        if (!state->accepting_send_tasks.load(std::memory_order_acquire)) {
             return UdpSendResult::Closed;
         }
         const af::detail::SocketAddress &address = peer.socket_address();
         if (!shard->supports_peer_address(address)) {
             return UdpSendResult::Unsupported;
         }
-        return enqueue_send(*shard, Command::Kind::SendTo, std::move(buffer), address);
+        return schedule_send_to(std::move(state), std::move(buffer), address);
     }
 
     [[nodiscard]] UdpSendResult send_to(af::BufferView view, const UdpPeer &peer) const {
@@ -1246,7 +1056,7 @@ public:
             }
             return shard->send_to(view, peer);
         }
-        if (!shard->accepting_commands()) {
+        if (!state->accepting_send_tasks.load(std::memory_order_acquire)) {
             return UdpSendResult::Closed;
         }
         const af::detail::SocketAddress &address = peer.socket_address();
@@ -1254,32 +1064,35 @@ public:
             return UdpSendResult::Unsupported;
         }
         try {
-            return enqueue_send(*shard, Command::Kind::SendTo, af::Buffer::copy(view), address);
+            return schedule_send_to(std::move(state), af::Buffer::copy(view), address);
         } catch (...) {
             return UdpSendResult::Backpressure;
         }
     }
 
 private:
-    [[nodiscard]] UdpSendResult enqueue_send(detail::UdpSocketShard<Runtime> &shard,
-                                             typename Command::Kind kind, af::Buffer buffer,
-                                             af::detail::SocketAddress address = {}) const {
-        if (!shard.accepting_commands()) {
-            return UdpSendResult::Closed;
+    [[nodiscard]] UdpSendResult schedule_send(std::shared_ptr<State> state,
+                                              af::Buffer buffer) const {
+        try {
+            if (Runtime::template start_task<detail::UdpSendTask<Runtime>>(
+                    std::move(state), shard_index_, generation_, std::move(buffer))) {
+                return UdpSendResult::Queued;
+            }
+        } catch (...) {
         }
-        Command *command = shard.create_command();
-        if (command == nullptr) {
-            return UdpSendResult::Backpressure;
+        return UdpSendResult::Backpressure;
+    }
+
+    [[nodiscard]] UdpSendResult schedule_send_to(std::shared_ptr<State> state, af::Buffer buffer,
+                                                 af::detail::SocketAddress address) const {
+        try {
+            if (Runtime::template start_task<detail::UdpSendTask<Runtime>>(
+                    std::move(state), shard_index_, generation_, std::move(buffer), address)) {
+                return UdpSendResult::Queued;
+            }
+        } catch (...) {
         }
-        command->kind = kind;
-        command->generation = generation_;
-        command->buffer = std::move(buffer);
-        command->address = address;
-        if (!shard.enqueue(command)) {
-            shard.destroy_command(command);
-            return shard.accepting_commands() ? UdpSendResult::Backpressure : UdpSendResult::Closed;
-        }
-        return UdpSendResult::Queued;
+        return UdpSendResult::Backpressure;
     }
 
     std::weak_ptr<State> state_;
@@ -1431,10 +1244,10 @@ public:
             return false;
         }
         state->running = false;
+        state->accepting_send_tasks.store(false, std::memory_order_release);
         detail::clear_udp_active_shard_snapshot<Runtime>(*state);
         state->active_shards.clear();
 
-        seal_commands_for_shards(state, shards);
         const auto stop_result = stop_shards(state, shards);
         if (!stop_result.ok) {
             publish_remaining_after_failed_stop(state, shards, stop_result.stopped_shards);
@@ -1510,9 +1323,6 @@ private:
 
     [[nodiscard]] static UdpSocketRuntimeConfig
     normalize_config(UdpSocketRuntimeConfig config) noexcept {
-        if (config.command_queue_capacity == 0U) {
-            config.command_queue_capacity = UdpSocketRuntimeConfig{}.command_queue_capacity;
-        }
         return config;
     }
 
@@ -1530,26 +1340,8 @@ private:
         state_->shards.reserve(Runtime::thread_count);
         for (std::uint16_t i = 0; i < Runtime::thread_count; ++i) {
             const Thread thread = Runtime::thread_from_index(i);
-            state_->shards.push_back(std::make_unique<detail::UdpSocketShard<Runtime>>(
-                state_, i, thread, state_->config.command_queue_capacity));
-        }
-    }
-
-    static void seal_commands_for_shards(const std::shared_ptr<State> &state,
-                                         const std::vector<std::uint16_t> &shards) noexcept {
-        for (const std::uint16_t shard : shards) {
-            if (shard < state->shards.size() && state->shards[shard] != nullptr) {
-                state->shards[shard]->seal_commands_from_control();
-            }
-        }
-    }
-
-    static void resume_commands_for_shards(const std::shared_ptr<State> &state,
-                                           const std::vector<std::uint16_t> &shards) noexcept {
-        for (const std::uint16_t shard : shards) {
-            if (shard < state->shards.size() && state->shards[shard] != nullptr) {
-                state->shards[shard]->resume_commands_from_control();
-            }
+            state_->shards.push_back(
+                std::make_unique<detail::UdpSocketShard<Runtime>>(state_, i, thread));
         }
     }
 
@@ -1641,9 +1433,10 @@ private:
         state->active_shards = std::move(remaining);
         state->running = !state->active_shards.empty();
         if (state->running) {
+            state->accepting_send_tasks.store(true, std::memory_order_release);
             detail::publish_udp_active_shard_snapshot<Runtime>(*state, state->active_shards);
-            resume_commands_for_shards(state, state->active_shards);
         } else {
+            state->accepting_send_tasks.store(false, std::memory_order_release);
             detail::clear_udp_active_shard_snapshot<Runtime>(*state);
         }
     }
@@ -1689,6 +1482,7 @@ private:
         }
 
         state_->running = true;
+        state_->accepting_send_tasks.store(true, std::memory_order_release);
         state_->active_shards = shard_indexes;
         detail::publish_udp_active_shard_snapshot<Runtime>(*state_, state_->active_shards);
 
@@ -1698,6 +1492,7 @@ private:
             scheduled_shards.reserve(pending.size());
         } catch (...) {
             state_->running = false;
+            state_->accepting_send_tasks.store(false, std::memory_order_release);
             detail::clear_udp_active_shard_snapshot<Runtime>(*state_);
             state_->active_shards.clear();
             return false;
@@ -1719,6 +1514,7 @@ private:
 
         if (!scheduled_all) {
             state_->running = false;
+            state_->accepting_send_tasks.store(false, std::memory_order_release);
             detail::clear_udp_active_shard_snapshot<Runtime>(*state_);
             state_->active_shards.clear();
             static_cast<void>(stop_shards(state_, scheduled_shards));

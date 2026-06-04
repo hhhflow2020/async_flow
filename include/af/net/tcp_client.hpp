@@ -26,9 +26,7 @@ struct TcpClientOptions {
     bool keep_alive{false};
 };
 
-struct TcpClientRuntimeConfig {
-    std::size_t command_queue_capacity{4096};
-};
+struct TcpClientRuntimeConfig {};
 
 template <typename Runtime> class TcpClient;
 

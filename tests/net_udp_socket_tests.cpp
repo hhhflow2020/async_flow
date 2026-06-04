@@ -570,7 +570,7 @@ TEST(NetUdpSocketTests, HandlesExposeBoundShardsAndDefaultHandleRoundRobins) {
     NetUdpTwoIoRuntime::shutdown();
 }
 
-TEST(NetUdpSocketTests, ConnectedClientSendsThroughRuntimeCommandQueue) {
+TEST(NetUdpSocketTests, ConnectedClientSendsThroughRuntimeTask) {
     const std::uint16_t port = reserve_udp_loopback_port();
     UdpCaptureState state;
 

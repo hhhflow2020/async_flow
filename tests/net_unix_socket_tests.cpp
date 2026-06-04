@@ -487,8 +487,7 @@ TEST(NetUnixSocketTests, StreamWrapperNormalizesReusePortForMultiThreadUnixListe
     options.reuse_port = true;
 
     NetUnixMultiRuntime::init();
-    ReactorUnixStreamServer<NetUnixMultiRuntime> server(
-        af::net::UnixStreamRuntimeConfig{.command_queue_capacity = 128});
+    ReactorUnixStreamServer<NetUnixMultiRuntime> server(af::net::UnixStreamRuntimeConfig{});
     const af::net::ListenerResult listener = server.add_listener<UnixMultiNoopHandler>({
         .name = "unix-multi-listener",
         .endpoint = af::net::UnixEndpoint::unix_path(path.path()),

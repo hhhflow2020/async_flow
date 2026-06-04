@@ -47,7 +47,7 @@ auto public_listener = server.add_listener<PublicHandler>({
 const bool scheduled = public_listener.ok() && server.start();
 ```
 
-`TcpServerConfig` 是 server/shard 级配置，目前用于创建每个 IO shard 的跨线程命令队列。`TcpListenerOptions` 是 listener/connection 级配置，包括 `backlog`、`reuse_port`、`ipv6_only`、accept 预算、读预算、读 buffer 大小和输出高水位。
+`TcpServerConfig` 是 server/shard 级配置，当前无额外字段；`TcpListenerOptions` 是 listener/connection 级配置，包括 `backlog`、`reuse_port`、`ipv6_only`、accept 预算、读预算、读 buffer 大小和输出高水位。
 
 运行中可以动态增加或移除 listener。TCP server 控制面是 reactor-only：`bind_threads()`、`add_listener()`、`remove_listener()`、`start()`、`stop()` 应由同一个 reactor 线程调用；外部线程应显式投递一个 runtime task 到该 reactor。框架把这作为无锁控制面的使用契约，不为外部直接调用额外建立同步兼容层。
 
@@ -106,7 +106,7 @@ TCP client 控制面与 server 一样是 reactor-only：`bind_threads()`、`conn
 
 连接建立后不再走 client 专用热路径，而是直接复用 `TcpConnection`：读事件、写队列、跨线程 `TcpConnectionHandle::send()`、关闭和 generation 校验都与 server accepted connection 一致。`TcpClientOptions` 复用 connection 级读预算、读 buffer 和输出高水位配置，并提供 `no_delay`、`keep_alive` 开关。`TcpClient::stop()` 会在各 owner IO 线程取消尚未完成的 nonblocking connect wait，并异步回投控制线程完成 stop 状态更新，因此不会等待较长的 `connect_timeout` 或系统 TCP 超时。
 
-`TcpClientRuntimeConfig::command_queue_capacity` 目前仅作为旧代码兼容字段保留；TCP stream 连接建立后的跨线程发送、关闭和控制操作已经通过 runtime task 调度到 owner reactor，不再依赖 stream 专用 command queue。
+TCP stream 连接建立后的跨线程发送、关闭和控制操作已经通过 runtime task 调度到 owner reactor，不再依赖 stream 专用 command queue。
 
 ## Unix Stream API
 
@@ -141,7 +141,7 @@ client.connect<ClientHandler>({
 
 ## Unix Datagram API
 
-Unix domain datagram socket 使用专门的 `UnixDatagramSocket` API。它和 IP UDP 一样是无连接 datagram 模型，但 filesystem path 的 bind/unlink 生命周期不同，所以对外不复用 `UdpSocket` 的配置入口。底层仍复用 datagram shard、MPSC command queue、读预算和跨线程发送逻辑。
+Unix domain datagram socket 使用专门的 `UnixDatagramSocket` API。它和 IP UDP 一样是无连接 datagram 模型，但 filesystem path 的 bind/unlink 生命周期不同，所以对外不复用 `UdpSocket` 的配置入口。底层仍复用 datagram shard、读预算和跨线程 runtime task 发送逻辑。
 
 ```cpp
 af::net::UnixDatagramSocket<Runtime> server;
@@ -172,7 +172,7 @@ Unix datagram 默认在 bind 前 unlink 已存在 path，并在 stop/close 后 u
 
 ## UDP Socket API
 
-`UdpSocket` 是 IP UDP 的统一 server/client 抽象。server 只绑定本地 IPv4/IPv6 endpoint；client 可以绑定本地 endpoint 并设置 `remote_endpoint + connect_remote=true`。每个绑定 IO shard 拥有独立 fd、handler 副本、读 buffer 和跨线程命令队列。
+`UdpSocket` 是 IP UDP 的统一 server/client 抽象。server 只绑定本地 IPv4/IPv6 endpoint；client 可以绑定本地 endpoint 并设置 `remote_endpoint + connect_remote=true`。每个绑定 IO shard 拥有独立 fd、handler 副本和读 buffer；跨线程发送通过 runtime task 显式调度到 owner reactor。
 
 ```cpp
 af::net::UdpSocket<Runtime> server;
@@ -214,7 +214,7 @@ client.start<ClientHandler>({
 client.handle().send(af::Buffer::copy("ping", 4));
 ```
 
-`UdpSocket::handle()` 在每个调用线程本地轮询 active shard，避免外部生产者默认全部集中到第一个 IO 线程，同时避免所有生产者争用一个全局原子计数器。业务需要固定亲和性时，可以启动后缓存 `handles()`，或用 `handle_for_shard()` 按业务 hash 选择目标 shard。`UdpSocketRef::send_to()` 在 IO 线程同线程发送，走直接 syscall。`UdpSocketHandle::send()` / `send_to()` 从业务线程调用时会投递到 socket 所属 IO shard 的 MPSC 队列，并唤醒该 shard。`UdpSendResult::Queued` 表示命令已入队；真正的非阻塞 send 在 IO 线程执行。
+`UdpSocket::handle()` 在每个调用线程本地轮询 active shard，避免外部生产者默认全部集中到第一个 IO 线程，同时避免所有生产者争用一个全局原子计数器。业务需要固定亲和性时，可以启动后缓存 `handles()`，或用 `handle_for_shard()` 按业务 hash 选择目标 shard。`UdpSocketRef::send_to()` 在 IO 线程同线程发送，走直接 syscall。`UdpSocketHandle::send()` / `send_to()` 从业务线程调用时会创建 runtime task 并调度到 socket 所属 IO shard。`UdpSendResult::Queued` 表示发送 task 已提交；真正的非阻塞 send 在 IO 线程执行。
 
 ## Listener 与 Handler
 
@@ -236,7 +236,7 @@ UDP socket 控制面同样是 reactor-only：`bind_threads()`、`start()`、`sto
 
 业务 task 要写 TCP 连接时，推荐调用 `TcpConnectionHandle::send()`。handle 内部把写请求投递到连接所属 IO 线程，由 IO 线程合并写队列、执行 syscall，并按 writable readiness 继续 flush。业务 task 不应直接跨线程操作 fd。
 
-业务 task 要写 UDP socket 时，推荐调用 `UdpSocketHandle::send()` 或 `send_to()`。UDP datagram 不维护连接写队列，IO 线程收到命令后直接执行非阻塞 `send`/`sendto`。
+业务 task 要写 UDP socket 时，推荐调用 `UdpSocketHandle::send()` 或 `send_to()`。UDP datagram 不维护连接写队列，发送 task 到达 owner IO 线程后直接执行非阻塞 `send`/`sendto`。
 
 ## 连接管理
 
@@ -251,7 +251,7 @@ UDP 无连接状态。业务层如果需要会话语义，可以维护 `peer end
 - TCP 写队列按连接归属 IO 线程管理，避免多线程直接写同一 fd。
 - Unix stream 复用 TCP stream connection 热路径，只有地址族、path unlink 和 accept 策略是 Unix 专属逻辑。
 - Unix datagram 使用独立 API，但复用 datagram shard 热路径；单 path 只绑定一个 IO shard，避免多线程重复 bind 同一路径。
-- UDP 跨线程发送使用每 shard MPSC 队列；默认 handle 轮询分散外部生产者，热路径建议业务缓存 shard handle 并按会话固定亲和性。
+- UDP 跨线程发送使用 runtime task 显式调度到 owner IO shard；默认 handle 轮询分散外部生产者，热路径建议业务缓存 shard handle 并按会话固定亲和性。
 - `Buffer` 已支持共享底层存储的零拷贝 `slice()`、前后缀消费和 head/tail room 查询；`BufferChain` 已缓存总长度并支持跨 buffer 前缀消费。后续可继续演进为更接近 folly IOBuf 的块链、引用计数块和 prepend/append reserve 设计。
 - TCP stream server/client、UDP socket、Unix stream/datagram socket 控制面属于单 reactor 线程，不使用 mutex、condition variable 或同步 barrier；accept/connect/read/write 热路径不使用全局锁。
 

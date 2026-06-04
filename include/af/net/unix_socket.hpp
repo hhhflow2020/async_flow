@@ -1,7 +1,6 @@
 #pragma once
 
 #include <chrono>
-#include <cstddef>
 #include <string>
 #include <utility>
 #include <vector>
@@ -16,13 +15,9 @@ template <typename Runtime> using UnixConnectionHandle = TcpConnectionHandle<Run
 template <typename Runtime> using UnixDatagramSocketRef = UdpSocketRef<Runtime>;
 template <typename Runtime> using UnixDatagramSocketHandle = UdpSocketHandle<Runtime>;
 
-struct UnixStreamRuntimeConfig {
-    std::size_t command_queue_capacity{TcpClientRuntimeConfig{}.command_queue_capacity};
-};
+struct UnixStreamRuntimeConfig {};
 
-struct UnixDatagramRuntimeConfig {
-    std::size_t command_queue_capacity{UdpSocketRuntimeConfig{}.command_queue_capacity};
-};
+struct UnixDatagramRuntimeConfig {};
 
 namespace detail {
 
@@ -33,12 +28,14 @@ namespace detail {
 
 [[nodiscard]] inline TcpClientRuntimeConfig
 to_tcp_client_config(UnixStreamRuntimeConfig config) noexcept {
-    return TcpClientRuntimeConfig{.command_queue_capacity = config.command_queue_capacity};
+    static_cast<void>(config);
+    return TcpClientRuntimeConfig{};
 }
 
 [[nodiscard]] inline UdpSocketRuntimeConfig
 to_udp_socket_config(UnixDatagramRuntimeConfig config) noexcept {
-    return UdpSocketRuntimeConfig{.command_queue_capacity = config.command_queue_capacity};
+    static_cast<void>(config);
+    return UdpSocketRuntimeConfig{};
 }
 
 } // namespace detail
