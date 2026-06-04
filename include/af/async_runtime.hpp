@@ -257,8 +257,7 @@ private:
     static void release_task_handle(Task *task) noexcept;
 
     static void reset_task_registry() noexcept;
-    static void register_task(Task *task) noexcept;
-    static void unregister_task(Task *task) noexcept;
+    static void register_pending_task(Task *task) noexcept;
     static void cancel_registered_tasks() noexcept;
     static void cancel_registered_task(Task *task) noexcept;
     static void on_task_started(Task *task) noexcept;

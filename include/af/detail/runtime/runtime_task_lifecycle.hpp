@@ -67,47 +67,31 @@ template <typename TraitsT> void AsyncRuntime<TraitsT>::release_task_handle(Task
 
 template <typename TraitsT> void AsyncRuntime<TraitsT>::reset_task_registry() noexcept {
     if constexpr (task_registry_enabled) {
-        std::lock_guard<std::mutex> lock(task_registry_.mutex);
-        task_registry_.head = nullptr;
-    }
-}
-
-template <typename TraitsT> void AsyncRuntime<TraitsT>::register_task(Task *task) noexcept {
-    if constexpr (task_registry_enabled) {
-        std::lock_guard<std::mutex> lock(task_registry_.mutex);
-        AF_ASSERT(!task->registry_.registered);
-        task->registry_.prev = nullptr;
-        task->registry_.next = task_registry_.head;
-        if (task_registry_.head != nullptr) {
-            task_registry_.head->registry_.prev = task;
+        Task *task = task_registry_.pending_head.exchange(nullptr, std::memory_order_acq_rel);
+        while (task != nullptr) {
+            Task *next = task->registry_.next.load(std::memory_order_relaxed);
+            task->registry_.next.store(nullptr, std::memory_order_relaxed);
+            task->registry_.registered.store(false, std::memory_order_release);
+            task->release_lifetime_ref();
+            task = next;
         }
-        task_registry_.head = task;
-        task->registry_.registered = true;
-    } else {
-        static_cast<void>(task);
     }
 }
 
-template <typename TraitsT> void AsyncRuntime<TraitsT>::unregister_task(Task *task) noexcept {
+template <typename TraitsT> void AsyncRuntime<TraitsT>::register_pending_task(Task *task) noexcept {
     if constexpr (task_registry_enabled) {
-        std::lock_guard<std::mutex> lock(task_registry_.mutex);
-        if (!task->registry_.registered) {
-            AF_ASSERT(false && "task was not registered");
+        bool expected = false;
+        if (!task->registry_.registered.compare_exchange_strong(
+                expected, true, std::memory_order_acq_rel, std::memory_order_acquire)) {
             return;
         }
 
-        if (task->registry_.prev != nullptr) {
-            task->registry_.prev->registry_.next = task->registry_.next;
-        } else {
-            task_registry_.head = task->registry_.next;
-        }
-        if (task->registry_.next != nullptr) {
-            task->registry_.next->registry_.prev = task->registry_.prev;
-        }
-
-        task->registry_.prev = nullptr;
-        task->registry_.next = nullptr;
-        task->registry_.registered = false;
+        task->add_lifetime_ref();
+        Task *head = task_registry_.pending_head.load(std::memory_order_relaxed);
+        do {
+            task->registry_.next.store(head, std::memory_order_relaxed);
+        } while (!task_registry_.pending_head.compare_exchange_weak(
+            head, task, std::memory_order_release, std::memory_order_relaxed));
     } else {
         static_cast<void>(task);
     }
@@ -115,19 +99,13 @@ template <typename TraitsT> void AsyncRuntime<TraitsT>::unregister_task(Task *ta
 
 template <typename TraitsT> void AsyncRuntime<TraitsT>::cancel_registered_tasks() noexcept {
     if constexpr (task_registry_enabled) {
-        Task *task = nullptr;
-        {
-            std::lock_guard<std::mutex> lock(task_registry_.mutex);
-            task = task_registry_.head;
-            task_registry_.head = nullptr;
-        }
-
+        Task *task = task_registry_.pending_head.exchange(nullptr, std::memory_order_acq_rel);
         while (task != nullptr) {
-            Task *next = task->registry_.next;
-            task->registry_.prev = nullptr;
-            task->registry_.next = nullptr;
-            task->registry_.registered = false;
+            Task *next = task->registry_.next.load(std::memory_order_relaxed);
+            task->registry_.next.store(nullptr, std::memory_order_relaxed);
+            task->registry_.registered.store(false, std::memory_order_release);
             cancel_registered_task(task);
+            task->release_lifetime_ref();
             task = next;
         }
     }
@@ -165,14 +143,14 @@ void AsyncRuntime<TraitsT>::cancel_registered_task(Task *task) noexcept {
 }
 
 template <typename TraitsT> void AsyncRuntime<TraitsT>::on_task_started(Task *task) noexcept {
-    register_task(task);
+    static_cast<void>(task);
     if constexpr (shutdown_policy == ShutdownPolicy::WaitForTasks) {
         unfinished_tasks_.fetch_add(1, std::memory_order_acq_rel);
     }
 }
 
 template <typename TraitsT> void AsyncRuntime<TraitsT>::on_task_finished(Task *task) noexcept {
-    unregister_task(task);
+    static_cast<void>(task);
     if constexpr (shutdown_policy == ShutdownPolicy::WaitForTasks) {
         if (unfinished_tasks_.fetch_sub(1, std::memory_order_acq_rel) == 1U) {
             unfinished_tasks_.notify_all();

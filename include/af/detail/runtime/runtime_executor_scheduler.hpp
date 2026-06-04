@@ -137,7 +137,15 @@ void Executor<RuntimeT, TraitsT>::finish_done(Task *task) noexcept {
 
 template <typename RuntimeT, typename TraitsT>
 void Executor<RuntimeT, TraitsT>::finish_pending(Task *task) noexcept {
+    if constexpr (RuntimeT::shutdown_policy == ShutdownPolicy::StopImmediately) {
+        if (RuntimeT::is_stopping()) {
+            finish_done(task);
+            return;
+        }
+    }
+
     task->state_.store(TaskState::Pending, std::memory_order_release);
+    RuntimeT::register_pending_task(task);
     const detail::RequestedSchedule requested = task->take_requested_schedule();
     if (requested.thread_index != invalid_thread_index) {
         enqueue_pending_blocking(requested.thread_index, task, requested.mode);

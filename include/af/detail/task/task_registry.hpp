@@ -51,9 +51,8 @@ inline constexpr bool task_registry_enabled_v = [] {
 }();
 
 template <typename TaskT> struct TaskRegistryLinks {
-    TaskT *prev{nullptr};
-    TaskT *next{nullptr};
-    bool registered{false};
+    std::atomic<TaskT *> next{nullptr};
+    std::atomic<bool> registered{false};
 };
 
 struct EmptyTaskRegistryLinks {};
