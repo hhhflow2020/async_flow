@@ -6,7 +6,6 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <iterator>
 #include <memory>
@@ -19,11 +18,8 @@
 #include "af/async_runtime.hpp"
 #include "af/buffer/buffer.hpp"
 #include "af/detail/config.hpp"
-#include "af/detail/memory/object_pool.hpp"
 #include "af/detail/net/reactor/net_io_channel.hpp"
 #include "af/detail/net/socket_address.hpp"
-#include "af/detail/queue/bounded_mpsc_queue.hpp"
-#include "af/detail/queue/queue_backoff.hpp"
 #include "af/net/tcp_endpoint.hpp"
 #include "af/thread_kind.hpp"
 
@@ -35,10 +31,6 @@
 #include <sys/uio.h>
 #include <sys/un.h>
 #include <unistd.h>
-
-#if defined(__linux__)
-#include <sys/eventfd.h>
-#endif
 
 namespace af::net {
 
@@ -87,9 +79,7 @@ struct TcpListenerOptions {
     bool unlink_unix_path_on_close{true};
 };
 
-struct TcpServerConfig {
-    std::size_t command_queue_capacity{4096};
-};
+struct TcpServerConfig {};
 
 struct ListenerId {
     std::uint32_t slot{0};
@@ -159,6 +149,19 @@ template <typename Runtime> class TcpListenerShard;
 template <typename Runtime> struct TcpListenerContext;
 template <typename Runtime> struct TcpListenerEntry;
 template <typename Runtime> struct TcpServerState;
+template <typename Runtime> class TcpAdoptConnectionTask;
+template <typename Runtime> class TcpConnectionCommandTask;
+
+enum class TcpConnectionCommandKind : std::uint8_t {
+    Send,
+    Close,
+    CloseAfterFlush,
+    ShutdownWrite,
+    PauseRead,
+    ResumeRead,
+    SetNoDelay,
+    SetKeepAlive,
+};
 
 template <typename Handler, typename Runtime, typename = void>
 struct TcpHandlerHasOnAccept : std::false_type {};
@@ -276,30 +279,6 @@ private:
     Handler handler_;
 };
 
-template <typename Runtime> struct TcpCommand {
-    enum class Kind : std::uint8_t {
-        Send,
-        Close,
-        CloseAfterFlush,
-        ShutdownWrite,
-        PauseRead,
-        ResumeRead,
-        SetNoDelay,
-        SetKeepAlive,
-        AdoptConnection,
-    };
-
-    Kind kind{Kind::Send};
-    std::uint32_t slot{0};
-    std::uint32_t generation{0};
-    ListenerId listener_id{};
-    bool flag{false};
-    int fd{-1};
-    sockaddr_storage peer{};
-    socklen_t peer_size{0};
-    af::Buffer buffer;
-};
-
 template <typename Runtime> struct TcpListenerContext {
     ListenerId id{};
     std::string name;
@@ -330,13 +309,14 @@ template <typename Runtime> struct TcpListenerEntry {
 
 template <typename Runtime> struct TcpServerState {
     using Thread = typename Runtime::Thread;
-    using Command = TcpCommand<Runtime>;
     using Shard = TcpServerShard<Runtime>;
     using ListenerEntry = TcpListenerEntry<Runtime>;
 
     TcpServerConfig config;
     std::uint16_t control_thread_index{Runtime::invalid_thread_index};
     bool running{false};
+    alignas(af::detail::hardware_cache_line_size) std::atomic<bool> accepting_connection_tasks{
+        false};
     std::vector<Thread> default_threads;
     std::vector<std::unique_ptr<Shard>> shards;
     std::vector<std::unique_ptr<ListenerEntry>> listeners;
@@ -975,8 +955,6 @@ template <typename Runtime> class TcpServerShard {
 public:
     using State = TcpServerState<Runtime>;
     using Thread = typename Runtime::Thread;
-    using Command = TcpCommand<Runtime>;
-    using CommandPool = af::detail::ObjectPool<Command, 256, 1, false, 4>;
     using Connection = TcpConnection<Runtime>;
     using ListenerContext = TcpListenerContext<Runtime>;
     using ListenerShard = TcpListenerShard<Runtime>;
@@ -986,18 +964,13 @@ public:
         std::uint32_t generation{1};
     };
 
-    TcpServerShard(std::weak_ptr<State> state, std::uint16_t shard_index, Thread thread,
-                   std::size_t command_queue_capacity)
-        : state_(std::move(state)), shard_index_(shard_index), thread_(thread),
-          commands_(command_queue_capacity) {}
+    TcpServerShard(std::weak_ptr<State> state, std::uint16_t shard_index, Thread thread)
+        : state_(std::move(state)), shard_index_(shard_index), thread_(thread) {}
 
     TcpServerShard(const TcpServerShard &) = delete;
     TcpServerShard &operator=(const TcpServerShard &) = delete;
 
-    ~TcpServerShard() {
-        detail::close_fd(wake_fd_);
-        detail::close_fd(wake_write_fd_);
-    }
+    ~TcpServerShard() = default;
 
     [[nodiscard]] Thread thread() const noexcept {
         return thread_;
@@ -1005,42 +978,6 @@ public:
 
     [[nodiscard]] std::weak_ptr<State> weak_state() const noexcept {
         return state_;
-    }
-
-    [[nodiscard]] bool enqueue(Command *command) noexcept {
-        if (command == nullptr) {
-            return false;
-        }
-        active_enqueues_.fetch_add(1U, std::memory_order_acquire);
-        const bool accepting = accepting_commands_.load(std::memory_order_acquire);
-        const bool pushed = accepting && commands_.try_push(command);
-        if (!pushed) {
-            active_enqueues_.fetch_sub(1U, std::memory_order_release);
-            return false;
-        }
-        wake();
-        active_enqueues_.fetch_sub(1U, std::memory_order_release);
-        return true;
-    }
-
-    [[nodiscard]] bool accepting_commands() const noexcept {
-        return accepting_commands_.load(std::memory_order_acquire);
-    }
-
-    [[nodiscard]] int start_command_channel_on_owner() noexcept {
-        return open_wake_channel();
-    }
-
-    void close_command_channel_if_idle_on_owner() noexcept {
-        close_wake_channel_if_idle();
-    }
-
-    void seal_commands_from_control() noexcept {
-        stop_accepting_commands();
-    }
-
-    void resume_commands_from_control() noexcept {
-        start_accepting_commands();
     }
 
     [[nodiscard]] SendResult send_to(std::uint32_t slot, std::uint32_t generation,
@@ -1136,16 +1073,11 @@ public:
     [[nodiscard]] int add_listener_on_owner(std::uint32_t listener_slot,
                                             std::shared_ptr<ListenerContext> context,
                                             bool open_listener) noexcept {
-        const int wake_error = open_wake_channel();
-        if (wake_error != 0) {
-            return wake_error;
-        }
         try {
             if (listener_slot >= listeners_.size()) {
                 listeners_.resize(static_cast<std::size_t>(listener_slot) + 1U);
             }
         } catch (...) {
-            close_wake_channel_if_idle();
             return ENOMEM;
         }
         if (listeners_[listener_slot] != nullptr) {
@@ -1155,13 +1087,11 @@ public:
         try {
             listener = std::make_unique<ListenerShard>(this, std::move(context));
         } catch (...) {
-            close_wake_channel_if_idle();
             return ENOMEM;
         }
         if (open_listener) {
             const int error = listener->open();
             if (error != 0) {
-                close_wake_channel_if_idle();
                 return error;
             }
         }
@@ -1186,12 +1116,9 @@ public:
             }
             reap_retired_connections();
         }
-        close_wake_channel_if_idle();
     }
 
     void stop_on_owner() noexcept {
-        stop_accepting_commands();
-        discard_pending_commands();
         for (auto &listener : listeners_) {
             if (listener != nullptr) {
                 listener->close();
@@ -1204,8 +1131,6 @@ public:
             }
         }
         reap_retired_connections();
-        discard_pending_commands();
-        close_wake_channel();
     }
 
     [[nodiscard]] bool create_connection(std::shared_ptr<ListenerContext> context, int fd,
@@ -1270,242 +1195,15 @@ public:
         if (target_shard == shard_index_) {
             return create_connection(std::move(context), fd, peer, peer_size);
         }
-        return enqueue_adopt_connection(target_shard, context->id, fd, peer, peer_size);
+        return schedule_adopt_connection(target_shard, context->id, fd, peer, peer_size);
     }
 
 private:
     friend class TcpConnection<Runtime>;
     friend class TcpListenerShard<Runtime>;
     friend class TcpConnectionHandle<Runtime>;
-
-    static void on_wake_event(void *owner, std::uint32_t events) noexcept {
-        static_cast<TcpServerShard *>(owner)->handle_wake(events);
-    }
-
-    [[nodiscard]] int open_wake_channel() noexcept {
-        if (wake_fd_ >= 0) {
-            start_accepting_commands();
-            return 0;
-        }
-#if defined(__linux__)
-        wake_fd_ = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-        if (wake_fd_ < 0) {
-            return errno;
-        }
-        wake_channel_.fd = wake_fd_;
-        wake_channel_.owner = this;
-        wake_channel_.on_event = &TcpServerShard::on_wake_event;
-        if (!Runtime::net_register_channel(thread_, &wake_channel_, af::detail::net_io_readable)) {
-            detail::close_fd(wake_fd_);
-            return errno == 0 ? EIO : errno;
-        }
-        start_accepting_commands();
-        return 0;
-#else
-        int fds[2]{-1, -1};
-        if (::pipe(fds) != 0) {
-            return errno;
-        }
-        wake_fd_ = fds[0];
-        wake_write_fd_ = fds[1];
-        if (!set_nonblocking(wake_fd_) || !set_cloexec(wake_fd_) ||
-            !set_nonblocking(wake_write_fd_) || !set_cloexec(wake_write_fd_)) {
-            const int error = errno == 0 ? EIO : errno;
-            detail::close_fd(wake_fd_);
-            detail::close_fd(wake_write_fd_);
-            return error;
-        }
-        wake_channel_.fd = wake_fd_;
-        wake_channel_.owner = this;
-        wake_channel_.on_event = &TcpServerShard::on_wake_event;
-        if (!Runtime::net_register_channel(thread_, &wake_channel_, af::detail::net_io_readable)) {
-            detail::close_fd(wake_fd_);
-            detail::close_fd(wake_write_fd_);
-            return errno == 0 ? EIO : errno;
-        }
-        start_accepting_commands();
-        return 0;
-#endif
-    }
-
-    void close_wake_channel() noexcept {
-        stop_accepting_commands();
-        discard_pending_commands();
-        if (wake_fd_ >= 0) {
-            static_cast<void>(Runtime::net_unregister_channel(thread_, &wake_channel_));
-        }
-        detail::close_fd(wake_fd_);
-        detail::close_fd(wake_write_fd_);
-        wake_pending_.store(false, std::memory_order_relaxed);
-    }
-
-    void close_wake_channel_if_idle() noexcept {
-        if (has_active_listener_or_connection()) {
-            return;
-        }
-        close_wake_channel();
-    }
-
-    [[nodiscard]] bool has_active_listener_or_connection() const noexcept {
-        for (const auto &listener : listeners_) {
-            if (listener != nullptr) {
-                return true;
-            }
-        }
-        for (const auto &connection : connections_) {
-            if (connection != nullptr && connection->alive()) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    void start_accepting_commands() noexcept {
-        accepting_commands_.store(true, std::memory_order_release);
-    }
-
-    void stop_accepting_commands() noexcept {
-        accepting_commands_.store(false, std::memory_order_release);
-        while (active_enqueues_.load(std::memory_order_acquire) != 0U) {
-            af::detail::queue_full_cpu_relax();
-        }
-    }
-
-    [[nodiscard]] Command *create_command() noexcept {
-        try {
-            return command_pool_.create_uncached();
-        } catch (...) {
-            return nullptr;
-        }
-    }
-
-    void destroy_command(Command *command) noexcept {
-        if (command != nullptr) {
-            command_pool_.destroy_uncached(command);
-        }
-    }
-
-    void discard_command(Command *command) noexcept {
-        if (command != nullptr && command->kind == Command::Kind::AdoptConnection &&
-            command->fd >= 0) {
-            detail::close_fd(command->fd);
-        }
-        destroy_command(command);
-    }
-
-    void discard_pending_commands() noexcept {
-        std::array<Command *, 64> batch{};
-        for (;;) {
-            const std::size_t count = commands_.try_pop_many(batch.data(), batch.size());
-            if (count == 0U) {
-                return;
-            }
-            for (std::size_t i = 0; i < count; ++i) {
-                discard_command(batch[i]);
-            }
-        }
-    }
-
-    void handle_wake(std::uint32_t events) noexcept {
-        static_cast<void>(events);
-        drain_wake_fd();
-        wake_pending_.store(false, std::memory_order_relaxed);
-        drain_commands();
-    }
-
-    void drain_wake_fd() noexcept {
-#if defined(__linux__)
-        std::uint64_t value = 0;
-        while (::read(wake_fd_, &value, sizeof(value)) == sizeof(value)) {
-        }
-#else
-        std::array<std::byte, 256> buffer{};
-        while (::read(wake_fd_, buffer.data(), buffer.size()) > 0) {
-        }
-#endif
-    }
-
-    void drain_commands() noexcept {
-        std::array<Command *, 64> batch{};
-        for (;;) {
-            const std::size_t count = commands_.try_pop_many(batch.data(), batch.size());
-            if (count == 0U) {
-                return;
-            }
-            for (std::size_t i = 0; i < count; ++i) {
-                Command *command = batch[i];
-                switch (command->kind) {
-                case Command::Kind::Send:
-                    static_cast<void>(
-                        send_to(command->slot, command->generation, std::move(command->buffer)));
-                    break;
-                case Command::Kind::Close:
-                    static_cast<void>(close_connection(command->slot, command->generation));
-                    break;
-                case Command::Kind::CloseAfterFlush:
-                    static_cast<void>(
-                        close_connection_after_flush(command->slot, command->generation));
-                    break;
-                case Command::Kind::ShutdownWrite:
-                    static_cast<void>(
-                        shutdown_connection_write(command->slot, command->generation));
-                    break;
-                case Command::Kind::PauseRead:
-                    static_cast<void>(pause_connection_read(command->slot, command->generation));
-                    break;
-                case Command::Kind::ResumeRead:
-                    static_cast<void>(resume_connection_read(command->slot, command->generation));
-                    break;
-                case Command::Kind::SetNoDelay:
-                    static_cast<void>(
-                        set_connection_no_delay(command->slot, command->generation, command->flag));
-                    break;
-                case Command::Kind::SetKeepAlive:
-                    static_cast<void>(set_connection_keepalive(command->slot, command->generation,
-                                                               command->flag));
-                    break;
-                case Command::Kind::AdoptConnection:
-                    adopt_connection(command->listener_id, command->fd,
-                                     reinterpret_cast<const sockaddr *>(&command->peer),
-                                     command->peer_size);
-                    command->fd = -1;
-                    break;
-                }
-                destroy_command(command);
-            }
-            reap_retired_connections();
-        }
-    }
-
-    void wake() noexcept {
-#if defined(__linux__)
-        if (wake_fd_ < 0) {
-            return;
-        }
-        bool expected = false;
-        if (!wake_pending_.compare_exchange_strong(expected, true, std::memory_order_relaxed,
-                                                   std::memory_order_relaxed)) {
-            return;
-        }
-        const std::uint64_t value = 1;
-        if (::write(wake_fd_, &value, sizeof(value)) != static_cast<ssize_t>(sizeof(value))) {
-            wake_pending_.store(false, std::memory_order_relaxed);
-        }
-#else
-        if (wake_write_fd_ < 0) {
-            return;
-        }
-        bool expected = false;
-        if (!wake_pending_.compare_exchange_strong(expected, true, std::memory_order_relaxed,
-                                                   std::memory_order_relaxed)) {
-            return;
-        }
-        const std::byte value{1};
-        if (::write(wake_write_fd_, &value, 1) != 1) {
-            wake_pending_.store(false, std::memory_order_relaxed);
-        }
-#endif
-    }
+    friend class TcpAdoptConnectionTask<Runtime>;
+    friend class TcpConnectionCommandTask<Runtime>;
 
     [[nodiscard]] Connection *find(std::uint32_t slot, std::uint32_t generation) noexcept {
         if (slot >= connections_.size()) {
@@ -1649,30 +1347,21 @@ private:
         return listener->context();
     }
 
-    [[nodiscard]] bool enqueue_adopt_connection(std::uint16_t target_shard, ListenerId listener_id,
-                                                int fd, const sockaddr *peer,
-                                                socklen_t peer_size) noexcept {
+    [[nodiscard]] bool schedule_adopt_connection(std::uint16_t target_shard, ListenerId listener_id,
+                                                 int fd, const sockaddr *peer,
+                                                 socklen_t peer_size) noexcept {
         auto state = state_.lock();
         if (state == nullptr || target_shard >= state->shards.size() ||
             state->shards[target_shard] == nullptr || peer == nullptr ||
             peer_size > sizeof(sockaddr_storage)) {
             return false;
         }
-        auto *target = state->shards[target_shard].get();
-        Command *command = target->create_command();
-        if (command == nullptr) {
+        try {
+            return Runtime::template start_task<TcpAdoptConnectionTask<Runtime>>(
+                std::move(state), target_shard, listener_id, fd, peer, peer_size);
+        } catch (...) {
             return false;
         }
-        command->kind = Command::Kind::AdoptConnection;
-        command->listener_id = listener_id;
-        command->fd = fd;
-        command->peer_size = peer_size;
-        std::memcpy(&command->peer, peer, peer_size);
-        if (!target->enqueue(command)) {
-            target->destroy_command(command);
-            return false;
-        }
-        return true;
     }
 
     void adopt_connection(ListenerId listener_id, int fd, const sockaddr *peer,
@@ -1696,14 +1385,6 @@ private:
     std::weak_ptr<State> state_;
     std::uint16_t shard_index_{0};
     Thread thread_;
-    af::detail::BoundedMpscQueue<Command> commands_;
-    CommandPool command_pool_;
-    int wake_fd_{-1};
-    int wake_write_fd_{-1};
-    af::detail::NetIoChannel wake_channel_{};
-    alignas(af::detail::hardware_cache_line_size) std::atomic<bool> wake_pending_{false};
-    alignas(af::detail::hardware_cache_line_size) std::atomic<bool> accepting_commands_{false};
-    alignas(af::detail::hardware_cache_line_size) std::atomic<std::uint32_t> active_enqueues_{0};
     std::vector<std::unique_ptr<ListenerShard>> listeners_;
     std::vector<std::unique_ptr<Connection>> connections_;
     std::vector<std::uint32_t> generations_;
@@ -1878,6 +1559,142 @@ private:
 
     std::shared_ptr<State> state_;
     std::uint16_t shard_index_{0};
+};
+
+template <typename Runtime> class TcpAdoptConnectionTask final : public Runtime::Task {
+    using Base = typename Runtime::Task;
+    using State = TcpServerState<Runtime>;
+
+public:
+    explicit TcpAdoptConnectionTask(typename Base::FactoryToken token) : Base(token) {}
+
+    ~TcpAdoptConnectionTask() override {
+        detail::close_fd(fd_);
+    }
+
+    bool do_it(std::shared_ptr<State> state, std::uint16_t shard_index, ListenerId listener_id,
+               int fd, const sockaddr *peer, socklen_t peer_size) {
+        state_ = std::move(state);
+        shard_index_ = shard_index;
+        listener_id_ = listener_id;
+        fd_ = fd;
+        if (state_ == nullptr || shard_index_ >= state_->shards.size() ||
+            state_->shards[shard_index_] == nullptr || fd_ < 0 || peer == nullptr ||
+            peer_size > sizeof(peer_)) {
+            fd_ = -1;
+            return false;
+        }
+        peer_size_ = peer_size;
+        std::memcpy(&peer_, peer, peer_size_);
+        if (!this->schedule(Runtime::thread_from_index(shard_index_))) {
+            fd_ = -1;
+            return false;
+        }
+        return true;
+    }
+
+private:
+    af::TaskResult run() override {
+        int fd = fd_;
+        fd_ = -1;
+        if (state_ != nullptr && shard_index_ < state_->shards.size() &&
+            state_->shards[shard_index_] != nullptr && fd >= 0) {
+            state_->shards[shard_index_]->adopt_connection(
+                listener_id_, fd, reinterpret_cast<const sockaddr *>(&peer_), peer_size_);
+            return this->done();
+        }
+        detail::close_fd(fd);
+        return this->done();
+    }
+
+    std::shared_ptr<State> state_;
+    std::uint16_t shard_index_{0};
+    ListenerId listener_id_{};
+    int fd_{-1};
+    sockaddr_storage peer_{};
+    socklen_t peer_size_{0};
+};
+
+template <typename Runtime> class TcpConnectionCommandTask final : public Runtime::Task {
+    using Base = typename Runtime::Task;
+    using State = TcpServerState<Runtime>;
+
+public:
+    explicit TcpConnectionCommandTask(typename Base::FactoryToken token) : Base(token) {}
+
+    bool do_it(std::shared_ptr<State> state, std::uint16_t shard_index, std::uint32_t slot,
+               std::uint32_t generation, af::Buffer buffer) {
+        state_ = std::move(state);
+        shard_index_ = shard_index;
+        slot_ = slot;
+        generation_ = generation;
+        kind_ = TcpConnectionCommandKind::Send;
+        buffer_ = std::move(buffer);
+        return schedule_on_owner();
+    }
+
+    bool do_it(std::shared_ptr<State> state, std::uint16_t shard_index, std::uint32_t slot,
+               std::uint32_t generation, TcpConnectionCommandKind kind, bool flag) {
+        state_ = std::move(state);
+        shard_index_ = shard_index;
+        slot_ = slot;
+        generation_ = generation;
+        kind_ = kind;
+        flag_ = flag;
+        return schedule_on_owner();
+    }
+
+private:
+    [[nodiscard]] bool schedule_on_owner() noexcept {
+        if (state_ == nullptr || shard_index_ >= state_->shards.size() ||
+            state_->shards[shard_index_] == nullptr) {
+            return false;
+        }
+        return this->schedule(Runtime::thread_from_index(shard_index_));
+    }
+
+    af::TaskResult run() override {
+        if (state_ == nullptr || shard_index_ >= state_->shards.size() ||
+            state_->shards[shard_index_] == nullptr) {
+            return this->done();
+        }
+        auto *shard = state_->shards[shard_index_].get();
+        switch (kind_) {
+        case TcpConnectionCommandKind::Send:
+            static_cast<void>(shard->send_to(slot_, generation_, std::move(buffer_)));
+            break;
+        case TcpConnectionCommandKind::Close:
+            static_cast<void>(shard->close_connection(slot_, generation_));
+            break;
+        case TcpConnectionCommandKind::CloseAfterFlush:
+            static_cast<void>(shard->close_connection_after_flush(slot_, generation_));
+            break;
+        case TcpConnectionCommandKind::ShutdownWrite:
+            static_cast<void>(shard->shutdown_connection_write(slot_, generation_));
+            break;
+        case TcpConnectionCommandKind::PauseRead:
+            static_cast<void>(shard->pause_connection_read(slot_, generation_));
+            break;
+        case TcpConnectionCommandKind::ResumeRead:
+            static_cast<void>(shard->resume_connection_read(slot_, generation_));
+            break;
+        case TcpConnectionCommandKind::SetNoDelay:
+            static_cast<void>(shard->set_connection_no_delay(slot_, generation_, flag_));
+            break;
+        case TcpConnectionCommandKind::SetKeepAlive:
+            static_cast<void>(shard->set_connection_keepalive(slot_, generation_, flag_));
+            break;
+        }
+        return this->done();
+    }
+
+    std::shared_ptr<State> state_;
+    std::uint16_t shard_index_{0};
+    std::uint32_t slot_{0};
+    std::uint32_t generation_{0};
+    TcpConnectionCommandKind kind_{TcpConnectionCommandKind::Close};
+    bool flag_{false};
+    af::Buffer buffer_;
 };
 
 [[nodiscard]] inline bool contains_shard_index(const std::vector<std::uint16_t> &shards,
@@ -2073,7 +1890,7 @@ void complete_listener_start_from_shard(std::shared_ptr<TcpServerState<Runtime>>
 template <typename Runtime> class TcpConnectionHandle {
 public:
     using State = detail::TcpServerState<Runtime>;
-    using Command = detail::TcpCommand<Runtime>;
+    using CommandKind = detail::TcpConnectionCommandKind;
 
     TcpConnectionHandle() = default;
 
@@ -2108,7 +1925,10 @@ public:
         if (Runtime::is_runtime_thread() && Runtime::current_thread_index() == shard_index_) {
             return shard->send_to(slot_, generation_, std::move(buffer));
         }
-        return enqueue_send_on_shard(*shard, std::move(buffer));
+        if (!state->accepting_connection_tasks.load(std::memory_order_acquire)) {
+            return SendResult::Closed;
+        }
+        return schedule_send_on_owner(std::move(state), std::move(buffer));
     }
 
     [[nodiscard]] SendResult send(af::BufferView view) const {
@@ -2121,39 +1941,42 @@ public:
         if (Runtime::is_runtime_thread() && Runtime::current_thread_index() == shard_index_) {
             return shard->send_to(slot_, generation_, view);
         }
+        if (!state->accepting_connection_tasks.load(std::memory_order_acquire)) {
+            return SendResult::Closed;
+        }
         try {
-            return enqueue_send_on_shard(*shard, af::Buffer::copy(view));
+            return schedule_send_on_owner(std::move(state), af::Buffer::copy(view));
         } catch (...) {
             return SendResult::Backpressure;
         }
     }
 
     [[nodiscard]] bool close() const {
-        return enqueue_command(Command::Kind::Close);
+        return schedule_command(CommandKind::Close);
     }
 
     [[nodiscard]] bool close_after_flush() const {
-        return enqueue_command(Command::Kind::CloseAfterFlush);
+        return schedule_command(CommandKind::CloseAfterFlush);
     }
 
     [[nodiscard]] bool shutdown_write() const {
-        return enqueue_command(Command::Kind::ShutdownWrite);
+        return schedule_command(CommandKind::ShutdownWrite);
     }
 
     [[nodiscard]] bool pause_read() const {
-        return enqueue_command(Command::Kind::PauseRead);
+        return schedule_command(CommandKind::PauseRead);
     }
 
     [[nodiscard]] bool resume_read() const {
-        return enqueue_command(Command::Kind::ResumeRead);
+        return schedule_command(CommandKind::ResumeRead);
     }
 
     [[nodiscard]] bool set_no_delay(bool enabled) const {
-        return enqueue_command(Command::Kind::SetNoDelay, enabled);
+        return schedule_command(CommandKind::SetNoDelay, enabled);
     }
 
     [[nodiscard]] bool set_keepalive(bool enabled) const {
-        return enqueue_command(Command::Kind::SetKeepAlive, enabled);
+        return schedule_command(CommandKind::SetKeepAlive, enabled);
     }
 
     [[nodiscard]] friend bool operator==(TcpConnectionHandle lhs,
@@ -2163,30 +1986,22 @@ public:
     }
 
 private:
-    [[nodiscard]] SendResult enqueue_send_on_shard(detail::TcpServerShard<Runtime> &shard,
-                                                   af::Buffer buffer) const {
-        if (!shard.accepting_commands()) {
-            return SendResult::Closed;
-        }
+    [[nodiscard]] SendResult schedule_send_on_owner(std::shared_ptr<State> state,
+                                                    af::Buffer buffer) const {
         if (buffer.empty()) {
             return SendResult::Queued;
         }
-        Command *command = shard.create_command();
-        if (command == nullptr) {
-            return SendResult::Backpressure;
+        try {
+            if (Runtime::template start_task<detail::TcpConnectionCommandTask<Runtime>>(
+                    std::move(state), shard_index_, slot_, generation_, std::move(buffer))) {
+                return SendResult::Queued;
+            }
+        } catch (...) {
         }
-        command->kind = Command::Kind::Send;
-        command->slot = slot_;
-        command->generation = generation_;
-        command->buffer = std::move(buffer);
-        if (!shard.enqueue(command)) {
-            shard.destroy_command(command);
-            return shard.accepting_commands() ? SendResult::Backpressure : SendResult::Closed;
-        }
-        return SendResult::Queued;
+        return SendResult::Backpressure;
     }
 
-    [[nodiscard]] bool enqueue_command(typename Command::Kind kind, bool flag = false) const {
+    [[nodiscard]] bool schedule_command(CommandKind kind, bool flag = false) const {
         auto state = state_.lock();
         if (state == nullptr || shard_index_ >= state->shards.size() ||
             state->shards[shard_index_] == nullptr) {
@@ -2198,45 +2013,36 @@ private:
         if (on_owner_thread) {
             return dispatch_on_owner(*shard, kind, flag);
         }
-        if (!shard->accepting_commands()) {
+        if (!state->accepting_connection_tasks.load(std::memory_order_acquire)) {
             return false;
         }
-        Command *command = shard->create_command();
-        if (command == nullptr) {
+        try {
+            return Runtime::template start_task<detail::TcpConnectionCommandTask<Runtime>>(
+                std::move(state), shard_index_, slot_, generation_, kind, flag);
+        } catch (...) {
             return false;
         }
-        command->kind = kind;
-        command->slot = slot_;
-        command->generation = generation_;
-        command->flag = flag;
-        if (!shard->enqueue(command)) {
-            shard->destroy_command(command);
-            return false;
-        }
-        return true;
     }
 
-    [[nodiscard]] bool dispatch_on_owner(detail::TcpServerShard<Runtime> &shard,
-                                         typename Command::Kind kind, bool flag) const noexcept {
+    [[nodiscard]] bool dispatch_on_owner(detail::TcpServerShard<Runtime> &shard, CommandKind kind,
+                                         bool flag) const noexcept {
         switch (kind) {
-        case Command::Kind::Send:
+        case CommandKind::Send:
             return false;
-        case Command::Kind::Close:
+        case CommandKind::Close:
             return shard.close_connection(slot_, generation_);
-        case Command::Kind::CloseAfterFlush:
+        case CommandKind::CloseAfterFlush:
             return shard.close_connection_after_flush(slot_, generation_);
-        case Command::Kind::ShutdownWrite:
+        case CommandKind::ShutdownWrite:
             return shard.shutdown_connection_write(slot_, generation_);
-        case Command::Kind::PauseRead:
+        case CommandKind::PauseRead:
             return shard.pause_connection_read(slot_, generation_);
-        case Command::Kind::ResumeRead:
+        case CommandKind::ResumeRead:
             return shard.resume_connection_read(slot_, generation_);
-        case Command::Kind::SetNoDelay:
+        case CommandKind::SetNoDelay:
             return shard.set_connection_no_delay(slot_, generation_, flag);
-        case Command::Kind::SetKeepAlive:
+        case CommandKind::SetKeepAlive:
             return shard.set_connection_keepalive(slot_, generation_, flag);
-        case Command::Kind::AdoptConnection:
-            return false;
         }
         return false;
     }
@@ -2485,6 +2291,7 @@ public:
         }
 
         bool ok = true;
+        state_->accepting_connection_tasks.store(true, std::memory_order_release);
         for (const std::uint32_t slot : listener_slots) {
             ok = start_listener_slot(slot).ok() && ok;
         }
@@ -2513,6 +2320,7 @@ public:
         }
 
         state->running = false;
+        state->accepting_connection_tasks.store(false, std::memory_order_release);
         for (auto &listener : state->listeners) {
             if (listener == nullptr || listener->state == ListenerState::Removed) {
                 continue;
@@ -2535,7 +2343,6 @@ public:
         if (shards.empty()) {
             return true;
         }
-        seal_commands_for_shards(state, shards);
         bool ok = true;
         for (const std::uint16_t shard_index : shards) {
             bool scheduled = false;
@@ -2548,9 +2355,6 @@ public:
             if (!scheduled) {
                 ok = false;
             }
-        }
-        if (!ok) {
-            resume_commands_for_shards(state, shards);
         }
         return ok;
     }
@@ -2575,9 +2379,6 @@ private:
     }
 
     [[nodiscard]] static TcpServerConfig normalize_config(TcpServerConfig config) noexcept {
-        if (config.command_queue_capacity == 0U) {
-            config.command_queue_capacity = TcpServerConfig{}.command_queue_capacity;
-        }
         return config;
     }
 
@@ -2585,8 +2386,8 @@ private:
         state_->shards.reserve(Runtime::thread_count);
         for (std::uint16_t i = 0; i < Runtime::thread_count; ++i) {
             const Thread thread = Runtime::thread_from_index(i);
-            state_->shards.push_back(std::make_unique<detail::TcpServerShard<Runtime>>(
-                state_, i, thread, state_->config.command_queue_capacity));
+            state_->shards.push_back(
+                std::make_unique<detail::TcpServerShard<Runtime>>(state_, i, thread));
         }
     }
 
@@ -2786,34 +2587,6 @@ private:
             shards.push_back(Runtime::thread_index(thread));
         }
         return shards;
-    }
-
-    [[nodiscard]] static bool contains_shard(const std::vector<std::uint16_t> &shards,
-                                             std::uint16_t shard) noexcept {
-        for (const std::uint16_t candidate : shards) {
-            if (candidate == shard) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    static void seal_commands_for_shards(const std::shared_ptr<State> &state,
-                                         const std::vector<std::uint16_t> &shards) noexcept {
-        for (const std::uint16_t shard : shards) {
-            if (shard < state->shards.size() && state->shards[shard] != nullptr) {
-                state->shards[shard]->seal_commands_from_control();
-            }
-        }
-    }
-
-    static void resume_commands_for_shards(const std::shared_ptr<State> &state,
-                                           const std::vector<std::uint16_t> &shards) noexcept {
-        for (const std::uint16_t shard : shards) {
-            if (shard < state->shards.size() && state->shards[shard] != nullptr) {
-                state->shards[shard]->resume_commands_from_control();
-            }
-        }
     }
 
     [[nodiscard]] ListenerResult start_listener_slot(std::uint32_t slot) {

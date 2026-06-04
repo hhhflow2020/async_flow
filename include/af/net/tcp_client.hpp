@@ -27,7 +27,7 @@ struct TcpClientOptions {
 };
 
 struct TcpClientRuntimeConfig {
-    std::size_t command_queue_capacity{TcpServerConfig{}.command_queue_capacity};
+    std::size_t command_queue_capacity{4096};
 };
 
 template <typename Runtime> class TcpClient;
@@ -238,6 +238,7 @@ void handle_tcp_client_connect_result_on_control(
     }
     if (control->inflight_connects == 0U && !control->has_connected && !control->stopping) {
         state->running = false;
+        state->accepting_connection_tasks.store(false, std::memory_order_release);
     }
 }
 
@@ -265,6 +266,7 @@ void handle_tcp_client_stop_result_on_control(
     control->pending_connects.clear();
     control->stopping = false;
     state->running = false;
+    state->accepting_connection_tasks.store(false, std::memory_order_release);
 }
 
 template <typename Runtime>
@@ -432,19 +434,12 @@ private:
             return;
         }
         auto *shard = state_->shards[shard_index_].get();
-        const int command_channel_error = shard->start_command_channel_on_owner();
-        if (command_channel_error != 0) {
-            finish_failed(command_channel_error);
-            return;
-        }
         int connected_fd = fd_;
         fd_ = -1;
+        state_->accepting_connection_tasks.store(true, std::memory_order_release);
         const bool connected = shard->create_connection(
             context_, connected_fd, reinterpret_cast<const sockaddr *>(&remote_.storage),
             remote_.size);
-        if (!connected) {
-            shard->close_command_channel_if_idle_on_owner();
-        }
         complete_client_connect(connected);
     }
 
@@ -658,11 +653,8 @@ public:
     explicit TcpClient(TcpClientRuntimeConfig config)
         : state_(std::make_shared<State>()),
           client_control_(std::make_shared<ClientControlState>()) {
-        state_->config = TcpServerConfig{
-            .command_queue_capacity = config.command_queue_capacity == 0U
-                                          ? TcpServerConfig{}.command_queue_capacity
-                                          : config.command_queue_capacity,
-        };
+        static_cast<void>(config);
+        state_->config = TcpServerConfig{};
         state_->control_thread_index = first_io_thread_index();
         init_shards();
     }
@@ -727,13 +719,13 @@ public:
         }
 
         state->running = false;
+        state->accepting_connection_tasks.store(false, std::memory_order_release);
         auto pending_connects_by_shard = collect_pending_connects_by_shard();
         client_control_->pending_stop_shards = shards.size();
         if (shards.empty()) {
             detail::handle_tcp_client_stop_result_on_control<Runtime>(state, client_control_);
             return true;
         }
-        seal_commands_for_shards(state, shards);
         return stop_shards(state, shards, std::move(pending_connects_by_shard));
     }
 
@@ -756,8 +748,8 @@ private:
         state_->shards.reserve(Runtime::thread_count);
         for (std::uint16_t i = 0; i < Runtime::thread_count; ++i) {
             const Thread thread = Runtime::thread_from_index(i);
-            state_->shards.push_back(std::make_unique<detail::TcpServerShard<Runtime>>(
-                state_, i, thread, state_->config.command_queue_capacity));
+            state_->shards.push_back(
+                std::make_unique<detail::TcpServerShard<Runtime>>(state_, i, thread));
         }
     }
 
@@ -785,15 +777,6 @@ private:
             }
         }
         return 0;
-    }
-
-    static void seal_commands_for_shards(const std::shared_ptr<State> &state,
-                                         const std::vector<std::uint16_t> &shards) noexcept {
-        for (const std::uint16_t shard : shards) {
-            if (shard < state->shards.size() && state->shards[shard] != nullptr) {
-                state->shards[shard]->seal_commands_from_control();
-            }
-        }
     }
 
     [[nodiscard]] bool connect_impl(ConnectConfig config,
@@ -889,6 +872,7 @@ private:
         }
         ++client_control_->inflight_connects;
         state_->running = true;
+        state_->accepting_connection_tasks.store(true, std::memory_order_release);
         return true;
     }
 
@@ -909,6 +893,7 @@ private:
         if (client_control_->inflight_connects == 0U && !client_control_->has_connected &&
             !has_live_pending_connect_locked()) {
             state_->running = false;
+            state_->accepting_connection_tasks.store(false, std::memory_order_release);
         }
     }
 

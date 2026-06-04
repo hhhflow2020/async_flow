@@ -677,9 +677,7 @@ TEST(NetTcpServerTests, SupportsMultipleListenersWithDifferentHandlers) {
     const std::uint16_t port_b = reserve_loopback_port();
 
     NetServerRuntime::init();
-    ReactorTcpServer<NetServerRuntime> server(af::net::TcpServerConfig{
-        .command_queue_capacity = 2048,
-    });
+    ReactorTcpServer<NetServerRuntime> server;
     server.bind_threads(NetServerRuntime::thread_group<NetServerIoTag>());
 
     const auto listener_a = server.add_listener<PrefixAHandler>({
@@ -962,14 +960,12 @@ TEST(NetTcpServerTests, CrossThreadHandleSendReportsQueued) {
     NetServerIoWorkerRuntime::shutdown();
 }
 
-TEST(NetTcpServerTests, OwnerThreadHandleControlBypassesCommandQueue) {
+TEST(NetTcpServerTests, OwnerThreadHandleControlRunsInline) {
     const std::uint16_t port = reserve_loopback_port();
     auto state = std::make_shared<OwnerHandleControlState>();
 
     NetServerRuntime::init();
-    ReactorTcpServer<NetServerRuntime> server(af::net::TcpServerConfig{
-        .command_queue_capacity = 2,
-    });
+    ReactorTcpServer<NetServerRuntime> server;
     server.bind_threads(NetServerRuntime::thread_group<NetServerIoTag>());
 
     const auto listener = server.add_listener<OwnerHandleControlHandler>(
@@ -1282,7 +1278,7 @@ TEST(NetTcpServerTests, StopRejectsQueuedWritesFromOldHandles) {
     NetServerRuntime::shutdown();
 }
 
-TEST(NetTcpServerTests, RemovingListenerKeepsExistingConnectionCommandPath) {
+TEST(NetTcpServerTests, RemovingListenerKeepsExistingConnectionScheduledSendPath) {
     const std::uint16_t port = reserve_loopback_port();
     auto state = std::make_shared<CapturedHandleState>();
 

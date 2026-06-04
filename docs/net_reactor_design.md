@@ -35,9 +35,7 @@
 `TcpServer` 不以 handler 作为模板参数。handler 绑定在 listener 上，因此同一个 server 可以管理多个监听地址和多种业务入口。
 
 ```cpp
-af::net::TcpServer<Runtime> server(af::net::TcpServerConfig{
-    .command_queue_capacity = 8192,
-});
+af::net::TcpServer<Runtime> server;
 
 // 在 runtime task 中执行，且后续控制操作固定在同一个 reactor 线程上。
 server.bind_threads(Runtime::thread_group<IoTag>());
@@ -108,7 +106,7 @@ TCP client 控制面与 server 一样是 reactor-only：`bind_threads()`、`conn
 
 连接建立后不再走 client 专用热路径，而是直接复用 `TcpConnection`：读事件、写队列、跨线程 `TcpConnectionHandle::send()`、关闭和 generation 校验都与 server accepted connection 一致。`TcpClientOptions` 复用 connection 级读预算、读 buffer 和输出高水位配置，并提供 `no_delay`、`keep_alive` 开关。`TcpClient::stop()` 会在各 owner IO 线程取消尚未完成的 nonblocking connect wait，并异步回投控制线程完成 stop 状态更新，因此不会等待较长的 `connect_timeout` 或系统 TCP 超时。
 
-`TcpClientRuntimeConfig` 是 client/shard 级配置，目前只配置跨线程 command queue 容量，避免 client API 继续暴露 server 命名。
+`TcpClientRuntimeConfig::command_queue_capacity` 目前仅作为旧代码兼容字段保留；TCP stream 连接建立后的跨线程发送、关闭和控制操作已经通过 runtime task 调度到 owner reactor，不再依赖 stream 专用 command queue。
 
 ## Unix Stream API
 

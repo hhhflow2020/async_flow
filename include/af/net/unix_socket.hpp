@@ -17,7 +17,7 @@ template <typename Runtime> using UnixDatagramSocketRef = UdpSocketRef<Runtime>;
 template <typename Runtime> using UnixDatagramSocketHandle = UdpSocketHandle<Runtime>;
 
 struct UnixStreamRuntimeConfig {
-    std::size_t command_queue_capacity{TcpServerConfig{}.command_queue_capacity};
+    std::size_t command_queue_capacity{TcpClientRuntimeConfig{}.command_queue_capacity};
 };
 
 struct UnixDatagramRuntimeConfig {
@@ -27,7 +27,8 @@ struct UnixDatagramRuntimeConfig {
 namespace detail {
 
 [[nodiscard]] inline TcpServerConfig to_tcp_server_config(UnixStreamRuntimeConfig config) noexcept {
-    return TcpServerConfig{.command_queue_capacity = config.command_queue_capacity};
+    static_cast<void>(config);
+    return TcpServerConfig{};
 }
 
 [[nodiscard]] inline TcpClientRuntimeConfig

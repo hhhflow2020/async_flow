@@ -267,9 +267,7 @@ int main(int argc, char **argv) {
 
     EchoRuntime::init();
 
-    af::net::TcpServer<EchoRuntime> server(af::net::TcpServerConfig{
-        .command_queue_capacity = 8192,
-    });
+    af::net::TcpServer<EchoRuntime> server;
     auto lifecycle = std::make_shared<ServerLifecycleState>();
     if (!EchoRuntime::start_task<StartServerTask>(&server, port, ipv6, lifecycle)) {
         std::cerr << "failed to schedule tcp echo server start\n";

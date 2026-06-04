@@ -384,9 +384,7 @@ int main(int argc, char **argv) {
 
     LoginRuntime::init();
 
-    af::net::TcpServer<LoginRuntime> server(af::net::TcpServerConfig{
-        .command_queue_capacity = 8192,
-    });
+    af::net::TcpServer<LoginRuntime> server;
     auto lifecycle = std::make_shared<ServerLifecycleState>();
     if (!LoginRuntime::start_task<StartServerTask>(&server, port, ipv6, lifecycle)) {
         std::cerr << "failed to schedule tcp login server start\n";
