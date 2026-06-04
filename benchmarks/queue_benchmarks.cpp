@@ -29,20 +29,6 @@ namespace {
     return indices;
 }
 
-void BM_SpscQueuePushPop(benchmark::State &state) {
-    af::detail::BoundedSpscQueue<int> queue(65536);
-    int value = 42;
-
-    for (auto _ : state) {
-        for (int i = 0; i < state.range(0); ++i) {
-            benchmark::DoNotOptimize(queue.try_push(&value));
-            benchmark::DoNotOptimize(queue.try_pop());
-        }
-    }
-
-    state.SetItemsProcessed(state.iterations() * state.range(0));
-}
-
 void BM_MpscQueuePushPop(benchmark::State &state) {
     af::detail::BoundedMpscQueue<int> queue(65536);
     int value = 42;
@@ -818,7 +804,6 @@ void BM_ObjectPoolReverseAlternatingPoolSet(benchmark::State &state) {
                             static_cast<std::int64_t>(PoolCount));
 }
 
-BENCHMARK(BM_SpscQueuePushPop)->Arg(1024)->Arg(16384);
 BENCHMARK(BM_MpscQueuePushPop)->Arg(1024)->Arg(16384);
 BENCHMARK(BM_MpscQueuePushManyPopMany)->Arg(1024)->Arg(16384);
 BENCHMARK(BM_MpscQueueConcurrentProducers)

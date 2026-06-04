@@ -5,7 +5,7 @@
 当前目录按职责拆分：
 
 - `include/af/detail/runtime/`：runtime 配置、executor、调度、task 生命周期、public API。
-- `include/af/detail/queue/`：bounded SPSC、MPSC、MPMC 队列和 backoff。
+- `include/af/detail/queue/`：intrusive MPSC、bounded MPSC/MPMC 队列和 backoff。
 - `include/af/detail/memory/`：对象池和连续对象存储。
 - `include/af/detail/io/`：native readiness helper、socket/file/event/timer adapter。
 - `include/af/detail/net/`：网络 reactor 内部 channel、socket address 等基础结构。
