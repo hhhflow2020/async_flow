@@ -15,6 +15,11 @@ template <typename Runtime> using UnixConnectionHandle = TcpConnectionHandle<Run
 template <typename Runtime> using UnixDatagramSocketRef = UdpSocketRef<Runtime>;
 template <typename Runtime> using UnixDatagramSocketHandle = UdpSocketHandle<Runtime>;
 
+template <typename Runtime> using unix_connection_ref = UnixConnectionRef<Runtime>;
+template <typename Runtime> using unix_connection_handle = UnixConnectionHandle<Runtime>;
+template <typename Runtime> using unix_datagram_socket_ref = UnixDatagramSocketRef<Runtime>;
+template <typename Runtime> using unix_datagram_socket_handle = UnixDatagramSocketHandle<Runtime>;
+
 struct UnixStreamRuntimeConfig {};
 
 struct UnixDatagramRuntimeConfig {};
@@ -263,5 +268,12 @@ private:
 
     UdpSocket<Runtime> socket_;
 };
+
+using unix_stream_runtime_config = UnixStreamRuntimeConfig;
+using unix_datagram_runtime_config = UnixDatagramRuntimeConfig;
+
+template <typename Runtime> using unix_stream_server = UnixStreamServer<Runtime>;
+template <typename Runtime> using unix_stream_client = UnixStreamClient<Runtime>;
+template <typename Runtime> using unix_datagram_socket = UnixDatagramSocket<Runtime>;
 
 } // namespace af::net

@@ -1,13 +1,51 @@
 #include <cstdint>
+#include <type_traits>
 
 #include <gtest/gtest.h>
 
 #include "af/detail/net/socket_address.hpp"
+#include "af/net.hpp"
 #include "af/net/tcp_endpoint.hpp"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/un.h>
+
+namespace {
+
+struct NetAliasRuntime;
+
+} // namespace
+
+TEST(NetSocketAddressTests, LowerCaseNetAliasesMatchPublicTypes) {
+    static_assert(std::is_same_v<af::net::address_family, af::net::AddressFamily>);
+    static_assert(std::is_same_v<af::net::ip_endpoint, af::net::IpEndpoint>);
+    static_assert(std::is_same_v<af::net::tcp_endpoint, af::net::TcpEndpoint>);
+    static_assert(std::is_same_v<af::net::udp_endpoint, af::net::UdpEndpoint>);
+    static_assert(std::is_same_v<af::net::unix_endpoint, af::net::UnixEndpoint>);
+
+    static_assert(std::is_same_v<af::net::send_result, af::net::SendResult>);
+    static_assert(std::is_same_v<af::net::close_reason, af::net::CloseReason>);
+    static_assert(std::is_same_v<af::net::accept_strategy, af::net::AcceptStrategy>);
+    static_assert(std::is_same_v<af::net::remove_listener_policy, af::net::RemoveListenerPolicy>);
+    static_assert(std::is_same_v<af::net::tcp_listener_options, af::net::TcpListenerOptions>);
+    static_assert(std::is_same_v<af::net::tcp_client_options, af::net::TcpClientOptions>);
+    static_assert(std::is_same_v<af::net::udp_socket_options, af::net::UdpSocketOptions>);
+    static_assert(std::is_same_v<af::net::udp_peer, af::net::UdpPeer>);
+
+    static_assert(
+        std::is_same_v<af::net::tcp_server<NetAliasRuntime>, af::net::TcpServer<NetAliasRuntime>>);
+    static_assert(
+        std::is_same_v<af::net::tcp_client<NetAliasRuntime>, af::net::TcpClient<NetAliasRuntime>>);
+    static_assert(
+        std::is_same_v<af::net::udp_socket<NetAliasRuntime>, af::net::UdpSocket<NetAliasRuntime>>);
+    static_assert(std::is_same_v<af::net::unix_stream_server<NetAliasRuntime>,
+                                 af::net::UnixStreamServer<NetAliasRuntime>>);
+    static_assert(std::is_same_v<af::net::unix_stream_client<NetAliasRuntime>,
+                                 af::net::UnixStreamClient<NetAliasRuntime>>);
+    static_assert(std::is_same_v<af::net::unix_datagram_socket<NetAliasRuntime>,
+                                 af::net::UnixDatagramSocket<NetAliasRuntime>>);
+}
 
 TEST(NetSocketAddressTests, ConvertsIpv4EndpointToSocketAddress) {
     const af::net::TcpEndpoint endpoint =

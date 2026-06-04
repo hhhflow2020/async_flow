@@ -38,6 +38,8 @@ select fallback 每次 poll 从当前 channel/wait 表重建 `fd_set`，用非�
 
 `TcpServer` 不以 handler 作为模板参数。handler 绑定在 listener 上，因此同一个 server 可以管理多个监听地址和多种业务入口。
 
+当前 public API 保留 `TcpServer` / `TcpClient` / `UdpSocket` 等历史类型名，同时提供 `tcp_server` / `tcp_client` / `udp_socket` / `unix_stream_server` / `unix_stream_client` / `unix_datagram_socket` 等 lower_case 类型别名，便于新代码逐步迁移到下一代命名风格。
+
 ```cpp
 af::net::TcpServer<Runtime> server;
 

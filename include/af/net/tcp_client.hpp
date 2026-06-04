@@ -1011,4 +1011,9 @@ private:
     std::uint32_t next_context_generation_{1};
 };
 
+using tcp_client_options = TcpClientOptions;
+using tcp_client_runtime_config = TcpClientRuntimeConfig;
+
+template <typename Runtime> using tcp_client = TcpClient<Runtime>;
+
 } // namespace af::net

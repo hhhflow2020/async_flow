@@ -1555,4 +1555,13 @@ private:
     std::shared_ptr<State> state_;
 };
 
+using udp_send_result = UdpSendResult;
+using udp_socket_options = UdpSocketOptions;
+using udp_socket_runtime_config = UdpSocketRuntimeConfig;
+using udp_peer = UdpPeer;
+
+template <typename Runtime> using udp_socket_handle = UdpSocketHandle<Runtime>;
+template <typename Runtime> using udp_socket_ref = UdpSocketRef<Runtime>;
+template <typename Runtime> using udp_socket = UdpSocket<Runtime>;
+
 } // namespace af::net
