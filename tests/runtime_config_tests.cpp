@@ -1,5 +1,6 @@
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <type_traits>
 #include <variant>
 
@@ -228,4 +229,85 @@ TEST(RuntimeConfigTests, RuntimeConfigUsesPlainStructDefaultsAndFactories) {
     EXPECT_EQ(std::get<af::tcp_log_backend_config>(config.logger.backends[2]).port, 9001U);
     EXPECT_EQ(config.logger.consumer_thread.kind, af::thread_selector_kind::io);
     EXPECT_EQ(config.logger.consumer_thread.index, 1U);
+}
+
+TEST(RuntimeConfigTests, ResolvesRuntimeConfigThreadMetadataAndSelectors) {
+    af::runtime_config config;
+    config.threads = {
+        af::io_threads("io", 2),
+        af::cpu_threads("logic", 3),
+    };
+    config.logger.consumer_thread = af::thread_selector::cpu(2);
+    config.logger.backends = {
+        af::file_log_backend_config{"server.log"},
+        af::udp_log_backend_config{"127.0.0.1", 9000},
+    };
+
+    auto resolution = af::resolve_runtime_config(config);
+    ASSERT_TRUE(resolution);
+    const auto &resolved = resolution.resolved;
+    EXPECT_EQ(resolved.thread_count(), 5U);
+    EXPECT_EQ(resolved.invalid_thread_index(), 5U);
+    EXPECT_EQ(resolved.io_threads.size(), 2U);
+    EXPECT_EQ(resolved.cpu_threads.size(), 3U);
+    EXPECT_EQ(resolved.select_thread(af::thread_selector::any_io()), 0U);
+    EXPECT_EQ(resolved.select_thread(af::thread_selector::io(1)), 1U);
+    EXPECT_EQ(resolved.select_thread(af::thread_selector::any_cpu()), 2U);
+    EXPECT_EQ(resolved.select_thread(af::thread_selector::cpu(2)), 4U);
+    EXPECT_EQ(resolved.select_thread(af::thread_selector::thread(3)), 3U);
+    EXPECT_EQ(resolved.select_thread(af::thread_selector::io(2)), resolved.invalid_thread_index());
+    EXPECT_EQ(resolved.thread_name(0), "io");
+    EXPECT_EQ(resolved.thread_name(3), "logic");
+    EXPECT_EQ(resolved.thread_name(resolved.invalid_thread_index()), "invalid");
+    EXPECT_EQ(resolved.thread_kind_of(0), af::thread_kind::io);
+    EXPECT_EQ(resolved.thread_kind_of(4), af::thread_kind::cpu);
+    EXPECT_EQ(resolved.thread_group_offset(0), 0U);
+    EXPECT_EQ(resolved.thread_group_offset(1), 1U);
+    EXPECT_EQ(resolved.thread_group_offset(4), 2U);
+}
+
+TEST(RuntimeConfigTests, RuntimeConfigValidationReportsInvalidFields) {
+    af::runtime_config config;
+    auto validation = af::validate_runtime_config(config);
+    EXPECT_EQ(validation.status, af::runtime_config_status::no_threads);
+    EXPECT_EQ(af::runtime_config_status_name(validation.status), "no_threads");
+
+    config.threads = {
+        af::io_threads("io", 1),
+        af::cpu_threads("bad", 0),
+    };
+    validation = af::validate_runtime_config(config);
+    EXPECT_EQ(validation.status, af::runtime_config_status::thread_group_count_zero);
+    EXPECT_EQ(validation.index, 1U);
+
+    config.threads = {
+        af::cpu_threads("too-many", std::numeric_limits<std::uint16_t>::max()),
+        af::cpu_threads("overflow", 1),
+    };
+    validation = af::validate_runtime_config(config);
+    EXPECT_EQ(validation.status, af::runtime_config_status::thread_count_overflow);
+    EXPECT_EQ(validation.index, 1U);
+
+    config.threads = {af::cpu_threads("logic", 1)};
+    config.scheduler.task_drain_budget = 0;
+    validation = af::validate_runtime_config(config);
+    EXPECT_EQ(validation.status, af::runtime_config_status::scheduler_task_drain_budget_zero);
+
+    config.scheduler.task_drain_budget = 1;
+    config.logger.consumer_thread = af::thread_selector::io(0);
+    validation = af::validate_runtime_config(config);
+    EXPECT_EQ(validation.status, af::runtime_config_status::log_consumer_thread_not_found);
+
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+    config.logger.backends = {af::udp_log_backend_config{"127.0.0.1", 9000}};
+    validation = af::validate_runtime_config(config);
+    EXPECT_EQ(validation.status, af::runtime_config_status::log_udp_backend_thread_not_found);
+    EXPECT_EQ(validation.index, 0U);
+
+    config.threads = {af::io_threads("io", 1)};
+    config.logger.consumer_thread = af::thread_selector::io(0);
+    config.logger.backends = {af::file_log_backend_config{}};
+    validation = af::validate_runtime_config(config);
+    EXPECT_EQ(validation.status, af::runtime_config_status::log_file_backend_path_empty);
+    EXPECT_EQ(validation.index, 0U);
 }

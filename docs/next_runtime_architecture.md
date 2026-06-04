@@ -616,6 +616,6 @@ include/af/reactor/select_reactor.hpp
 - 当前网络 public API 已补 lower_case 类型别名和 enum 值别名，例如 `tcp_server`、`tcp_client`、`udp_socket`、`send_result::backpressure`、`close_reason::error` 和 Unix socket 相关别名；TCP echo/login 示例已使用新命名作为迁移样板。
 - 当前 task API 已补 `schedule_to(...)` / `pending_to(...)` 及 fast/ordered 变体作为清晰调度入口，旧 `schedule(...)` / `pending_on(...)` 保留兼容。
 - 当前 runtime/task public enum 与容器已补 lower_case 别名，例如 `task_result`、`schedule_mode::ordered`、`shutdown_policy::wait_for_tasks`、`parallel_mode::non_empty_only` 和 `sharded_ops<T>`；示例已迁移到新拼写。
-- 当前已提供 public `runtime_config`、`scheduler_config`、`task_pool_config`、`timer_config`、`reactor_config`、`log_config`、`shutdown_config` 和 `diagnostics_config` 普通结构体，以及 `io_threads()` / `cpu_threads()` 配置值工厂；后续还需要把实例化 `runtime` 接到这套配置模型上。
+- 当前已提供 public `runtime_config`、`scheduler_config`、`task_pool_config`、`timer_config`、`reactor_config`、`log_config`、`shutdown_config` 和 `diagnostics_config` 普通结构体，`io_threads()` / `cpu_threads()` 配置值工厂，以及 `resolve_runtime_config()` / `validate_runtime_config()` 解析校验入口；后续还需要把实例化 `runtime` 接到这套配置模型上。
 
 后续迁移应先补齐测试和 benchmark，再逐步替换旧路径，避免一次性重写导致行为不可控。
