@@ -26,7 +26,6 @@
 #include "af/detail/log/network_log_backend.hpp"
 #include "af/detail/log/runtime_async_log_consumer.hpp"
 #include "af/detail/log/runtime_instance_async_log_consumer.hpp"
-#include "af/runtime/runtime.hpp"
 #include "af/thread_kind.hpp"
 
 namespace af {

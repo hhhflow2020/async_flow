@@ -12,7 +12,6 @@
 #include "af/detail/runtime/runtime_common_state.hpp"
 #include "af/detail/runtime/runtime_service_task.hpp"
 #include "af/detail/runtime/timed_atomic_wait.hpp"
-#include "af/runtime/runtime.hpp"
 
 namespace af::detail {
 

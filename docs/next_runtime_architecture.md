@@ -248,7 +248,7 @@ empty -> reactor/futex park
 
 service task 是长期服务对象，例如 logger、metrics、trace。executor 只知道 service task 的通用接口，不知道 logger 内部细节。
 
-当前静态 runtime 和实例 runtime 都已具备通用 service task 骨架：service 对象通过 `register_service_task()` 在 owner runtime 线程注册，executor 每轮按 `service_task_budget` 调用 `run_service()`；外部生产者只更新 service 自己的 pending 状态并调用 `wake_service_tasks()` 唤醒目标 executor。service 列表仅在 owner runtime 线程访问，因此不需要互斥锁。静态 runtime 的日志消费者已经迁移到这个通用 service task 接口；实例 runtime 已提供 `start_async_logging_for_runtime(runtime&, ...)` 入口把日志消费者绑定到实例 runtime 线程。后续还需要把 `runtime_config.logger` 接入 runtime-owned 生命周期。
+当前静态 runtime 和实例 runtime 都已具备通用 service task 骨架：service 对象通过 `register_service_task()` 在 owner runtime 线程注册，executor 每轮按 `service_task_budget` 调用 `run_service()`；外部生产者只更新 service 自己的 pending 状态并调用 `wake_service_tasks()` 唤醒目标 executor。service 列表仅在 owner runtime 线程访问，因此不需要互斥锁。静态 runtime 的日志消费者已经迁移到这个通用 service task 接口；实例 runtime 已支持从 `runtime_config.logger` 自动创建 runtime-owned async logger，日志消费者绑定到配置指定的 runtime 线程。
 
 ## Task API 与生命周期
 
@@ -483,14 +483,14 @@ Unix stream 和 Unix datagram 使用独立 API，避免把 Unix path 混入 TCP/
 
 logger 由 runtime 拥有，消费者是绑定到 runtime 线程的 service task，不创建独立线程，也不创建长期 consumer task。
 
-当前实例 runtime 已提供两类启动入口：
+当前实例 runtime 已提供两类启动方式：
 
 ```cpp
-auto logging = af::start_async_logging_for_runtime(runtime, async_log_config);
-auto logging = af::start_async_logging_for_runtime(runtime); // 使用 runtime.config().logger
+af::runtime runtime(cfg); // cfg.logger.backends 非空时由 runtime.start() 自动启动
+auto logging = af::start_async_logging_for_runtime(runtime, async_log_config); // 手动模式
 ```
 
-第二种入口把 `runtime_config.logger` 转换为 `AsyncLogConfig`，按 `consumer_thread` 选择目标 runtime 线程，并把消费者注册为该 executor 上的 service task。handle 仍需要在 `runtime.stop()` 前停止；后续 runtime-owned logger 会把这个 handle 纳入 runtime 生命周期，用户只保留配置。
+自动模式把 `runtime_config.logger` 转换为 `AsyncLogConfig`，按 `consumer_thread` 选择目标 runtime 线程，并把消费者注册为该 executor 上的 service task。没有配置 backend 时不创建全局 Abseil sink。`runtime.stop()` 会先停止日志 admission、drain 已接受记录并 flush backend，再停止 executor；手动模式仍保留给需要自定义 `AsyncLogConfig` 或临时日志管线的场景。
 
 前端流程：
 
@@ -634,7 +634,7 @@ include/af/reactor/select_reactor.hpp
 - 当前已提供 public `runtime_config`、`scheduler_config`、`task_pool_config`、`timer_config`、`reactor_config`、`log_config`、`shutdown_config` 和 `diagnostics_config` 普通结构体，`io_threads()` / `cpu_threads()` 配置值工厂，以及 `resolve_runtime_config()` / `validate_runtime_config()` 解析校验入口。
 - 当前已提供 `af::runtime` 实例生命周期外壳和低层投递通道：构造时使用结构化配置解析校验，`start()` 按配置启动 runtime 线程，每个 executor 拥有 intrusive MPSC inbox，`post()` 可把 `runtime_work` 投递到指定线程执行，空闲线程使用 atomic/futex wait，`stop()` 可由外部线程完成 join/回收，也可由 runtime 线程内请求停止而不自 join。
 - 当前实例 runtime 已提供 service task 注册、注销和唤醒入口：service 列表只在目标 executor 线程内修改，executor 主循环按 `scheduler.service_task_budget` 轮询，外部唤醒不加锁。
-- 当前实例 runtime 已提供手动启动的 runtime-aware async logger 入口：`start_async_logging_for_runtime(runtime&, config, thread)` / `start_async_logging_for_runtime(runtime&)` 复用 `AsyncLogger` 队列、Abseil sink 和 service task 消费，不创建独立 consumer 线程；无参数入口会读取 `runtime.config().logger` 并构造 file/udp/tcp 后端。handle 仍需在 `runtime.stop()` 前停止，后续再迁移为 runtime-owned logger。
+- 当前实例 runtime 已提供 runtime-owned async logger：`runtime.start()` 在 `runtime.config().logger.backends` 非空时自动构造 file/udp/tcp 后端并把消费者注册为 service task，`runtime.stop()` 先 drain/flush 日志再停止 executor；`start_async_logging_for_runtime(runtime&, config, thread)` 仍作为手动自定义入口保留。
 - 当前实例 runtime 已提供 `af::runtime_task`、`af::make_task<T>(runtime, ...)`、`af::try_make_task<T>(runtime, ...)` 和 `runtime_task_handle<T>`：任务创建走 typed slab object pool，任务 id 使用每线程 block 分配，`schedule_to()` 投递到目标 executor，运行中请求下一跳会延后到当前 `run_task()` 返回后再入队，避免同一个任务对象并发重入。
 - 当前实例 runtime 已接入每 executor 本地 timer min-heap：`schedule_after()` / `schedule_at()` / `pending_after()` / `pending_at()` 先把 task 以 `timer_arming` 状态投递到目标 inbox，目标线程再挂入本地 heap；executor 空闲等待使用最近 timer deadline 作为 atomic/futex timeout，IO executor 则把最近 timer deadline 传给 `reactor.poll(timeout)`；`stop()` 会取消未到期 timer 并释放 task 生命周期引用。后续可在不改变 task API 的前提下把 min-heap backend 替换为分层时间轮。
 

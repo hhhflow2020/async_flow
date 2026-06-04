@@ -1192,17 +1192,61 @@ TEST(LogTests, RuntimeInstanceAsyncLoggingUsesStructuredLoggerConfig) {
 
     af::runtime runtime(runtime_config);
     ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(runtime.logger_started());
 
-    auto logging = af::start_async_logging_for_runtime(runtime);
     LOG(INFO) << "runtime config async logger";
 
-    ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
-    logging->stop();
+    ASSERT_TRUE(runtime.flush_logger(std::chrono::seconds(2)));
     runtime.stop();
+    EXPECT_FALSE(runtime.logger_started());
 
     const std::string contents = read_file(path);
     EXPECT_NE(contents.find("runtime config async logger"), std::string::npos);
     std::filesystem::remove(path);
+}
+
+TEST(LogTests, RuntimeInstanceOwnedAsyncLoggerDrainsWhenRuntimeStops) {
+    const auto path =
+        std::filesystem::path(::testing::TempDir()) / "asyncflow-runtime-owned-log.log";
+    std::filesystem::remove(path);
+
+    af::runtime_config runtime_config;
+    runtime_config.threads = {
+        af::io_threads("io", 1),
+        af::cpu_threads("logic", 1),
+    };
+    runtime_config.logger.consumer_thread = af::thread_selector::cpu(0);
+    runtime_config.logger.queue_capacity = 16;
+    runtime_config.logger.max_batch_records = 4;
+    runtime_config.logger.backends = {
+        af::file_log_backend_config{path.string(), false, false, 8},
+    };
+
+    af::runtime runtime(runtime_config);
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(runtime.logger_started());
+
+    LOG(INFO) << "runtime owned async logger drains on stop";
+    runtime.stop();
+    EXPECT_FALSE(runtime.logger_started());
+
+    const std::string contents = read_file(path);
+    EXPECT_NE(contents.find("runtime owned async logger drains on stop"), std::string::npos);
+    std::filesystem::remove(path);
+}
+
+TEST(LogTests, RuntimeInstanceLoggerStaysDisabledWithoutBackends) {
+    af::runtime_config runtime_config;
+    runtime_config.threads = {
+        af::io_threads("io", 1),
+        af::cpu_threads("logic", 1),
+    };
+
+    af::runtime runtime(runtime_config);
+    ASSERT_TRUE(runtime.start());
+    EXPECT_FALSE(runtime.logger_started());
+    EXPECT_TRUE(runtime.flush_logger(std::chrono::milliseconds(1)));
+    runtime.stop();
 }
 
 TEST(LogTests, RuntimeAwareSinkCanStopFromConsumerRuntimeThread) {

@@ -24,6 +24,8 @@
 
 namespace af {
 
+class AsyncLogHandle;
+
 enum class runtime_state : std::uint8_t {
     stopped,
     starting,
@@ -47,9 +49,7 @@ public:
     runtime(const runtime &) = delete;
     runtime &operator=(const runtime &) = delete;
 
-    ~runtime() {
-        stop();
-    }
+    ~runtime();
 
     [[nodiscard]] const runtime_config &config() const noexcept {
         return resolution_.resolved.config;
@@ -117,6 +117,13 @@ public:
 
     [[nodiscard]] static reactor *current_reactor() noexcept;
 
+    [[nodiscard]] bool logger_started() const noexcept {
+        return owned_logger_ != nullptr;
+    }
+
+    [[nodiscard]] bool
+    flush_logger(std::chrono::milliseconds timeout = std::chrono::seconds(5)) noexcept;
+
     [[nodiscard]] bool start() {
         runtime_state expected = runtime_state::stopped;
         if (!state_.compare_exchange_strong(expected, runtime_state::starting,
@@ -134,6 +141,7 @@ public:
                 executor->start();
             }
             state_.store(runtime_state::running, std::memory_order_release);
+            start_owned_logger_if_configured();
             return true;
         } catch (...) {
             request_stop();
@@ -192,6 +200,9 @@ public:
             if (observed == runtime_state::stopping) {
                 break;
             }
+            if (observed == runtime_state::running) {
+                stop_owned_logger();
+            }
             if (state_.compare_exchange_weak(observed, runtime_state::stopping,
                                              std::memory_order_acq_rel,
                                              std::memory_order_acquire)) {
@@ -200,6 +211,7 @@ public:
         }
 
         wait_for_posts();
+        stop_owned_logger();
         request_stop();
         if (called_from_runtime_thread) {
             return;
@@ -561,9 +573,14 @@ private:
         return previous;
     }
 
+    void start_owned_logger_if_configured();
+    void stop_owned_logger() noexcept;
+
     runtime_config_resolution resolution_;
     std::vector<std::unique_ptr<executor>> executors_;
+    std::unique_ptr<AsyncLogHandle> owned_logger_;
     std::atomic<runtime_state> state_{runtime_state::stopped};
+    std::atomic<bool> owned_logger_stop_started_{false};
     std::atomic<thread_index> active_thread_count_{0};
     std::atomic<std::uint32_t> posting_count_{0};
     std::atomic<std::uint32_t> active_epoch_{0};
@@ -597,6 +614,41 @@ inline const task_pool_config &runtime_task_pool_config(const runtime &owner) no
 }
 
 } // namespace detail
+
+} // namespace af
+
+#include "af/detail/log/absl_log_sink.hpp"
+
+namespace af {
+
+inline runtime::~runtime() {
+    stop();
+}
+
+inline bool runtime::flush_logger(std::chrono::milliseconds timeout) noexcept {
+    return owned_logger_ == nullptr || owned_logger_->flush(timeout);
+}
+
+inline void runtime::start_owned_logger_if_configured() {
+    if (owned_logger_ != nullptr || config().logger.backends.empty()) {
+        return;
+    }
+    owned_logger_stop_started_.store(false, std::memory_order_release);
+    owned_logger_ = start_async_logging_for_runtime(*this);
+}
+
+inline void runtime::stop_owned_logger() noexcept {
+    bool expected = false;
+    if (!owned_logger_stop_started_.compare_exchange_strong(
+            expected, true, std::memory_order_acq_rel, std::memory_order_acquire)) {
+        return;
+    }
+    if (owned_logger_ == nullptr) {
+        return;
+    }
+    owned_logger_->stop();
+    owned_logger_.reset();
+}
 
 } // namespace af
 
