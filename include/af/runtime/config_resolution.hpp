@@ -444,7 +444,11 @@ validate_resolved_runtime_config(const resolved_runtime_config &resolved) noexce
     if (config.timer.initial_reserve == 0) {
         return runtime_config_error(runtime_config_status::timer_initial_reserve_zero);
     }
-    if (config.timer.kind != timer_kind::min_heap) {
+    switch (config.timer.kind) {
+    case timer_kind::min_heap:
+    case timer_kind::hierarchical_wheel:
+        break;
+    default:
         return runtime_config_error(runtime_config_status::timer_kind_unsupported);
     }
     if (config.reactor.event_capacity == 0) {

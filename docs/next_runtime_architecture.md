@@ -167,7 +167,7 @@ struct timer_config {
 
 每个 executor 自己拥有 timer 结构。跨线程注册定时器时，先把 task 以 `TimerArming` 状态投递到目标 executor 的同一个 intrusive MPSC inbox，再由目标 executor 在线程内挂入本地 timer 结构，因此 timer 数据结构不需要锁。
 
-当前实现先使用每 executor 本地 min-heap，按 deadline 和 arm sequence 排序；`timer_kind::hierarchical_wheel` 仅作为后续 backend 目标保留，当前配置为该值会校验失败，避免用户误以为已经启用时间轮。后续可以在不改变 task API 和 executor 主循环的前提下，把 heap backend 替换成分层时间轮。
+当前实现支持每 executor 本地 min-heap 和分层时间轮两种 backend。`timer_kind::min_heap` 按 deadline 和 arm sequence 建堆，适合 timer 数量中低且需要严格全局排序的场景；`timer_kind::hierarchical_wheel` 使用 executor 私有的 L0/L1/overflow bucket 组织 timer，wait timeout 仍使用精确最近 deadline，避免 tick 粒度导致晚醒。两种 backend 都只在 owner executor 线程内修改数据结构，因此不需要互斥锁。
 
 ### reactor_config
 
@@ -658,6 +658,6 @@ include/af/reactor/select_reactor.hpp
 - 当前实例 runtime 已提供 `af::runtime_task`、`af::make_task<T>(runtime, ...)`、`af::try_make_task<T>(runtime, ...)` 和 `runtime_task_handle<T>`：任务创建走 typed slab object pool，任务 id 默认使用每线程 block 分配，`diagnostics.enable_task_id=false` 时跳过 id 分配并保持 invalid；`schedule_to()` 投递到目标 executor，运行中请求下一跳会延后到当前 `run_task()` 返回后再入队，避免同一个任务对象并发重入。
 - 当前实例 runtime 已提供 `thread_ref` / `thread_group_ref`：`runtime::io_threads()`、`runtime::cpu_threads()` 返回按 kind 聚合的线程索引 view，`runtime::thread_group(index/name)` 返回配置中的命名线程组 view，`thread_group_ref::shard()` 用于稳定分片选择；`runtime::post()` 和 `runtime_task` 调度入口已支持 `thread_ref`，便于后续网络层直接使用 runtime thread group；`basic` 示例已迁移到实例 runtime 作为新 API 样板。
 - 当前实例 runtime 已提供 `runtime::parallel_shards()`、`runtime::parallel_shards_ordered()`、`runtime::start_ordered_task()` 和 `runtime::ordered_last_applied_batch_id()`：分片线程优先使用 `thread_group_ref` 显式绑定，parallel group 通过对象池分配并持有 pending owner task 的生命周期引用，ordered start 状态为 sequencer executor 的 TLS 状态，per-shard ordered guard 仍存放在 owner runtime 的 executor 本地状态中；`parallel_shards`、`ordered_batches`、`crud_apply` 示例已迁移到实例 runtime。
-- 当前实例 runtime 已接入每 executor 本地 timer min-heap：`schedule_after()` / `schedule_at()` / `pending_after()` / `pending_at()` 先把 task 以 `timer_arming` 状态投递到目标 inbox，目标线程再挂入本地 heap；executor 空闲等待使用最近 timer deadline 作为 atomic/futex timeout，IO executor 则把最近 timer deadline 传给 `reactor.poll(timeout)`；`stop()` 会取消未到期 timer 并释放 task 生命周期引用。后续可在不改变 task API 的前提下把 min-heap backend 替换为分层时间轮。
+- 当前实例 runtime 已接入每 executor 本地 timer backend：`schedule_after()` / `schedule_at()` / `pending_after()` / `pending_at()` 先把 task 以 `timer_arming` 状态投递到目标 inbox，目标线程再按 `timer.kind` 挂入 min-heap 或 hierarchical wheel；executor 空闲等待使用最近 timer deadline 作为 atomic/futex timeout，IO executor 则把最近 timer deadline 传给 `reactor.poll(timeout)`；`stop()` 会取消未到期 timer 并释放 task 生命周期引用。
 
 后续迁移应先补齐测试和 benchmark，再逐步替换旧路径，避免一次性重写导致行为不可控。

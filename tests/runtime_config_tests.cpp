@@ -1159,6 +1159,10 @@ TEST(RuntimeConfigTests, RuntimeConfigValidationReportsInvalidFields) {
     config.timer.drain_budget = 1;
     config.timer.kind = af::timer_kind::hierarchical_wheel;
     validation = af::validate_runtime_config(config);
+    EXPECT_EQ(validation.status, af::runtime_config_status::ok);
+
+    config.timer.kind = static_cast<af::timer_kind>(255);
+    validation = af::validate_runtime_config(config);
     EXPECT_EQ(validation.status, af::runtime_config_status::timer_kind_unsupported);
     EXPECT_EQ(af::runtime_config_status_name(validation.status), "timer_kind_unsupported");
 
@@ -1755,6 +1759,53 @@ TEST(RuntimeConfigTests, RuntimeTaskScheduleAfterRunsOnTargetThread) {
     ASSERT_TRUE(wait_for_counter(counter, 1));
     EXPECT_EQ(observed_thread.load(std::memory_order_acquire), cpu_thread);
     EXPECT_GE(elapsed_ns.load(std::memory_order_acquire), 5'000'000LL);
+
+    runtime.stop();
+}
+
+TEST(RuntimeConfigTests, RuntimeHierarchicalWheelRunsDelayedTasks) {
+    af::runtime_config config;
+    config.threads = {af::cpu_threads("logic", 1)};
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+    config.timer.kind = af::timer_kind::hierarchical_wheel;
+    config.timer.tick = std::chrono::milliseconds(1);
+    config.timer.wheel_slots = 4;
+    config.timer.drain_budget = 8;
+    config.timer.initial_reserve = 4;
+
+    af::runtime runtime(config);
+    std::atomic<int> counter{0};
+    std::array<std::atomic<std::uint16_t>, 3> observed_threads{};
+    std::array<std::atomic<long long>, 3> elapsed_ns{};
+    for (auto &thread : observed_threads) {
+        thread.store(af::runtime_invalid_thread_index, std::memory_order_release);
+    }
+    for (auto &elapsed : elapsed_ns) {
+        elapsed.store(0, std::memory_order_release);
+    }
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 1));
+
+    const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
+    const std::array<std::chrono::milliseconds, 3> delays{
+        std::chrono::milliseconds(2),
+        std::chrono::milliseconds(7),
+        std::chrono::milliseconds(20),
+    };
+
+    for (std::size_t i = 0; i < delays.size(); ++i) {
+        auto task =
+            af::make_task<DelayedRuntimeTask>(runtime, counter, observed_threads[i], elapsed_ns[i]);
+        ASSERT_TRUE(task->do_it(cpu_thread, delays[i]));
+        task.reset();
+    }
+
+    ASSERT_TRUE(wait_for_counter(counter, static_cast<int>(delays.size())));
+    for (std::size_t i = 0; i < delays.size(); ++i) {
+        EXPECT_EQ(observed_threads[i].load(std::memory_order_acquire), cpu_thread);
+        EXPECT_GE(elapsed_ns[i].load(std::memory_order_acquire), 500'000LL);
+    }
 
     runtime.stop();
 }
