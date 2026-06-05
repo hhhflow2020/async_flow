@@ -179,6 +179,10 @@ protected:
         return task_result::again;
     }
 
+    [[nodiscard]] static constexpr task_result reschedule() noexcept {
+        return task_result::again;
+    }
+
     [[nodiscard]] static constexpr task_result failed() noexcept {
         return task_result::failed;
     }

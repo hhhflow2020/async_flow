@@ -560,6 +560,35 @@ private:
     std::atomic<int> phase_{0};
 };
 
+class RescheduleRuntimeTask final : public af::runtime_task {
+public:
+    RescheduleRuntimeTask(af::runtime_task::factory_token token, af::runtime &owner,
+                          std::atomic<int> &run_count, std::atomic<std::uint16_t> &first_thread,
+                          std::atomic<std::uint16_t> &second_thread)
+        : af::runtime_task(token, owner), run_count_(run_count), first_thread_(first_thread),
+          second_thread_(second_thread) {}
+
+    [[nodiscard]] bool do_it(std::uint16_t thread) noexcept {
+        return schedule_to(thread);
+    }
+
+private:
+    af::task_result run_task() noexcept override {
+        const int phase = run_count_.fetch_add(1, std::memory_order_acq_rel);
+        if (phase == 0) {
+            first_thread_.store(af::runtime::current_thread_index(), std::memory_order_release);
+            return reschedule();
+        }
+
+        second_thread_.store(af::runtime::current_thread_index(), std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int> &run_count_;
+    std::atomic<std::uint16_t> &first_thread_;
+    std::atomic<std::uint16_t> &second_thread_;
+};
+
 class DelayedRuntimeTask final : public af::runtime_task {
 public:
     DelayedRuntimeTask(af::runtime_task::factory_token token, af::runtime &owner,
@@ -1765,6 +1794,35 @@ TEST(RuntimeConfigTests, RuntimeTaskDefersRunningScheduleUntilRunReturns) {
     EXPECT_TRUE(next_schedule_ok.load(std::memory_order_acquire));
     EXPECT_EQ(first_thread.load(std::memory_order_acquire), cpu0);
     EXPECT_EQ(second_thread.load(std::memory_order_acquire), cpu1);
+
+    runtime.stop();
+}
+
+TEST(RuntimeConfigTests, RuntimeTaskRescheduleRunsAgainOnCurrentThread) {
+    af::runtime_config config;
+    config.threads = {
+        af::io_threads("io", 1),
+        af::cpu_threads("logic", 1),
+    };
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    std::atomic<int> run_count{0};
+    std::atomic<std::uint16_t> first_thread{af::runtime_invalid_thread_index};
+    std::atomic<std::uint16_t> second_thread{af::runtime_invalid_thread_index};
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 2));
+
+    const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
+    auto task =
+        af::make_task<RescheduleRuntimeTask>(runtime, run_count, first_thread, second_thread);
+    ASSERT_TRUE(task->do_it(cpu_thread));
+    task.reset();
+
+    ASSERT_TRUE(wait_for_counter(run_count, 2));
+    EXPECT_EQ(first_thread.load(std::memory_order_acquire), cpu_thread);
+    EXPECT_EQ(second_thread.load(std::memory_order_acquire), cpu_thread);
 
     runtime.stop();
 }
