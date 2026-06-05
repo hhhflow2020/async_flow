@@ -7,7 +7,6 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
-#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -27,6 +26,7 @@
 #include "af/detail/log/network_log_backend.hpp"
 #include "af/detail/log/runtime_bound_log_backend.hpp"
 #include "af/detail/log/runtime_instance_async_log_consumer.hpp"
+#include "af/detail/runtime/atomic_wait.hpp"
 #include "af/thread_kind.hpp"
 
 namespace af {
@@ -387,12 +387,34 @@ inline void initialize_absl_log_once() {
         return;
     }
 
-    static std::once_flag once;
-    std::call_once(once, [] {
-        if (!absl::log_internal::IsInitialized()) {
-            absl::InitializeLog();
+    static std::atomic<std::uint32_t> state{0};
+    std::uint32_t observed = state.load(std::memory_order_acquire);
+    for (;;) {
+        if (observed == 2U) {
+            return;
         }
-    });
+        if (observed == 0U) {
+            if (!state.compare_exchange_weak(observed, 1U, std::memory_order_acq_rel,
+                                             std::memory_order_acquire)) {
+                continue;
+            }
+            try {
+                if (!absl::log_internal::IsInitialized()) {
+                    absl::InitializeLog();
+                }
+                state.store(2U, std::memory_order_release);
+                detail::atomic_notify_all(state);
+                return;
+            } catch (...) {
+                state.store(0U, std::memory_order_release);
+                detail::atomic_notify_all(state);
+                throw;
+            }
+        }
+
+        detail::atomic_wait_value(state, observed, std::memory_order_acquire);
+        observed = state.load(std::memory_order_acquire);
+    }
 }
 
 [[nodiscard]] inline std::unique_ptr<AsyncLogHandle>
