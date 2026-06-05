@@ -554,6 +554,7 @@ private:
             current_executor_ = this;
             current_thread_index_ = thread_.index;
             static_cast<void>(detail::set_current_thread_affinity(thread_.affinity));
+            static_cast<void>(detail::set_current_thread_priority(thread_.priority));
             if (owner_.config().diagnostics.enable_thread_name && thread_.set_os_thread_name) {
                 detail::set_current_thread_name(thread_.name, thread_.group_offset);
             }

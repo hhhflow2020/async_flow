@@ -18,6 +18,7 @@ enum class runtime_config_status : std::uint8_t {
     no_threads,
     thread_group_count_zero,
     thread_count_overflow,
+    thread_priority_value_out_of_range,
     scheduler_task_drain_budget_zero,
     scheduler_service_task_budget_zero,
     task_pool_local_cache_size_zero,
@@ -60,6 +61,8 @@ runtime_config_status_name(runtime_config_status status) noexcept {
         return "thread_group_count_zero";
     case runtime_config_status::thread_count_overflow:
         return "thread_count_overflow";
+    case runtime_config_status::thread_priority_value_out_of_range:
+        return "thread_priority_value_out_of_range";
     case runtime_config_status::scheduler_task_drain_budget_zero:
         return "scheduler_task_drain_budget_zero";
     case runtime_config_status::scheduler_service_task_budget_zero:
@@ -293,6 +296,11 @@ validate_runtime_thread_groups(const runtime_config &config) noexcept {
         const auto &group = config.threads[index];
         if (group.count == 0) {
             return runtime_config_error(runtime_config_status::thread_group_count_zero, index);
+        }
+        if (group.priority.enabled && (group.priority.value < thread_priority_min ||
+                                       group.priority.value > thread_priority_max)) {
+            return runtime_config_error(runtime_config_status::thread_priority_value_out_of_range,
+                                        index);
         }
         total_threads += group.count;
         if (total_threads > std::numeric_limits<std::uint16_t>::max()) {

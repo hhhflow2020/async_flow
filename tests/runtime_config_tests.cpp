@@ -1,6 +1,7 @@
 #include <array>
 #include <chrono>
 #include <atomic>
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -16,6 +17,8 @@
 
 #if defined(__linux__)
 #include <sched.h>
+#include <sys/resource.h>
+#include <sys/syscall.h>
 #endif
 
 #include <gtest/gtest.h>
@@ -97,6 +100,7 @@ static_assert(af::supports_sendfile == af::platform_linux);
 static_assert(af::supports_splice == af::platform_linux);
 static_assert(af::supports_zero_copy_send == af::platform_linux);
 static_assert(af::supports_thread_affinity == af::platform_linux);
+static_assert(af::supports_thread_priority == af::platform_linux);
 static_assert(af::platform_posix != af::platform_windows);
 static_assert(std::is_same_v<af::task_result, af::TaskResult>);
 static_assert(std::is_same_v<af::schedule_mode, af::ScheduleMode>);
@@ -239,6 +243,32 @@ private:
     std::uint32_t expected_cpu_;
     std::atomic<int> &counter_;
     std::atomic<bool> &matches_;
+};
+
+[[nodiscard]] int current_linux_thread_nice() noexcept {
+    const auto tid = static_cast<id_t>(::syscall(SYS_gettid));
+    errno = 0;
+    const int value = ::getpriority(PRIO_PROCESS, tid);
+    if (value == -1 && errno != 0) {
+        return std::numeric_limits<int>::max();
+    }
+    return value;
+}
+
+class ThreadPriorityProbeWork final : public af::runtime_work {
+public:
+    ThreadPriorityProbeWork(std::atomic<int> &observed_priority, std::atomic<int> &counter)
+        : observed_priority_(observed_priority), counter_(counter) {}
+
+    void run(af::runtime &owner) noexcept override {
+        static_cast<void>(owner);
+        observed_priority_.store(current_linux_thread_nice(), std::memory_order_release);
+        counter_.fetch_add(1, std::memory_order_release);
+    }
+
+private:
+    std::atomic<int> &observed_priority_;
+    std::atomic<int> &counter_;
 };
 #endif
 
@@ -890,6 +920,8 @@ TEST(RuntimeConfigTests, RuntimeConfigUsesPlainStructDefaultsAndFactories) {
     EXPECT_EQ(config.threads[0].kind, af::thread_kind::io);
     EXPECT_EQ(config.threads[0].count, 2U);
     EXPECT_TRUE(config.threads[0].set_os_thread_name);
+    EXPECT_FALSE(config.threads[0].priority.enabled);
+    EXPECT_EQ(config.threads[0].priority.value, 0);
     EXPECT_EQ(config.threads[1].name, "logic");
     EXPECT_EQ(config.threads[1].kind, af::thread_kind::cpu);
     EXPECT_EQ(config.threads[1].count, 4U);
@@ -966,6 +998,40 @@ TEST(RuntimeConfigTests, RuntimeAppliesThreadAffinityOnSupportedPlatforms) {
     ASSERT_TRUE(runtime.post(cpu_thread, &work));
     ASSERT_TRUE(wait_for_counter(counter, 1));
     EXPECT_TRUE(matches.load(std::memory_order_acquire));
+
+    runtime.stop();
+#endif
+}
+
+TEST(RuntimeConfigTests, RuntimeAppliesThreadPriorityOnSupportedPlatforms) {
+    if (!af::supports_thread_priority) {
+        GTEST_SKIP() << "thread priority is not supported on this platform";
+    }
+#if defined(__linux__)
+    const int current_priority = current_linux_thread_nice();
+    if (current_priority == std::numeric_limits<int>::max() ||
+        current_priority >= af::thread_priority_max) {
+        GTEST_SKIP() << "no lower Linux nice value is available for priority test";
+    }
+    const int target_priority = current_priority + 1;
+
+    af::runtime_config config;
+    config.threads = {af::cpu_threads("priority", 1)};
+    config.threads[0].priority.enabled = true;
+    config.threads[0].priority.value = target_priority;
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    std::atomic<int> counter{0};
+    std::atomic<int> observed_priority{std::numeric_limits<int>::max()};
+    ThreadPriorityProbeWork work(observed_priority, counter);
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 1));
+    const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
+    ASSERT_TRUE(runtime.post(cpu_thread, &work));
+    ASSERT_TRUE(wait_for_counter(counter, 1));
+    EXPECT_EQ(observed_priority.load(std::memory_order_acquire), target_priority);
 
     runtime.stop();
 #endif
@@ -1060,6 +1126,20 @@ TEST(RuntimeConfigTests, RuntimeConfigValidationReportsInvalidFields) {
     validation = af::validate_runtime_config(config);
     EXPECT_EQ(validation.status, af::runtime_config_status::thread_count_overflow);
     EXPECT_EQ(validation.index, 1U);
+
+    config.threads = {af::cpu_threads("priority", 1)};
+    config.threads[0].priority.enabled = true;
+    config.threads[0].priority.value = af::thread_priority_min - 1;
+    validation = af::validate_runtime_config(config);
+    EXPECT_EQ(validation.status, af::runtime_config_status::thread_priority_value_out_of_range);
+    EXPECT_EQ(af::runtime_config_status_name(validation.status),
+              "thread_priority_value_out_of_range");
+    EXPECT_EQ(validation.index, 0U);
+
+    config.threads[0].priority.value = af::thread_priority_max + 1;
+    validation = af::validate_runtime_config(config);
+    EXPECT_EQ(validation.status, af::runtime_config_status::thread_priority_value_out_of_range);
+    EXPECT_EQ(validation.index, 0U);
 
     config.threads = {af::cpu_threads("logic", 1)};
     config.scheduler.task_drain_budget = 0;

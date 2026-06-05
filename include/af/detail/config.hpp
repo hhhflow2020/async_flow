@@ -85,5 +85,6 @@ inline constexpr bool supports_kqueue = AF_DETAIL_HAS_KQUEUE != 0;
 inline constexpr bool supports_select = AF_DETAIL_HAS_SELECT != 0;
 inline constexpr bool supports_native_io_wait = AF_DETAIL_HAS_NATIVE_IO_WAIT != 0;
 inline constexpr bool supports_thread_affinity = platform_linux;
+inline constexpr bool supports_thread_priority = platform_linux;
 
 } // namespace af::detail

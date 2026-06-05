@@ -176,6 +176,9 @@ struct thread_affinity_config {
     std::vector<std::uint32_t> cpu_ids;
 };
 
+inline constexpr int thread_priority_min = -20;
+inline constexpr int thread_priority_max = 19;
+
 struct thread_priority_config {
     bool enabled{false};
     int value{0};
