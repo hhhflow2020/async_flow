@@ -48,6 +48,7 @@ enum class runtime_config_status : std::uint8_t {
     shutdown_drain_timeout_negative,
     shutdown_connection_close_timeout_negative,
     shutdown_log_flush_timeout_negative,
+    task_pool_local_cache_size_too_large,
 };
 
 [[nodiscard]] inline std::string_view
@@ -77,6 +78,8 @@ runtime_config_status_name(runtime_config_status status) noexcept {
         return "shutdown_log_flush_timeout_negative";
     case runtime_config_status::task_pool_local_cache_size_zero:
         return "task_pool_local_cache_size_zero";
+    case runtime_config_status::task_pool_local_cache_size_too_large:
+        return "task_pool_local_cache_size_too_large";
     case runtime_config_status::task_pool_slab_object_count_zero:
         return "task_pool_slab_object_count_zero";
     case runtime_config_status::timer_tick_zero:
@@ -429,6 +432,9 @@ validate_resolved_runtime_config(const resolved_runtime_config &resolved) noexce
     if (config.task_pool.local_cache_size == 0) {
         return runtime_config_error(runtime_config_status::task_pool_local_cache_size_zero);
     }
+    if (config.task_pool.local_cache_size > runtime_task_pool_max_local_cache_size) {
+        return runtime_config_error(runtime_config_status::task_pool_local_cache_size_too_large);
+    }
     if (config.task_pool.slab_object_count == 0) {
         return runtime_config_error(runtime_config_status::task_pool_slab_object_count_zero);
     }
@@ -498,6 +504,13 @@ validate_resolved_runtime_config(const resolved_runtime_config &resolved) noexce
 [[nodiscard]] inline runtime_config_resolution resolve_runtime_config(runtime_config config) {
     runtime_config_resolution resolution;
     resolution.resolved.config = std::move(config);
+    if (resolution.resolved.config.task_pool.local_cache_size != 0 &&
+        resolution.resolved.config.task_pool.local_cache_size <=
+            runtime_task_pool_max_local_cache_size) {
+        resolution.resolved.config.task_pool.local_cache_size =
+            normalize_runtime_task_pool_local_cache_size(
+                resolution.resolved.config.task_pool.local_cache_size);
+    }
     if (const auto validation = detail::validate_runtime_thread_groups(resolution.resolved.config);
         !validation) {
         resolution.validation = validation;

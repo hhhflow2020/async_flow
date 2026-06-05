@@ -226,6 +226,47 @@ struct task_pool_config {
     bool enable_stats{true};
 };
 
+inline constexpr std::size_t runtime_task_pool_min_local_cache_size = 2;
+inline constexpr std::size_t runtime_task_pool_max_local_cache_size = 4096;
+
+[[nodiscard]] constexpr std::size_t
+normalize_runtime_task_pool_local_cache_size(std::size_t value) noexcept {
+    if (value <= runtime_task_pool_min_local_cache_size) {
+        return runtime_task_pool_min_local_cache_size;
+    }
+    if (value <= 4U) {
+        return 4U;
+    }
+    if (value <= 8U) {
+        return 8U;
+    }
+    if (value <= 16U) {
+        return 16U;
+    }
+    if (value <= 32U) {
+        return 32U;
+    }
+    if (value <= 64U) {
+        return 64U;
+    }
+    if (value <= 128U) {
+        return 128U;
+    }
+    if (value <= 256U) {
+        return 256U;
+    }
+    if (value <= 512U) {
+        return 512U;
+    }
+    if (value <= 1024U) {
+        return 1024U;
+    }
+    if (value <= 2048U) {
+        return 2048U;
+    }
+    return runtime_task_pool_max_local_cache_size;
+}
+
 struct timer_config {
     timer_kind kind{timer_kind::min_heap};
     std::chrono::milliseconds tick{1};

@@ -1081,6 +1081,7 @@ TEST(RuntimeConfigTests, ResolvesRuntimeConfigThreadMetadataAndSelectors) {
     EXPECT_EQ(resolved.thread_groups[1].kind, af::thread_kind::cpu);
     EXPECT_EQ(resolved.thread_groups[1].begin, 2U);
     EXPECT_EQ(resolved.thread_groups[1].count, 3U);
+    EXPECT_EQ(resolved.config.task_pool.local_cache_size, 256U);
 
     const af::thread_group_ref io_threads = resolved.io_thread_group();
     const af::thread_group_ref cpu_threads = resolved.cpu_thread_group();
@@ -1103,6 +1104,22 @@ TEST(RuntimeConfigTests, ResolvesRuntimeConfigThreadMetadataAndSelectors) {
     EXPECT_EQ(logic_group.front(), af::thread_ref(2));
     EXPECT_EQ(logic_group.shard(5), af::thread_ref(4));
     EXPECT_FALSE(resolved.thread_group("missing"));
+}
+
+TEST(RuntimeConfigTests, RuntimeTaskPoolLocalCacheSizeUsesSizeClasses) {
+    EXPECT_EQ(af::normalize_runtime_task_pool_local_cache_size(1), 2U);
+    EXPECT_EQ(af::normalize_runtime_task_pool_local_cache_size(3), 4U);
+    EXPECT_EQ(af::normalize_runtime_task_pool_local_cache_size(129), 256U);
+    EXPECT_EQ(af::normalize_runtime_task_pool_local_cache_size(257), 512U);
+    EXPECT_EQ(af::normalize_runtime_task_pool_local_cache_size(4096), 4096U);
+
+    af::runtime_config config;
+    config.threads = {af::cpu_threads("logic", 1)};
+    config.task_pool.local_cache_size = 257;
+
+    auto resolution = af::resolve_runtime_config(config);
+    ASSERT_TRUE(resolution);
+    EXPECT_EQ(resolution.resolved.config.task_pool.local_cache_size, 512U);
 }
 
 TEST(RuntimeConfigTests, RuntimeConfigValidationReportsInvalidFields) {
@@ -1152,6 +1169,18 @@ TEST(RuntimeConfigTests, RuntimeConfigValidationReportsInvalidFields) {
     EXPECT_EQ(validation.status, af::runtime_config_status::scheduler_max_task_run_slice_negative);
 
     config.scheduler.max_task_run_slice = std::chrono::nanoseconds(0);
+    config.task_pool.local_cache_size = 0;
+    validation = af::validate_runtime_config(config);
+    EXPECT_EQ(validation.status, af::runtime_config_status::task_pool_local_cache_size_zero);
+    EXPECT_EQ(af::runtime_config_status_name(validation.status), "task_pool_local_cache_size_zero");
+
+    config.task_pool.local_cache_size = af::runtime_task_pool_max_local_cache_size + 1U;
+    validation = af::validate_runtime_config(config);
+    EXPECT_EQ(validation.status, af::runtime_config_status::task_pool_local_cache_size_too_large);
+    EXPECT_EQ(af::runtime_config_status_name(validation.status),
+              "task_pool_local_cache_size_too_large");
+
+    config.task_pool.local_cache_size = 1;
     config.timer.drain_budget = 0;
     validation = af::validate_runtime_config(config);
     EXPECT_EQ(validation.status, af::runtime_config_status::timer_drain_budget_zero);
@@ -1608,10 +1637,12 @@ TEST(RuntimeConfigTests, RuntimeTaskRunSliceLetsServiceTasksRunBeforeLargeTaskBu
 TEST(RuntimeConfigTests, RuntimeTaskPoolConfigAllowsSmallInitialSlabsToExpand) {
     af::runtime_config config;
     config.threads = {af::cpu_threads("logic", 1)};
+    config.task_pool.local_cache_size = 3;
     config.task_pool.slab_object_count = 1;
     config.task_pool.oom = af::oom_policy::throw_exception;
 
     af::runtime runtime(config);
+    EXPECT_EQ(runtime.config().task_pool.local_cache_size, 4U);
     std::array<af::runtime_task_handle<PoolOnlyRuntimeTask>, 8> tasks;
     for (auto &task : tasks) {
         task = af::make_task<PoolOnlyRuntimeTask>(runtime);
