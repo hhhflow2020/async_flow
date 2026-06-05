@@ -361,6 +361,8 @@ inline bool tcp_client::adopt_connected_socket(pending_connect &pending) noexcep
         detail::tcp_connection_lifecycle lifecycle;
         lifecycle.owner = entry;
         lifecycle.on_inactive = &tcp_client::on_connection_inactive;
+        lifecycle.on_callback_begin = &tcp_client::on_connection_callback_begin;
+        lifecycle.on_callback_end = &tcp_client::on_connection_callback_end;
 
         entry->connection = std::make_unique<tcp_connection>(
             *owner_, pending.owner_thread, owned_fd, entry->slot, entry->generation,
@@ -380,12 +382,15 @@ inline bool tcp_client::adopt_connected_socket(pending_connect &pending) noexcep
     }
 
     if (pending.callbacks.on_connect != nullptr) {
+        begin_user_callback();
         pending.callbacks.on_connect(pending.callbacks.owner,
                                      tcp_connection_ref(entry->connection.get()));
+        end_user_callback();
     }
     if (entry->connection == nullptr || !entry->connection->alive()) {
-        release_connection_slot(entry->slot);
+        retire_connection_slot(entry->slot, entry->generation);
     }
+    reap_retired_connections_if_safe();
     return true;
 }
 
@@ -435,6 +440,30 @@ inline void tcp_client::refresh_running_state() noexcept {
     handle_state_->accepting_operations.store(false, std::memory_order_release);
 }
 
+inline void tcp_client::begin_user_callback() noexcept {
+    ++user_callback_depth_;
+}
+
+inline void tcp_client::end_user_callback() noexcept {
+    if (user_callback_depth_ > 0U) {
+        --user_callback_depth_;
+    }
+}
+
+inline void tcp_client::on_connection_callback_begin(void *owner) noexcept {
+    auto *entry = static_cast<connection_entry *>(owner);
+    if (entry != nullptr && entry->client != nullptr) {
+        entry->client->begin_user_callback();
+    }
+}
+
+inline void tcp_client::on_connection_callback_end(void *owner) noexcept {
+    auto *entry = static_cast<connection_entry *>(owner);
+    if (entry != nullptr && entry->client != nullptr) {
+        entry->client->end_user_callback();
+    }
+}
+
 inline tcp_client::connection_entry *tcp_client::acquire_connection_slot() {
     const std::uint32_t generation = next_connection_generation();
     if (!free_connection_slots_.empty()) {
@@ -445,6 +474,7 @@ inline tcp_client::connection_entry *tcp_client::acquire_connection_slot() {
         entry.slot = slot;
         entry.generation = generation;
         entry.occupied = true;
+        entry.retired = false;
         ++connection_count_;
         return &entry;
     }
@@ -454,6 +484,7 @@ inline tcp_client::connection_entry *tcp_client::acquire_connection_slot() {
     entry.slot = slot;
     entry.generation = generation;
     entry.occupied = true;
+    entry.retired = false;
     ++connection_count_;
     return &entry;
 }
@@ -464,6 +495,46 @@ inline std::uint32_t tcp_client::next_connection_generation() noexcept {
         generation = next_connection_generation_++;
     }
     return generation;
+}
+
+inline void tcp_client::retire_connection_slot(std::uint32_t slot,
+                                               std::uint32_t generation) noexcept {
+    if (slot >= connections_.size() || connections_[slot] == nullptr) {
+        return;
+    }
+    connection_entry &entry = *connections_[slot];
+    if (!entry.occupied || entry.generation != generation || entry.retired) {
+        return;
+    }
+    entry.retired = true;
+    try {
+        retired_connection_slots_.push_back(connection_slot_ref{slot, generation});
+    } catch (...) {
+    }
+}
+
+inline void tcp_client::reap_retired_connections() noexcept {
+    if (retired_connection_slots_.empty()) {
+        return;
+    }
+    for (const connection_slot_ref retired : retired_connection_slots_) {
+        if (retired.slot >= connections_.size() || connections_[retired.slot] == nullptr) {
+            continue;
+        }
+        const connection_entry &entry = *connections_[retired.slot];
+        if (!entry.occupied || entry.generation != retired.generation ||
+            entry.connection == nullptr || entry.connection->alive()) {
+            continue;
+        }
+        release_connection_slot(retired.slot);
+    }
+    retired_connection_slots_.clear();
+}
+
+inline void tcp_client::reap_retired_connections_if_safe() noexcept {
+    if (user_callback_depth_ == 0U) {
+        reap_retired_connections();
+    }
 }
 
 inline void tcp_client::release_connection_slot(std::uint32_t slot) noexcept {
@@ -489,6 +560,7 @@ inline void tcp_client::close_all_connections() noexcept {
     }
     connections_.clear();
     free_connection_slots_.clear();
+    retired_connection_slots_.clear();
     connection_count_ = 0;
 }
 
@@ -522,7 +594,8 @@ inline send_result tcp_client::send_to_connection(std::uint32_t slot, std::uint3
     }
     const send_result result = entry->connection->send(std::move(buffer));
     if (result == send_result::closed) {
-        release_connection_slot(slot);
+        retire_connection_slot(slot, generation);
+        reap_retired_connections_if_safe();
     }
     return result;
 }
@@ -535,9 +608,34 @@ inline send_result tcp_client::send_to_connection(std::uint32_t slot, std::uint3
     }
     const send_result result = entry->connection->send(view);
     if (result == send_result::closed) {
-        release_connection_slot(slot);
+        retire_connection_slot(slot, generation);
+        reap_retired_connections_if_safe();
     }
     return result;
+}
+
+inline bool tcp_client::pause_connection_read(std::uint32_t slot,
+                                              std::uint32_t generation) noexcept {
+    connection_entry *entry = find_connection_entry(slot, generation);
+    return entry != nullptr && entry->connection->pause_read();
+}
+
+inline bool tcp_client::resume_connection_read(std::uint32_t slot,
+                                               std::uint32_t generation) noexcept {
+    connection_entry *entry = find_connection_entry(slot, generation);
+    return entry != nullptr && entry->connection->resume_read();
+}
+
+inline bool tcp_client::set_connection_no_delay(std::uint32_t slot, std::uint32_t generation,
+                                                bool enabled) noexcept {
+    connection_entry *entry = find_connection_entry(slot, generation);
+    return entry != nullptr && entry->connection->set_no_delay(enabled);
+}
+
+inline bool tcp_client::set_connection_keepalive(std::uint32_t slot, std::uint32_t generation,
+                                                 bool enabled) noexcept {
+    connection_entry *entry = find_connection_entry(slot, generation);
+    return entry != nullptr && entry->connection->set_keepalive(enabled);
 }
 
 inline bool tcp_client::close_connection(std::uint32_t slot, std::uint32_t generation,
@@ -547,7 +645,8 @@ inline bool tcp_client::close_connection(std::uint32_t slot, std::uint32_t gener
         return false;
     }
     entry->connection->close(reason);
-    release_connection_slot(slot);
+    retire_connection_slot(slot, generation);
+    reap_retired_connections_if_safe();
     return true;
 }
 
@@ -559,7 +658,8 @@ inline bool tcp_client::close_connection_after_flush(std::uint32_t slot,
     }
     const bool closed = entry->connection->close_after_flush();
     if (closed) {
-        release_connection_slot(slot);
+        retire_connection_slot(slot, generation);
+        reap_retired_connections_if_safe();
     }
     return true;
 }
@@ -570,7 +670,8 @@ inline void tcp_client::on_connection_inactive(void *owner, tcp_connection &conn
         entry->generation != connection.generation()) {
         return;
     }
-    entry->client->release_connection_slot(entry->slot);
+    entry->client->retire_connection_slot(entry->slot, entry->generation);
+    entry->client->reap_retired_connections_if_safe();
 }
 
 inline void tcp_client::on_pending_connect_event(void *owner, af::fd_event_source &source,

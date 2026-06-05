@@ -64,6 +64,138 @@ inline send_result tcp_connection_handle::send(af::BufferView view) const noexce
     }
 }
 
+inline bool tcp_connection_handle::pause_read() const noexcept {
+    auto state = state_.lock();
+    if (state == nullptr) {
+        return false;
+    }
+    detail::tcp_connection_owner *owner = state->owner.load(std::memory_order_acquire);
+    if (owner == nullptr) {
+        return false;
+    }
+    if (af::runtime::current() == &owner->runtime_owner() &&
+        af::runtime::current_thread_index() == owner_thread_.index) {
+        return owner->pause_connection_read(slot_, generation_);
+    }
+    if (!state->accepting_operations.load(std::memory_order_acquire)) {
+        return false;
+    }
+    try {
+        return owner->runtime_owner().post(
+            owner_thread_, [state = std::move(state), slot = slot_, generation = generation_]() {
+                if (!state->accepting_operations.load(std::memory_order_acquire)) {
+                    return;
+                }
+                detail::tcp_connection_owner *target = state->owner.load(std::memory_order_acquire);
+                if (target == nullptr) {
+                    return;
+                }
+                static_cast<void>(target->pause_connection_read(slot, generation));
+            });
+    } catch (...) {
+        return false;
+    }
+}
+
+inline bool tcp_connection_handle::resume_read() const noexcept {
+    auto state = state_.lock();
+    if (state == nullptr) {
+        return false;
+    }
+    detail::tcp_connection_owner *owner = state->owner.load(std::memory_order_acquire);
+    if (owner == nullptr) {
+        return false;
+    }
+    if (af::runtime::current() == &owner->runtime_owner() &&
+        af::runtime::current_thread_index() == owner_thread_.index) {
+        return owner->resume_connection_read(slot_, generation_);
+    }
+    if (!state->accepting_operations.load(std::memory_order_acquire)) {
+        return false;
+    }
+    try {
+        return owner->runtime_owner().post(
+            owner_thread_, [state = std::move(state), slot = slot_, generation = generation_]() {
+                if (!state->accepting_operations.load(std::memory_order_acquire)) {
+                    return;
+                }
+                detail::tcp_connection_owner *target = state->owner.load(std::memory_order_acquire);
+                if (target == nullptr) {
+                    return;
+                }
+                static_cast<void>(target->resume_connection_read(slot, generation));
+            });
+    } catch (...) {
+        return false;
+    }
+}
+
+inline bool tcp_connection_handle::set_no_delay(bool enabled) const noexcept {
+    auto state = state_.lock();
+    if (state == nullptr) {
+        return false;
+    }
+    detail::tcp_connection_owner *owner = state->owner.load(std::memory_order_acquire);
+    if (owner == nullptr) {
+        return false;
+    }
+    if (af::runtime::current() == &owner->runtime_owner() &&
+        af::runtime::current_thread_index() == owner_thread_.index) {
+        return owner->set_connection_no_delay(slot_, generation_, enabled);
+    }
+    if (!state->accepting_operations.load(std::memory_order_acquire)) {
+        return false;
+    }
+    try {
+        return owner->runtime_owner().post(owner_thread_, [state = std::move(state), slot = slot_,
+                                                           generation = generation_, enabled]() {
+            if (!state->accepting_operations.load(std::memory_order_acquire)) {
+                return;
+            }
+            detail::tcp_connection_owner *target = state->owner.load(std::memory_order_acquire);
+            if (target == nullptr) {
+                return;
+            }
+            static_cast<void>(target->set_connection_no_delay(slot, generation, enabled));
+        });
+    } catch (...) {
+        return false;
+    }
+}
+
+inline bool tcp_connection_handle::set_keepalive(bool enabled) const noexcept {
+    auto state = state_.lock();
+    if (state == nullptr) {
+        return false;
+    }
+    detail::tcp_connection_owner *owner = state->owner.load(std::memory_order_acquire);
+    if (owner == nullptr) {
+        return false;
+    }
+    if (af::runtime::current() == &owner->runtime_owner() &&
+        af::runtime::current_thread_index() == owner_thread_.index) {
+        return owner->set_connection_keepalive(slot_, generation_, enabled);
+    }
+    if (!state->accepting_operations.load(std::memory_order_acquire)) {
+        return false;
+    }
+    try {
+        return owner->runtime_owner().post(owner_thread_, [state = std::move(state), slot = slot_,
+                                                           generation = generation_, enabled]() {
+            if (!state->accepting_operations.load(std::memory_order_acquire)) {
+                return;
+            }
+            detail::tcp_connection_owner *target = state->owner.load(std::memory_order_acquire);
+            if (target == nullptr) {
+                return;
+            }
+            static_cast<void>(target->set_connection_keepalive(slot, generation, enabled));
+        });
+    } catch (...) {
+        return false;
+    }
+}
+
 inline bool tcp_connection_handle::close(close_reason reason) const noexcept {
     auto state = state_.lock();
     if (state == nullptr) {

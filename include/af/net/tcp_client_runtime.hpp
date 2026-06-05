@@ -78,6 +78,14 @@ private:
                                                  af::Buffer buffer) noexcept override;
     [[nodiscard]] send_result send_to_connection(std::uint32_t slot, std::uint32_t generation,
                                                  af::BufferView view) noexcept override;
+    [[nodiscard]] bool pause_connection_read(std::uint32_t slot,
+                                             std::uint32_t generation) noexcept override;
+    [[nodiscard]] bool resume_connection_read(std::uint32_t slot,
+                                              std::uint32_t generation) noexcept override;
+    [[nodiscard]] bool set_connection_no_delay(std::uint32_t slot, std::uint32_t generation,
+                                               bool enabled) noexcept override;
+    [[nodiscard]] bool set_connection_keepalive(std::uint32_t slot, std::uint32_t generation,
+                                                bool enabled) noexcept override;
     [[nodiscard]] bool close_connection(std::uint32_t slot, std::uint32_t generation,
                                         close_reason reason) noexcept override;
     [[nodiscard]] bool close_connection_after_flush(std::uint32_t slot,
@@ -106,9 +114,16 @@ private:
     void cancel_pending_connect(pending_connect &pending) noexcept;
     void cancel_all_pending_connects() noexcept;
     void refresh_running_state() noexcept;
+    void begin_user_callback() noexcept;
+    void end_user_callback() noexcept;
+    static void on_connection_callback_begin(void *owner) noexcept;
+    static void on_connection_callback_end(void *owner) noexcept;
 
     [[nodiscard]] connection_entry *acquire_connection_slot();
     [[nodiscard]] std::uint32_t next_connection_generation() noexcept;
+    void retire_connection_slot(std::uint32_t slot, std::uint32_t generation) noexcept;
+    void reap_retired_connections() noexcept;
+    void reap_retired_connections_if_safe() noexcept;
     void release_connection_slot(std::uint32_t slot) noexcept;
     void close_all_connections() noexcept;
     [[nodiscard]] connection_entry *find_connection_entry(std::uint32_t slot,
@@ -125,6 +140,12 @@ private:
         std::uint32_t slot{0};
         std::uint32_t generation{0};
         bool occupied{false};
+        bool retired{false};
+    };
+
+    struct connection_slot_ref {
+        std::uint32_t slot{0};
+        std::uint32_t generation{0};
     };
 
     struct pending_connect {
@@ -145,9 +166,11 @@ private:
     std::shared_ptr<detail::tcp_connection_handle_state> handle_state_;
     std::vector<std::unique_ptr<connection_entry>> connections_;
     std::vector<std::uint32_t> free_connection_slots_;
+    std::vector<connection_slot_ref> retired_connection_slots_;
     std::vector<std::shared_ptr<pending_connect>> pending_connects_;
     std::uint32_t next_connection_generation_{1};
     std::size_t connection_count_{0};
+    std::uint32_t user_callback_depth_{0};
     bool running_{false};
 };
 

@@ -264,6 +264,8 @@ struct RuntimeTcpListenerState {
     std::atomic<int> last_error{0};
     std::atomic<int> cpu_runs{0};
     std::atomic<int> handle_send_result{-1};
+    std::atomic<int> successful_ops{0};
+    std::atomic<std::size_t> first_read_size{0};
     std::atomic<int> connection_count_after_close{-1};
     std::atomic<bool> connection_count_checked{false};
     std::atomic<bool> handle_published{false};
@@ -408,6 +410,41 @@ void runtime_tcp_connection_read_via_handle(void *owner, af::net::tcp_connection
                                         std::memory_order_release);
         conn.close(af::net::close_reason::error);
     }
+}
+
+void runtime_tcp_connection_owner_control_read(void *owner, af::net::tcp_connection_ref conn,
+                                               af::BufferView bytes) noexcept {
+    auto *state = static_cast<RuntimeTcpListenerState *>(owner);
+    if (state != nullptr) {
+        state->reads.fetch_add(1, std::memory_order_release);
+    }
+
+    const af::net::tcp_connection_handle handle = conn.handle();
+    int successful = 0;
+    successful += handle.pause_read() ? 1 : 0;
+    successful += handle.resume_read() ? 1 : 0;
+    successful += handle.set_no_delay(true) ? 1 : 0;
+    successful += handle.set_keepalive(false) ? 1 : 0;
+    const af::net::send_result sent = handle.send(bytes);
+    successful += sent == af::net::send_result::accepted ? 1 : 0;
+    successful += handle.close_after_flush() ? 1 : 0;
+
+    if (state != nullptr) {
+        state->handle_send_result.store(static_cast<int>(sent), std::memory_order_release);
+        state->successful_ops.store(successful, std::memory_order_release);
+    }
+}
+
+void runtime_tcp_connection_pause_after_first_read(void *owner, af::net::tcp_connection_ref conn,
+                                                   af::BufferView bytes) noexcept {
+    auto *state = static_cast<RuntimeTcpListenerState *>(owner);
+    if (state != nullptr) {
+        const int previous = state->reads.fetch_add(1, std::memory_order_release);
+        if (previous == 0) {
+            state->first_read_size.store(bytes.size(), std::memory_order_release);
+        }
+    }
+    static_cast<void>(conn.pause_read());
 }
 
 void runtime_tcp_connection_close(void *owner, af::net::tcp_connection_ref conn,
@@ -773,33 +810,35 @@ struct CapturedHandleState {
 };
 
 struct StopTimeoutState {
+    StopTimeoutState() {
+        payload.fill('x');
+    }
+
     std::atomic<bool> accepted{false};
     std::atomic<int> send_result{-1};
     std::atomic<int> close_count{0};
     std::atomic<int> close_reason{-1};
+    std::array<char, 16U * 1024U> payload{};
 };
 
 struct FillSendQueueOnAcceptHandler {
     std::shared_ptr<StopTimeoutState> state;
 
     void on_accept(af::net::TcpConnectionRef<NetServerRuntime> conn) noexcept {
-        if (state != nullptr) {
-            state->accepted.store(true, std::memory_order_release);
+        if (state == nullptr) {
+            return;
         }
 
-        std::array<char, 16U * 1024U> payload{};
-        payload.fill('x');
+        state->accepted.store(true, std::memory_order_release);
         af::net::SendResult last_result = af::net::SendResult::Accepted;
         for (int i = 0; i < 4096; ++i) {
-            last_result = conn.send(af::BufferView(payload.data(), payload.size()));
+            last_result = conn.send(af::BufferView(state->payload.data(), state->payload.size()));
             if (last_result == af::net::SendResult::Backpressure ||
                 last_result == af::net::SendResult::Closed) {
                 break;
             }
         }
-        if (state != nullptr) {
-            state->send_result.store(static_cast<int>(last_result), std::memory_order_release);
-        }
+        state->send_result.store(static_cast<int>(last_result), std::memory_order_release);
     }
 
     void on_close(af::net::TcpConnectionHandle<NetServerRuntime>,
@@ -1231,6 +1270,131 @@ TEST(NetTcpServerTests, RuntimeTcpConnectionHandleSendsFromCpuThread) {
     EXPECT_EQ(state.handle_send_result.load(std::memory_order_acquire),
               static_cast<int>(af::net::send_result::queued));
     EXPECT_EQ(state.errors.load(std::memory_order_acquire), 0);
+
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        state.stop_ok.store(server.stop(), std::memory_order_release);
+        state.stopped.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return state.stopped.load(std::memory_order_acquire); }));
+    EXPECT_TRUE(state.stop_ok.load(std::memory_order_acquire));
+
+    runtime.stop();
+}
+
+TEST(NetTcpServerTests, RuntimeTcpConnectionHandleOwnerThreadControlsConnection) {
+    af::runtime_config config;
+    config.threads = {af::io_threads("net-rt-io", 1)};
+    config.logger.consumer_thread = af::thread_selector::io(0);
+
+    af::runtime runtime(config);
+    RuntimeTcpListenerState state;
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_until([&] { return runtime.active_thread_count() == 1; }));
+
+    const af::thread_ref io_thread = runtime.select_thread_ref(af::thread_selector::io(0));
+    af::net::tcp_server server(runtime);
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        af::net::tcp_connection_callbacks callbacks;
+        callbacks.owner = &state;
+        callbacks.on_accept = &runtime_tcp_connection_accept;
+        callbacks.on_read = &runtime_tcp_connection_owner_control_read;
+        callbacks.on_close = &runtime_tcp_connection_close;
+
+        af::net::tcp_listener_config listener_config;
+        listener_config.name = "runtime-server-owner-handle-control";
+        listener_config.endpoint = af::net::tcp_endpoint::loopback_v4(0);
+        listener_config.threads = {io_thread};
+        listener_config.options.reuse_port = false;
+
+        const af::net::listener_result listener =
+            server.add_listener(std::move(listener_config), callbacks);
+        bool ok = listener.ok() && server.start();
+        const af::net::tcp_endpoint *endpoint = server.local_endpoint(listener.listener);
+        ok = ok && endpoint != nullptr;
+        if (ok) {
+            state.port.store(endpoint->port, std::memory_order_release);
+        }
+        state.start_ok.store(ok, std::memory_order_release);
+        state.started.store(true, std::memory_order_release);
+    }));
+
+    ASSERT_TRUE(wait_until([&] { return state.started.load(std::memory_order_acquire); }));
+    ASSERT_TRUE(state.start_ok.load(std::memory_order_acquire));
+    ASSERT_GT(state.port.load(std::memory_order_acquire), 0U);
+
+    EXPECT_EQ(roundtrip(state.port.load(std::memory_order_acquire), "owner"), "owner");
+    ASSERT_TRUE(wait_until([&] {
+        return state.successful_ops.load(std::memory_order_acquire) == 6 &&
+               state.closes.load(std::memory_order_acquire) >= 1;
+    }));
+    EXPECT_EQ(state.handle_send_result.load(std::memory_order_acquire),
+              static_cast<int>(af::net::send_result::accepted));
+
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        state.stop_ok.store(server.stop(), std::memory_order_release);
+        state.stopped.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return state.stopped.load(std::memory_order_acquire); }));
+    EXPECT_TRUE(state.stop_ok.load(std::memory_order_acquire));
+
+    runtime.stop();
+}
+
+TEST(NetTcpServerTests, RuntimeTcpConnectionPauseReadStopsCurrentDrainLoop) {
+    af::runtime_config config;
+    config.threads = {af::io_threads("net-rt-io", 1)};
+    config.logger.consumer_thread = af::thread_selector::io(0);
+
+    af::runtime runtime(config);
+    RuntimeTcpListenerState state;
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_until([&] { return runtime.active_thread_count() == 1; }));
+
+    const af::thread_ref io_thread = runtime.select_thread_ref(af::thread_selector::io(0));
+    af::net::tcp_server server(runtime);
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        af::net::tcp_connection_callbacks callbacks;
+        callbacks.owner = &state;
+        callbacks.on_accept = &runtime_tcp_connection_accept;
+        callbacks.on_read = &runtime_tcp_connection_pause_after_first_read;
+        callbacks.on_close = &runtime_tcp_connection_close;
+
+        af::net::tcp_listener_config listener_config;
+        listener_config.name = "runtime-server-pause-read";
+        listener_config.endpoint = af::net::tcp_endpoint::loopback_v4(0);
+        listener_config.threads = {io_thread};
+        listener_config.options.reuse_port = false;
+        listener_config.options.read_budget_bytes = 256U * 1024U;
+        listener_config.options.read_buffer_size = 1024U;
+
+        const af::net::listener_result listener =
+            server.add_listener(std::move(listener_config), callbacks);
+        bool ok = listener.ok() && server.start();
+        const af::net::tcp_endpoint *endpoint = server.local_endpoint(listener.listener);
+        ok = ok && endpoint != nullptr;
+        if (ok) {
+            state.port.store(endpoint->port, std::memory_order_release);
+        }
+        state.start_ok.store(ok, std::memory_order_release);
+        state.started.store(true, std::memory_order_release);
+    }));
+
+    ASSERT_TRUE(wait_until([&] { return state.started.load(std::memory_order_acquire); }));
+    ASSERT_TRUE(state.start_ok.load(std::memory_order_acquire));
+    ASSERT_GT(state.port.load(std::memory_order_acquire), 0U);
+
+    UniqueFd fd = connect_loopback(state.port.load(std::memory_order_acquire));
+    ASSERT_GE(fd.get(), 0);
+    const std::vector<std::byte> payload(128U * 1024U, std::byte{0x78});
+    send_all(fd.get(), payload.data(), payload.size());
+
+    ASSERT_TRUE(wait_until([&] { return state.reads.load(std::memory_order_acquire) >= 1; }));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_EQ(state.reads.load(std::memory_order_acquire), 1);
+    EXPECT_GT(state.first_read_size.load(std::memory_order_acquire), 0U);
+    EXPECT_LE(state.first_read_size.load(std::memory_order_acquire), 1024U);
 
     ASSERT_TRUE(runtime.post(io_thread, [&] {
         state.stop_ok.store(server.stop(), std::memory_order_release);

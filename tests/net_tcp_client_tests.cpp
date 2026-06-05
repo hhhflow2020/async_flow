@@ -931,6 +931,7 @@ TEST(NetTcpClientTests, StopReturnsWithoutWaitingForConnectTimeout) {
     std::size_t pending_count = 0;
     ASSERT_TRUE(query_pending_connects(runtime, io_thread, client, pending_count));
     if (pending_count == 0U) {
+        static_cast<void>(stop_runtime_tcp_client(runtime, io_thread, client, client_state));
         runtime.stop();
         GTEST_SKIP() << "pending connect completed synchronously on this host";
     }
@@ -964,6 +965,7 @@ TEST(NetTcpClientTests, StalePendingConnectCompletionDoesNotStopNewConnect) {
     std::size_t pending_count = 0;
     ASSERT_TRUE(query_pending_connects(runtime, io_thread, client, pending_count));
     if (pending_count == 0U) {
+        static_cast<void>(stop_runtime_tcp_client(runtime, io_thread, client, stale_state));
         runtime.stop();
         GTEST_SKIP() << "pending connect completed synchronously on this host";
     }

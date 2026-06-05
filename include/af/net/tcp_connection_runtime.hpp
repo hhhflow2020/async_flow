@@ -51,6 +51,15 @@ public:
     [[nodiscard]] virtual send_result send_to_connection(std::uint32_t slot,
                                                          std::uint32_t generation,
                                                          af::BufferView view) noexcept = 0;
+    [[nodiscard]] virtual bool pause_connection_read(std::uint32_t slot,
+                                                     std::uint32_t generation) noexcept = 0;
+    [[nodiscard]] virtual bool resume_connection_read(std::uint32_t slot,
+                                                      std::uint32_t generation) noexcept = 0;
+    [[nodiscard]] virtual bool set_connection_no_delay(std::uint32_t slot, std::uint32_t generation,
+                                                       bool enabled) noexcept = 0;
+    [[nodiscard]] virtual bool set_connection_keepalive(std::uint32_t slot,
+                                                        std::uint32_t generation,
+                                                        bool enabled) noexcept = 0;
     [[nodiscard]] virtual bool close_connection(std::uint32_t slot, std::uint32_t generation,
                                                 close_reason reason) noexcept = 0;
     [[nodiscard]] virtual bool close_connection_after_flush(std::uint32_t slot,
@@ -61,10 +70,13 @@ protected:
 };
 
 using tcp_connection_inactive_callback = void (*)(void *owner, tcp_connection &connection) noexcept;
+using tcp_connection_lifecycle_callback = void (*)(void *owner) noexcept;
 
 struct tcp_connection_lifecycle {
     void *owner{nullptr};
     tcp_connection_inactive_callback on_inactive{nullptr};
+    tcp_connection_lifecycle_callback on_callback_begin{nullptr};
+    tcp_connection_lifecycle_callback on_callback_end{nullptr};
 };
 
 struct tcp_connection_handle_state {
@@ -96,6 +108,10 @@ public:
 
     [[nodiscard]] send_result send(af::Buffer buffer) const noexcept;
     [[nodiscard]] send_result send(af::BufferView view) const noexcept;
+    [[nodiscard]] bool pause_read() const noexcept;
+    [[nodiscard]] bool resume_read() const noexcept;
+    [[nodiscard]] bool set_no_delay(bool enabled) const noexcept;
+    [[nodiscard]] bool set_keepalive(bool enabled) const noexcept;
     [[nodiscard]] bool close(close_reason reason = close_reason::local) const noexcept;
     [[nodiscard]] bool close_now(close_reason reason = close_reason::local) const noexcept;
     [[nodiscard]] bool close_after_flush() const noexcept;
@@ -141,6 +157,10 @@ public:
     [[nodiscard]] std::size_t queued_bytes() const noexcept;
     [[nodiscard]] send_result send(af::Buffer buffer) const noexcept;
     [[nodiscard]] send_result send(af::BufferView view) const noexcept;
+    [[nodiscard]] bool pause_read() const noexcept;
+    [[nodiscard]] bool resume_read() const noexcept;
+    [[nodiscard]] bool set_no_delay(bool enabled) const noexcept;
+    [[nodiscard]] bool set_keepalive(bool enabled) const noexcept;
     void close(close_reason reason = close_reason::local) const noexcept;
     void close_after_flush() const noexcept;
 
@@ -302,8 +322,68 @@ public:
         return !alive();
     }
 
+    [[nodiscard]] bool pause_read() noexcept {
+        if (!alive()) {
+            return false;
+        }
+        if (read_paused_) {
+            return true;
+        }
+        read_paused_ = true;
+        update_interest();
+        return alive();
+    }
+
+    [[nodiscard]] bool resume_read() noexcept {
+        if (!alive()) {
+            return false;
+        }
+        if (!read_paused_) {
+            return true;
+        }
+        read_paused_ = false;
+        update_interest();
+        return alive();
+    }
+
+    [[nodiscard]] bool set_no_delay(bool enabled) noexcept {
+        if (!alive() || local_endpoint_.family == address_family::unix_domain ||
+            peer_endpoint_.family == address_family::unix_domain) {
+            return false;
+        }
+        if (!detail::set_tcp_no_delay(fd_, enabled)) {
+            return false;
+        }
+        config_.no_delay = enabled;
+        return true;
+    }
+
+    [[nodiscard]] bool set_keepalive(bool enabled) noexcept {
+        if (!alive() || local_endpoint_.family == address_family::unix_domain ||
+            peer_endpoint_.family == address_family::unix_domain) {
+            return false;
+        }
+        if (!detail::set_socket_keepalive(fd_, enabled)) {
+            return false;
+        }
+        config_.keepalive = enabled;
+        return true;
+    }
+
 private:
     friend class tcp_connection_ref;
+
+    void begin_user_callback() noexcept {
+        if (lifecycle_.on_callback_begin != nullptr) {
+            lifecycle_.on_callback_begin(lifecycle_.owner);
+        }
+    }
+
+    void end_user_callback() noexcept {
+        if (lifecycle_.on_callback_end != nullptr) {
+            lifecycle_.on_callback_end(lifecycle_.owner);
+        }
+    }
 
     [[nodiscard]] static tcp_connection_config
     normalize_config(tcp_connection_config config) noexcept {
@@ -386,14 +466,16 @@ private:
         }
 
         std::size_t consumed = 0;
-        while (alive() && consumed < config_.read_budget_bytes) {
+        while (alive() && !read_paused_ && consumed < config_.read_budget_bytes) {
             const ssize_t n = ::recv(fd_, read_buffer_.data(), read_buffer_.size(), 0);
             if (n > 0) {
                 const std::size_t size = static_cast<std::size_t>(n);
                 consumed += size;
                 if (callbacks_.on_read != nullptr) {
+                    begin_user_callback();
                     callbacks_.on_read(callbacks_.owner, tcp_connection_ref(this),
                                        af::BufferView(read_buffer_.data(), size));
+                    end_user_callback();
                 }
                 continue;
             }
@@ -493,15 +575,31 @@ private:
         if (!alive()) {
             return;
         }
-        std::uint32_t interests = af::reactor_readable;
+        std::uint32_t interests = read_paused_ ? 0U : af::reactor_readable;
         if (!output_.empty()) {
             interests |= af::reactor_writable;
         }
-        if (interests == source_.interests) {
+        if (registered_ && interests == source_.interests) {
             return;
         }
         source_.interests = interests;
-        static_cast<void>(owner_->update_reactor_source(owner_thread_, &source_));
+        if (interests == 0U) {
+            if (registered_) {
+                registered_ = !owner_->unregister_reactor_source(owner_thread_, &source_);
+            }
+            return;
+        }
+        if (registered_) {
+            if (!owner_->update_reactor_source(owner_thread_, &source_)) {
+                close(close_reason::error);
+            }
+            return;
+        }
+        if (owner_->register_reactor_source(owner_thread_, &source_)) {
+            registered_ = true;
+            return;
+        }
+        close(close_reason::error);
     }
 
     void close_now(close_reason reason) noexcept {
@@ -514,7 +612,9 @@ private:
         }
         detail::close_fd(fd_);
         if (callbacks_.on_close != nullptr) {
+            begin_user_callback();
             callbacks_.on_close(callbacks_.owner, tcp_connection_ref(this), reason);
+            end_user_callback();
         }
     }
 
@@ -543,6 +643,7 @@ private:
     std::size_t queued_bytes_{0};
     bool registered_{false};
     bool close_after_flush_{false};
+    bool read_paused_{false};
 };
 
 inline bool tcp_connection_ref::valid() const noexcept {
@@ -585,6 +686,22 @@ inline send_result tcp_connection_ref::send(af::Buffer buffer) const noexcept {
 
 inline send_result tcp_connection_ref::send(af::BufferView view) const noexcept {
     return connection_ == nullptr ? send_result::closed : connection_->send(view);
+}
+
+inline bool tcp_connection_ref::pause_read() const noexcept {
+    return connection_ != nullptr && connection_->pause_read();
+}
+
+inline bool tcp_connection_ref::resume_read() const noexcept {
+    return connection_ != nullptr && connection_->resume_read();
+}
+
+inline bool tcp_connection_ref::set_no_delay(bool enabled) const noexcept {
+    return connection_ != nullptr && connection_->set_no_delay(enabled);
+}
+
+inline bool tcp_connection_ref::set_keepalive(bool enabled) const noexcept {
+    return connection_ != nullptr && connection_->set_keepalive(enabled);
 }
 
 inline void tcp_connection_ref::close(close_reason reason) const noexcept {

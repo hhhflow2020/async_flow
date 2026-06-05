@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -25,7 +26,7 @@ namespace af::net {
 class tcp_server : private detail::tcp_connection_owner {
 public:
     explicit tcp_server(af::runtime &owner, tcp_server_config config = {})
-        : owner_(&owner), config_(std::move(config)),
+        : owner_(&owner), config_(normalize_config(std::move(config))),
           handle_state_(std::make_shared<detail::tcp_connection_handle_state>()) {
         handle_state_->owner.store(this, std::memory_order_release);
     }
@@ -279,6 +280,12 @@ private:
         std::uint32_t slot{0};
         std::uint32_t generation{0};
         bool occupied{false};
+        bool retired{false};
+    };
+
+    struct connection_slot_ref {
+        std::uint32_t slot{0};
+        std::uint32_t generation{0};
     };
 
     [[nodiscard]] af::thread_ref current_owner_thread() const noexcept {
@@ -306,6 +313,75 @@ private:
             return false;
         }
         return config.threads.front() == owner_thread;
+    }
+
+    [[nodiscard]] static tcp_server_config normalize_config(tcp_server_config config) noexcept {
+        const tcp_connection_config defaults{};
+        if (config.connection.read_buffer_size == 0U) {
+            config.connection.read_buffer_size = defaults.read_buffer_size;
+        }
+        if (config.connection.read_budget_bytes == 0U) {
+            config.connection.read_budget_bytes = defaults.read_budget_bytes;
+        }
+        if (config.connection.write_budget_bytes == 0U) {
+            config.connection.write_budget_bytes = defaults.write_budget_bytes;
+        }
+        if (config.connection.output_high_watermark == 0U) {
+            config.connection.output_high_watermark = defaults.output_high_watermark;
+        }
+        if (config.connection_close_timeout.count() < 0) {
+            config.connection_close_timeout = std::chrono::milliseconds(0);
+        }
+        return config;
+    }
+
+    [[nodiscard]] tcp_connection_config
+    connection_config_for_listener(const tcp_listener_config &config) const noexcept {
+        const tcp_listener_options defaults{};
+        tcp_connection_config connection = config_.connection;
+        if (config.options.read_buffer_size != defaults.read_buffer_size) {
+            connection.read_buffer_size = config.options.read_buffer_size;
+        }
+        if (config.options.read_budget_bytes != defaults.read_budget_bytes) {
+            connection.read_budget_bytes = config.options.read_budget_bytes;
+        }
+        if (config.options.write_budget_bytes != defaults.write_budget_bytes) {
+            connection.write_budget_bytes = config.options.write_budget_bytes;
+        }
+        if (config.options.output_high_watermark != defaults.output_high_watermark) {
+            connection.output_high_watermark = config.options.output_high_watermark;
+        }
+        if (config.options.no_delay != defaults.no_delay) {
+            connection.no_delay = config.options.no_delay;
+        }
+        if (config.options.keepalive != defaults.keepalive) {
+            connection.keepalive = config.options.keepalive;
+        }
+        return connection;
+    }
+
+    void begin_user_callback() noexcept {
+        ++user_callback_depth_;
+    }
+
+    void end_user_callback() noexcept {
+        if (user_callback_depth_ > 0U) {
+            --user_callback_depth_;
+        }
+    }
+
+    static void on_connection_callback_begin(void *owner) noexcept {
+        auto *entry = static_cast<connection_entry *>(owner);
+        if (entry != nullptr && entry->server != nullptr) {
+            entry->server->begin_user_callback();
+        }
+    }
+
+    static void on_connection_callback_end(void *owner) noexcept {
+        auto *entry = static_cast<connection_entry *>(owner);
+        if (entry != nullptr && entry->server != nullptr) {
+            entry->server->end_user_callback();
+        }
     }
 
     [[nodiscard]] listener_id acquire_listener_slot() {
@@ -459,9 +535,13 @@ private:
             detail::tcp_connection_lifecycle lifecycle;
             lifecycle.owner = entry;
             lifecycle.on_inactive = &tcp_server::on_connection_inactive;
+            lifecycle.on_callback_begin = &tcp_server::on_connection_callback_begin;
+            lifecycle.on_callback_end = &tcp_server::on_connection_callback_end;
+            const tcp_connection_config connection_config =
+                connection_config_for_listener(listener.config);
             entry->connection = std::make_unique<tcp_connection>(
                 *owner_, source.owner_thread(), owned_fd, entry->slot, entry->generation,
-                source.local_endpoint(), peer_endpoint, config_.connection,
+                source.local_endpoint(), peer_endpoint, connection_config,
                 listener.connection_callbacks, lifecycle, handle_state_);
             owned_fd = -1;
             if (!entry->connection->start()) {
@@ -478,12 +558,15 @@ private:
             return false;
         }
         if (listener.connection_callbacks.on_accept != nullptr) {
+            begin_user_callback();
             listener.connection_callbacks.on_accept(listener.connection_callbacks.owner,
                                                     tcp_connection_ref(entry->connection.get()));
+            end_user_callback();
         }
         if (entry->connection == nullptr || !entry->connection->alive()) {
-            release_connection_slot(entry->slot);
+            retire_connection_slot(entry->slot, entry->generation);
         }
+        reap_retired_connections_if_safe();
         return true;
     }
 
@@ -521,7 +604,8 @@ private:
         }
         const send_result result = entry->connection->send(std::move(buffer));
         if (result == send_result::closed) {
-            release_connection_slot(slot);
+            retire_connection_slot(slot, generation);
+            reap_retired_connections_if_safe();
         }
         return result;
     }
@@ -534,9 +618,34 @@ private:
         }
         const send_result result = entry->connection->send(view);
         if (result == send_result::closed) {
-            release_connection_slot(slot);
+            retire_connection_slot(slot, generation);
+            reap_retired_connections_if_safe();
         }
         return result;
+    }
+
+    [[nodiscard]] bool pause_connection_read(std::uint32_t slot,
+                                             std::uint32_t generation) noexcept override {
+        connection_entry *entry = find_connection_entry(slot, generation);
+        return entry != nullptr && entry->connection->pause_read();
+    }
+
+    [[nodiscard]] bool resume_connection_read(std::uint32_t slot,
+                                              std::uint32_t generation) noexcept override {
+        connection_entry *entry = find_connection_entry(slot, generation);
+        return entry != nullptr && entry->connection->resume_read();
+    }
+
+    [[nodiscard]] bool set_connection_no_delay(std::uint32_t slot, std::uint32_t generation,
+                                               bool enabled) noexcept override {
+        connection_entry *entry = find_connection_entry(slot, generation);
+        return entry != nullptr && entry->connection->set_no_delay(enabled);
+    }
+
+    [[nodiscard]] bool set_connection_keepalive(std::uint32_t slot, std::uint32_t generation,
+                                                bool enabled) noexcept override {
+        connection_entry *entry = find_connection_entry(slot, generation);
+        return entry != nullptr && entry->connection->set_keepalive(enabled);
     }
 
     [[nodiscard]] bool close_connection(std::uint32_t slot, std::uint32_t generation,
@@ -546,7 +655,8 @@ private:
             return false;
         }
         entry->connection->close(reason);
-        release_connection_slot(slot);
+        retire_connection_slot(slot, generation);
+        reap_retired_connections_if_safe();
         return true;
     }
 
@@ -558,7 +668,8 @@ private:
         }
         const bool closed = entry->connection->close_after_flush();
         if (closed) {
-            release_connection_slot(slot);
+            retire_connection_slot(slot, generation);
+            reap_retired_connections_if_safe();
         }
         return true;
     }
@@ -573,6 +684,7 @@ private:
             entry.slot = slot;
             entry.generation = generation;
             entry.occupied = true;
+            entry.retired = false;
             ++connection_count_;
             return &entry;
         }
@@ -582,6 +694,7 @@ private:
         entry.slot = slot;
         entry.generation = generation;
         entry.occupied = true;
+        entry.retired = false;
         ++connection_count_;
         return &entry;
     }
@@ -592,6 +705,45 @@ private:
             generation = next_connection_generation_++;
         }
         return generation;
+    }
+
+    void retire_connection_slot(std::uint32_t slot, std::uint32_t generation) noexcept {
+        if (slot >= connections_.size() || connections_[slot] == nullptr) {
+            return;
+        }
+        connection_entry &entry = *connections_[slot];
+        if (!entry.occupied || entry.generation != generation || entry.retired) {
+            return;
+        }
+        entry.retired = true;
+        try {
+            retired_connection_slots_.push_back(connection_slot_ref{slot, generation});
+        } catch (...) {
+        }
+    }
+
+    void reap_retired_connections() noexcept {
+        if (retired_connection_slots_.empty()) {
+            return;
+        }
+        for (const connection_slot_ref retired : retired_connection_slots_) {
+            if (retired.slot >= connections_.size() || connections_[retired.slot] == nullptr) {
+                continue;
+            }
+            const connection_entry &entry = *connections_[retired.slot];
+            if (!entry.occupied || entry.generation != retired.generation ||
+                entry.connection == nullptr || entry.connection->alive()) {
+                continue;
+            }
+            release_connection_slot(retired.slot);
+        }
+        retired_connection_slots_.clear();
+    }
+
+    void reap_retired_connections_if_safe() noexcept {
+        if (user_callback_depth_ == 0U) {
+            reap_retired_connections();
+        }
     }
 
     void release_connection_slot(std::uint32_t slot) noexcept {
@@ -616,6 +768,7 @@ private:
         }
         connections_.clear();
         free_connection_slots_.clear();
+        retired_connection_slots_.clear();
         connection_count_ = 0;
     }
 
@@ -625,7 +778,8 @@ private:
             entry->generation != connection.generation()) {
             return;
         }
-        entry->server->release_connection_slot(entry->slot);
+        entry->server->retire_connection_slot(entry->slot, entry->generation);
+        entry->server->reap_retired_connections_if_safe();
     }
 
     af::runtime *owner_{nullptr};
@@ -635,10 +789,12 @@ private:
     std::vector<std::unique_ptr<connection_entry>> connections_;
     std::vector<std::uint32_t> free_listener_slots_;
     std::vector<std::uint32_t> free_connection_slots_;
+    std::vector<connection_slot_ref> retired_connection_slots_;
     std::uint32_t next_listener_generation_{1};
     std::uint32_t next_connection_generation_{1};
     std::size_t listener_count_{0};
     std::size_t connection_count_{0};
+    std::uint32_t user_callback_depth_{0};
     bool running_{false};
 };
 
