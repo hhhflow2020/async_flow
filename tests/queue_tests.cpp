@@ -222,6 +222,20 @@ TEST(QueueTests, IntrusiveMpscReturnsSingleNodeAndAllowsImmediateReuse) {
     EXPECT_TRUE(queue.empty());
 }
 
+TEST(QueueTests, IntrusiveMpscEmptyReportsBufferedTailNode) {
+    af::detail::IntrusiveMpscQueue<IntrusiveQueueValue> queue;
+    IntrusiveQueueValue first;
+    IntrusiveQueueValue second;
+
+    queue.push(&first);
+    queue.push(&second);
+
+    EXPECT_EQ(queue.try_pop(), &first);
+    EXPECT_FALSE(queue.empty());
+    EXPECT_EQ(queue.try_pop(), &second);
+    EXPECT_TRUE(queue.empty());
+}
+
 TEST(QueueTests, IntrusiveMpscSupportsConcurrentProducersInPerProducerOrder) {
     constexpr int producer_count = 4;
     constexpr int values_per_producer = 256;

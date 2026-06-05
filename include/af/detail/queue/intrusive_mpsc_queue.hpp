@@ -76,7 +76,7 @@ public:
 
     [[nodiscard]] bool empty() const noexcept {
         Node *tail = tail_;
-        return tail->next.load(std::memory_order_acquire) == nullptr &&
+        return tail == &stub_ && tail->next.load(std::memory_order_acquire) == nullptr &&
                tail == head_.load(std::memory_order_acquire);
     }
 
