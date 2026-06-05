@@ -267,8 +267,12 @@ public:
         }
 
         using work_type = detail::runtime_function_work<std::decay_t<Fn>>;
+        const task_pool_config &pool_config = config().task_pool;
         return detail::visit_runtime_pooled_object_pool_holder<work_type>(
-            config().task_pool.local_cache_size, [&](auto &holder) -> bool {
+            pool_config.local_cache_size, [&](auto &holder) -> bool {
+                if (!holder.try_reserve_at_least(pool_config.slab_object_count)) {
+                    return false;
+                }
                 work_type *work = nullptr;
                 try {
                     work = holder.pool.create(

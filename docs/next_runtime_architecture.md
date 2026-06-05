@@ -258,7 +258,7 @@ service task 是长期服务对象，例如 logger、metrics、trace。executor 
 
 当前静态 runtime 和实例 runtime 都已具备通用 service task 骨架：service 对象通过 `register_service_task()` 在 owner runtime 线程注册，executor 每轮按 `service_task_budget` 调用 `run_service()`；外部生产者只更新 service 自己的 pending 状态并调用 `wake_service_tasks()` 唤醒目标 executor。service 列表仅在 owner runtime 线程访问，因此不需要互斥锁。实例 runtime 的 executor 已按 `scheduler.task_drain_budget` 限制每轮 task inbox drain 数量，按 `timer.drain_budget` 限制每轮到期 timer 数量，并在 `scheduler.max_task_run_slice` 非零时额外按时间片提前让出，避免长任务流饿死 timer、service task 和 reactor poll。静态 runtime 的日志消费者已经迁移到这个通用 service task 接口；实例 runtime 已支持从 `runtime_config.logger` 自动创建 runtime-owned async logger，日志消费者绑定到配置指定的 runtime 线程。
 
-实例 runtime 还提供函数式 `post(thread_ref, fn)` 控制面入口：callable 会被包装成一次性 `runtime_work`，按 `task_pool.local_cache_size` 选择同一套 size-class pooled object，再投递到目标 executor 的 intrusive MPSC inbox，执行完成后在目标线程归还对象池；投递失败会立即释放 callable。`schedule_after(thread_ref, delay, fn)` / `schedule_at(thread_ref, time, fn)` 则会把 callable 包装成隐藏 `runtime_task`，走 task 对象池和目标 executor 本地 timer backend。该入口用于控制任务、server/listener 管理、超时处理和少量跨线程切换，热路径仍可直接使用自定义 `runtime_work` 或 `runtime_task` 以完全控制生命周期和分配策略。
+实例 runtime 还提供函数式 `post(thread_ref, fn)` 控制面入口：callable 会被包装成一次性 `runtime_work`，按 `task_pool.local_cache_size` 选择同一套 size-class pooled object，并按 `task_pool.slab_object_count` 对该 callable work 类型做首次 reserve，再投递到目标 executor 的 intrusive MPSC inbox，执行完成后在目标线程归还对象池；投递失败会立即释放 callable。`schedule_after(thread_ref, delay, fn)` / `schedule_at(thread_ref, time, fn)` 则会把 callable 包装成隐藏 `runtime_task`，走 task 对象池和目标 executor 本地 timer backend。该入口用于控制任务、server/listener 管理、超时处理和少量跨线程切换，热路径仍可直接使用自定义 `runtime_work` 或 `runtime_task` 以完全控制生命周期和分配策略。
 
 ## Task API 与生命周期
 
