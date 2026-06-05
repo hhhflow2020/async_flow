@@ -11,7 +11,7 @@
 - `tcp_endpoint` / `udp_endpoint` / `unix_endpoint`：IPv4、IPv6 和 Unix path endpoint 的语义化表示。
 - `tcp_listener`：监听 fd、accept 循环、listener id、监听配置和 handler 绑定。
 - `tcp_connection`：连接 fd、读 buffer、写队列、关闭状态、所属 listener 和用户上下文。
-- `tcp_server`：管理同一个 control IO 线程上的多个 listener、连接表和启动/停止生命周期。
+- `tcp_server`：server facade 管理逻辑 listener 和生命周期；每个目标 IO 线程有自己的 shard，shard 独占 listener fd、connection table 和连接生命周期。
 - `tcp_client`：在绑定 IO 线程上发起非阻塞 connect，连接成功后交给 `tcp_connection` 统一管理。
 - `udp_socket`：绑定本地 IPv4/IPv6 endpoint，可选连接 remote endpoint；同一抽象同时覆盖 UDP server/client。
 - `unix_stream_server` / `unix_stream_client`：面向 Unix domain stream socket 的 server/client 控制对象，复用 stream connection 热路径。
@@ -48,12 +48,12 @@ callbacks.on_accept = &on_accept;
 callbacks.on_read = &on_read;
 callbacks.on_close = &on_close;
 
-// 在 runtime task 中执行，且后续控制操作固定在同一个 reactor 线程上。
+// 在 runtime task 中执行，且后续控制操作固定在同一个 control reactor 线程上。
 runtime.post(io_thread, [&] {
     af::net::tcp_listener_config listener;
     listener.name = "public";
     listener.endpoint = af::net::tcp_endpoint::any(8080);
-    listener.threads = {io_thread};
+    listener.threads = af::net::thread_list(runtime.io_threads());
     listener.options.reuse_port = true;
 
     const af::net::listener_result public_listener =
@@ -66,9 +66,9 @@ runtime.post(io_thread, [&] {
 
 `tcp_server_config` 是 server 级配置，包含默认 `connection` 配置和 `connection_close_timeout`。`connection` 会作为 listener 的默认连接配置，覆盖读 buffer、读预算、写预算、输出高水位、`TCP_NODELAY` 和 keepalive；`tcp_listener_options` 仍可在单个 listener 上覆盖这些连接热路径参数，并继续承载 `backlog`、`reuse_port`、`ipv6_only`、accept 预算和 Unix path 生命周期选项。
 
-运行中可以动态增加或移除 listener。TCP server 控制面是 reactor-only：`add_listener()`、`remove_listener()`、`start()`、`stop()` 应由同一个 control reactor 线程调用；外部线程应显式投递一个 runtime task 到该 reactor。`tcp_server` 内部 listener table 和 connection table 不加锁，第一次控制操作会绑定 control IO 线程，后续从其他 IO 线程控制同一个 server 会失败，避免无锁状态被并发修改。
+运行中可以动态增加或移除 listener。TCP server 控制面是 reactor-only：`add_listener()`、`remove_listener()`、`start()`、`stop()` 应由同一个 control reactor 线程调用；外部线程应显式投递一个 runtime task 到该 reactor。`tcp_server` facade 内部只维护逻辑 listener 表和 shard 列表；真正的 listener fd、connection table、retire/reap 和回调深度都在对应 IO shard 内部，shard 只由自己的 reactor 线程访问，因此不需要 mutex。
 
-当前实现的一个约束是：单次 `add_listener()` 只绑定当前 control IO 线程。要在多个 IO 线程上监听同一端口，现阶段应为每个 IO 线程创建独立 `tcp_server` / listener 控制对象，或等待后续 shard 化 server API。目标架构中的 `listener.threads = rt.io_threads()` 会在后续实现中统一展开为每个 IO shard 的 listener。
+`listener.threads` 可以绑定一个或多个 IO 线程；未填写时默认展开为 `runtime.io_threads()`。多 IO 监听同一 TCP 端口时，当前实现支持 `reuse_port=true` 且端口非 0 的高性能路径：每个目标 IO shard 创建自己的 nonblocking listen fd，内核把连接分配到不同 shard。Unix domain listener 仍然归一到单个 owner IO 线程。`reuse_port=false` 的“单 acceptor 后再分发 accepted fd”路径尚未实现，避免为了次优路径引入隐藏 command queue 或跨 reactor fd 迁移复杂度。
 
 `start()` / 动态 `add_listener()` 表示控制任务已成功提交；真正的 `bind/listen/register channel` 在目标 IO shard 上异步完成。监听 fd 打开失败会通过 handler 的 `on_error(listener, error)` 或 `on_listener_error(listener, error)` 回调报告。这样控制面不需要 mutex、condition variable 或跨线程 barrier，也不会在 IO 线程上等待自身任务。
 

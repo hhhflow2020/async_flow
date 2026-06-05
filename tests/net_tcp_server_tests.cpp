@@ -226,6 +226,7 @@ struct RuntimeTcpListenerState {
     std::atomic<int> cpu_runs{0};
     std::atomic<int> handle_send_result{-1};
     std::atomic<int> successful_ops{0};
+    std::atomic<std::uint64_t> runtime_thread_mask{0};
     std::atomic<std::size_t> first_read_size{0};
     std::atomic<int> connection_count_after_close{-1};
     std::atomic<bool> connection_count_checked{false};
@@ -286,6 +287,18 @@ void runtime_tcp_connection_accept(void *owner, af::net::tcp_connection_ref conn
     }
 }
 
+void runtime_tcp_connection_record_accept(void *owner, af::net::tcp_connection_ref conn) noexcept {
+    auto *state = static_cast<RuntimeTcpListenerState *>(owner);
+    if (state == nullptr || !conn.valid()) {
+        return;
+    }
+    state->accepted.fetch_add(1, std::memory_order_release);
+    const auto index = af::runtime::current_thread_index();
+    if (index < 64U) {
+        state->runtime_thread_mask.fetch_or(1ULL << index, std::memory_order_release);
+    }
+}
+
 void runtime_tcp_connection_capture_accept(void *owner, af::net::tcp_connection_ref conn) noexcept {
     auto *state = static_cast<RuntimeTcpListenerState *>(owner);
     if (state != nullptr && conn.valid()) {
@@ -320,6 +333,19 @@ void runtime_tcp_connection_read(void *owner, af::net::tcp_connection_ref conn,
     auto *state = static_cast<RuntimeTcpListenerState *>(owner);
     if (state != nullptr) {
         state->reads.fetch_add(1, std::memory_order_release);
+    }
+    static_cast<void>(conn.send(bytes));
+}
+
+void runtime_tcp_connection_record_read(void *owner, af::net::tcp_connection_ref conn,
+                                        af::BufferView bytes) noexcept {
+    auto *state = static_cast<RuntimeTcpListenerState *>(owner);
+    if (state != nullptr) {
+        state->reads.fetch_add(1, std::memory_order_release);
+        const auto index = af::runtime::current_thread_index();
+        if (index < 64U) {
+            state->runtime_thread_mask.fetch_or(1ULL << index, std::memory_order_release);
+        }
     }
     static_cast<void>(conn.send(bytes));
 }
@@ -696,6 +722,73 @@ TEST(NetTcpServerTests, RuntimeTcpServerRejectsControlFromSecondIoThread) {
     ASSERT_TRUE(wait_until([&] { return state.stopped.load(std::memory_order_acquire); }));
     EXPECT_TRUE(state.stop_ok.load(std::memory_order_acquire));
 
+    runtime.stop();
+}
+
+TEST(NetTcpServerTests, RuntimeTcpServerReusePortListenerStartsOnMultipleIoThreads) {
+    af::runtime_config config;
+    config.threads = {af::io_threads("net-rt-io", 2)};
+    config.logger.consumer_thread = af::thread_selector::io(0);
+
+    af::runtime runtime(config);
+    RuntimeTcpListenerState state;
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_until([&] { return runtime.active_thread_count() == 2; }));
+
+    const std::uint16_t port = reserve_loopback_port();
+    const af::thread_ref io_0 = runtime.select_thread_ref(af::thread_selector::io(0));
+    const af::thread_ref io_1 = runtime.select_thread_ref(af::thread_selector::io(1));
+    af::net::tcp_server server(runtime);
+    af::net::tcp_listener_handle listener;
+
+    ASSERT_TRUE(runtime.post(io_0, [&] {
+        af::net::tcp_connection_callbacks callbacks;
+        callbacks.owner = &state;
+        callbacks.on_accept = &runtime_tcp_connection_record_accept;
+        callbacks.on_read = &runtime_tcp_connection_record_read;
+        callbacks.on_close = &runtime_tcp_connection_close;
+
+        af::net::tcp_listener_config listener_config;
+        listener_config.name = "runtime-server-reuse-port-shards";
+        listener_config.endpoint = af::net::tcp_endpoint::loopback_v4(port);
+        listener_config.threads = {io_0, io_1};
+        listener_config.options.reuse_port = true;
+
+        const af::net::listener_result result =
+            server.add_listener(std::move(listener_config), callbacks);
+        listener = result.listener;
+        const bool ok = result.ok() && server.start();
+        state.start_ok.store(ok, std::memory_order_release);
+        state.started.store(true, std::memory_order_release);
+    }));
+
+    ASSERT_TRUE(wait_until([&] { return state.started.load(std::memory_order_acquire); }));
+    ASSERT_TRUE(state.start_ok.load(std::memory_order_acquire));
+    ASSERT_TRUE(listener.valid());
+
+    std::atomic<bool> io_1_checked{false};
+    std::atomic<bool> io_1_active{false};
+    ASSERT_TRUE(runtime.post(io_1, [&] {
+        io_1_active.store(server.state(listener) == af::net::listener_state::active,
+                          std::memory_order_release);
+        io_1_checked.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return io_1_checked.load(std::memory_order_acquire); }));
+    EXPECT_TRUE(io_1_active.load(std::memory_order_acquire));
+
+    EXPECT_EQ(roundtrip(port, "reuse-port"), "reuse-port");
+    ASSERT_TRUE(wait_until([&] { return state.accepted.load(std::memory_order_acquire) >= 1; }));
+    EXPECT_NE(state.runtime_thread_mask.load(std::memory_order_acquire), 0U);
+
+    ASSERT_TRUE(runtime.post(io_0, [&] {
+        state.stop_ok.store(server.stop(), std::memory_order_release);
+        state.stopped.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return state.stopped.load(std::memory_order_acquire); }));
+    EXPECT_TRUE(state.stop_ok.load(std::memory_order_acquire));
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
     runtime.stop();
 }
 

@@ -444,7 +444,7 @@ server.start();
 多 IO 线程监听策略：
 
 - `reuse_port=true`：每个目标 IO 线程各自创建 listen fd，内核分配连接，性能最好。
-- `reuse_port=false`：只在一个 IO 线程创建 listen fd，accepted fd 再按策略分发到目标 IO 线程。
+- `reuse_port=false`：目标上可扩展为只在一个 IO 线程创建 listen fd，accepted fd 再按策略分发到目标 IO 线程；当前实现先支持 `reuse_port=true` 的 shard 化高性能路径。
 - 同一个 listen fd 不放入多个 reactor；每个 fd 只属于一个 reactor。
 
 TCP server 流程：
