@@ -3,19 +3,9 @@
 
 #include <gtest/gtest.h>
 
-#include "af/async_flow.hpp"
-
-namespace {
-
-struct UtilityThreadTag;
-
-struct UtilityRuntimeTraits {
-    static constexpr auto threads = af::thread_layout(af::thread_group<UtilityThreadTag, 4>());
-};
-
-using Runtime = af::AsyncRuntime<UtilityRuntimeTraits>;
-
-} // namespace
+#include "af/batch_sequencer.hpp"
+#include "af/crud_batch.hpp"
+#include "af/runtime.hpp"
 
 TEST(UtilityTests, SplitByShardGroupsByKey) {
     struct Op {
@@ -24,7 +14,8 @@ TEST(UtilityTests, SplitByShardGroupsByKey) {
     };
 
     std::vector<Op> ops{{0, 10}, {1, 11}, {4, 14}, {6, 16}};
-    auto sharded = Runtime::split_by_shard(std::move(ops), 4, [](const Op &op) { return op.key; });
+    auto sharded =
+        af::runtime::split_by_shard(std::move(ops), 4, [](const Op &op) { return op.key; });
 
     ASSERT_EQ(sharded.shard_count(), 4);
     ASSERT_EQ(sharded.shards[0].size(), 2);
