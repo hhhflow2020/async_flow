@@ -45,7 +45,11 @@ public:
     AsyncLogConsumerController &operator=(const AsyncLogConsumerController &) = delete;
     virtual ~AsyncLogConsumerController() = default;
 
-    virtual void shutdown() noexcept = 0;
+    void shutdown() noexcept {
+        shutdown(std::chrono::seconds(5));
+    }
+
+    virtual void shutdown(std::chrono::milliseconds timeout) noexcept = 0;
 };
 
 template <typename RuntimeT> class RuntimeAsyncLogConsumerController;

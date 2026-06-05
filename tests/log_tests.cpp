@@ -1200,7 +1200,7 @@ TEST(LogTests, RuntimeInstanceAwareSinkDrainsOnConfiguredRuntimeThread) {
     LOG(INFO) << "runtime instance-bound consumer external log";
 
     ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
-    logging->stop();
+    logging->stop(std::chrono::milliseconds(250));
     runtime.stop();
 
     EXPECT_EQ(observing_backend->record_count(), 1U);
@@ -1225,6 +1225,7 @@ TEST(LogTests, RuntimeInstanceAsyncLoggingUsesStructuredLoggerConfig) {
     runtime_config.logger.queue_shard_count = 1;
     runtime_config.logger.max_batch_records = 4;
     runtime_config.logger.max_batch_delay = std::chrono::microseconds(500);
+    runtime_config.shutdown.log_flush_timeout = std::chrono::seconds(1);
     runtime_config.logger.backends = {
         af::file_log_backend_config{path.string(), false, false, 8},
     };

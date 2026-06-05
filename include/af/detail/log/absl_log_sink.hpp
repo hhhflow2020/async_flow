@@ -320,13 +320,17 @@ public:
     }
 
     void stop() noexcept {
+        stop(std::chrono::seconds(5));
+    }
+
+    void stop(std::chrono::milliseconds timeout) noexcept {
         bool expected = true;
         if (!registered_.compare_exchange_strong(expected, false, std::memory_order_acq_rel,
                                                  std::memory_order_acquire)) {
             return;
         }
         absl::RemoveLogSink(sink_.get());
-        consumer_controller_->shutdown();
+        consumer_controller_->shutdown(timeout);
     }
 
 private:

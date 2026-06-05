@@ -563,6 +563,8 @@ created
 
 `accepting` 状态接受用户日志。`stopping` 后停止普通日志 admission。`draining` 消费已接受记录。`flushing` 调用后端 flush。`stopped` 注销 sink 并释放资源。
 
+当前 runtime-owned logger 在 `runtime.stop()` 时会使用 `shutdown.log_flush_timeout` 作为日志消费者 drain/flush 的等待预算；手动 `AsyncLogHandle::stop()` 也提供 timeout 重载。后端自身如果阻塞在不可取消 IO 上，仍需要后端实现自己的 `shutdown()` 解除阻塞。
+
 ## 优雅退出
 
 推荐 runtime 停止顺序：
@@ -640,6 +642,7 @@ include/af/reactor/select_reactor.hpp
 - 当前实例 runtime 已在 Linux 上接入 `thread_group_config.affinity.cpu_ids`：executor 线程入口对当前线程调用 `pthread_setaffinity_np`；非 Linux 平台当前为 no-op。`thread_priority_config` 仍处于配置解析阶段。
 - 当前实例 runtime 已提供 service task 注册、注销和唤醒入口：service 列表只在目标 executor 线程内修改，executor 主循环按 `scheduler.service_task_budget` 轮询，外部唤醒不加锁。
 - 当前实例 runtime 已提供 runtime-owned async logger：`runtime.start()` 在 `runtime.config().logger.backends` 非空时自动构造 file/udp/tcp 后端并把消费者注册为 service task，`runtime.stop()` 先 drain/flush 日志再停止 executor；`start_async_logging_for_runtime(runtime&, config, thread)` 仍作为手动自定义入口保留。
+- 当前 runtime-owned async logger 已接入 `shutdown.log_flush_timeout`，用于控制停止时日志 drain/flush 的等待预算；`shutdown.connection_close_timeout` 仍待网络层优雅关闭流程完整接入。
 - 当前实例 runtime 已提供 `af::runtime_task`、`af::make_task<T>(runtime, ...)`、`af::try_make_task<T>(runtime, ...)` 和 `runtime_task_handle<T>`：任务创建走 typed slab object pool，任务 id 默认使用每线程 block 分配，`diagnostics.enable_task_id=false` 时跳过 id 分配并保持 invalid；`schedule_to()` 投递到目标 executor，运行中请求下一跳会延后到当前 `run_task()` 返回后再入队，避免同一个任务对象并发重入。
 - 当前实例 runtime 已接入每 executor 本地 timer min-heap：`schedule_after()` / `schedule_at()` / `pending_after()` / `pending_at()` 先把 task 以 `timer_arming` 状态投递到目标 inbox，目标线程再挂入本地 heap；executor 空闲等待使用最近 timer deadline 作为 atomic/futex timeout，IO executor 则把最近 timer deadline 传给 `reactor.poll(timeout)`；`stop()` 会取消未到期 timer 并释放 task 生命周期引用。后续可在不改变 task API 的前提下把 min-heap backend 替换为分层时间轮。
 

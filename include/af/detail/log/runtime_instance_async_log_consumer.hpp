@@ -63,7 +63,7 @@ public:
     operator=(const RuntimeInstanceAsyncLogConsumerController &) = delete;
 
     ~RuntimeInstanceAsyncLogConsumerController() override {
-        shutdown();
+        shutdown(std::chrono::seconds(5));
     }
 
     [[nodiscard]] bool start() noexcept {
@@ -108,7 +108,11 @@ public:
         return did_work || logger_->ready_record_count() != 0U;
     }
 
-    void shutdown() noexcept override {
+    void shutdown() noexcept {
+        shutdown(std::chrono::seconds(5));
+    }
+
+    void shutdown(std::chrono::milliseconds timeout) noexcept override {
         bool expected = false;
         if (!shutdown_started_.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
                                                        std::memory_order_acquire)) {
@@ -122,7 +126,7 @@ public:
             return;
         }
 
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
         drain_until_finished(deadline);
 
         if (registered_.load(std::memory_order_acquire)) {

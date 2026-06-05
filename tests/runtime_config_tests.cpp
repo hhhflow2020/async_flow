@@ -869,6 +869,9 @@ TEST(RuntimeConfigTests, RuntimeConfigUsesPlainStructDefaultsAndFactories) {
     EXPECT_EQ(config.logger.record_pool.oom, af::oom_policy::fatal);
     EXPECT_TRUE(config.logger.record_pool.enable_stats);
     EXPECT_EQ(config.shutdown.drain_timeout, std::chrono::seconds(5));
+    EXPECT_EQ(config.shutdown.connection_close_timeout, std::chrono::seconds(5));
+    EXPECT_EQ(config.shutdown.log_flush_timeout, std::chrono::seconds(5));
+    EXPECT_TRUE(config.shutdown.stop_accept_first);
     EXPECT_TRUE(config.diagnostics.enable_task_id);
     EXPECT_TRUE(config.diagnostics.enable_stats);
     EXPECT_TRUE(config.diagnostics.enable_thread_name);

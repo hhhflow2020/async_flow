@@ -759,7 +759,8 @@ inline void runtime::stop_owned_logger() noexcept {
     if (owned_logger_ == nullptr) {
         return;
     }
-    owned_logger_->stop();
+    owned_logger_->stop(
+        std::chrono::duration_cast<std::chrono::milliseconds>(config().shutdown.log_flush_timeout));
     owned_logger_.reset();
 }
 
