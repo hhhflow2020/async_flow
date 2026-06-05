@@ -36,8 +36,13 @@ inline bool runtime_task::schedule_to(std::uint16_t thread) noexcept {
         switch (state) {
         case task_state::created:
         case task_state::pending:
-            if (enqueue_from_state(state, thread)) {
+            switch (enqueue_from_state(state, thread)) {
+            case enqueue_result::queued:
                 return true;
+            case enqueue_result::retry:
+                break;
+            case enqueue_result::failed:
+                return false;
             }
             break;
         case task_state::running:
@@ -65,8 +70,13 @@ inline bool runtime_task::schedule_after_ns(std::uint16_t thread,
         switch (state) {
         case task_state::created:
         case task_state::pending:
-            if (enqueue_timer_from_state(state, thread, deadline_ns)) {
+            switch (enqueue_timer_from_state(state, thread, deadline_ns)) {
+            case enqueue_result::queued:
                 return true;
+            case enqueue_result::retry:
+                break;
+            case enqueue_result::failed:
+                return false;
             }
             break;
         case task_state::running:
@@ -82,42 +92,44 @@ inline bool runtime_task::schedule_after_ns(std::uint16_t thread,
     }
 }
 
-inline bool runtime_task::enqueue_from_state(task_state previous, std::uint16_t thread) noexcept {
+inline runtime_task::enqueue_result
+runtime_task::enqueue_from_state(task_state previous, std::uint16_t thread) noexcept {
     task_state expected = previous;
     if (!state_.compare_exchange_weak(expected, task_state::queued, std::memory_order_acq_rel,
                                       std::memory_order_acquire)) {
-        return false;
+        return enqueue_result::retry;
     }
 
     add_lifetime_ref();
     if (owner_->post(thread, this)) {
-        return true;
+        return enqueue_result::queued;
     }
 
     state_.store(previous, std::memory_order_release);
     release_lifetime_ref();
-    return false;
+    return enqueue_result::failed;
 }
 
-inline bool runtime_task::enqueue_timer_from_state(task_state previous, std::uint16_t thread,
-                                                   std::int64_t deadline_ns) noexcept {
+inline runtime_task::enqueue_result
+runtime_task::enqueue_timer_from_state(task_state previous, std::uint16_t thread,
+                                       std::int64_t deadline_ns) noexcept {
     timer_deadline_ns_ = deadline_ns;
     task_state expected = previous;
     if (!state_.compare_exchange_weak(expected, task_state::timer_arming, std::memory_order_acq_rel,
                                       std::memory_order_acquire)) {
         timer_deadline_ns_ = no_timer_deadline_ns;
-        return false;
+        return enqueue_result::retry;
     }
 
     add_lifetime_ref();
     if (owner_->post(thread, this)) {
-        return true;
+        return enqueue_result::queued;
     }
 
     timer_deadline_ns_ = no_timer_deadline_ns;
     state_.store(previous, std::memory_order_release);
     release_lifetime_ref();
-    return false;
+    return enqueue_result::failed;
 }
 
 inline bool runtime_task::request_schedule_after_running(std::uint16_t thread) noexcept {
@@ -166,9 +178,10 @@ inline bool runtime_task::enqueue_late_request_after_running(std::uint16_t threa
 
     if (deadline_ns != no_timer_deadline_ns) {
         requested_deadline_ns_.store(no_timer_deadline_ns, std::memory_order_release);
-        return enqueue_timer_from_state(task_state::pending, thread, deadline_ns);
+        return enqueue_timer_from_state(task_state::pending, thread, deadline_ns) ==
+               enqueue_result::queued;
     }
-    return enqueue_from_state(task_state::pending, thread);
+    return enqueue_from_state(task_state::pending, thread) == enqueue_result::queued;
 }
 
 inline bool runtime_task::enqueue_next_from_running(std::uint16_t thread) noexcept {

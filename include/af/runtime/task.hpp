@@ -196,6 +196,12 @@ protected:
     }
 
 private:
+    enum class enqueue_result : std::uint8_t {
+        queued,
+        retry,
+        failed,
+    };
+
     static constexpr std::uint32_t no_requested_thread = std::numeric_limits<std::uint32_t>::max();
     static constexpr task_id_type task_id_block_size = 1024;
     static constexpr std::int64_t no_timer_deadline_ns = 0;
@@ -227,9 +233,10 @@ private:
                                                    std::int64_t deadline_ns) noexcept;
     [[nodiscard]] bool enqueue_late_request_after_running(std::uint16_t thread,
                                                           std::int64_t deadline_ns) noexcept;
-    [[nodiscard]] bool enqueue_from_state(task_state previous, std::uint16_t thread) noexcept;
-    [[nodiscard]] bool enqueue_timer_from_state(task_state previous, std::uint16_t thread,
-                                                std::int64_t deadline_ns) noexcept;
+    [[nodiscard]] enqueue_result enqueue_from_state(task_state previous,
+                                                    std::uint16_t thread) noexcept;
+    [[nodiscard]] enqueue_result enqueue_timer_from_state(task_state previous, std::uint16_t thread,
+                                                          std::int64_t deadline_ns) noexcept;
     [[nodiscard]] bool enqueue_next_from_running(std::uint16_t thread) noexcept;
     [[nodiscard]] bool enqueue_timer_next_from_running(std::uint16_t thread,
                                                        std::int64_t deadline_ns) noexcept;
