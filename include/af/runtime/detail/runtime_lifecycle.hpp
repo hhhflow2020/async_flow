@@ -146,6 +146,7 @@ inline void runtime::stop() noexcept {
     executors_.clear();
     ordered_batch_state_.clear();
     active_thread_count_.store(0, std::memory_order_release);
+    active_work_count_.store(0, std::memory_order_release);
     state_.store(runtime_state::stopped, std::memory_order_release);
 }
 
@@ -161,12 +162,41 @@ inline void runtime::join_all() noexcept {
     }
 }
 
+inline bool runtime::has_active_work() const noexcept {
+    return active_work_count_.load(std::memory_order_acquire) != 0U;
+}
+
+inline void runtime::track_work_started() noexcept {
+    active_work_count_.fetch_add(1, std::memory_order_acq_rel);
+}
+
+inline void runtime::track_work_finished() noexcept {
+    const std::uint32_t previous = active_work_count_.fetch_sub(1, std::memory_order_acq_rel);
+    AF_ASSERT(previous != 0U);
+}
+
+inline bool runtime::can_post_from_stopping_runtime_thread() const noexcept {
+    return current_runtime_ == this && current_executor_ != nullptr;
+}
+
 inline bool runtime::try_enter_post() noexcept {
-    if (state_.load(std::memory_order_acquire) != runtime_state::running) {
+    runtime_state observed = state_.load(std::memory_order_acquire);
+    if (observed != runtime_state::running) {
+        if (observed != runtime_state::stopping || !can_post_from_stopping_runtime_thread()) {
+            return false;
+        }
+        posting_count_.fetch_add(1, std::memory_order_acq_rel);
+        observed = state_.load(std::memory_order_acquire);
+        if (observed == runtime_state::stopping && can_post_from_stopping_runtime_thread()) {
+            return true;
+        }
+        leave_post();
         return false;
     }
     posting_count_.fetch_add(1, std::memory_order_acq_rel);
-    if (state_.load(std::memory_order_acquire) == runtime_state::running) {
+    observed = state_.load(std::memory_order_acquire);
+    if (observed == runtime_state::running ||
+        (observed == runtime_state::stopping && can_post_from_stopping_runtime_thread())) {
         return true;
     }
     leave_post();

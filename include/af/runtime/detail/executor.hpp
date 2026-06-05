@@ -46,6 +46,8 @@ private:
     [[nodiscard]] bool drain_inbox_by_budget() noexcept;
     [[nodiscard]] bool drain_inbox_with_time_slice() noexcept;
     [[nodiscard]] bool run_service_tasks() noexcept;
+    void run_work(runtime_work *work) noexcept;
+    void run_unqueued_work(runtime_work *work) noexcept;
     [[nodiscard]] static std::int64_t steady_now_ns() noexcept;
     [[nodiscard]] std::chrono::nanoseconds timer_wait_duration() const noexcept;
     void wait_for_wake_or_timer(std::uint32_t observed) noexcept;
@@ -78,7 +80,7 @@ private:
     std::uint64_t next_timer_sequence_{0};
     idle_wait_strategy idle_wait_{idle_wait_strategy::futex};
     wake_policy wake_policy_{wake_policy::empty_to_non_empty};
-    alignas(hardware_cache_line_size) std::atomic<bool> sleep_requested_{false};
+    alignas(hardware_cache_line_size) std::atomic<std::size_t> queued_work_count_{0};
     alignas(hardware_cache_line_size) std::atomic<std::uint32_t> wake_epoch_{0};
     std::atomic<bool> stop_requested_{false};
     std::thread worker_;

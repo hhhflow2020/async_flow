@@ -49,6 +49,23 @@ enum class RunningWakeTerminalMode : std::uint8_t {
     return true;
 }
 
+[[nodiscard]] bool wait_non_zero_until(std::atomic<int> &value,
+                                       std::chrono::steady_clock::time_point deadline) {
+    while (value.load(std::memory_order_acquire) == 0) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) {
+            return value.load(std::memory_order_acquire) != 0;
+        }
+
+        const auto remaining = deadline - now;
+        const auto wait_for =
+            remaining < std::chrono::milliseconds(1) ? remaining : std::chrono::milliseconds(1);
+        static_cast<void>(
+            af::detail::atomic_wait_value_for(value, 0, wait_for, std::memory_order_acquire));
+    }
+    return true;
+}
+
 class RunningPendingOwnerTask;
 
 class RunningPendingWakerTask final : public af::runtime_task {
@@ -134,12 +151,8 @@ private:
         }
         waker.reset();
 
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-        while (wake_flag_->load(std::memory_order_acquire) == 0 &&
-               std::chrono::steady_clock::now() < deadline) {
-            std::this_thread::yield();
-        }
-        if (wake_flag_->load(std::memory_order_acquire) == 0) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        if (!wait_non_zero_until(*wake_flag_, deadline)) {
             failures_->fetch_add(1, std::memory_order_relaxed);
             complete();
             return failed();
@@ -171,6 +184,7 @@ af::task_result RunningPendingWakerTask::run_task() noexcept {
         failures_->fetch_add(1, std::memory_order_relaxed);
     }
     wake_flag_->store(1, std::memory_order_release);
+    af::detail::atomic_notify_one(*wake_flag_);
     wake_attempts_->fetch_add(1, std::memory_order_release);
     af::detail::atomic_notify_one(*wake_attempts_);
     return done();
@@ -276,12 +290,8 @@ private:
     }
 
     [[nodiscard]] bool wait_for_wake() const noexcept {
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-        while (wake_flag_->load(std::memory_order_acquire) == 0 &&
-               std::chrono::steady_clock::now() < deadline) {
-            std::this_thread::yield();
-        }
-        return wake_flag_->load(std::memory_order_acquire) != 0;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        return wait_non_zero_until(*wake_flag_, deadline);
     }
 
     void complete() noexcept {
@@ -307,6 +317,7 @@ af::task_result RunningWakeTerminalWakerTask::run_task() noexcept {
         failures_->fetch_add(1, std::memory_order_relaxed);
     }
     wake_flag_->store(1, std::memory_order_release);
+    af::detail::atomic_notify_one(*wake_flag_);
     wake_attempts_->fetch_add(1, std::memory_order_release);
     af::detail::atomic_notify_one(*wake_attempts_);
     return done();

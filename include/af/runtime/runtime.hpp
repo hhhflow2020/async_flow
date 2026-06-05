@@ -196,6 +196,7 @@ public:
             return false;
         }
 
+        track_work_started();
         executors_[thread]->enqueue(work);
         leave_post();
         return true;
@@ -360,6 +361,10 @@ private:
 
     void request_stop() noexcept;
     void join_all() noexcept;
+    [[nodiscard]] bool has_active_work() const noexcept;
+    void track_work_started() noexcept;
+    void track_work_finished() noexcept;
+    [[nodiscard]] bool can_post_from_stopping_runtime_thread() const noexcept;
     [[nodiscard]] bool try_enter_post() noexcept;
     void leave_post() noexcept;
     void wait_for_posts() noexcept;
@@ -405,6 +410,7 @@ private:
     std::atomic<bool> owned_logger_stop_started_{false};
     std::atomic<thread_index> active_thread_count_{0};
     std::atomic<std::uint32_t> posting_count_{0};
+    alignas(detail::hardware_cache_line_size) std::atomic<std::uint32_t> active_work_count_{0};
     std::atomic<std::uint32_t> active_epoch_{0};
 
     inline static thread_local runtime *current_runtime_{nullptr};

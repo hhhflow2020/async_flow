@@ -54,11 +54,13 @@ inline void runtime_executor::notify() noexcept {
 }
 
 inline void runtime_executor::enqueue(runtime_work *work) noexcept {
+    const std::size_t previous_queued = queued_work_count_.fetch_add(1, std::memory_order_acq_rel);
     inbox_.push(work);
-    if (wake_policy_ == wake_policy::empty_to_non_empty) {
-        if (!sleep_requested_.exchange(false, std::memory_order_acq_rel)) {
-            return;
-        }
+    if (runtime::current_runtime_ == &owner_ && runtime::current_thread_index_ == thread_.index) {
+        return;
+    }
+    if (wake_policy_ == wake_policy::empty_to_non_empty && previous_queued != 0U) {
+        return;
     }
     notify();
 }
@@ -151,7 +153,11 @@ inline void runtime_executor::run_loop() noexcept {
         did_work = run_due_timers() || did_work;
         did_work = run_service_tasks() || did_work;
         if (stop_requested_.load(std::memory_order_acquire) && !did_work) {
-            break;
+            if (!owner_.has_active_work()) {
+                break;
+            }
+            std::this_thread::yield();
+            continue;
         }
         if (stop_requested_.load(std::memory_order_acquire)) {
             continue;
@@ -161,7 +167,6 @@ inline void runtime_executor::run_loop() noexcept {
             continue;
         }
         wait_for_wake_or_timer(observed);
-        sleep_requested_.store(false, std::memory_order_release);
     }
     cancel_timers();
     owner_.on_executor_stopped();
@@ -185,9 +190,10 @@ inline bool runtime_executor::drain_inbox_by_budget() noexcept {
         if (work == nullptr) {
             break;
         }
+        queued_work_count_.fetch_sub(1, std::memory_order_acq_rel);
         ++drained;
         did_work = true;
-        work->run(owner_);
+        run_work(work);
     }
     return did_work;
 }
@@ -201,9 +207,10 @@ inline bool runtime_executor::drain_inbox_with_time_slice() noexcept {
         if (work == nullptr) {
             break;
         }
+        queued_work_count_.fetch_sub(1, std::memory_order_acq_rel);
         ++drained;
         did_work = true;
-        work->run(owner_);
+        run_work(work);
         if (std::chrono::steady_clock::now() >= deadline) {
             break;
         }
@@ -227,9 +234,21 @@ inline bool runtime_executor::run_service_tasks() noexcept {
         if (service == nullptr) [[unlikely]] {
             continue;
         }
+        owner_.track_work_started();
         did_work = service->run_service(service_task_budget_) || did_work;
+        owner_.track_work_finished();
     }
     return did_work;
+}
+
+inline void runtime_executor::run_work(runtime_work *work) noexcept {
+    work->run(owner_);
+    owner_.track_work_finished();
+}
+
+inline void runtime_executor::run_unqueued_work(runtime_work *work) noexcept {
+    owner_.track_work_started();
+    run_work(work);
 }
 
 inline std::int64_t runtime_executor::steady_now_ns() noexcept {
@@ -247,7 +266,9 @@ inline std::chrono::nanoseconds runtime_executor::timer_wait_duration() const no
 inline void runtime_executor::wait_for_wake_or_timer(std::uint32_t observed) noexcept {
     const auto timeout = timer_wait_duration();
     if (reactor_ != nullptr) {
+        owner_.track_work_started();
         static_cast<void>(reactor_->poll(timeout));
+        owner_.track_work_finished();
         return;
     }
     if (timeout == std::chrono::nanoseconds(0)) {
@@ -315,16 +336,12 @@ inline void runtime_executor::idle_wait_once(bool yield_wait) noexcept {
 }
 
 inline bool runtime_executor::prepare_wait(std::uint32_t &observed) noexcept {
-    if (wake_policy_ == wake_policy::empty_to_non_empty) {
-        sleep_requested_.store(true, std::memory_order_release);
-    }
     observed = wake_epoch_.load(std::memory_order_acquire);
-    if (stop_requested_.load(std::memory_order_acquire) || !inbox_.empty()) {
-        sleep_requested_.store(false, std::memory_order_release);
+    if (stop_requested_.load(std::memory_order_acquire) ||
+        queued_work_count_.load(std::memory_order_acquire) != 0U || !inbox_.empty()) {
         return false;
     }
     if (run_due_timers() || run_service_tasks()) {
-        sleep_requested_.store(false, std::memory_order_release);
         return false;
     }
     return true;
@@ -332,10 +349,17 @@ inline bool runtime_executor::prepare_wait(std::uint32_t &observed) noexcept {
 
 inline bool runtime_executor::run_due_timers() noexcept {
     const std::int64_t now = steady_now_ns();
+    const auto run = [this](runtime_work *work) noexcept { run_unqueued_work(work); };
+    auto run_due = [this](auto &timer_backend, std::int64_t now_ns, const auto &runner) noexcept {
+        if (timer_backend.wait_duration(now_ns) != std::chrono::nanoseconds(0)) {
+            return false;
+        }
+        return timer_backend.run_due(now_ns, timer_drain_budget_, runner);
+    };
     if (timer_kind_ == timer_kind::hierarchical_wheel) {
-        return timer_wheel_.run_due(now, timer_drain_budget_, owner_);
+        return run_due(timer_wheel_, now, run);
     }
-    return timer_heap_.run_due(now, timer_drain_budget_, owner_);
+    return run_due(timer_heap_, now, run);
 }
 
 inline void runtime_executor::cancel_timers() noexcept {

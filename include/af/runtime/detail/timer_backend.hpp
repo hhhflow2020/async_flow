@@ -66,7 +66,8 @@ public:
         return std::chrono::nanoseconds(deadline - now_ns);
     }
 
-    [[nodiscard]] bool run_due(std::int64_t now_ns, std::size_t budget, runtime &owner) noexcept {
+    template <typename Runner>
+    [[nodiscard]] bool run_due(std::int64_t now_ns, std::size_t budget, Runner &&runner) noexcept {
         bool did_work = false;
         std::size_t drained = 0;
         while (drained < budget && !entries_.empty()) {
@@ -85,7 +86,7 @@ public:
             }
 
             did_work = true;
-            static_cast<runtime_work *>(task)->run(owner);
+            runner(static_cast<runtime_work *>(task));
         }
         return did_work;
     }
@@ -148,7 +149,8 @@ public:
         return std::chrono::nanoseconds(next_deadline_ns_ - now_ns);
     }
 
-    [[nodiscard]] bool run_due(std::int64_t now_ns, std::size_t budget, runtime &owner) noexcept {
+    template <typename Runner>
+    [[nodiscard]] bool run_due(std::int64_t now_ns, std::size_t budget, Runner &&runner) noexcept {
         if (pending_count_ == 0 || budget == 0 || next_deadline_ns_ > now_ns) {
             return false;
         }
@@ -184,7 +186,7 @@ public:
                 continue;
             }
             did_work = true;
-            static_cast<runtime_work *>(task)->run(owner);
+            runner(static_cast<runtime_work *>(task));
         }
         rebuild_next_deadline();
         return did_work;
