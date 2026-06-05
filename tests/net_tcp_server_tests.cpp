@@ -250,6 +250,9 @@ struct ReactorCallState {
 };
 
 struct RuntimeTcpListenerState {
+    af::runtime *runtime{nullptr};
+    af::thread_ref cpu_thread{};
+    af::net::tcp_connection_handle handle;
     std::atomic<bool> started{false};
     std::atomic<bool> start_ok{false};
     std::atomic<bool> stopped{false};
@@ -259,8 +262,33 @@ struct RuntimeTcpListenerState {
     std::atomic<int> closes{0};
     std::atomic<int> errors{0};
     std::atomic<int> last_error{0};
+    std::atomic<int> cpu_runs{0};
+    std::atomic<int> handle_send_result{-1};
+    std::atomic<bool> handle_published{false};
     std::atomic<std::uint16_t> port{0};
     std::atomic<std::uint16_t> second_port{0};
+};
+
+struct RuntimeTcpSlotReuseState {
+    RuntimeTcpSlotReuseState() {
+        for (auto &published_value : published) {
+            published_value.store(false, std::memory_order_relaxed);
+        }
+        for (auto &slot : slots) {
+            slot.store(0, std::memory_order_relaxed);
+        }
+        for (auto &generation : generations) {
+            generation.store(0, std::memory_order_relaxed);
+        }
+    }
+
+    std::atomic<int> next_accept{0};
+    std::atomic<int> closes{0};
+    std::atomic<int> stale_send_result{-1};
+    std::array<std::atomic<bool>, 2> published;
+    std::array<std::atomic<std::uint32_t>, 2> slots;
+    std::array<std::atomic<std::uint32_t>, 2> generations;
+    std::array<af::net::tcp_connection_handle, 2> handles;
 };
 
 void runtime_tcp_listener_accept(void *owner, af::net::tcp_listener &listener, int fd,
@@ -293,6 +321,35 @@ void runtime_tcp_connection_accept(void *owner, af::net::tcp_connection_ref conn
     }
 }
 
+void runtime_tcp_connection_capture_accept(void *owner, af::net::tcp_connection_ref conn) noexcept {
+    auto *state = static_cast<RuntimeTcpListenerState *>(owner);
+    if (state != nullptr && conn.valid()) {
+        state->handle = conn.handle();
+        state->accepted.fetch_add(1, std::memory_order_release);
+        state->handle_published.store(true, std::memory_order_release);
+    }
+}
+
+void runtime_tcp_slot_reuse_accept(void *owner, af::net::tcp_connection_ref conn) noexcept {
+    auto *state = static_cast<RuntimeTcpSlotReuseState *>(owner);
+    if (state == nullptr || !conn.valid()) {
+        return;
+    }
+    const int index = state->next_accept.fetch_add(1, std::memory_order_release);
+    if (index < 0 || index >= static_cast<int>(state->handles.size())) {
+        return;
+    }
+    const auto array_index = static_cast<std::size_t>(index);
+    state->handles[array_index] = conn.handle();
+    state->slots[array_index].store(conn.slot(), std::memory_order_relaxed);
+    state->generations[array_index].store(conn.generation(), std::memory_order_relaxed);
+    if (index == 1) {
+        const af::net::send_result result = state->handles[0].send(af::Buffer::copy("stale", 5));
+        state->stale_send_result.store(static_cast<int>(result), std::memory_order_release);
+    }
+    state->published[array_index].store(true, std::memory_order_release);
+}
+
 void runtime_tcp_connection_read(void *owner, af::net::tcp_connection_ref conn,
                                  af::BufferView bytes) noexcept {
     auto *state = static_cast<RuntimeTcpListenerState *>(owner);
@@ -302,11 +359,70 @@ void runtime_tcp_connection_read(void *owner, af::net::tcp_connection_ref conn,
     static_cast<void>(conn.send(bytes));
 }
 
+void runtime_tcp_connection_read_and_close(void *owner, af::net::tcp_connection_ref conn,
+                                           af::BufferView bytes) noexcept {
+    static_cast<void>(owner);
+    static_cast<void>(conn.send(bytes));
+    conn.close_after_flush();
+}
+
+void runtime_tcp_connection_read_via_handle(void *owner, af::net::tcp_connection_ref conn,
+                                            af::BufferView bytes) noexcept {
+    auto *state = static_cast<RuntimeTcpListenerState *>(owner);
+    if (state != nullptr) {
+        state->reads.fetch_add(1, std::memory_order_release);
+    }
+
+    af::Buffer payload;
+    try {
+        payload = af::Buffer::copy(bytes);
+    } catch (...) {
+        if (state != nullptr) {
+            state->handle_send_result.store(static_cast<int>(af::net::send_result::backpressure),
+                                            std::memory_order_release);
+        }
+        conn.close(af::net::close_reason::error);
+        return;
+    }
+
+    if (state == nullptr || state->runtime == nullptr || !state->cpu_thread) {
+        if (state != nullptr) {
+            state->handle_send_result.store(static_cast<int>(af::net::send_result::closed),
+                                            std::memory_order_release);
+        }
+        conn.close(af::net::close_reason::error);
+        return;
+    }
+
+    const af::net::tcp_connection_handle handle = conn.handle();
+    const bool posted = state->runtime->post(
+        state->cpu_thread, [state, handle, payload = std::move(payload)]() mutable {
+            state->cpu_runs.fetch_add(1, std::memory_order_release);
+            const af::net::send_result result = handle.send(std::move(payload));
+            state->handle_send_result.store(static_cast<int>(result), std::memory_order_release);
+        });
+    if (!posted) {
+        state->handle_send_result.store(static_cast<int>(af::net::send_result::backpressure),
+                                        std::memory_order_release);
+        conn.close(af::net::close_reason::error);
+    }
+}
+
 void runtime_tcp_connection_close(void *owner, af::net::tcp_connection_ref conn,
                                   af::net::close_reason reason) noexcept {
     static_cast<void>(conn);
     static_cast<void>(reason);
     auto *state = static_cast<RuntimeTcpListenerState *>(owner);
+    if (state != nullptr) {
+        state->closes.fetch_add(1, std::memory_order_release);
+    }
+}
+
+void runtime_tcp_slot_reuse_close(void *owner, af::net::tcp_connection_ref conn,
+                                  af::net::close_reason reason) noexcept {
+    static_cast<void>(conn);
+    static_cast<void>(reason);
+    auto *state = static_cast<RuntimeTcpSlotReuseState *>(owner);
     if (state != nullptr) {
         state->closes.fetch_add(1, std::memory_order_release);
     }
@@ -1055,6 +1171,207 @@ TEST(NetTcpServerTests, RuntimeTcpServerAdoptsConnectionsAndEchoesReads) {
     }));
     ASSERT_TRUE(wait_until([&] { return state.stopped.load(std::memory_order_acquire); }));
     EXPECT_TRUE(state.stop_ok.load(std::memory_order_acquire));
+
+    runtime.stop();
+}
+
+TEST(NetTcpServerTests, RuntimeTcpConnectionHandleSendsFromCpuThread) {
+    af::runtime_config config;
+    config.threads = {af::io_threads("net-rt-io", 1), af::cpu_threads("net-rt-cpu", 1)};
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    RuntimeTcpListenerState state;
+    state.runtime = &runtime;
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_until([&] { return runtime.active_thread_count() == 2; }));
+
+    const af::thread_ref io_thread = runtime.select_thread_ref(af::thread_selector::io(0));
+    state.cpu_thread = runtime.select_thread_ref(af::thread_selector::cpu(0));
+    ASSERT_TRUE(state.cpu_thread);
+
+    af::net::tcp_server server(runtime);
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        af::net::tcp_connection_callbacks callbacks;
+        callbacks.owner = &state;
+        callbacks.on_accept = &runtime_tcp_connection_accept;
+        callbacks.on_read = &runtime_tcp_connection_read_via_handle;
+        callbacks.on_close = &runtime_tcp_connection_close;
+
+        af::net::tcp_listener_config listener_config;
+        listener_config.name = "runtime-server-handle-echo";
+        listener_config.endpoint = af::net::tcp_endpoint::loopback_v4(0);
+        listener_config.threads = {io_thread};
+        listener_config.options.reuse_port = false;
+
+        const af::net::listener_result listener =
+            server.add_listener(std::move(listener_config), callbacks);
+        bool ok = listener.ok() && server.start();
+        const af::net::tcp_endpoint *endpoint = server.local_endpoint(listener.listener);
+        ok = ok && endpoint != nullptr;
+        if (ok) {
+            state.port.store(endpoint->port, std::memory_order_release);
+        }
+        state.start_ok.store(ok, std::memory_order_release);
+        state.started.store(true, std::memory_order_release);
+    }));
+
+    ASSERT_TRUE(wait_until([&] { return state.started.load(std::memory_order_acquire); }));
+    ASSERT_TRUE(state.start_ok.load(std::memory_order_acquire));
+    ASSERT_GT(state.port.load(std::memory_order_acquire), 0U);
+
+    EXPECT_EQ(roundtrip(state.port.load(std::memory_order_acquire), "runtime-handle"),
+              "runtime-handle");
+    ASSERT_TRUE(wait_until([&] { return state.accepted.load(std::memory_order_acquire) == 1; }));
+    ASSERT_TRUE(wait_until([&] { return state.reads.load(std::memory_order_acquire) >= 1; }));
+    ASSERT_TRUE(wait_until([&] { return state.cpu_runs.load(std::memory_order_acquire) == 1; }));
+    EXPECT_EQ(state.handle_send_result.load(std::memory_order_acquire),
+              static_cast<int>(af::net::send_result::queued));
+    EXPECT_EQ(state.errors.load(std::memory_order_acquire), 0);
+
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        state.stop_ok.store(server.stop(), std::memory_order_release);
+        state.stopped.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return state.stopped.load(std::memory_order_acquire); }));
+    EXPECT_TRUE(state.stop_ok.load(std::memory_order_acquire));
+
+    runtime.stop();
+}
+
+TEST(NetTcpServerTests, RuntimeTcpConnectionHandleReportsClosedAfterServerStop) {
+    af::runtime_config config;
+    config.threads = {af::io_threads("net-rt-io", 1)};
+    config.logger.consumer_thread = af::thread_selector::io(0);
+
+    af::runtime runtime(config);
+    RuntimeTcpListenerState state;
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_until([&] { return runtime.active_thread_count() == 1; }));
+
+    const af::thread_ref io_thread = runtime.select_thread_ref(af::thread_selector::io(0));
+    af::net::tcp_server server(runtime);
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        af::net::tcp_connection_callbacks callbacks;
+        callbacks.owner = &state;
+        callbacks.on_accept = &runtime_tcp_connection_capture_accept;
+        callbacks.on_read = &runtime_tcp_connection_read;
+        callbacks.on_close = &runtime_tcp_connection_close;
+
+        af::net::tcp_listener_config listener_config;
+        listener_config.name = "runtime-server-handle-stop";
+        listener_config.endpoint = af::net::tcp_endpoint::loopback_v4(0);
+        listener_config.threads = {io_thread};
+        listener_config.options.reuse_port = false;
+
+        const af::net::listener_result listener =
+            server.add_listener(std::move(listener_config), callbacks);
+        bool ok = listener.ok() && server.start();
+        const af::net::tcp_endpoint *endpoint = server.local_endpoint(listener.listener);
+        ok = ok && endpoint != nullptr;
+        if (ok) {
+            state.port.store(endpoint->port, std::memory_order_release);
+        }
+        state.start_ok.store(ok, std::memory_order_release);
+        state.started.store(true, std::memory_order_release);
+    }));
+
+    ASSERT_TRUE(wait_until([&] { return state.started.load(std::memory_order_acquire); }));
+    ASSERT_TRUE(state.start_ok.load(std::memory_order_acquire));
+    ASSERT_GT(state.port.load(std::memory_order_acquire), 0U);
+
+    UniqueFd client = connect_loopback(state.port.load(std::memory_order_acquire));
+    ASSERT_GE(client.get(), 0);
+    ASSERT_TRUE(wait_until([&] { return state.handle_published.load(std::memory_order_acquire); }));
+    EXPECT_TRUE(state.handle.valid());
+
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        state.stop_ok.store(server.stop(), std::memory_order_release);
+        state.stopped.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return state.stopped.load(std::memory_order_acquire); }));
+    EXPECT_TRUE(state.stop_ok.load(std::memory_order_acquire));
+    EXPECT_TRUE(wait_until([&] { return state.closes.load(std::memory_order_acquire) >= 1; }));
+    EXPECT_EQ(state.handle.send(af::Buffer::copy("after-stop", 10)), af::net::send_result::closed);
+
+    runtime.stop();
+}
+
+TEST(NetTcpServerTests, RuntimeTcpConnectionHandleRejectsStaleGenerationAfterSlotReuse) {
+    af::runtime_config config;
+    config.threads = {af::io_threads("net-rt-io", 1)};
+    config.logger.consumer_thread = af::thread_selector::io(0);
+
+    af::runtime runtime(config);
+    RuntimeTcpListenerState listener_state;
+    RuntimeTcpSlotReuseState reuse_state;
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_until([&] { return runtime.active_thread_count() == 1; }));
+
+    const af::thread_ref io_thread = runtime.select_thread_ref(af::thread_selector::io(0));
+    af::net::tcp_server server(runtime);
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        af::net::tcp_connection_callbacks callbacks;
+        callbacks.owner = &reuse_state;
+        callbacks.on_accept = &runtime_tcp_slot_reuse_accept;
+        callbacks.on_read = &runtime_tcp_connection_read_and_close;
+        callbacks.on_close = &runtime_tcp_slot_reuse_close;
+
+        af::net::tcp_listener_config listener_config;
+        listener_config.name = "runtime-server-slot-reuse";
+        listener_config.endpoint = af::net::tcp_endpoint::loopback_v4(0);
+        listener_config.threads = {io_thread};
+        listener_config.options.reuse_port = false;
+
+        const af::net::listener_result listener =
+            server.add_listener(std::move(listener_config), callbacks);
+        bool ok = listener.ok() && server.start();
+        const af::net::tcp_endpoint *endpoint = server.local_endpoint(listener.listener);
+        ok = ok && endpoint != nullptr;
+        if (ok) {
+            listener_state.port.store(endpoint->port, std::memory_order_release);
+        }
+        listener_state.start_ok.store(ok, std::memory_order_release);
+        listener_state.started.store(true, std::memory_order_release);
+    }));
+
+    ASSERT_TRUE(wait_until([&] { return listener_state.started.load(std::memory_order_acquire); }));
+    ASSERT_TRUE(listener_state.start_ok.load(std::memory_order_acquire));
+    const std::uint16_t port = listener_state.port.load(std::memory_order_acquire);
+    ASSERT_GT(port, 0U);
+
+    EXPECT_EQ(roundtrip(port, "first"), "first");
+    ASSERT_TRUE(wait_until([&] {
+        return reuse_state.published[0].load(std::memory_order_acquire) &&
+               reuse_state.closes.load(std::memory_order_acquire) >= 1;
+    }));
+
+    EXPECT_EQ(roundtrip(port, "second"), "second");
+    ASSERT_TRUE(wait_until([&] {
+        return reuse_state.published[1].load(std::memory_order_acquire) &&
+               reuse_state.closes.load(std::memory_order_acquire) >= 2;
+    }));
+
+    const std::uint32_t first_slot = reuse_state.slots[0].load(std::memory_order_relaxed);
+    const std::uint32_t second_slot = reuse_state.slots[1].load(std::memory_order_relaxed);
+    const std::uint32_t first_generation =
+        reuse_state.generations[0].load(std::memory_order_relaxed);
+    const std::uint32_t second_generation =
+        reuse_state.generations[1].load(std::memory_order_relaxed);
+    EXPECT_EQ(first_slot, second_slot);
+    EXPECT_NE(first_generation, second_generation);
+    EXPECT_EQ(reuse_state.stale_send_result.load(std::memory_order_acquire),
+              static_cast<int>(af::net::send_result::closed));
+
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        listener_state.stop_ok.store(server.stop(), std::memory_order_release);
+        listener_state.stopped.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return listener_state.stopped.load(std::memory_order_acquire); }));
+    EXPECT_TRUE(listener_state.stop_ok.load(std::memory_order_acquire));
 
     runtime.stop();
 }

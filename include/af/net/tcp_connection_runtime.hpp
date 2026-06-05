@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -22,7 +23,9 @@
 
 namespace af::net {
 
+class tcp_server;
 class tcp_connection;
+class tcp_connection_handle;
 class tcp_connection_ref;
 
 using tcp_connection_accept_callback = void (*)(void *owner, tcp_connection_ref conn) noexcept;
@@ -47,7 +50,64 @@ struct tcp_connection_lifecycle {
     tcp_connection_inactive_callback on_inactive{nullptr};
 };
 
+struct tcp_server_handle_state {
+    std::atomic<tcp_server *> server{nullptr};
+    std::atomic<bool> accepting_operations{false};
+};
+
 } // namespace detail
+
+class tcp_connection_handle {
+public:
+    tcp_connection_handle() noexcept = default;
+
+    [[nodiscard]] bool valid() const noexcept {
+        return owner_thread_.valid() && generation_ != 0U;
+    }
+
+    [[nodiscard]] af::thread_ref owner_thread() const noexcept {
+        return owner_thread_;
+    }
+
+    [[nodiscard]] std::uint32_t slot() const noexcept {
+        return slot_;
+    }
+
+    [[nodiscard]] std::uint32_t generation() const noexcept {
+        return generation_;
+    }
+
+    [[nodiscard]] send_result send(af::Buffer buffer) const noexcept;
+    [[nodiscard]] send_result send(af::BufferView view) const noexcept;
+    [[nodiscard]] bool close(close_reason reason = close_reason::local) const noexcept;
+    [[nodiscard]] bool close_now(close_reason reason = close_reason::local) const noexcept;
+    [[nodiscard]] bool close_after_flush() const noexcept;
+
+    [[nodiscard]] friend bool operator==(tcp_connection_handle lhs,
+                                         tcp_connection_handle rhs) noexcept {
+        return lhs.owner_thread_ == rhs.owner_thread_ && lhs.slot_ == rhs.slot_ &&
+               lhs.generation_ == rhs.generation_;
+    }
+
+    [[nodiscard]] friend bool operator!=(tcp_connection_handle lhs,
+                                         tcp_connection_handle rhs) noexcept {
+        return !(lhs == rhs);
+    }
+
+private:
+    friend class tcp_connection;
+
+    tcp_connection_handle(std::weak_ptr<detail::tcp_server_handle_state> state,
+                          af::thread_ref owner_thread, std::uint32_t slot,
+                          std::uint32_t generation) noexcept
+        : state_(std::move(state)), owner_thread_(owner_thread), slot_(slot),
+          generation_(generation) {}
+
+    std::weak_ptr<detail::tcp_server_handle_state> state_;
+    af::thread_ref owner_thread_{};
+    std::uint32_t slot_{0};
+    std::uint32_t generation_{0};
+};
 
 class tcp_connection_ref {
 public:
@@ -55,6 +115,8 @@ public:
         : connection_(connection) {}
 
     [[nodiscard]] bool valid() const noexcept;
+    [[nodiscard]] tcp_connection_handle handle() const noexcept;
+    [[nodiscard]] af::thread_ref owner_thread() const noexcept;
     [[nodiscard]] std::uint32_t slot() const noexcept;
     [[nodiscard]] std::uint32_t generation() const noexcept;
     [[nodiscard]] const tcp_endpoint &local_endpoint() const noexcept;
@@ -74,12 +136,12 @@ public:
     tcp_connection(af::runtime &owner, af::thread_ref owner_thread, int fd, std::uint32_t slot,
                    std::uint32_t generation, tcp_endpoint local_endpoint,
                    tcp_endpoint peer_endpoint, tcp_connection_config config,
-                   tcp_connection_callbacks callbacks,
-                   detail::tcp_connection_lifecycle lifecycle) noexcept
+                   tcp_connection_callbacks callbacks, detail::tcp_connection_lifecycle lifecycle,
+                   std::weak_ptr<detail::tcp_server_handle_state> handle_state) noexcept
         : owner_(&owner), owner_thread_(owner_thread), fd_(fd), slot_(slot),
           generation_(generation), local_endpoint_(std::move(local_endpoint)),
           peer_endpoint_(std::move(peer_endpoint)), config_(normalize_config(config)),
-          callbacks_(callbacks), lifecycle_(lifecycle) {
+          callbacks_(callbacks), lifecycle_(lifecycle), handle_state_(std::move(handle_state)) {
         source_.fd = fd_;
         source_.interests = af::reactor_readable;
         source_.owner = this;
@@ -116,6 +178,14 @@ public:
 
     [[nodiscard]] bool alive() const noexcept {
         return fd_ >= 0;
+    }
+
+    [[nodiscard]] tcp_connection_handle handle() const noexcept {
+        return tcp_connection_handle(handle_state_, owner_thread_, slot_, generation_);
+    }
+
+    [[nodiscard]] af::thread_ref owner_thread() const noexcept {
+        return owner_thread_;
     }
 
     [[nodiscard]] std::uint32_t slot() const noexcept {
@@ -447,6 +517,7 @@ private:
     tcp_connection_config config_;
     tcp_connection_callbacks callbacks_{};
     detail::tcp_connection_lifecycle lifecycle_{};
+    std::weak_ptr<detail::tcp_server_handle_state> handle_state_;
     af::fd_event_source source_{};
     af::BufferChain output_;
     std::vector<std::byte> read_buffer_;
@@ -457,6 +528,14 @@ private:
 
 inline bool tcp_connection_ref::valid() const noexcept {
     return connection_ != nullptr && connection_->alive();
+}
+
+inline tcp_connection_handle tcp_connection_ref::handle() const noexcept {
+    return connection_ == nullptr ? tcp_connection_handle{} : connection_->handle();
+}
+
+inline af::thread_ref tcp_connection_ref::owner_thread() const noexcept {
+    return connection_ == nullptr ? af::thread_ref{} : connection_->owner_thread();
 }
 
 inline std::uint32_t tcp_connection_ref::slot() const noexcept {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -24,18 +25,27 @@ namespace af::net {
 class tcp_server {
 public:
     explicit tcp_server(af::runtime &owner, tcp_server_config config = {})
-        : owner_(&owner), config_(std::move(config)) {}
+        : owner_(&owner), config_(std::move(config)),
+          handle_state_(std::make_shared<detail::tcp_server_handle_state>()) {
+        handle_state_->server.store(this, std::memory_order_release);
+    }
 
     tcp_server(const tcp_server &) = delete;
     tcp_server &operator=(const tcp_server &) = delete;
 
     ~tcp_server() {
+        if (handle_state_ != nullptr) {
+            handle_state_->accepting_operations.store(false, std::memory_order_release);
+        }
         if (running_) {
             AF_ASSERT(on_owner_io_thread() &&
                       "tcp_server must be stopped on the owner reactor thread before destruction");
             if (on_owner_io_thread()) {
                 static_cast<void>(stop());
             }
+        }
+        if (handle_state_ != nullptr) {
+            handle_state_->server.store(nullptr, std::memory_order_release);
         }
     }
 
@@ -131,6 +141,8 @@ public:
         }
 
         running_ = true;
+        handle_state_->server.store(this, std::memory_order_release);
+        handle_state_->accepting_operations.store(true, std::memory_order_release);
         bool ok = true;
         for (auto &entry_ptr : entries_) {
             if (entry_ptr == nullptr) {
@@ -158,6 +170,7 @@ public:
             return false;
         }
 
+        handle_state_->accepting_operations.store(false, std::memory_order_release);
         bool ok = true;
         for (auto &entry_ptr : entries_) {
             if (entry_ptr == nullptr) {
@@ -241,6 +254,8 @@ public:
     }
 
 private:
+    friend class tcp_connection_handle;
+
     struct listener_entry {
         tcp_server *server{nullptr};
         listener_id id{};
@@ -447,7 +462,7 @@ private:
             entry->connection = std::make_unique<tcp_connection>(
                 *owner_, source.owner_thread(), owned_fd, entry->slot, entry->generation,
                 source.local_endpoint(), peer_endpoint, config_.connection,
-                listener.connection_callbacks, lifecycle);
+                listener.connection_callbacks, lifecycle, handle_state_);
             owned_fd = -1;
             if (!entry->connection->start()) {
                 release_connection_slot(entry->slot);
@@ -469,6 +484,51 @@ private:
         if (entry->connection == nullptr || !entry->connection->alive()) {
             release_connection_slot(entry->slot);
         }
+        return true;
+    }
+
+    [[nodiscard]] tcp_connection *find_connection(std::uint32_t slot,
+                                                  std::uint32_t generation) noexcept {
+        if (!on_owner_io_thread() || slot >= connections_.size()) {
+            return nullptr;
+        }
+        connection_entry *entry = connections_[slot].get();
+        if (entry == nullptr || !entry->occupied || entry->generation != generation ||
+            entry->connection == nullptr || !entry->connection->alive()) {
+            return nullptr;
+        }
+        return entry->connection.get();
+    }
+
+    [[nodiscard]] send_result send_to_connection(std::uint32_t slot, std::uint32_t generation,
+                                                 af::Buffer buffer) noexcept {
+        tcp_connection *connection = find_connection(slot, generation);
+        return connection == nullptr ? send_result::closed : connection->send(std::move(buffer));
+    }
+
+    [[nodiscard]] send_result send_to_connection(std::uint32_t slot, std::uint32_t generation,
+                                                 af::BufferView view) noexcept {
+        tcp_connection *connection = find_connection(slot, generation);
+        return connection == nullptr ? send_result::closed : connection->send(view);
+    }
+
+    [[nodiscard]] bool close_connection(std::uint32_t slot, std::uint32_t generation,
+                                        close_reason reason) noexcept {
+        tcp_connection *connection = find_connection(slot, generation);
+        if (connection == nullptr) {
+            return false;
+        }
+        connection->close(reason);
+        return true;
+    }
+
+    [[nodiscard]] bool close_connection_after_flush(std::uint32_t slot,
+                                                    std::uint32_t generation) noexcept {
+        tcp_connection *connection = find_connection(slot, generation);
+        if (connection == nullptr) {
+            return false;
+        }
+        connection->close_after_flush();
         return true;
     }
 
@@ -539,6 +599,7 @@ private:
 
     af::runtime *owner_{nullptr};
     tcp_server_config config_;
+    std::shared_ptr<detail::tcp_server_handle_state> handle_state_;
     std::vector<std::unique_ptr<listener_entry>> entries_;
     std::vector<std::unique_ptr<connection_entry>> connections_;
     std::vector<std::uint32_t> free_listener_slots_;
@@ -551,3 +612,5 @@ private:
 };
 
 } // namespace af::net
+
+#include "af/net/detail/tcp_connection_handle_runtime_impl.hpp"
