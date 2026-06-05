@@ -248,7 +248,7 @@ empty -> reactor/futex park
 
 service task 是长期服务对象，例如 logger、metrics、trace。executor 只知道 service task 的通用接口，不知道 logger 内部细节。
 
-当前静态 runtime 和实例 runtime 都已具备通用 service task 骨架：service 对象通过 `register_service_task()` 在 owner runtime 线程注册，executor 每轮按 `service_task_budget` 调用 `run_service()`；外部生产者只更新 service 自己的 pending 状态并调用 `wake_service_tasks()` 唤醒目标 executor。service 列表仅在 owner runtime 线程访问，因此不需要互斥锁。静态 runtime 的日志消费者已经迁移到这个通用 service task 接口；实例 runtime 已支持从 `runtime_config.logger` 自动创建 runtime-owned async logger，日志消费者绑定到配置指定的 runtime 线程。
+当前静态 runtime 和实例 runtime 都已具备通用 service task 骨架：service 对象通过 `register_service_task()` 在 owner runtime 线程注册，executor 每轮按 `service_task_budget` 调用 `run_service()`；外部生产者只更新 service 自己的 pending 状态并调用 `wake_service_tasks()` 唤醒目标 executor。service 列表仅在 owner runtime 线程访问，因此不需要互斥锁。实例 runtime 的 executor 已按 `scheduler.task_drain_budget` 限制每轮 task inbox drain 数量，避免长任务流饿死 timer、service task 和 reactor poll。静态 runtime 的日志消费者已经迁移到这个通用 service task 接口；实例 runtime 已支持从 `runtime_config.logger` 自动创建 runtime-owned async logger，日志消费者绑定到配置指定的 runtime 线程。
 
 ## Task API 与生命周期
 
@@ -632,7 +632,7 @@ include/af/reactor/select_reactor.hpp
 - 当前 task API 已补 `schedule_to(...)` / `pending_to(...)` 及 fast/ordered 变体作为清晰调度入口，旧 `schedule(...)` / `pending_on(...)` 保留兼容。
 - 当前 runtime/task public enum 与容器已补 lower_case 别名，例如 `task_result`、`schedule_mode::ordered`、`shutdown_policy::wait_for_tasks`、`parallel_mode::non_empty_only` 和 `sharded_ops<T>`；示例已迁移到新拼写。
 - 当前已提供 public `runtime_config`、`scheduler_config`、`task_pool_config`、`timer_config`、`reactor_config`、`log_config`、`shutdown_config` 和 `diagnostics_config` 普通结构体，`io_threads()` / `cpu_threads()` 配置值工厂，以及 `resolve_runtime_config()` / `validate_runtime_config()` 解析校验入口。
-- 当前已提供 `af::runtime` 实例生命周期外壳和低层投递通道：构造时使用结构化配置解析校验，`start()` 按配置启动 runtime 线程，每个 executor 拥有 intrusive MPSC inbox，`post()` 可把 `runtime_work` 投递到指定线程执行，空闲线程使用 atomic/futex wait，`stop()` 可由外部线程完成 join/回收，也可由 runtime 线程内请求停止而不自 join。
+- 当前已提供 `af::runtime` 实例生命周期外壳和低层投递通道：构造时使用结构化配置解析校验，`start()` 按配置启动 runtime 线程，每个 executor 拥有 intrusive MPSC inbox，`post()` 可把 `runtime_work` 投递到指定线程执行，每轮按 `scheduler.task_drain_budget` drain task，空闲线程使用 atomic/futex wait，`stop()` 可由外部线程完成 join/回收，也可由 runtime 线程内请求停止而不自 join。
 - 当前实例 runtime 已提供 service task 注册、注销和唤醒入口：service 列表只在目标 executor 线程内修改，executor 主循环按 `scheduler.service_task_budget` 轮询，外部唤醒不加锁。
 - 当前实例 runtime 已提供 runtime-owned async logger：`runtime.start()` 在 `runtime.config().logger.backends` 非空时自动构造 file/udp/tcp 后端并把消费者注册为 service task，`runtime.stop()` 先 drain/flush 日志再停止 executor；`start_async_logging_for_runtime(runtime&, config, thread)` 仍作为手动自定义入口保留。
 - 当前实例 runtime 已提供 `af::runtime_task`、`af::make_task<T>(runtime, ...)`、`af::try_make_task<T>(runtime, ...)` 和 `runtime_task_handle<T>`：任务创建走 typed slab object pool，任务 id 使用每线程 block 分配，`schedule_to()` 投递到目标 executor，运行中请求下一跳会延后到当前 `run_task()` 返回后再入队，避免同一个任务对象并发重入。

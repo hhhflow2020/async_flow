@@ -152,6 +152,17 @@ static_assert(af::log_overflow_policy::block == af::LogOverflowPolicy::Block);
     return counter.load(std::memory_order_acquire) == expected;
 }
 
+[[nodiscard]] bool wait_for_counter_at_least(std::atomic<int> &counter, int expected) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (counter.load(std::memory_order_acquire) >= expected) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return counter.load(std::memory_order_acquire) >= expected;
+}
+
 class PostedRuntimeWork final : public af::runtime_work {
 public:
     PostedRuntimeWork(std::atomic<int> &counter, std::atomic<std::uint16_t> &thread,
@@ -235,6 +246,53 @@ private:
     af::detail::RuntimeServiceTask &service_;
     std::atomic<int> &counter_;
     std::atomic<bool> &ok_;
+};
+
+class RepostingRuntimeWork final : public af::runtime_work {
+public:
+    RepostingRuntimeWork(std::uint16_t thread, int limit, std::atomic<int> &run_counter)
+        : thread_(thread), limit_(limit), run_counter_(run_counter) {}
+
+    void run(af::runtime &owner) noexcept override {
+        const int count = run_counter_.fetch_add(1, std::memory_order_acq_rel) + 1;
+        if (count < limit_) {
+            static_cast<void>(owner.post(thread_, this));
+        }
+    }
+
+private:
+    std::uint16_t thread_;
+    int limit_;
+    std::atomic<int> &run_counter_;
+};
+
+class TaskBudgetProbeService final : public af::detail::RuntimeServiceTask {
+public:
+    TaskBudgetProbeService(std::atomic<int> &service_counter, std::atomic<int> &task_counter,
+                           std::atomic<int> &observed_task_count)
+        : service_counter_(service_counter), task_counter_(task_counter),
+          observed_task_count_(observed_task_count) {}
+
+    void mark_pending() noexcept {
+        pending_.store(true, std::memory_order_release);
+    }
+
+    [[nodiscard]] bool run_service(std::size_t budget) noexcept override {
+        static_cast<void>(budget);
+        if (!pending_.exchange(false, std::memory_order_acq_rel)) {
+            return false;
+        }
+        observed_task_count_.store(task_counter_.load(std::memory_order_acquire),
+                                   std::memory_order_release);
+        service_counter_.fetch_add(1, std::memory_order_release);
+        return true;
+    }
+
+private:
+    std::atomic<int> &service_counter_;
+    std::atomic<int> &task_counter_;
+    std::atomic<int> &observed_task_count_;
+    std::atomic<bool> pending_{false};
 };
 
 class InstanceRuntimeTask final : public af::runtime_task {
@@ -849,6 +907,46 @@ TEST(RuntimeConfigTests, RuntimeInstanceRunsRegisteredServiceTasksOnTargetThread
     ASSERT_TRUE(runtime.wake_service_tasks(cpu_thread));
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
     EXPECT_EQ(service_counter.load(std::memory_order_acquire), 2);
+
+    runtime.stop();
+}
+
+TEST(RuntimeConfigTests, RuntimeTaskDrainBudgetLetsServiceTasksRunBetweenBursts) {
+    af::runtime_config config;
+    config.threads = {af::cpu_threads("logic", 1)};
+    config.scheduler.task_drain_budget = 1;
+    config.scheduler.service_task_budget = 1;
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    std::atomic<int> task_counter{0};
+    std::atomic<int> service_counter{0};
+    std::atomic<int> observed_task_count{-1};
+    std::atomic<int> control_counter{0};
+    std::atomic<bool> register_ok{false};
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 1));
+
+    const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
+    TaskBudgetProbeService service(service_counter, task_counter, observed_task_count);
+    ServiceTaskControlWork register_work(ServiceTaskControlWork::action::register_service,
+                                         cpu_thread, service, control_counter, register_ok);
+    ASSERT_TRUE(runtime.post(cpu_thread, &register_work));
+    ASSERT_TRUE(wait_for_counter(control_counter, 1));
+    ASSERT_TRUE(register_ok.load(std::memory_order_acquire));
+
+    constexpr int task_limit = 1000000;
+    RepostingRuntimeWork work(cpu_thread, task_limit, task_counter);
+    ASSERT_TRUE(runtime.post(cpu_thread, &work));
+    ASSERT_TRUE(wait_for_counter_at_least(task_counter, 16));
+
+    service.mark_pending();
+    ASSERT_TRUE(runtime.wake_service_tasks(cpu_thread));
+    ASSERT_TRUE(wait_for_counter(service_counter, 1));
+
+    EXPECT_GT(observed_task_count.load(std::memory_order_acquire), 0);
+    EXPECT_LT(observed_task_count.load(std::memory_order_acquire), task_limit);
 
     runtime.stop();
 }

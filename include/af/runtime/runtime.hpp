@@ -227,6 +227,7 @@ private:
     public:
         executor(runtime &owner, runtime_thread_info thread)
             : owner_(owner), thread_(std::move(thread)),
+              task_drain_budget_(owner_.config().scheduler.task_drain_budget),
               timer_drain_budget_(owner_.config().scheduler.timer_drain_budget),
               service_task_budget_(owner_.config().scheduler.service_task_budget) {
             timers_.reserve(owner_.config().timer.initial_reserve);
@@ -373,7 +374,13 @@ private:
 
         [[nodiscard]] bool drain_inbox() noexcept {
             bool did_work = false;
-            while (runtime_work *work = inbox_.try_pop()) {
+            std::size_t drained = 0;
+            while (drained < task_drain_budget_) {
+                runtime_work *work = inbox_.try_pop();
+                if (work == nullptr) {
+                    break;
+                }
+                ++drained;
                 did_work = true;
                 work->run(owner_);
             }
@@ -489,6 +496,7 @@ private:
         std::vector<TimerEntry> timers_;
         std::vector<detail::RuntimeServiceTask *> service_tasks_;
         std::unique_ptr<reactor> reactor_;
+        std::size_t task_drain_budget_{256};
         std::size_t timer_drain_budget_{256};
         std::size_t service_task_budget_{32};
         std::size_t next_service_task_{0};
