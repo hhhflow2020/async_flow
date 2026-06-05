@@ -134,19 +134,6 @@ private:
 
 namespace af::net {
 
-using send_result = SendResult;
-using close_reason = CloseReason;
-using accept_strategy = AcceptStrategy;
-using listener_state = ListenerState;
-using remove_listener_policy = RemoveListenerPolicy;
-using tcp_listener_options = TcpListenerOptions;
-using tcp_connection_config = TcpConnectionConfig;
-using tcp_listener_config = TcpListenerConfig;
-using tcp_server_config = TcpServerConfig;
-using listener_id = ListenerId;
-using tcp_listener_handle = TcpListenerHandle;
-using listener_result = ListenerResult;
-
 template <typename Runtime> using tcp_connection_handle = TcpConnectionHandle<Runtime>;
 template <typename Runtime> using tcp_connection_ref = TcpConnectionRef<Runtime>;
 template <typename Runtime> using tcp_server = TcpServer<Runtime>;

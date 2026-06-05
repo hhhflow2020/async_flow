@@ -1,6 +1,7 @@
 #include <atomic>
 #include <array>
 #include <chrono>
+#include <cerrno>
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -14,6 +15,7 @@
 #include "af/async_runtime.hpp"
 #include "af/net.hpp"
 #include "af/platform.hpp"
+#include "af/runtime.hpp"
 
 #include "gtest/gtest.h"
 
@@ -246,6 +248,40 @@ struct ReactorCallState {
     std::atomic<bool> done{false};
     std::atomic<bool> ok{false};
 };
+
+struct RuntimeTcpListenerState {
+    std::atomic<bool> started{false};
+    std::atomic<bool> start_ok{false};
+    std::atomic<bool> stopped{false};
+    std::atomic<bool> stop_ok{false};
+    std::atomic<int> accepted{0};
+    std::atomic<int> errors{0};
+    std::atomic<int> last_error{0};
+    std::atomic<std::uint16_t> port{0};
+};
+
+void runtime_tcp_listener_accept(void *owner, af::net::tcp_listener &listener, int fd,
+                                 const sockaddr *peer, socklen_t peer_size) noexcept {
+    static_cast<void>(listener);
+    static_cast<void>(peer);
+    static_cast<void>(peer_size);
+    auto *state = static_cast<RuntimeTcpListenerState *>(owner);
+    if (fd >= 0) {
+        ::close(fd);
+    }
+    if (state != nullptr) {
+        state->accepted.fetch_add(1, std::memory_order_release);
+    }
+}
+
+void runtime_tcp_listener_error(void *owner, af::net::tcp_listener &listener, int error) noexcept {
+    static_cast<void>(listener);
+    auto *state = static_cast<RuntimeTcpListenerState *>(owner);
+    if (state != nullptr) {
+        state->last_error.store(error, std::memory_order_release);
+        state->errors.fetch_add(1, std::memory_order_release);
+    }
+}
 
 template <typename Runtime> class ReactorCallTask final : public Runtime::Task {
 public:
@@ -723,6 +759,91 @@ struct TwoIoEchoHandler {
 };
 
 } // namespace
+
+TEST(NetTcpServerTests, RuntimeTcpListenerAcceptsOnRuntimeReactorThread) {
+    af::runtime_config config;
+    config.threads = {af::io_threads("net-rt-io", 1)};
+    config.logger.consumer_thread = af::thread_selector::io(0);
+
+    af::runtime runtime(config);
+    RuntimeTcpListenerState state;
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_until([&] { return runtime.active_thread_count() == 1; }));
+
+    const af::thread_ref io_thread = runtime.select_thread_ref(af::thread_selector::io(0));
+    af::net::tcp_listener listener(runtime);
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        af::net::tcp_listener_config listener_config;
+        listener_config.name = "runtime-listener";
+        listener_config.endpoint = af::net::tcp_endpoint::loopback_v4(0);
+        listener_config.options.reuse_port = false;
+        af::net::tcp_listener_callbacks callbacks;
+        callbacks.owner = &state;
+        callbacks.on_accept = &runtime_tcp_listener_accept;
+        callbacks.on_error = &runtime_tcp_listener_error;
+
+        const bool ok = listener.start(io_thread, std::move(listener_config), callbacks);
+        if (ok) {
+            state.port.store(listener.local_endpoint().port, std::memory_order_release);
+        }
+        state.start_ok.store(ok, std::memory_order_release);
+        state.started.store(true, std::memory_order_release);
+    }));
+
+    ASSERT_TRUE(wait_until([&] { return state.started.load(std::memory_order_acquire); }));
+    ASSERT_TRUE(state.start_ok.load(std::memory_order_acquire));
+    ASSERT_GT(state.port.load(std::memory_order_acquire), 0U);
+
+    UniqueFd client = connect_loopback(state.port.load(std::memory_order_acquire));
+    ASSERT_GE(client.get(), 0);
+    ASSERT_TRUE(wait_until([&] { return state.accepted.load(std::memory_order_acquire) == 1; }));
+    EXPECT_EQ(state.errors.load(std::memory_order_acquire), 0);
+
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        state.stop_ok.store(listener.stop(), std::memory_order_release);
+        state.stopped.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return state.stopped.load(std::memory_order_acquire); }));
+    EXPECT_TRUE(state.stop_ok.load(std::memory_order_acquire));
+
+    runtime.stop();
+}
+
+TEST(NetTcpServerTests, RuntimeTcpListenerReportsEarlyConfigErrors) {
+    af::runtime_config config;
+    config.threads = {af::io_threads("net-rt-io", 1)};
+    config.logger.consumer_thread = af::thread_selector::io(0);
+
+    af::runtime runtime(config);
+    RuntimeTcpListenerState state;
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_until([&] { return runtime.active_thread_count() == 1; }));
+
+    const af::thread_ref io_thread = runtime.select_thread_ref(af::thread_selector::io(0));
+    af::net::tcp_listener listener(runtime);
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        af::net::tcp_listener_config listener_config;
+        listener_config.name = "runtime-listener-invalid";
+        listener_config.endpoint = af::net::tcp_endpoint::unix_path("/tmp/af-invalid-listener");
+        af::net::tcp_listener_callbacks callbacks;
+        callbacks.owner = &state;
+        callbacks.on_error = &runtime_tcp_listener_error;
+
+        const bool ok = listener.start(io_thread, std::move(listener_config), callbacks);
+        state.start_ok.store(ok, std::memory_order_release);
+        state.started.store(true, std::memory_order_release);
+    }));
+
+    ASSERT_TRUE(wait_until([&] { return state.started.load(std::memory_order_acquire); }));
+    EXPECT_FALSE(state.start_ok.load(std::memory_order_acquire));
+    EXPECT_EQ(state.errors.load(std::memory_order_acquire), 1);
+    EXPECT_EQ(state.last_error.load(std::memory_order_acquire), EAFNOSUPPORT);
+    EXPECT_FALSE(listener.started());
+
+    runtime.stop();
+}
 
 TEST(NetTcpServerTests, SupportsMultipleListenersWithDifferentHandlers) {
     const std::uint16_t port_a = reserve_loopback_port();
