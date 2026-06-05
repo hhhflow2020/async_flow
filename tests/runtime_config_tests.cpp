@@ -1006,11 +1006,24 @@ TEST(RuntimeConfigTests, ResolvesRuntimeConfigThreadMetadataAndSelectors) {
     EXPECT_EQ(resolved.thread_group_offset(0), 0U);
     EXPECT_EQ(resolved.thread_group_offset(1), 1U);
     EXPECT_EQ(resolved.thread_group_offset(4), 2U);
+    ASSERT_EQ(resolved.thread_groups.size(), 2U);
+    EXPECT_EQ(resolved.thread_groups[0].name, "io");
+    EXPECT_EQ(resolved.thread_groups[0].kind, af::thread_kind::io);
+    EXPECT_EQ(resolved.thread_groups[0].begin, 0U);
+    EXPECT_EQ(resolved.thread_groups[0].count, 2U);
+    EXPECT_EQ(resolved.thread_groups[1].name, "logic");
+    EXPECT_EQ(resolved.thread_groups[1].kind, af::thread_kind::cpu);
+    EXPECT_EQ(resolved.thread_groups[1].begin, 2U);
+    EXPECT_EQ(resolved.thread_groups[1].count, 3U);
 
     const af::thread_group_ref io_threads = resolved.io_thread_group();
     const af::thread_group_ref cpu_threads = resolved.cpu_thread_group();
+    const af::thread_group_ref io_group = resolved.thread_group(0);
+    const af::thread_group_ref logic_group = resolved.thread_group("logic");
     ASSERT_EQ(io_threads.size(), 2U);
     ASSERT_EQ(cpu_threads.size(), 3U);
+    ASSERT_EQ(io_group.size(), 2U);
+    ASSERT_EQ(logic_group.size(), 3U);
     EXPECT_EQ(io_threads.front(), af::thread_ref(0));
     EXPECT_EQ(io_threads[1], af::thread_ref(1));
     EXPECT_EQ(io_threads.shard(3), af::thread_ref(1));
@@ -1020,6 +1033,10 @@ TEST(RuntimeConfigTests, ResolvesRuntimeConfigThreadMetadataAndSelectors) {
     EXPECT_EQ(cpu_threads.shard(5), af::thread_ref(4));
     EXPECT_EQ(resolved.thread_name(cpu_threads.shard(2)), "logic");
     EXPECT_EQ(resolved.thread_group_offset(cpu_threads.shard(2)), 2U);
+    EXPECT_EQ(io_group.front(), af::thread_ref(0));
+    EXPECT_EQ(logic_group.front(), af::thread_ref(2));
+    EXPECT_EQ(logic_group.shard(5), af::thread_ref(4));
+    EXPECT_FALSE(resolved.thread_group("missing"));
 }
 
 TEST(RuntimeConfigTests, RuntimeConfigValidationReportsInvalidFields) {
@@ -1183,14 +1200,21 @@ TEST(RuntimeConfigTests, RuntimeInstanceExposesResolvedThreadMetadata) {
 
     const af::thread_group_ref io_threads = runtime.io_threads();
     const af::thread_group_ref cpu_threads = runtime.cpu_threads();
+    const af::thread_group_ref io_group = runtime.thread_group("io");
+    const af::thread_group_ref logic_group = runtime.thread_group(1);
     ASSERT_EQ(io_threads.size(), 2U);
     ASSERT_EQ(cpu_threads.size(), 1U);
+    ASSERT_EQ(io_group.size(), 2U);
+    ASSERT_EQ(logic_group.size(), 1U);
     EXPECT_TRUE(runtime.valid_thread(io_threads.front()));
     EXPECT_EQ(runtime.thread_kind_of(io_threads.front()), af::thread_kind::io);
     EXPECT_EQ(runtime.thread_name(cpu_threads.front()), "logic");
     EXPECT_EQ(runtime.thread_group_offset(io_threads.shard(3)), 1U);
     EXPECT_TRUE(io_threads.contains(af::thread_ref(1)));
     EXPECT_FALSE(cpu_threads.contains(af::thread_ref(1)));
+    EXPECT_EQ(io_group.shard(3), af::thread_ref(1));
+    EXPECT_EQ(logic_group.front(), af::thread_ref(2));
+    EXPECT_FALSE(runtime.thread_group("missing"));
 }
 
 TEST(RuntimeConfigTests, RuntimeInstanceStartStopRunsConfiguredThreads) {

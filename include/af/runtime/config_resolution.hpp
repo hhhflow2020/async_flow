@@ -146,11 +146,20 @@ struct runtime_thread_info {
     bool set_os_thread_name{true};
 };
 
+struct runtime_thread_group_info {
+    std::string name{"worker"};
+    af::thread_kind kind{af::thread_kind::cpu};
+    std::uint16_t begin{0};
+    std::uint16_t count{0};
+};
+
 struct resolved_runtime_config {
     runtime_config config;
     std::vector<runtime_thread_info> threads;
+    std::vector<std::uint16_t> all_threads;
     std::vector<std::uint16_t> io_threads;
     std::vector<std::uint16_t> cpu_threads;
+    std::vector<runtime_thread_group_info> thread_groups;
 
     [[nodiscard]] std::uint16_t thread_count() const noexcept {
         return static_cast<std::uint16_t>(threads.size());
@@ -234,6 +243,23 @@ struct resolved_runtime_config {
     [[nodiscard]] thread_group_ref cpu_thread_group() const noexcept {
         return thread_group_ref(cpu_threads.data(), cpu_threads.size());
     }
+
+    [[nodiscard]] thread_group_ref thread_group(std::size_t group_index) const noexcept {
+        if (group_index >= thread_groups.size()) {
+            return {};
+        }
+        const runtime_thread_group_info &group = thread_groups[group_index];
+        return thread_group_ref(all_threads.data() + group.begin, group.count);
+    }
+
+    [[nodiscard]] thread_group_ref thread_group(std::string_view name) const noexcept {
+        for (std::size_t i = 0; i < thread_groups.size(); ++i) {
+            if (thread_groups[i].name == name) {
+                return thread_group(i);
+            }
+        }
+        return {};
+    }
 };
 
 struct runtime_config_resolution {
@@ -283,12 +309,20 @@ inline void expand_runtime_threads(resolved_runtime_config &resolved) {
         total_threads += group.count;
     }
     resolved.threads.reserve(total_threads);
+    resolved.all_threads.reserve(total_threads);
     resolved.io_threads.reserve(total_threads);
     resolved.cpu_threads.reserve(total_threads);
+    resolved.thread_groups.reserve(groups.size());
 
     std::uint16_t index = 0;
     for (std::size_t group_index = 0; group_index < groups.size(); ++group_index) {
         const thread_group_config &group = groups[group_index];
+        runtime_thread_group_info group_info;
+        group_info.name = group.name.empty() ? "worker" : group.name;
+        group_info.kind = group.kind;
+        group_info.begin = index;
+        group_info.count = static_cast<std::uint16_t>(group.count);
+        resolved.thread_groups.push_back(std::move(group_info));
         for (std::size_t group_offset = 0; group_offset < group.count; ++group_offset) {
             runtime_thread_info info;
             info.index = index;
@@ -300,6 +334,7 @@ inline void expand_runtime_threads(resolved_runtime_config &resolved) {
             info.priority = group.priority;
             info.set_os_thread_name = group.set_os_thread_name;
             resolved.threads.push_back(std::move(info));
+            resolved.all_threads.push_back(index);
             if (group.kind == af::thread_kind::io) {
                 resolved.io_threads.push_back(index);
             } else {

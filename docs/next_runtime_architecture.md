@@ -122,7 +122,7 @@ epoll/kqueue/select 属于 `reactor_backend`，不属于线程类型。
 
 当前实例 runtime 在 executor 线程入口会应用 thread layout 的系统属性：`diagnostics.enable_thread_name` 和 group 的 `set_os_thread_name` 控制线程命名；Linux 上非空 `affinity.cpu_ids` 会通过 `pthread_setaffinity_np` 绑定当前 runtime 线程。`thread_priority_config` 目前只保留配置和解析结果，后续需要补充明确的调度策略语义后再应用，避免不同平台上优先级含义不一致。
 
-实例 runtime 解析 thread layout 后会提供轻量 `thread_ref` / `thread_group_ref`：`rt.io_threads()` 和 `rt.cpu_threads()` 返回只读连续 view，不分配、不持有、不加锁；`thread_group_ref::shard(key)` 可按业务 key 选择稳定线程。task 调度、`runtime.post()` 等入口接受 `thread_ref`，为后续 `tcp_server`、`udp_socket` 直接绑定 runtime IO 线程组提供低耦合 API。
+实例 runtime 解析 thread layout 后会提供轻量 `thread_ref` / `thread_group_ref`：`rt.io_threads()` 和 `rt.cpu_threads()` 返回按 kind 聚合的只读 view，`rt.thread_group(index)` / `rt.thread_group("logic")` 返回配置中的命名线程组 view；这些 view 不分配、不持有、不加锁。`thread_group_ref::shard(key)` 可按业务 key 选择稳定线程。task 调度、`runtime.post()` 等入口接受 `thread_ref`，为后续 `tcp_server`、`udp_socket` 直接绑定 runtime IO 线程组提供低耦合 API。
 
 ### scheduler_config
 
@@ -654,7 +654,7 @@ include/af/reactor/select_reactor.hpp
 - 当前实例 runtime 已提供 runtime-owned async logger：`runtime.start()` 在 `runtime.config().logger.backends` 非空时自动构造 file/udp/tcp 后端并把消费者注册为 service task，`runtime.stop()` 先 drain/flush 日志再停止 executor；`start_async_logging_for_runtime(runtime&, config, thread)` 仍作为手动自定义入口保留。
 - 当前 runtime-owned async logger 已接入 `shutdown.log_flush_timeout`，用于控制停止时日志 drain/flush 的等待预算；模板化 `tcp_server` 已支持自身 `tcp_server_config.connection_close_timeout` 和 server 级默认 `tcp_connection_config`，但实例 `runtime_config.shutdown.connection_close_timeout` 仍待网络层迁移到实例 runtime API 后直连。
 - 当前实例 runtime 已提供 `af::runtime_task`、`af::make_task<T>(runtime, ...)`、`af::try_make_task<T>(runtime, ...)` 和 `runtime_task_handle<T>`：任务创建走 typed slab object pool，任务 id 默认使用每线程 block 分配，`diagnostics.enable_task_id=false` 时跳过 id 分配并保持 invalid；`schedule_to()` 投递到目标 executor，运行中请求下一跳会延后到当前 `run_task()` 返回后再入队，避免同一个任务对象并发重入。
-- 当前实例 runtime 已提供 `thread_ref` / `thread_group_ref`：`runtime::io_threads()`、`runtime::cpu_threads()` 返回已解析线程索引的连续 view，`thread_group_ref::shard()` 用于稳定分片选择；`runtime::post()` 和 `runtime_task` 调度入口已支持 `thread_ref`，便于后续网络层直接使用 runtime thread group。
+- 当前实例 runtime 已提供 `thread_ref` / `thread_group_ref`：`runtime::io_threads()`、`runtime::cpu_threads()` 返回按 kind 聚合的线程索引 view，`runtime::thread_group(index/name)` 返回配置中的命名线程组 view，`thread_group_ref::shard()` 用于稳定分片选择；`runtime::post()` 和 `runtime_task` 调度入口已支持 `thread_ref`，便于后续网络层直接使用 runtime thread group；`basic` 示例已迁移到实例 runtime 作为新 API 样板。
 - 当前实例 runtime 已接入每 executor 本地 timer min-heap：`schedule_after()` / `schedule_at()` / `pending_after()` / `pending_at()` 先把 task 以 `timer_arming` 状态投递到目标 inbox，目标线程再挂入本地 heap；executor 空闲等待使用最近 timer deadline 作为 atomic/futex timeout，IO executor 则把最近 timer deadline 传给 `reactor.poll(timeout)`；`stop()` 会取消未到期 timer 并释放 task 生命周期引用。后续可在不改变 task API 的前提下把 min-heap backend 替换为分层时间轮。
 
 后续迁移应先补齐测试和 benchmark，再逐步替换旧路径，避免一次性重写导致行为不可控。

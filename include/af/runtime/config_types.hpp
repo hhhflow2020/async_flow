@@ -113,6 +113,10 @@ public:
         return count_ == 0;
     }
 
+    [[nodiscard]] explicit constexpr operator bool() const noexcept {
+        return !empty();
+    }
+
     [[nodiscard]] constexpr std::size_t size() const noexcept {
         return count_;
     }

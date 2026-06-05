@@ -126,6 +126,14 @@ public:
         return resolution_.resolved.cpu_thread_group();
     }
 
+    [[nodiscard]] thread_group_ref thread_group(std::size_t group_index) const noexcept {
+        return resolution_.resolved.thread_group(group_index);
+    }
+
+    [[nodiscard]] thread_group_ref thread_group(std::string_view name) const noexcept {
+        return resolution_.resolved.thread_group(name);
+    }
+
     [[nodiscard]] thread_index active_thread_count() const noexcept {
         return active_thread_count_.load(std::memory_order_acquire);
     }
