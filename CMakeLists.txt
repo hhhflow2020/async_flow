@@ -170,6 +170,7 @@ if(ASYNCFLOW_BUILD_TESTS)
         tests/net_tcp_server_tests.cpp
         tests/net_udp_socket_tests.cpp
         tests/net_unix_socket_tests.cpp
+        tests/public_header_tests.cpp
     )
     target_link_libraries(asyncflow_runtime_tests PRIVATE AsyncFlow::AsyncFlow GTest::gtest_main)
 
