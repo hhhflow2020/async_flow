@@ -74,7 +74,7 @@ private:
     std::size_t task_drain_budget_{256};
     std::chrono::nanoseconds max_task_run_slice_{0};
     std::size_t timer_drain_budget_{256};
-    timer_kind timer_kind_{timer_kind::min_heap};
+    timer_kind timer_kind_{timer_kind::hierarchical_wheel};
     std::size_t service_task_budget_{32};
     std::size_t next_service_task_{0};
     std::uint64_t next_timer_sequence_{0};

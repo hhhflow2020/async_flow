@@ -268,7 +268,7 @@ normalize_runtime_task_pool_local_cache_size(std::size_t value) noexcept {
 }
 
 struct timer_config {
-    timer_kind kind{timer_kind::min_heap};
+    timer_kind kind{timer_kind::hierarchical_wheel};
     std::chrono::milliseconds tick{1};
     std::size_t wheel_slots{4096};
     std::size_t drain_budget{256};

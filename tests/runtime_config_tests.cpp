@@ -886,7 +886,7 @@ TEST(RuntimeConfigTests, RuntimeConfigUsesPlainStructDefaultsAndFactories) {
     EXPECT_EQ(config.task_pool.local_cache_size, 256U);
     EXPECT_EQ(config.task_pool.slab_object_count, 4096U);
     EXPECT_EQ(config.task_pool.oom, af::oom_policy::fatal);
-    EXPECT_EQ(config.timer.kind, af::timer_kind::min_heap);
+    EXPECT_EQ(config.timer.kind, af::timer_kind::hierarchical_wheel);
     EXPECT_EQ(config.timer.tick, std::chrono::milliseconds(1));
     EXPECT_EQ(config.timer.drain_budget, 256U);
     EXPECT_EQ(config.reactor.backend, af::reactor_backend::auto_select);
