@@ -53,7 +53,7 @@ auto public_listener = server.add_listener<PublicHandler>({
 const bool scheduled = public_listener.ok() && server.start();
 ```
 
-`TcpServerConfig` 是 server/shard 级配置，当前无额外字段；`TcpListenerOptions` 是 listener/connection 级配置，包括 `backlog`、`reuse_port`、`ipv6_only`、accept 预算、读预算、读 buffer 大小和输出高水位。
+`TcpServerConfig` 是 server/shard 级配置，包含默认 `connection` 配置和 `connection_close_timeout`。`connection` 会作为 listener 的默认连接配置，覆盖读 buffer、读预算、写预算、输出高水位、`TCP_NODELAY` 和 keepalive；`TcpListenerOptions` 仍可在单个 listener 上覆盖这些连接热路径参数，并继续承载 `backlog`、`reuse_port`、`ipv6_only`、accept 预算和 Unix path 生命周期选项。
 
 运行中可以动态增加或移除 listener。TCP server 控制面是 reactor-only：`bind_threads()`、`add_listener()`、`remove_listener()`、`start()`、`stop()` 应由同一个 reactor 线程调用；外部线程应显式投递一个 runtime task 到该 reactor。框架把这作为无锁控制面的使用契约，不为外部直接调用额外建立同步兼容层。
 
@@ -72,6 +72,8 @@ if (result.ok()) {
 ```
 
 `remove_listener_policy::stop_accept_only` 只停止 accept，不影响已建立连接；`close_existing_connections` 会同时关闭该 listener 下已有连接。
+
+`TcpServer::stop()` 会先停止 accept 并从 reactor 移除 listener，然后对活跃连接执行 `close_after_flush()`；连接自然 flush 完会立即关闭，超过 `connection_close_timeout` 后强制关闭剩余连接，避免生产退出时被慢客户端无限拖住。
 
 ## TCP Client API
 

@@ -782,6 +782,7 @@ TEST(NetTcpServerTests, SupportsIpv6LoopbackListener) {
 TEST(NetTcpServerTests, RejectsBusyLoopListenerOptions) {
     const std::uint16_t accept_budget_port = reserve_loopback_port();
     const std::uint16_t read_budget_port = reserve_loopback_port();
+    const std::uint16_t write_budget_port = reserve_loopback_port();
     const std::uint16_t watermark_port = reserve_loopback_port();
 
     NetServerRuntime::init();
@@ -803,6 +804,11 @@ TEST(NetTcpServerTests, RejectsBusyLoopListenerOptions) {
         .endpoint = af::net::TcpEndpoint::host("127.0.0.1", watermark_port),
         .options = {.output_high_watermark = 0},
     });
+    const auto zero_write_budget = server.add_listener<EchoHandler>({
+        .name = "zero-write-budget",
+        .endpoint = af::net::TcpEndpoint::host("127.0.0.1", write_budget_port),
+        .options = {.write_budget_bytes = 0},
+    });
 
     EXPECT_FALSE(zero_accept_budget.ok());
     EXPECT_EQ(zero_accept_budget.error, EINVAL);
@@ -810,6 +816,8 @@ TEST(NetTcpServerTests, RejectsBusyLoopListenerOptions) {
     EXPECT_EQ(zero_read_budget.error, EINVAL);
     EXPECT_FALSE(zero_output_watermark.ok());
     EXPECT_EQ(zero_output_watermark.error, EINVAL);
+    EXPECT_FALSE(zero_write_budget.ok());
+    EXPECT_EQ(zero_write_budget.error, EINVAL);
 
     EXPECT_TRUE(server.stop());
     NetServerRuntime::wait_for_idle();
@@ -1335,6 +1343,8 @@ TEST(NetTcpServerTests, StopClosesBufferedConnectionsAfterConfiguredTimeout) {
     auto state = std::make_shared<StopTimeoutState>();
 
     af::net::TcpServerConfig server_config;
+    server_config.connection.write_budget_bytes = 16U * 1024U;
+    server_config.connection.output_high_watermark = 64U * 1024U;
     server_config.connection_close_timeout = std::chrono::milliseconds(20);
 
     NetServerRuntime::init();
@@ -1345,11 +1355,7 @@ TEST(NetTcpServerTests, StopClosesBufferedConnectionsAfterConfiguredTimeout) {
         {
             .name = "stop-timeout-fill",
             .endpoint = af::net::TcpEndpoint::host("127.0.0.1", port),
-            .options =
-                {
-                    .reuse_port = true,
-                    .output_high_watermark = 64U * 1024U,
-                },
+            .options = {.reuse_port = true},
         },
         FillSendQueueOnAcceptHandler{state});
     ASSERT_TRUE(listener.ok()) << listener.error;

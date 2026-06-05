@@ -93,12 +93,25 @@ struct TcpListenerOptions {
     std::size_t accept_budget{128};
     std::size_t read_budget_bytes{256U * 1024U};
     std::size_t read_buffer_size{16U * 1024U};
+    std::size_t write_budget_bytes{512U * 1024U};
     std::size_t output_high_watermark{4U * 1024U * 1024U};
+    bool no_delay{true};
+    bool keepalive{true};
     bool unlink_existing_unix_path{true};
     bool unlink_unix_path_on_close{true};
 };
 
+struct TcpConnectionConfig {
+    std::size_t read_buffer_size{16U * 1024U};
+    std::size_t read_budget_bytes{512U * 1024U};
+    std::size_t write_budget_bytes{512U * 1024U};
+    std::size_t output_high_watermark{8U * 1024U * 1024U};
+    bool no_delay{true};
+    bool keepalive{true};
+};
+
 struct TcpServerConfig {
+    TcpConnectionConfig connection;
     std::chrono::milliseconds connection_close_timeout{std::chrono::seconds(5)};
 };
 
@@ -668,13 +681,21 @@ private:
     }
 
     void flush_output() noexcept {
+        std::size_t written_this_run = 0;
+        const std::size_t write_budget = listener_options().write_budget_bytes;
         while (alive()) {
             if (output_.empty()) {
                 break;
             }
-            const ssize_t n = flush_output_once();
+            if (written_this_run >= write_budget) {
+                update_interest();
+                return;
+            }
+            const ssize_t n = flush_output_once(write_budget - written_this_run);
             if (n > 0) {
-                consume_output(static_cast<std::size_t>(n));
+                const auto written = static_cast<std::size_t>(n);
+                written_this_run += written;
+                consume_output(written);
                 continue;
             }
             if (n == 0) {
@@ -702,24 +723,35 @@ private:
         update_interest();
     }
 
-    [[nodiscard]] ssize_t flush_output_once() noexcept {
+    [[nodiscard]] ssize_t flush_output_once(std::size_t max_bytes) noexcept {
+        if (max_bytes == 0U) {
+            return 0;
+        }
         std::array<af::BufferView, 64> views{};
         std::array<iovec, 64> iov{};
         const std::size_t count = output_.fill_views(views);
-        for (std::size_t i = 0; i < count; ++i) {
-            iov[i].iov_base = const_cast<std::byte *>(views[i].data());
-            iov[i].iov_len = views[i].size();
+        std::size_t send_count = 0;
+        std::size_t remaining = max_bytes;
+        for (std::size_t i = 0; i < count && remaining != 0U; ++i) {
+            const std::size_t size = std::min(views[i].size(), remaining);
+            if (size == 0U) {
+                continue;
+            }
+            iov[send_count].iov_base = const_cast<std::byte *>(views[i].data());
+            iov[send_count].iov_len = size;
+            ++send_count;
+            remaining -= size;
         }
-        if (count == 0U) {
+        if (send_count == 0U) {
             return 0;
         }
-        if (count == 1U) {
+        if (send_count == 1U) {
             return ::send(fd_, iov[0].iov_base, iov[0].iov_len, send_no_signal_flags());
         }
 
         msghdr message{};
         message.msg_iov = iov.data();
-        message.msg_iovlen = static_cast<decltype(message.msg_iovlen)>(count);
+        message.msg_iovlen = static_cast<decltype(message.msg_iovlen)>(send_count);
         return ::sendmsg(fd_, &message, send_no_signal_flags());
     }
 
@@ -935,7 +967,12 @@ private:
             if (fd >= 0) {
                 set_no_sigpipe(fd);
                 if (context_ != nullptr && context_->endpoint.family != AddressFamily::Unix) {
-                    static_cast<void>(set_tcp_no_delay(fd, true));
+                    if (context_->options.no_delay) {
+                        static_cast<void>(set_tcp_no_delay(fd, true));
+                    }
+                    if (context_->options.keepalive) {
+                        static_cast<void>(set_socket_keepalive(fd, true));
+                    }
                 }
                 if (!route_connection(fd, reinterpret_cast<const sockaddr *>(&peer), peer_size)) {
                     detail::close_fd(fd);
@@ -2449,10 +2486,48 @@ private:
     }
 
     [[nodiscard]] static TcpServerConfig normalize_config(TcpServerConfig config) noexcept {
+        const TcpConnectionConfig defaults{};
+        if (config.connection.read_buffer_size == 0U) {
+            config.connection.read_buffer_size = defaults.read_buffer_size;
+        }
+        if (config.connection.read_budget_bytes == 0U) {
+            config.connection.read_budget_bytes = defaults.read_budget_bytes;
+        }
+        if (config.connection.write_budget_bytes == 0U) {
+            config.connection.write_budget_bytes = defaults.write_budget_bytes;
+        }
+        if (config.connection.output_high_watermark == 0U) {
+            config.connection.output_high_watermark = defaults.output_high_watermark;
+        }
         if (config.connection_close_timeout.count() < 0) {
             config.connection_close_timeout = std::chrono::milliseconds(0);
         }
         return config;
+    }
+
+    [[nodiscard]] TcpListenerOptions
+    normalize_listener_options(TcpListenerOptions options) const noexcept {
+        const TcpListenerOptions listener_defaults{};
+        const TcpConnectionConfig &connection = state_->config.connection;
+        if (options.read_buffer_size == listener_defaults.read_buffer_size) {
+            options.read_buffer_size = connection.read_buffer_size;
+        }
+        if (options.read_budget_bytes == listener_defaults.read_budget_bytes) {
+            options.read_budget_bytes = connection.read_budget_bytes;
+        }
+        if (options.write_budget_bytes == listener_defaults.write_budget_bytes) {
+            options.write_budget_bytes = connection.write_budget_bytes;
+        }
+        if (options.output_high_watermark == listener_defaults.output_high_watermark) {
+            options.output_high_watermark = connection.output_high_watermark;
+        }
+        if (options.no_delay == listener_defaults.no_delay) {
+            options.no_delay = connection.no_delay;
+        }
+        if (options.keepalive == listener_defaults.keepalive) {
+            options.keepalive = connection.keepalive;
+        }
+        return options;
     }
 
     void init_shards() {
@@ -2550,6 +2625,7 @@ private:
                 return ListenerResult::failure(ENOMEM);
             }
         }
+        config.options = normalize_listener_options(config.options);
 
         const int validation_error = validate_config(config);
         if (validation_error != 0) {
@@ -2602,7 +2678,8 @@ private:
             return EINVAL;
         }
         if (config.options.backlog <= 0 || config.options.accept_budget == 0U ||
-            config.options.read_budget_bytes == 0U || config.options.output_high_watermark == 0U) {
+            config.options.read_budget_bytes == 0U || config.options.read_buffer_size == 0U ||
+            config.options.write_budget_bytes == 0U || config.options.output_high_watermark == 0U) {
             return EINVAL;
         }
         if (config.endpoint.family == AddressFamily::Unix &&

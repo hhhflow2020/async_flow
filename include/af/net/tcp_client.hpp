@@ -757,6 +757,7 @@ private:
         }
         if (config.options.connection.read_budget_bytes == 0U ||
             config.options.connection.read_buffer_size == 0U ||
+            config.options.connection.write_budget_bytes == 0U ||
             config.options.connection.output_high_watermark == 0U) {
             return EINVAL;
         }

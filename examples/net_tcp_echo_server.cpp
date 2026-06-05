@@ -92,8 +92,6 @@ struct EchoHandler {
     std::shared_ptr<ServerLifecycleState> lifecycle;
 
     void on_accept(af::net::tcp_connection_ref<EchoRuntime> conn) noexcept {
-        static_cast<void>(conn.set_no_delay(true));
-        static_cast<void>(conn.set_keepalive(true));
         LOG(INFO) << "tcp echo accepted listener=" << conn.listener_name()
                   << " slot=" << conn.slot() << " generation=" << conn.generation();
     }
@@ -171,9 +169,6 @@ private:
                         .reuse_port = true,
                         .ipv6_only = true,
                         .accept_budget = 256,
-                        .read_budget_bytes = 512U * 1024U,
-                        .read_buffer_size = 16U * 1024U,
-                        .output_high_watermark = 8U * 1024U * 1024U,
                     },
                 .accept_strategy = af::net::accept_strategy::reuse_port_per_io_thread,
             },
@@ -264,7 +259,16 @@ int main(int argc, char **argv) {
 
     EchoRuntime::init();
 
-    af::net::tcp_server<EchoRuntime> server;
+    af::net::tcp_server_config server_config;
+    server_config.connection.read_budget_bytes = 512U * 1024U;
+    server_config.connection.read_buffer_size = 16U * 1024U;
+    server_config.connection.write_budget_bytes = 512U * 1024U;
+    server_config.connection.output_high_watermark = 8U * 1024U * 1024U;
+    server_config.connection.no_delay = true;
+    server_config.connection.keepalive = true;
+    server_config.connection_close_timeout = std::chrono::seconds(5);
+
+    af::net::tcp_server<EchoRuntime> server(server_config);
     auto lifecycle = std::make_shared<ServerLifecycleState>();
     if (!EchoRuntime::start_task<StartServerTask>(&server, port, ipv6, lifecycle)) {
         std::cerr << "failed to schedule tcp echo server start\n";
