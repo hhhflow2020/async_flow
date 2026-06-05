@@ -41,9 +41,11 @@ enum class runtime_config_status : std::uint8_t {
     log_udp_backend_host_empty,
     log_udp_backend_port_zero,
     log_udp_backend_thread_not_found,
+    log_udp_backend_thread_not_io,
     log_tcp_backend_host_empty,
     log_tcp_backend_port_zero,
     log_tcp_backend_thread_not_found,
+    log_tcp_backend_thread_not_io,
     scheduler_max_task_run_slice_negative,
     shutdown_drain_timeout_negative,
     shutdown_connection_close_timeout_negative,
@@ -109,12 +111,16 @@ runtime_config_status_name(runtime_config_status status) noexcept {
         return "log_udp_backend_port_zero";
     case runtime_config_status::log_udp_backend_thread_not_found:
         return "log_udp_backend_thread_not_found";
+    case runtime_config_status::log_udp_backend_thread_not_io:
+        return "log_udp_backend_thread_not_io";
     case runtime_config_status::log_tcp_backend_host_empty:
         return "log_tcp_backend_host_empty";
     case runtime_config_status::log_tcp_backend_port_zero:
         return "log_tcp_backend_port_zero";
     case runtime_config_status::log_tcp_backend_thread_not_found:
         return "log_tcp_backend_thread_not_found";
+    case runtime_config_status::log_tcp_backend_thread_not_io:
+        return "log_tcp_backend_thread_not_io";
     }
     return "unknown";
 }
@@ -276,6 +282,20 @@ inline void expand_runtime_threads(resolved_runtime_config &resolved) {
 }
 
 [[nodiscard]] inline runtime_config_validation_result
+validate_log_backend_io_thread(const resolved_runtime_config &resolved, thread_selector selector,
+                               runtime_config_status not_found_status,
+                               runtime_config_status not_io_status, std::size_t index) noexcept {
+    const std::uint16_t thread = resolved.select_thread(selector);
+    if (!resolved.valid_thread(thread)) {
+        return runtime_config_error(not_found_status, index);
+    }
+    if (resolved.thread_kind_of(thread) != af::thread_kind::io) {
+        return runtime_config_error(not_io_status, index);
+    }
+    return {};
+}
+
+[[nodiscard]] inline runtime_config_validation_result
 validate_log_backend(const resolved_runtime_config &resolved, const log_backend_config &backend,
                      std::size_t index) noexcept {
     if (const auto *file = std::get_if<file_log_backend_config>(&backend)) {
@@ -291,9 +311,11 @@ validate_log_backend(const resolved_runtime_config &resolved, const log_backend_
         if (udp->port == 0) {
             return runtime_config_error(runtime_config_status::log_udp_backend_port_zero, index);
         }
-        if (!resolved.valid_thread(resolved.select_thread(udp->io_thread))) {
-            return runtime_config_error(runtime_config_status::log_udp_backend_thread_not_found,
-                                        index);
+        if (const auto validation = validate_log_backend_io_thread(
+                resolved, udp->io_thread, runtime_config_status::log_udp_backend_thread_not_found,
+                runtime_config_status::log_udp_backend_thread_not_io, index);
+            !validation) {
+            return validation;
         }
         return {};
     }
@@ -307,8 +329,11 @@ validate_log_backend(const resolved_runtime_config &resolved, const log_backend_
     if (tcp->port == 0) {
         return runtime_config_error(runtime_config_status::log_tcp_backend_port_zero, index);
     }
-    if (!resolved.valid_thread(resolved.select_thread(tcp->io_thread))) {
-        return runtime_config_error(runtime_config_status::log_tcp_backend_thread_not_found, index);
+    if (const auto validation = validate_log_backend_io_thread(
+            resolved, tcp->io_thread, runtime_config_status::log_tcp_backend_thread_not_found,
+            runtime_config_status::log_tcp_backend_thread_not_io, index);
+        !validation) {
+        return validation;
     }
     return {};
 }

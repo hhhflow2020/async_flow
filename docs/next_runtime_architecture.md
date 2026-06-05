@@ -553,6 +553,8 @@ struct tcp_log_backend_config {
 ```
 
 网络日志后端可以由日志消费者聚合 batch，再调度到指定 IO executor，通过 reactor 发送。当前 `runtime_config.logger` 的 `io_thread` 已参与配置校验；实际 file/udp/tcp 后端先复用现有 `LogBackend` 实现，网络后端完全 reactor 化发送仍在后续迁移项中。
+UDP/TCP 日志后端的 `io_thread` 必须解析到 `thread_kind::io` executor；解析失败或指向
+CPU 线程都会在 `validate_runtime_config()` 阶段拒绝。
 
 ### 日志生命周期
 

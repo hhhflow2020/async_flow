@@ -1070,6 +1070,25 @@ TEST(RuntimeConfigTests, RuntimeConfigValidationReportsInvalidFields) {
     EXPECT_EQ(validation.status, af::runtime_config_status::log_udp_backend_thread_not_found);
     EXPECT_EQ(validation.index, 0U);
 
+    config.threads = {
+        af::io_threads("io", 1),
+        af::cpu_threads("logic", 1),
+    };
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+    config.logger.backends = {
+        af::udp_log_backend_config{"127.0.0.1", 9000, 1400, af::thread_selector::cpu(0)}};
+    validation = af::validate_runtime_config(config);
+    EXPECT_EQ(validation.status, af::runtime_config_status::log_udp_backend_thread_not_io);
+    EXPECT_EQ(af::runtime_config_status_name(validation.status), "log_udp_backend_thread_not_io");
+    EXPECT_EQ(validation.index, 0U);
+
+    config.logger.backends = {af::tcp_log_backend_config{
+        "127.0.0.1", 9001, std::chrono::milliseconds(500), af::thread_selector::cpu(0)}};
+    validation = af::validate_runtime_config(config);
+    EXPECT_EQ(validation.status, af::runtime_config_status::log_tcp_backend_thread_not_io);
+    EXPECT_EQ(af::runtime_config_status_name(validation.status), "log_tcp_backend_thread_not_io");
+    EXPECT_EQ(validation.index, 0U);
+
     config.threads = {af::io_threads("io", 1)};
     config.logger.consumer_thread = af::thread_selector::io(0);
     config.logger.backends = {af::file_log_backend_config{}};
