@@ -22,12 +22,12 @@
 
 namespace af::net {
 
-class tcp_server {
+class tcp_server : private detail::tcp_connection_owner {
 public:
     explicit tcp_server(af::runtime &owner, tcp_server_config config = {})
         : owner_(&owner), config_(std::move(config)),
-          handle_state_(std::make_shared<detail::tcp_server_handle_state>()) {
-        handle_state_->server.store(this, std::memory_order_release);
+          handle_state_(std::make_shared<detail::tcp_connection_handle_state>()) {
+        handle_state_->owner.store(this, std::memory_order_release);
     }
 
     tcp_server(const tcp_server &) = delete;
@@ -45,7 +45,7 @@ public:
             }
         }
         if (handle_state_ != nullptr) {
-            handle_state_->server.store(nullptr, std::memory_order_release);
+            handle_state_->owner.store(nullptr, std::memory_order_release);
         }
     }
 
@@ -141,7 +141,7 @@ public:
         }
 
         running_ = true;
-        handle_state_->server.store(this, std::memory_order_release);
+        handle_state_->owner.store(this, std::memory_order_release);
         handle_state_->accepting_operations.store(true, std::memory_order_release);
         bool ok = true;
         for (auto &entry_ptr : entries_) {
@@ -487,8 +487,12 @@ private:
         return true;
     }
 
-    [[nodiscard]] tcp_connection *find_connection(std::uint32_t slot,
-                                                  std::uint32_t generation) noexcept {
+    [[nodiscard]] af::runtime &runtime_owner() noexcept override {
+        return *owner_;
+    }
+
+    [[nodiscard]] connection_entry *find_connection_entry(std::uint32_t slot,
+                                                          std::uint32_t generation) noexcept {
         if (!on_owner_io_thread() || slot >= connections_.size()) {
             return nullptr;
         }
@@ -497,38 +501,65 @@ private:
             entry->connection == nullptr || !entry->connection->alive()) {
             return nullptr;
         }
+        return entry;
+    }
+
+    [[nodiscard]] tcp_connection *find_connection(std::uint32_t slot,
+                                                  std::uint32_t generation) noexcept {
+        connection_entry *entry = find_connection_entry(slot, generation);
+        if (entry == nullptr) {
+            return nullptr;
+        }
         return entry->connection.get();
     }
 
     [[nodiscard]] send_result send_to_connection(std::uint32_t slot, std::uint32_t generation,
-                                                 af::Buffer buffer) noexcept {
-        tcp_connection *connection = find_connection(slot, generation);
-        return connection == nullptr ? send_result::closed : connection->send(std::move(buffer));
+                                                 af::Buffer buffer) noexcept override {
+        connection_entry *entry = find_connection_entry(slot, generation);
+        if (entry == nullptr) {
+            return send_result::closed;
+        }
+        const send_result result = entry->connection->send(std::move(buffer));
+        if (result == send_result::closed) {
+            release_connection_slot(slot);
+        }
+        return result;
     }
 
     [[nodiscard]] send_result send_to_connection(std::uint32_t slot, std::uint32_t generation,
-                                                 af::BufferView view) noexcept {
-        tcp_connection *connection = find_connection(slot, generation);
-        return connection == nullptr ? send_result::closed : connection->send(view);
+                                                 af::BufferView view) noexcept override {
+        connection_entry *entry = find_connection_entry(slot, generation);
+        if (entry == nullptr) {
+            return send_result::closed;
+        }
+        const send_result result = entry->connection->send(view);
+        if (result == send_result::closed) {
+            release_connection_slot(slot);
+        }
+        return result;
     }
 
     [[nodiscard]] bool close_connection(std::uint32_t slot, std::uint32_t generation,
-                                        close_reason reason) noexcept {
-        tcp_connection *connection = find_connection(slot, generation);
-        if (connection == nullptr) {
+                                        close_reason reason) noexcept override {
+        connection_entry *entry = find_connection_entry(slot, generation);
+        if (entry == nullptr) {
             return false;
         }
-        connection->close(reason);
+        entry->connection->close(reason);
+        release_connection_slot(slot);
         return true;
     }
 
     [[nodiscard]] bool close_connection_after_flush(std::uint32_t slot,
-                                                    std::uint32_t generation) noexcept {
-        tcp_connection *connection = find_connection(slot, generation);
-        if (connection == nullptr) {
+                                                    std::uint32_t generation) noexcept override {
+        connection_entry *entry = find_connection_entry(slot, generation);
+        if (entry == nullptr) {
             return false;
         }
-        connection->close_after_flush();
+        const bool closed = entry->connection->close_after_flush();
+        if (closed) {
+            release_connection_slot(slot);
+        }
         return true;
     }
 
@@ -599,7 +630,7 @@ private:
 
     af::runtime *owner_{nullptr};
     tcp_server_config config_;
-    std::shared_ptr<detail::tcp_server_handle_state> handle_state_;
+    std::shared_ptr<detail::tcp_connection_handle_state> handle_state_;
     std::vector<std::unique_ptr<listener_entry>> entries_;
     std::vector<std::unique_ptr<connection_entry>> connections_;
     std::vector<std::uint32_t> free_listener_slots_;

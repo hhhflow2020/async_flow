@@ -23,7 +23,6 @@
 
 namespace af::net {
 
-class tcp_server;
 class tcp_connection;
 class tcp_connection_handle;
 class tcp_connection_ref;
@@ -43,6 +42,24 @@ struct tcp_connection_callbacks {
 
 namespace detail {
 
+class tcp_connection_owner {
+public:
+    [[nodiscard]] virtual af::runtime &runtime_owner() noexcept = 0;
+    [[nodiscard]] virtual send_result send_to_connection(std::uint32_t slot,
+                                                         std::uint32_t generation,
+                                                         af::Buffer buffer) noexcept = 0;
+    [[nodiscard]] virtual send_result send_to_connection(std::uint32_t slot,
+                                                         std::uint32_t generation,
+                                                         af::BufferView view) noexcept = 0;
+    [[nodiscard]] virtual bool close_connection(std::uint32_t slot, std::uint32_t generation,
+                                                close_reason reason) noexcept = 0;
+    [[nodiscard]] virtual bool close_connection_after_flush(std::uint32_t slot,
+                                                            std::uint32_t generation) noexcept = 0;
+
+protected:
+    ~tcp_connection_owner() = default;
+};
+
 using tcp_connection_inactive_callback = void (*)(void *owner, tcp_connection &connection) noexcept;
 
 struct tcp_connection_lifecycle {
@@ -50,8 +67,8 @@ struct tcp_connection_lifecycle {
     tcp_connection_inactive_callback on_inactive{nullptr};
 };
 
-struct tcp_server_handle_state {
-    std::atomic<tcp_server *> server{nullptr};
+struct tcp_connection_handle_state {
+    std::atomic<tcp_connection_owner *> owner{nullptr};
     std::atomic<bool> accepting_operations{false};
 };
 
@@ -97,13 +114,13 @@ public:
 private:
     friend class tcp_connection;
 
-    tcp_connection_handle(std::weak_ptr<detail::tcp_server_handle_state> state,
+    tcp_connection_handle(std::weak_ptr<detail::tcp_connection_handle_state> state,
                           af::thread_ref owner_thread, std::uint32_t slot,
                           std::uint32_t generation) noexcept
         : state_(std::move(state)), owner_thread_(owner_thread), slot_(slot),
           generation_(generation) {}
 
-    std::weak_ptr<detail::tcp_server_handle_state> state_;
+    std::weak_ptr<detail::tcp_connection_handle_state> state_;
     af::thread_ref owner_thread_{};
     std::uint32_t slot_{0};
     std::uint32_t generation_{0};
@@ -137,7 +154,7 @@ public:
                    std::uint32_t generation, tcp_endpoint local_endpoint,
                    tcp_endpoint peer_endpoint, tcp_connection_config config,
                    tcp_connection_callbacks callbacks, detail::tcp_connection_lifecycle lifecycle,
-                   std::weak_ptr<detail::tcp_server_handle_state> handle_state) noexcept
+                   std::weak_ptr<detail::tcp_connection_handle_state> handle_state) noexcept
         : owner_(&owner), owner_thread_(owner_thread), fd_(fd), slot_(slot),
           generation_(generation), local_endpoint_(std::move(local_endpoint)),
           peer_endpoint_(std::move(peer_endpoint)), config_(normalize_config(config)),
@@ -276,12 +293,13 @@ public:
         close_now(reason);
     }
 
-    void close_after_flush() noexcept {
+    [[nodiscard]] bool close_after_flush() noexcept {
         if (!alive()) {
-            return;
+            return true;
         }
         close_after_flush_ = true;
         flush_output();
+        return !alive();
     }
 
 private:
@@ -517,7 +535,7 @@ private:
     tcp_connection_config config_;
     tcp_connection_callbacks callbacks_{};
     detail::tcp_connection_lifecycle lifecycle_{};
-    std::weak_ptr<detail::tcp_server_handle_state> handle_state_;
+    std::weak_ptr<detail::tcp_connection_handle_state> handle_state_;
     af::fd_event_source source_{};
     af::BufferChain output_;
     std::vector<std::byte> read_buffer_;
@@ -576,7 +594,7 @@ inline void tcp_connection_ref::close(close_reason reason) const noexcept {
 
 inline void tcp_connection_ref::close_after_flush() const noexcept {
     if (connection_ != nullptr) {
-        connection_->close_after_flush();
+        static_cast<void>(connection_->close_after_flush());
     }
 }
 

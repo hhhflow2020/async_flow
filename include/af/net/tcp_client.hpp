@@ -411,6 +411,4 @@ private:
     std::uint32_t next_context_generation_{1};
 };
 
-template <typename Runtime> using tcp_client = TcpClient<Runtime>;
-
 } // namespace af::net

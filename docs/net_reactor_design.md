@@ -77,42 +77,50 @@ if (result.ok()) {
 
 ## TCP Client API
 
-`TcpClient` 负责主动出站连接。调用方选择绑定的 IO 线程组，`connect()` 会按配置线程轮询选择一个 IO shard，在目标 IO 线程上创建 nonblocking socket 并调用 `connect`。如果返回 `EINPROGRESS`，连接 task 通过 runtime IO wait 挂起；等待期间 IO 线程可以继续运行其他 task 和网络事件。
+`tcp_client` 负责主动出站连接。用户把控制操作显式投递到目标 IO reactor 线程；`connect()` 在该线程创建 nonblocking socket 并调用 `connect`。如果返回 `EINPROGRESS`，client 会把 fd 注册到当前线程的 reactor，等待 writable/error/hangup 事件；等待期间 IO 线程继续运行 task 和其他网络事件。
 
 ```cpp
-af::net::tcp_client<Runtime> client;
+af::net::tcp_client client(runtime);
+af::net::tcp_client_callbacks callbacks{};
+callbacks.owner = &client_state;
+callbacks.on_connect = &client_on_connect;
+callbacks.on_read = &client_on_read;
+callbacks.on_close = &client_on_close;
+callbacks.on_error = &client_on_error;
 
-// 在 runtime task 中执行，且后续控制操作固定在同一个 reactor 线程上。
-client.bind_threads(Runtime::thread_group<IoTag>());
-
-client.connect<ClientHandler>({
-    .name = "upstream",
-    .remote_endpoint = af::net::tcp_endpoint::host("127.0.0.1", 9000),
-    .connect_timeout = std::chrono::seconds(3),
+runtime.post(io_thread, [&] {
+    af::net::tcp_client_connect_config config;
+    config.name = "upstream";
+    config.remote_endpoint = af::net::tcp_endpoint::host("127.0.0.1", 9000);
+    config.owner_thread = io_thread;
+    config.connect_timeout = std::chrono::seconds(3);
+    client.connect(std::move(config), callbacks);
 });
 ```
 
-推荐 handler 签名：
+推荐 callback 签名：
 
 ```cpp
-struct ClientHandler {
-    void on_connect(af::net::tcp_connection_ref<Runtime> conn) {
-        conn.send(af::Buffer::copy("hello", 5));
-    }
+void client_on_connect(void *owner, af::net::tcp_connection_ref conn) noexcept {
+    static_cast<void>(owner);
+    static_cast<void>(conn.send(af::Buffer::copy("hello", 5)));
+}
 
-    void on_read(af::net::tcp_connection_ref<Runtime> conn,
-                 af::BufferView bytes) {}
+void client_on_read(void *owner, af::net::tcp_connection_ref conn,
+                    af::BufferView bytes) noexcept {
+    static_cast<void>(owner);
+    static_cast<void>(conn);
+    static_cast<void>(bytes);
+}
 
-    void on_close(af::net::tcp_connection_handle<Runtime> conn,
-                  af::net::close_reason reason) {}
-
-    void on_connect_error(int error) {}
-};
+void client_on_close(void *owner, af::net::tcp_connection_ref conn,
+                     af::net::close_reason reason) noexcept;
+void client_on_error(void *owner, int error) noexcept;
 ```
 
-TCP client 控制面与 server 一样是 reactor-only：`bind_threads()`、`connect()`、`stop()` 应由同一个 reactor 线程调用；外部线程应显式投递 runtime task。`connect()` 表示连接任务已成功提交，真实连接成功通过 `on_connect()` 回调通知，失败通过 `on_connect_error(error)` / `on_error(error)` 通知。
+TCP client 控制面与 server 一样是 reactor-only：`connect()`、`stop()` 应由同一个 reactor 线程调用；外部线程应显式投递 runtime task。`connect()` 表示连接任务已成功提交，真实连接成功通过 `on_connect()` 回调通知，失败通过 `on_error(error)` 通知。
 
-连接建立后不再走 client 专用热路径，而是直接复用 `TcpConnection`：读事件、写队列、跨线程 `TcpConnectionHandle::send()`、关闭和 generation 校验都与 server accepted connection 一致。`TcpClientOptions` 复用 connection 级读预算、读 buffer 和输出高水位配置，并提供 `no_delay`、`keep_alive` 开关。`TcpClient::stop()` 会在各 owner IO 线程取消尚未完成的 nonblocking connect wait，并异步回投控制线程完成 stop 状态更新，因此不会等待较长的 `connect_timeout` 或系统 TCP 超时。
+连接建立后直接复用 runtime-native `tcp_connection`：读事件、写队列、跨线程 `tcp_connection_handle::send()`、关闭和 generation 校验都与 server accepted connection 一致。`tcp_client_connect_config::connection` 复用 connection 级读预算、读 buffer 和输出高水位配置，并提供 `no_delay`、`keepalive` 开关。`tcp_client::stop()` 会在 owner IO 线程取消尚未完成的 nonblocking connect wait，因此不会等待较长的 `connect_timeout` 或系统 TCP 超时。
 
 TCP stream 连接建立后的跨线程发送、关闭和控制操作已经通过 runtime task 调度到 owner reactor，不再依赖 stream 专用 command queue。
 
