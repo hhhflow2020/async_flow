@@ -153,6 +153,7 @@ if(ASYNCFLOW_BUILD_TESTS)
         asyncflow_runtime_tests
         tests/runtime_lifecycle_basic_tests.cpp
         tests/runtime_config_tests.cpp
+        tests/runtime_function_post_tests.cpp
         tests/runtime_backpressure_tests.cpp
         tests/runtime_shutdown_policy_tests.cpp
         tests/runtime_instance_parallel_tests.cpp

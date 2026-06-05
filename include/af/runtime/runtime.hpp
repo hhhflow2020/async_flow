@@ -214,6 +214,33 @@ public:
         return post(thread.index, work);
     }
 
+    template <typename Fn,
+              typename = std::enable_if_t<!std::is_convertible_v<std::decay_t<Fn>, runtime_work *>>>
+    [[nodiscard]] bool post(thread_index thread, Fn &&fn) {
+        if (!valid_thread(thread)) [[unlikely]] {
+            return false;
+        }
+
+        using work_type = detail::runtime_function_work<std::decay_t<Fn>>;
+        work_type *work = nullptr;
+        try {
+            work = new work_type(std::forward<Fn>(fn));
+        } catch (...) {
+            return false;
+        }
+        if (post(thread, static_cast<runtime_work *>(work))) [[likely]] {
+            return true;
+        }
+        delete work;
+        return false;
+    }
+
+    template <typename Fn,
+              typename = std::enable_if_t<!std::is_convertible_v<std::decay_t<Fn>, runtime_work *>>>
+    [[nodiscard]] bool post(thread_ref thread, Fn &&fn) {
+        return post(thread.index, std::forward<Fn>(fn));
+    }
+
     template <typename Op, typename KeyFn>
     [[nodiscard]] static ShardedOps<Op> split_by_shard(std::vector<Op> &&ops,
                                                        std::uint16_t shard_count, KeyFn &&key_fn);
