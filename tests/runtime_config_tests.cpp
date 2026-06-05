@@ -11,6 +11,7 @@
 #include <type_traits>
 #include <variant>
 
+#include <pthread.h>
 #include <unistd.h>
 
 #include <gtest/gtest.h>
@@ -162,6 +163,32 @@ static_assert(af::log_overflow_policy::block == af::LogOverflowPolicy::Block);
     }
     return counter.load(std::memory_order_acquire) >= expected;
 }
+
+[[nodiscard]] std::string current_os_thread_name() {
+    std::array<char, 64> name{};
+#if defined(__APPLE__) || defined(__linux__)
+    if (::pthread_getname_np(::pthread_self(), name.data(), name.size()) != 0) {
+        return {};
+    }
+#endif
+    return name.data();
+}
+
+class ThreadNameProbeWork final : public af::runtime_work {
+public:
+    ThreadNameProbeWork(std::string &observed_name, std::atomic<int> &counter)
+        : observed_name_(observed_name), counter_(counter) {}
+
+    void run(af::runtime &owner) noexcept override {
+        static_cast<void>(owner);
+        observed_name_ = current_os_thread_name();
+        counter_.fetch_add(1, std::memory_order_release);
+    }
+
+private:
+    std::string &observed_name_;
+    std::atomic<int> &counter_;
+};
 
 class PostedRuntimeWork final : public af::runtime_work {
 public:
@@ -726,6 +753,9 @@ TEST(RuntimeConfigTests, RuntimeConfigUsesPlainStructDefaultsAndFactories) {
     EXPECT_EQ(config.logger.overflow, af::log_overflow_policy::drop_newest);
     EXPECT_EQ(config.shutdown.drain_timeout, std::chrono::seconds(5));
     EXPECT_TRUE(config.diagnostics.enable_task_id);
+    EXPECT_TRUE(config.diagnostics.enable_stats);
+    EXPECT_TRUE(config.diagnostics.enable_thread_name);
+    EXPECT_TRUE(config.diagnostics.enable_queue_metrics);
 
     config.threads = {
         af::io_threads("io", 2),
@@ -758,6 +788,32 @@ TEST(RuntimeConfigTests, RuntimeConfigUsesPlainStructDefaultsAndFactories) {
     EXPECT_EQ(std::get<af::tcp_log_backend_config>(config.logger.backends[2]).port, 9001U);
     EXPECT_EQ(config.logger.consumer_thread.kind, af::thread_selector_kind::io);
     EXPECT_EQ(config.logger.consumer_thread.index, 1U);
+}
+
+TEST(RuntimeConfigTests, RuntimeThreadNameDiagnosticsControlsOsThreadName) {
+    auto observe_name = [](bool enable_thread_name) {
+        af::runtime_config config;
+        config.threads = {af::cpu_threads("diag", 1)};
+        config.diagnostics.enable_thread_name = enable_thread_name;
+        config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+        af::runtime runtime(config);
+        std::string observed_name;
+        std::atomic<int> counter{0};
+        ThreadNameProbeWork work(observed_name, counter);
+
+        EXPECT_TRUE(runtime.start());
+        EXPECT_TRUE(wait_for_active_threads(runtime, 1));
+        const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
+        EXPECT_TRUE(runtime.post(cpu_thread, &work));
+        EXPECT_TRUE(wait_for_counter(counter, 1));
+        runtime.stop();
+        return observed_name;
+    };
+
+    constexpr std::string_view expected_name = "af-diag-0";
+    EXPECT_EQ(observe_name(true), expected_name);
+    EXPECT_NE(observe_name(false), expected_name);
 }
 
 TEST(RuntimeConfigTests, ResolvesRuntimeConfigThreadMetadataAndSelectors) {

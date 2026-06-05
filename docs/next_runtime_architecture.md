@@ -217,6 +217,8 @@ struct diagnostics_config {
 };
 ```
 
+`enable_task_id` 控制实例 task id 分配和日志 `[task=...]` 注入；`enable_thread_name` 控制实例 runtime 是否调用系统线程命名接口。极致热路径或嵌入式场景可以按需关闭诊断能力。
+
 ## Executor 模型
 
 每个 executor 对应一个框架线程和一个 task inbox：
@@ -632,6 +634,7 @@ include/af/reactor/select_reactor.hpp
 - 当前 runtime/task public enum 与容器已补 lower_case 别名，例如 `task_result`、`schedule_mode::ordered`、`shutdown_policy::wait_for_tasks`、`parallel_mode::non_empty_only` 和 `sharded_ops<T>`；示例已迁移到新拼写。
 - 当前已提供 public `runtime_config`、`scheduler_config`、`task_pool_config`、`timer_config`、`reactor_config`、`log_config`、`shutdown_config` 和 `diagnostics_config` 普通结构体，`io_threads()` / `cpu_threads()` 配置值工厂，以及 `resolve_runtime_config()` / `validate_runtime_config()` 解析校验入口。
 - 当前已提供 `af::runtime` 实例生命周期外壳和低层投递通道：构造时使用结构化配置解析校验，`start()` 按配置启动 runtime 线程，每个 executor 拥有 intrusive MPSC inbox，`post()` 可把 `runtime_work` 投递到指定线程执行，每轮按 `scheduler.task_drain_budget` drain task、按 `timer.drain_budget` drain 到期 timer，且在 `scheduler.max_task_run_slice` 非零时按时间片让出；`scheduler.wake` 已控制投递唤醒策略，默认 empty-to-non-empty 通过消费者 sleep flag 减少重复 wake，并在真正 wait 前复查队列/定时器/service task；CPU executor 空闲等待已支持 `scheduler.idle_wait` 的 futex/spin/yield 策略，IO executor 使用 reactor poll；`stop()` 可由外部线程完成 join/回收，也可由 runtime 线程内请求停止而不自 join。
+- 当前实例 runtime 已接入 `diagnostics.enable_thread_name`：开启时按 thread layout 调用系统线程命名接口，关闭时跳过命名调用；单个 thread group 仍可通过 `set_os_thread_name=false` 禁用自身命名。
 - 当前实例 runtime 已提供 service task 注册、注销和唤醒入口：service 列表只在目标 executor 线程内修改，executor 主循环按 `scheduler.service_task_budget` 轮询，外部唤醒不加锁。
 - 当前实例 runtime 已提供 runtime-owned async logger：`runtime.start()` 在 `runtime.config().logger.backends` 非空时自动构造 file/udp/tcp 后端并把消费者注册为 service task，`runtime.stop()` 先 drain/flush 日志再停止 executor；`start_async_logging_for_runtime(runtime&, config, thread)` 仍作为手动自定义入口保留。
 - 当前实例 runtime 已提供 `af::runtime_task`、`af::make_task<T>(runtime, ...)`、`af::try_make_task<T>(runtime, ...)` 和 `runtime_task_handle<T>`：任务创建走 typed slab object pool，任务 id 默认使用每线程 block 分配，`diagnostics.enable_task_id=false` 时跳过 id 分配并保持 invalid；`schedule_to()` 投递到目标 executor，运行中请求下一跳会延后到当前 `run_task()` 返回后再入队，避免同一个任务对象并发重入。

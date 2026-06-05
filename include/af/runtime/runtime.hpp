@@ -348,7 +348,7 @@ private:
             current_runtime_ = &owner_;
             current_executor_ = this;
             current_thread_index_ = thread_.index;
-            if (thread_.set_os_thread_name) {
+            if (owner_.config().diagnostics.enable_thread_name && thread_.set_os_thread_name) {
                 detail::set_current_thread_name(thread_.name, thread_.group_offset);
             }
 
