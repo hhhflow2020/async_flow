@@ -1,6 +1,7 @@
 #pragma once
 
 #include "af/buffer/buffer.hpp"
+#include "af/net/tcp_connection_handle.hpp"
 #include "af/net/tcp_endpoint.hpp"
 #include "af/net/tcp_listener.hpp"
 #include "af/net/tcp_client_types.hpp"
