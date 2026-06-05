@@ -187,6 +187,25 @@ TEST(LogTests, AsyncLogConfigProfilesSelectQueueStrategy) {
     EXPECT_EQ(ordered.ordering, af::LogOrdering::Relaxed);
     EXPECT_EQ(ordered.runtime_thread_count, af::AsyncLogConfig::auto_runtime_thread_count);
     EXPECT_EQ(ordered.queue_shard_count, af::AsyncLogConfig::auto_queue_shard_count);
+    EXPECT_EQ(ordered.record_pool_slab_object_count, 0U);
+}
+
+TEST(LogTests, RuntimeLogConfigCarriesRecordPoolSlabSize) {
+    af::log_config source = af::log_config::relaxed();
+    source.queue_capacity = 16;
+    source.queue_shard_count = 2;
+    source.runtime_thread_count = 3;
+    source.max_batch_records = 4;
+    source.record_pool.slab_object_count = 7;
+
+    const af::AsyncLogConfig target = af::make_async_log_config(source, 5);
+
+    EXPECT_EQ(target.ordering, af::LogOrdering::Relaxed);
+    EXPECT_EQ(target.queue_capacity, 16U);
+    EXPECT_EQ(target.queue_shard_count, 2U);
+    EXPECT_EQ(target.runtime_thread_count, 3U);
+    EXPECT_EQ(target.max_batch_size, 4U);
+    EXPECT_EQ(target.record_pool_slab_object_count, 7U);
 }
 
 class BlockingLogBackend final : public af::LogBackend {

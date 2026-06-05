@@ -170,6 +170,7 @@ template <typename TaskId>
     }
 
     target.queue_capacity = source.queue_capacity;
+    target.record_pool_slab_object_count = source.record_pool.slab_object_count;
     target.max_batch_size = source.max_batch_records;
     target.overflow_policy = source.overflow;
     target.flush_poll_interval =

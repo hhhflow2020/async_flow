@@ -812,6 +812,10 @@ TEST(RuntimeConfigTests, RuntimeConfigUsesPlainStructDefaultsAndFactories) {
     EXPECT_EQ(config.logger.consumer_thread.kind, af::thread_selector_kind::cpu);
     EXPECT_EQ(config.logger.consumer_thread.index, 0U);
     EXPECT_EQ(config.logger.overflow, af::log_overflow_policy::drop_newest);
+    EXPECT_EQ(config.logger.record_pool.local_cache_size, 256U);
+    EXPECT_EQ(config.logger.record_pool.slab_object_count, 4096U);
+    EXPECT_EQ(config.logger.record_pool.oom, af::oom_policy::fatal);
+    EXPECT_TRUE(config.logger.record_pool.enable_stats);
     EXPECT_EQ(config.shutdown.drain_timeout, std::chrono::seconds(5));
     EXPECT_TRUE(config.diagnostics.enable_task_id);
     EXPECT_TRUE(config.diagnostics.enable_stats);
@@ -956,6 +960,20 @@ TEST(RuntimeConfigTests, RuntimeConfigValidationReportsInvalidFields) {
     EXPECT_EQ(af::runtime_config_status_name(validation.status), "timer_kind_unsupported");
 
     config.timer.kind = af::timer_kind::min_heap;
+    config.logger.record_pool.local_cache_size = 0;
+    validation = af::validate_runtime_config(config);
+    EXPECT_EQ(validation.status, af::runtime_config_status::log_record_pool_local_cache_size_zero);
+    EXPECT_EQ(af::runtime_config_status_name(validation.status),
+              "log_record_pool_local_cache_size_zero");
+
+    config.logger.record_pool.local_cache_size = 1;
+    config.logger.record_pool.slab_object_count = 0;
+    validation = af::validate_runtime_config(config);
+    EXPECT_EQ(validation.status, af::runtime_config_status::log_record_pool_slab_object_count_zero);
+    EXPECT_EQ(af::runtime_config_status_name(validation.status),
+              "log_record_pool_slab_object_count_zero");
+
+    config.logger.record_pool.slab_object_count = 1;
     config.logger.consumer_thread = af::thread_selector::io(0);
     validation = af::validate_runtime_config(config);
     EXPECT_EQ(validation.status, af::runtime_config_status::log_consumer_thread_not_found);

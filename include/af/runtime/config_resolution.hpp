@@ -34,6 +34,8 @@ enum class runtime_config_status : std::uint8_t {
     reactor_event_budget_zero,
     log_queue_capacity_zero,
     log_max_batch_records_zero,
+    log_record_pool_local_cache_size_zero,
+    log_record_pool_slab_object_count_zero,
     log_consumer_thread_not_found,
     log_file_backend_path_empty,
     log_udp_backend_host_empty,
@@ -84,6 +86,10 @@ runtime_config_status_name(runtime_config_status status) noexcept {
         return "log_queue_capacity_zero";
     case runtime_config_status::log_max_batch_records_zero:
         return "log_max_batch_records_zero";
+    case runtime_config_status::log_record_pool_local_cache_size_zero:
+        return "log_record_pool_local_cache_size_zero";
+    case runtime_config_status::log_record_pool_slab_object_count_zero:
+        return "log_record_pool_slab_object_count_zero";
     case runtime_config_status::log_consumer_thread_not_found:
         return "log_consumer_thread_not_found";
     case runtime_config_status::log_file_backend_path_empty:
@@ -346,6 +352,12 @@ validate_resolved_runtime_config(const resolved_runtime_config &resolved) noexce
     }
     if (config.logger.max_batch_records == 0) {
         return runtime_config_error(runtime_config_status::log_max_batch_records_zero);
+    }
+    if (config.logger.record_pool.local_cache_size == 0) {
+        return runtime_config_error(runtime_config_status::log_record_pool_local_cache_size_zero);
+    }
+    if (config.logger.record_pool.slab_object_count == 0) {
+        return runtime_config_error(runtime_config_status::log_record_pool_slab_object_count_zero);
     }
     if (!resolved.valid_thread(resolved.select_thread(config.logger.consumer_thread))) {
         return runtime_config_error(runtime_config_status::log_consumer_thread_not_found);
