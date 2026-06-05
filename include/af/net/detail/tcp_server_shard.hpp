@@ -80,19 +80,24 @@ public:
             return listener_result::failure(EINVAL);
         }
 
+        bool acquired = false;
         try {
             if (!acquire_listener_slot(id)) {
                 return listener_result::failure(EEXIST);
             }
+            acquired = true;
             listener_entry &entry = *entries_[id.slot];
             entry.server = this;
             entry.id = id;
+            ++listener_count_;
             entry.state = listener_state::configured;
             entry.config = std::move(config);
             entry.raw_callbacks = callbacks;
             entry.owner_thread = owner_thread;
-            ++listener_count_;
         } catch (...) {
+            if (acquired) {
+                release_listener_slot(id.slot);
+            }
             return listener_result::failure(ENOMEM);
         }
 
@@ -127,20 +132,25 @@ public:
             return listener_result::failure(EINVAL);
         }
 
+        bool acquired = false;
         try {
             if (!acquire_listener_slot(id)) {
                 return listener_result::failure(EEXIST);
             }
+            acquired = true;
             listener_entry &entry = *entries_[id.slot];
             entry.server = this;
             entry.id = id;
+            ++listener_count_;
             entry.state = listener_state::configured;
             entry.config = std::move(config);
             entry.connection_callbacks = callbacks;
             entry.connection_mode = true;
             entry.owner_thread = owner_thread;
-            ++listener_count_;
         } catch (...) {
+            if (acquired) {
+                release_listener_slot(id.slot);
+            }
             return listener_result::failure(ENOMEM);
         }
 
@@ -425,19 +435,6 @@ private:
         if (entry != nullptr && entry->server != nullptr) {
             entry->server->end_user_callback();
         }
-    }
-
-    [[nodiscard]] listener_id acquire_listener_slot() {
-        const std::uint32_t generation = next_listener_generation();
-        if (!free_listener_slots_.empty()) {
-            const std::uint32_t slot = free_listener_slots_.back();
-            free_listener_slots_.pop_back();
-            entries_[slot] = std::make_unique<listener_entry>();
-            return listener_id{slot, generation};
-        }
-        const std::uint32_t slot = static_cast<std::uint32_t>(entries_.size());
-        entries_.push_back(std::make_unique<listener_entry>());
-        return listener_id{slot, generation};
     }
 
     [[nodiscard]] listener_id next_listener_id() noexcept {
