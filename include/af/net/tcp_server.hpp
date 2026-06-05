@@ -20,6 +20,7 @@
 #include "af/net/detail/tcp_state.hpp"
 #include "af/net/tcp_endpoint.hpp"
 #include "af/net/tcp_types.hpp"
+#include "af/net/thread_list.hpp"
 #include "af/thread_kind.hpp"
 
 namespace af::net {
@@ -597,16 +598,6 @@ private:
 
     std::shared_ptr<State> state_;
 };
-
-template <typename Runtime, typename Group>
-[[nodiscard]] std::vector<typename Runtime::Thread> thread_list(Group) {
-    std::vector<typename Runtime::Thread> result;
-    result.reserve(Group::count);
-    for (std::uint16_t i = 0; i < Group::count; ++i) {
-        result.push_back(Group::at(i));
-    }
-    return result;
-}
 
 using send_result = SendResult;
 using close_reason = CloseReason;

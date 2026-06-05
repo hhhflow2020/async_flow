@@ -13,8 +13,14 @@
 
 #include "af/net/detail/tcp_client_handler.hpp"
 #include "af/net/detail/tcp_client_tasks.hpp"
+#include "af/net/detail/tcp_handler.hpp"
+#include "af/net/detail/tcp_server_shard.hpp"
+#include "af/net/detail/tcp_state.hpp"
 #include "af/net/tcp_client_types.hpp"
-#include "af/net/tcp_server.hpp"
+#include "af/net/tcp_endpoint.hpp"
+#include "af/net/tcp_types.hpp"
+#include "af/net/thread_list.hpp"
+#include "af/thread_kind.hpp"
 
 #include <sys/socket.h>
 

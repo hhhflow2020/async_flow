@@ -4,7 +4,8 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <vector>
+
+#include "af/net/thread_list.hpp"
 
 namespace af::net {
 
@@ -144,8 +145,5 @@ struct ListenerResult {
 
 template <typename Runtime> class TcpConnectionHandle;
 template <typename Runtime> class TcpConnectionRef;
-
-template <typename Runtime, typename Group>
-[[nodiscard]] std::vector<typename Runtime::Thread> thread_list(Group);
 
 } // namespace af::net
