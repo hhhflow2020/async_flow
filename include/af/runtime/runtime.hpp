@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "af/detail/config.hpp"
 #include "af/detail/runtime/atomic_wait.hpp"
 #include "af/detail/runtime/runtime_service_task.hpp"
 #include "af/detail/thread/thread_name.hpp"
@@ -230,7 +231,8 @@ private:
               task_drain_budget_(owner_.config().scheduler.task_drain_budget),
               max_task_run_slice_(owner_.config().scheduler.max_task_run_slice),
               timer_drain_budget_(owner_.config().scheduler.timer_drain_budget),
-              service_task_budget_(owner_.config().scheduler.service_task_budget) {
+              service_task_budget_(owner_.config().scheduler.service_task_budget),
+              wake_policy_(owner_.config().scheduler.wake) {
             timers_.reserve(owner_.config().timer.initial_reserve);
             if (thread_.kind == thread_kind::io) {
                 reactor_ = make_reactor(owner_.config().reactor);
@@ -264,6 +266,11 @@ private:
 
         void enqueue(runtime_work *work) noexcept {
             inbox_.push(work);
+            if (wake_policy_ == wake_policy::empty_to_non_empty) {
+                if (!sleep_requested_.exchange(false, std::memory_order_acq_rel)) {
+                    return;
+                }
+            }
             notify();
         }
 
@@ -351,20 +358,15 @@ private:
                 if (stop_requested_.load(std::memory_order_acquire) && !did_work) {
                     break;
                 }
-                const auto observed = wake_epoch_.load(std::memory_order_acquire);
                 if (stop_requested_.load(std::memory_order_acquire)) {
                     continue;
                 }
-                if (!inbox_.empty()) {
-                    continue;
-                }
-                if (run_due_timers()) {
-                    continue;
-                }
-                if (run_service_tasks()) {
+                std::uint32_t observed = 0;
+                if (!prepare_wait(observed)) {
                     continue;
                 }
                 wait_for_wake_or_timer(observed);
+                sleep_requested_.store(false, std::memory_order_release);
             }
             cancel_timers();
             owner_.on_executor_stopped();
@@ -485,6 +487,22 @@ private:
                                                             std::memory_order_acquire));
         }
 
+        [[nodiscard]] bool prepare_wait(std::uint32_t &observed) noexcept {
+            if (wake_policy_ == wake_policy::empty_to_non_empty) {
+                sleep_requested_.store(true, std::memory_order_release);
+            }
+            observed = wake_epoch_.load(std::memory_order_acquire);
+            if (stop_requested_.load(std::memory_order_acquire) || !inbox_.empty()) {
+                sleep_requested_.store(false, std::memory_order_release);
+                return false;
+            }
+            if (run_due_timers() || run_service_tasks()) {
+                sleep_requested_.store(false, std::memory_order_release);
+                return false;
+            }
+            return true;
+        }
+
         [[nodiscard]] bool run_due_timers() noexcept {
             bool did_work = false;
             std::size_t drained = 0;
@@ -529,7 +547,9 @@ private:
         std::size_t service_task_budget_{32};
         std::size_t next_service_task_{0};
         std::uint64_t next_timer_sequence_{0};
-        std::atomic<std::uint32_t> wake_epoch_{0};
+        wake_policy wake_policy_{wake_policy::empty_to_non_empty};
+        alignas(detail::hardware_cache_line_size) std::atomic<bool> sleep_requested_{false};
+        alignas(detail::hardware_cache_line_size) std::atomic<std::uint32_t> wake_epoch_{0};
         std::atomic<bool> stop_requested_{false};
         std::thread worker_;
     };

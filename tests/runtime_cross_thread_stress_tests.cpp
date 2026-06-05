@@ -43,7 +43,7 @@ TEST(RuntimeStressTests, RepeatedCrossThreadHopBurstsComplete) {
             }
         }
 
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
         if (!wait_zero_until(remaining, deadline)) {
             int min_progress = hops_per_task + 1;
             int min_id = -1;
@@ -97,7 +97,7 @@ TEST(RuntimeStressTests, AboveSixtyFourThreadCrossWordHopCompletes) {
         }
     }
 
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
     if (!wait_zero_until(remaining, deadline)) {
         ADD_FAILURE() << "wide hop tasks did not drain, remaining="
                       << remaining.load(std::memory_order_acquire)

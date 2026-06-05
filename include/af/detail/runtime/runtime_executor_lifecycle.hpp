@@ -46,16 +46,9 @@ void Executor<RuntimeT, TraitsT>::set_current_thread_name() noexcept {
 
 template <typename RuntimeT, typename TraitsT> void Executor<RuntimeT, TraitsT>::notify() noexcept {
     wake_epoch_.fetch_add(1, std::memory_order_release);
-    if (!sleeping_.exchange(false, std::memory_order_acq_rel)) {
-        return;
-    }
+    const bool was_sleeping = sleeping_.exchange(false, std::memory_order_acq_rel);
 
-    if (!io_thread() || !io_backend_available()) {
-        wake_epoch_.notify_one();
-        return;
-    }
-
-    if (notify_native_io_backend()) {
+    if (was_sleeping && io_thread() && io_backend_available() && notify_native_io_backend()) {
         return;
     }
     wake_epoch_.notify_one();

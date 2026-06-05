@@ -849,6 +849,36 @@ TEST(RuntimeConfigTests, RuntimeInstancePostRunsWorkOnTargetThread) {
     EXPECT_FALSE(runtime.post(cpu_thread, &first));
 }
 
+TEST(RuntimeConfigTests, RuntimeWakePolicyEmptyToNonEmptyDrainsQueuedPosts) {
+    af::runtime_config config;
+    config.threads = {af::cpu_threads("logic", 1)};
+    config.scheduler.wake = af::wake_policy::empty_to_non_empty;
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    std::atomic<int> counter{0};
+    std::atomic<std::uint16_t> first_thread{af::runtime_invalid_thread_index};
+    std::atomic<std::uint16_t> second_thread{af::runtime_invalid_thread_index};
+    std::atomic<bool> first_owner_matches{false};
+    std::atomic<bool> second_owner_matches{false};
+    PostedRuntimeWork first(counter, first_thread, first_owner_matches);
+    PostedRuntimeWork second(counter, second_thread, second_owner_matches);
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 1));
+
+    const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
+    ASSERT_TRUE(runtime.post(cpu_thread, &first));
+    ASSERT_TRUE(runtime.post(cpu_thread, &second));
+    ASSERT_TRUE(wait_for_counter(counter, 2));
+    EXPECT_EQ(first_thread.load(std::memory_order_acquire), cpu_thread);
+    EXPECT_EQ(second_thread.load(std::memory_order_acquire), cpu_thread);
+    EXPECT_TRUE(first_owner_matches.load(std::memory_order_acquire));
+    EXPECT_TRUE(second_owner_matches.load(std::memory_order_acquire));
+
+    runtime.stop();
+}
+
 TEST(RuntimeConfigTests, RuntimeInstanceStopCanBeRequestedFromRuntimeThread) {
     af::runtime_config config;
     config.threads = {

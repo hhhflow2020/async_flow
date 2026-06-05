@@ -5,7 +5,7 @@ struct RepeatHopThreadTag;
 struct RepeatHopRuntimeTraits {
     static constexpr auto threads = af::thread_layout(af::thread_group<RepeatHopThreadTag, 2>());
     static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::StopImmediately;
-    static constexpr bool enable_task_registry = true;
+    static constexpr bool enable_task_registry = false;
 };
 
 using RepeatHopRuntime = af::AsyncRuntime<RepeatHopRuntimeTraits>;
