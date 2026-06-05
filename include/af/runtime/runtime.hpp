@@ -1,34 +1,28 @@
 #pragma once
 
-#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <exception>
-#include <limits>
 #include <memory>
 #include <new>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "af/detail/config.hpp"
 #include "af/detail/runtime/atomic_wait.hpp"
-#include "af/detail/runtime/cpu_relax.hpp"
 #include "af/detail/runtime/runtime_common_state.hpp"
 #include "af/detail/runtime/runtime_service_task.hpp"
-#include "af/detail/thread/thread_attributes.hpp"
-#include "af/detail/thread/thread_name.hpp"
 #include "af/parallel.hpp"
 #include "af/runtime/config_resolution.hpp"
+#include "af/runtime/detail/executor.hpp"
 #include "af/runtime/detail/function_task.hpp"
 #include "af/runtime/detail/function_work.hpp"
 #include "af/runtime/detail/pooled_object.hpp"
-#include "af/runtime/detail/timer_backend.hpp"
 #include "af/runtime/reactor.hpp"
 #include "af/runtime/task.hpp"
 
@@ -182,7 +176,7 @@ public:
             executors_.reserve(resolution_.resolved.threads.size());
             ordered_batch_state_.assign(resolution_.resolved.threads.size(), ordered_batch_state{});
             for (const auto &thread : resolution_.resolved.threads) {
-                executors_.push_back(std::make_unique<executor>(*this, thread));
+                executors_.push_back(std::make_unique<detail::runtime_executor>(*this, thread));
             }
             for (auto &executor : executors_) {
                 executor->start();
@@ -400,367 +394,6 @@ private:
         fail,
     };
 
-    class executor {
-    public:
-        executor(runtime &owner, runtime_thread_info thread)
-            : owner_(owner), thread_(std::move(thread)),
-              task_drain_budget_(owner_.config().scheduler.task_drain_budget),
-              max_task_run_slice_(owner_.config().scheduler.max_task_run_slice),
-              timer_drain_budget_(owner_.config().timer.drain_budget),
-              timer_kind_(owner_.config().timer.kind),
-              service_task_budget_(owner_.config().scheduler.service_task_budget),
-              idle_wait_(owner_.config().scheduler.idle_wait),
-              wake_policy_(owner_.config().scheduler.wake) {
-            if (timer_kind_ == timer_kind::min_heap) {
-                timer_heap_.reserve(owner_.config().timer.initial_reserve);
-            } else {
-                timer_wheel_.configure(owner_.config().timer, timer_drain_budget_);
-            }
-            if (thread_.kind == thread_kind::io) {
-                reactor_ = make_reactor(owner_.config().reactor);
-            }
-        }
-
-        executor(const executor &) = delete;
-        executor &operator=(const executor &) = delete;
-
-        ~executor() {
-            request_stop();
-            join();
-        }
-
-        void start() {
-            worker_ = std::thread([this] { run_loop(); });
-        }
-
-        void request_stop() noexcept {
-            stop_requested_.store(true, std::memory_order_release);
-            notify();
-        }
-
-        void notify() noexcept {
-            wake_epoch_.fetch_add(1, std::memory_order_release);
-            if (reactor_ != nullptr) {
-                reactor_->wake();
-            }
-            detail::atomic_notify_all(wake_epoch_);
-        }
-
-        void enqueue(runtime_work *work) noexcept {
-            inbox_.push(work);
-            if (wake_policy_ == wake_policy::empty_to_non_empty) {
-                if (!sleep_requested_.exchange(false, std::memory_order_acq_rel)) {
-                    return;
-                }
-            }
-            notify();
-        }
-
-        void arm_timer(runtime_task *task) noexcept {
-            if (!detail::runtime_task_access::mark_timer_pending(task)) {
-                return;
-            }
-            try {
-                detail::RuntimeTimerEntry entry{
-                    detail::runtime_task_access::timer_deadline_ns(task), next_timer_sequence_++,
-                    task};
-                if (timer_kind_ == timer_kind::min_heap) {
-                    timer_heap_.push(entry);
-                } else {
-                    timer_wheel_.push(entry, steady_now_ns());
-                }
-            } catch (...) {
-                detail::runtime_task_access::cancel_timer(task);
-            }
-        }
-
-        void join() noexcept {
-            if (!worker_.joinable()) {
-                return;
-            }
-            if (worker_.get_id() == std::this_thread::get_id()) {
-                return;
-            }
-            worker_.join();
-        }
-
-        [[nodiscard]] reactor *reactor_backend() noexcept {
-            return reactor_.get();
-        }
-
-        [[nodiscard]] bool register_service_task(detail::RuntimeServiceTask *service) noexcept {
-            AF_ASSERT(current_runtime_ == &owner_ && current_thread_index_ == thread_.index &&
-                      "service task registration must run on the owner runtime thread");
-            if (current_runtime_ != &owner_ || current_thread_index_ != thread_.index ||
-                service == nullptr) {
-                return false;
-            }
-            if (std::find(service_tasks_.begin(), service_tasks_.end(), service) !=
-                service_tasks_.end()) {
-                return true;
-            }
-            try {
-                service_tasks_.push_back(service);
-                return true;
-            } catch (...) {
-                return false;
-            }
-        }
-
-        [[nodiscard]] bool unregister_service_task(detail::RuntimeServiceTask *service) noexcept {
-            AF_ASSERT(current_runtime_ == &owner_ && current_thread_index_ == thread_.index &&
-                      "service task unregister must run on the owner runtime thread");
-            if (current_runtime_ != &owner_ || current_thread_index_ != thread_.index ||
-                service == nullptr) {
-                return false;
-            }
-            auto it = std::find(service_tasks_.begin(), service_tasks_.end(), service);
-            if (it == service_tasks_.end()) {
-                return false;
-            }
-            const std::size_t removed_index = static_cast<std::size_t>(it - service_tasks_.begin());
-            service_tasks_.erase(it);
-            if (next_service_task_ > service_tasks_.size()) {
-                next_service_task_ = 0;
-            } else if (next_service_task_ != 0U && next_service_task_ > removed_index) {
-                --next_service_task_;
-            }
-            return true;
-        }
-
-    private:
-        void run_loop() noexcept {
-            current_runtime_ = &owner_;
-            current_executor_ = this;
-            current_thread_index_ = thread_.index;
-            static_cast<void>(detail::set_current_thread_affinity(thread_.affinity));
-            static_cast<void>(detail::set_current_thread_priority(thread_.priority));
-            if (owner_.config().diagnostics.enable_thread_name && thread_.set_os_thread_name) {
-                detail::set_current_thread_name(thread_.name, thread_.group_offset);
-            }
-
-            owner_.on_executor_started();
-            for (;;) {
-                bool did_work = drain_inbox();
-                did_work = run_due_timers() || did_work;
-                did_work = run_service_tasks() || did_work;
-                if (stop_requested_.load(std::memory_order_acquire) && !did_work) {
-                    break;
-                }
-                if (stop_requested_.load(std::memory_order_acquire)) {
-                    continue;
-                }
-                std::uint32_t observed = 0;
-                if (!prepare_wait(observed)) {
-                    continue;
-                }
-                wait_for_wake_or_timer(observed);
-                sleep_requested_.store(false, std::memory_order_release);
-            }
-            cancel_timers();
-            owner_.on_executor_stopped();
-            current_thread_index_ = runtime_invalid_thread_index;
-            current_executor_ = nullptr;
-            current_runtime_ = nullptr;
-        }
-
-        [[nodiscard]] bool drain_inbox() noexcept {
-            if (max_task_run_slice_.count() > 0) [[unlikely]] {
-                return drain_inbox_with_time_slice();
-            }
-            return drain_inbox_by_budget();
-        }
-
-        [[nodiscard]] bool drain_inbox_by_budget() noexcept {
-            bool did_work = false;
-            std::size_t drained = 0;
-            while (drained < task_drain_budget_) {
-                runtime_work *work = inbox_.try_pop();
-                if (work == nullptr) {
-                    break;
-                }
-                ++drained;
-                did_work = true;
-                work->run(owner_);
-            }
-            return did_work;
-        }
-
-        [[nodiscard]] bool drain_inbox_with_time_slice() noexcept {
-            bool did_work = false;
-            std::size_t drained = 0;
-            const auto deadline = std::chrono::steady_clock::now() + max_task_run_slice_;
-            while (drained < task_drain_budget_) {
-                runtime_work *work = inbox_.try_pop();
-                if (work == nullptr) {
-                    break;
-                }
-                ++drained;
-                did_work = true;
-                work->run(owner_);
-                if (std::chrono::steady_clock::now() >= deadline) {
-                    break;
-                }
-            }
-            return did_work;
-        }
-
-        [[nodiscard]] bool run_service_tasks() noexcept {
-            if (service_tasks_.empty()) {
-                return false;
-            }
-            bool did_work = false;
-            const std::size_t count = service_tasks_.size();
-            const std::size_t budget = service_task_budget_ < count ? service_task_budget_ : count;
-            for (std::size_t i = 0; i < budget; ++i) {
-                if (next_service_task_ >= service_tasks_.size()) {
-                    next_service_task_ = 0;
-                }
-                detail::RuntimeServiceTask *service = service_tasks_[next_service_task_];
-                ++next_service_task_;
-                if (service == nullptr) [[unlikely]] {
-                    continue;
-                }
-                did_work = service->run_service(service_task_budget_) || did_work;
-            }
-            return did_work;
-        }
-
-        [[nodiscard]] static std::int64_t steady_now_ns() noexcept {
-            return detail::runtime_steady_now_ns();
-        }
-
-        [[nodiscard]] std::chrono::nanoseconds timer_wait_duration() const noexcept {
-            const std::int64_t now = steady_now_ns();
-            if (timer_kind_ == timer_kind::hierarchical_wheel) {
-                return timer_wheel_.wait_duration(now);
-            }
-            return timer_heap_.wait_duration(now);
-        }
-
-        void wait_for_wake_or_timer(std::uint32_t observed) noexcept {
-            const auto timeout = timer_wait_duration();
-            if (reactor_ != nullptr) {
-                static_cast<void>(reactor_->poll(timeout));
-                return;
-            }
-            if (timeout == std::chrono::nanoseconds(0)) {
-                return;
-            }
-            if (idle_wait_ == idle_wait_strategy::spin) {
-                spin_until_wake_or_timeout(observed, timeout);
-                return;
-            }
-            if (idle_wait_ == idle_wait_strategy::yield) {
-                yield_until_wake_or_timeout(observed, timeout);
-                return;
-            }
-            if (timeout == std::chrono::nanoseconds::max()) {
-                detail::atomic_wait_value(wake_epoch_, observed, std::memory_order_acquire);
-                return;
-            }
-            static_cast<void>(detail::atomic_wait_value_for(wake_epoch_, observed, timeout,
-                                                            std::memory_order_acquire));
-        }
-
-        [[nodiscard]] bool wake_observed(std::uint32_t observed) const noexcept {
-            return stop_requested_.load(std::memory_order_acquire) ||
-                   wake_epoch_.load(std::memory_order_acquire) != observed;
-        }
-
-        void spin_until_wake_or_timeout(std::uint32_t observed,
-                                        std::chrono::nanoseconds timeout) noexcept {
-            wait_polling_until_wake_or_timeout(observed, timeout, false);
-        }
-
-        void yield_until_wake_or_timeout(std::uint32_t observed,
-                                         std::chrono::nanoseconds timeout) noexcept {
-            wait_polling_until_wake_or_timeout(observed, timeout, true);
-        }
-
-        void wait_polling_until_wake_or_timeout(std::uint32_t observed,
-                                                std::chrono::nanoseconds timeout,
-                                                bool yield_wait) noexcept {
-            if (timeout == std::chrono::nanoseconds::max()) {
-                while (!wake_observed(observed)) {
-                    idle_wait_once(yield_wait);
-                }
-                return;
-            }
-
-            const std::int64_t now = steady_now_ns();
-            const std::int64_t timeout_ns = timeout.count();
-            const std::int64_t deadline =
-                timeout_ns > std::numeric_limits<std::int64_t>::max() - now
-                    ? std::numeric_limits<std::int64_t>::max()
-                    : now + timeout_ns;
-            while (!wake_observed(observed) && steady_now_ns() < deadline) {
-                idle_wait_once(yield_wait);
-            }
-        }
-
-        static void idle_wait_once(bool yield_wait) noexcept {
-            if (yield_wait) {
-                std::this_thread::yield();
-                return;
-            }
-            detail::cpu_relax();
-        }
-
-        [[nodiscard]] bool prepare_wait(std::uint32_t &observed) noexcept {
-            if (wake_policy_ == wake_policy::empty_to_non_empty) {
-                sleep_requested_.store(true, std::memory_order_release);
-            }
-            observed = wake_epoch_.load(std::memory_order_acquire);
-            if (stop_requested_.load(std::memory_order_acquire) || !inbox_.empty()) {
-                sleep_requested_.store(false, std::memory_order_release);
-                return false;
-            }
-            if (run_due_timers() || run_service_tasks()) {
-                sleep_requested_.store(false, std::memory_order_release);
-                return false;
-            }
-            return true;
-        }
-
-        [[nodiscard]] bool run_due_timers() noexcept {
-            const std::int64_t now = steady_now_ns();
-            if (timer_kind_ == timer_kind::hierarchical_wheel) {
-                return timer_wheel_.run_due(now, timer_drain_budget_, owner_);
-            }
-            return timer_heap_.run_due(now, timer_drain_budget_, owner_);
-        }
-
-        void cancel_timers() noexcept {
-            if (timer_kind_ == timer_kind::hierarchical_wheel) {
-                timer_wheel_.cancel_all();
-                return;
-            }
-            timer_heap_.cancel_all();
-        }
-
-        runtime &owner_;
-        runtime_thread_info thread_;
-        detail::IntrusiveMpscQueue<runtime_work> inbox_;
-        detail::RuntimeTimerHeap timer_heap_;
-        detail::RuntimeHierarchicalTimerWheel timer_wheel_;
-        std::vector<detail::RuntimeServiceTask *> service_tasks_;
-        std::unique_ptr<reactor> reactor_;
-        std::size_t task_drain_budget_{256};
-        std::chrono::nanoseconds max_task_run_slice_{0};
-        std::size_t timer_drain_budget_{256};
-        timer_kind timer_kind_{timer_kind::min_heap};
-        std::size_t service_task_budget_{32};
-        std::size_t next_service_task_{0};
-        std::uint64_t next_timer_sequence_{0};
-        idle_wait_strategy idle_wait_{idle_wait_strategy::futex};
-        wake_policy wake_policy_{wake_policy::empty_to_non_empty};
-        alignas(detail::hardware_cache_line_size) std::atomic<bool> sleep_requested_{false};
-        alignas(detail::hardware_cache_line_size) std::atomic<std::uint32_t> wake_epoch_{0};
-        std::atomic<bool> stop_requested_{false};
-        std::thread worker_;
-    };
-
     [[nodiscard]] static std::string status_message(runtime_config_validation_result validation) {
         std::string result("invalid af::runtime_config: ");
         result.append(runtime_config_status_name(validation.status));
@@ -866,7 +499,7 @@ private:
     template <typename Op, typename Handler, bool Ordered> class parallel_shard_task;
 
     runtime_config_resolution resolution_;
-    std::vector<std::unique_ptr<executor>> executors_;
+    std::vector<std::unique_ptr<detail::runtime_executor>> executors_;
     std::vector<ordered_batch_state> ordered_batch_state_;
     std::unique_ptr<AsyncLogHandle> owned_logger_;
     std::atomic<runtime_state> state_{runtime_state::stopped};
@@ -876,12 +509,19 @@ private:
     std::atomic<std::uint32_t> active_epoch_{0};
 
     inline static thread_local runtime *current_runtime_{nullptr};
-    inline static thread_local executor *current_executor_{nullptr};
+    inline static thread_local detail::runtime_executor *current_executor_{nullptr};
     inline static thread_local thread_index current_thread_index_{runtime_invalid_thread_index};
     inline static thread_local task_id_type current_task_id_{invalid_task_id};
 
     friend class runtime_task;
+    friend class detail::runtime_executor;
 };
+
+} // namespace af
+
+#include "af/runtime/detail/executor_impl.hpp"
+
+namespace af {
 
 inline reactor *runtime::current_reactor() noexcept {
     if (current_executor_ == nullptr) {
