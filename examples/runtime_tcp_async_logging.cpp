@@ -1,14 +1,15 @@
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
-#include <string>
 #include <thread>
 
-#include "af/async_flow.hpp"
+#include "af/log.hpp"
+#include "af/runtime.hpp"
 
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -17,55 +18,57 @@
 
 namespace {
 
-struct RuntimeTcpLogicThreadTag;
-struct RuntimeTcpIoThreadTag;
-
 inline constexpr std::uint32_t runtime_tcp_records_per_task = 32;
 
-struct RuntimeTcpTraits {
-    static constexpr auto threads = af::thread_layout(
-        af::thread_group<RuntimeTcpLogicThreadTag, 2, af::thread_kind::cpu>("tcp-log-cpu"),
-        af::thread_group<RuntimeTcpIoThreadTag, 1, af::thread_kind::io>("tcp-log-io"));
-    static constexpr af::shutdown_policy shutdown_policy = af::shutdown_policy::wait_for_tasks;
-};
-
-using runtime_tcp_async = af::AsyncRuntime<RuntimeTcpTraits>;
-using RuntimeTcpTaskBase = runtime_tcp_async::Task;
-
-struct RuntimeTcpThreads {
-    static constexpr auto logic = runtime_tcp_async::thread_group<RuntimeTcpLogicThreadTag>();
-    static constexpr auto IO_0 =
-        runtime_tcp_async::thread_group<RuntimeTcpIoThreadTag>().template at<0>();
-};
-
-class RuntimeTcpLogTask final : public RuntimeTcpTaskBase {
+class RuntimeTcpLogTask final : public af::runtime_task {
 public:
-    explicit RuntimeTcpLogTask(RuntimeTcpTaskBase::FactoryToken token)
-        : RuntimeTcpTaskBase(token) {}
+    RuntimeTcpLogTask(af::runtime_task::factory_token token, af::runtime &owner,
+                      std::uint32_t task_id, std::atomic<int> &completed)
+        : af::runtime_task(token, owner), task_id_(task_id), completed_(completed) {}
 
-    bool do_it(std::uint32_t task_id, std::atomic<int> *completed) {
-        task_id_ = task_id;
-        completed_ = completed;
-        return schedule_to(RuntimeTcpThreads::logic.shard(task_id));
+    [[nodiscard]] bool do_it(af::thread_group_ref logic_threads) noexcept {
+        return schedule_to(logic_threads.shard(task_id_));
     }
 
 private:
-    af::task_result run() override {
+    af::task_result run_task() noexcept override {
         for (std::uint32_t i = 0; i < runtime_tcp_records_per_task; ++i) {
             LOG(INFO) << "runtime tcp log task=" << task_id_ << " seq=" << i
-                      << " thread=" << runtime_tcp_async::current_thread_index();
+                      << " thread=" << af::runtime::current_thread_index();
         }
-        completed_->fetch_add(1, std::memory_order_release);
+        completed_.fetch_add(1, std::memory_order_release);
         return done();
     }
 
     std::uint32_t task_id_{0};
-    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> &completed_;
 };
 
-bool wait_for_completion(std::atomic<int> &completed, int expected) {
+[[nodiscard]] bool wait_for_completion(std::atomic<int> &completed, int expected) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (completed.load(std::memory_order_acquire) < expected) {
+        if (std::chrono::steady_clock::now() > deadline) {
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+}
+
+[[nodiscard]] bool wait_until_true(std::atomic<bool> &value) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!value.load(std::memory_order_acquire)) {
+        if (std::chrono::steady_clock::now() > deadline) {
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+}
+
+[[nodiscard]] bool wait_for_count(std::atomic<int> &value, int expected) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (value.load(std::memory_order_acquire) < expected) {
         if (std::chrono::steady_clock::now() > deadline) {
             return false;
         }
@@ -88,11 +91,11 @@ void set_fd_nonblocking(int fd) noexcept {
     }
 }
 
-bool transient_socket_error() noexcept {
+[[nodiscard]] bool transient_socket_error() noexcept {
     return errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK;
 }
 
-int make_loopback_tcp_listener(std::uint16_t &port) noexcept {
+[[nodiscard]] int make_loopback_tcp_listener(std::uint16_t &port) noexcept {
     int listener = ::socket(AF_INET, SOCK_STREAM, 0);
     if (listener < 0) {
         return -1;
@@ -121,7 +124,8 @@ int make_loopback_tcp_listener(std::uint16_t &port) noexcept {
     return listener;
 }
 
-int accept_until(int listener, std::chrono::steady_clock::time_point deadline) noexcept {
+[[nodiscard]] int accept_until(int listener,
+                               std::chrono::steady_clock::time_point deadline) noexcept {
     while (std::chrono::steady_clock::now() < deadline) {
         int accepted = ::accept(listener, nullptr, nullptr);
         if (accepted >= 0) {
@@ -136,12 +140,14 @@ int accept_until(int listener, std::chrono::steady_clock::time_point deadline) n
     return -1;
 }
 
-void receive_stream_lines(int listener, std::atomic<int> &received, int expected) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+void receive_stream_lines(int listener, std::atomic<int> &received, int expected,
+                          std::atomic<bool> &accepted_connection) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     int accepted = accept_until(listener, deadline);
     if (accepted < 0) {
         return;
     }
+    accepted_connection.store(true, std::memory_order_release);
 
     std::array<char, 4096> buffer{};
     while (received.load(std::memory_order_acquire) < expected &&
@@ -161,9 +167,33 @@ void receive_stream_lines(int listener, std::atomic<int> &received, int expected
         if (errno == EINTR) {
             continue;
         }
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            break;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     close_fd(accepted);
+}
+
+[[nodiscard]] af::runtime_config make_runtime_config(std::uint16_t tcp_port) {
+    using namespace std::chrono_literals;
+
+    af::runtime_config config;
+    config.threads = {
+        af::cpu_threads("tcp-log-cpu", 2),
+        af::io_threads("tcp-log-io", 1),
+    };
+    config.logger = af::log_config::ordered();
+    config.logger.consumer_thread = af::thread_selector::io(0);
+    config.logger.queue_capacity = 1U << 15U;
+    config.logger.max_batch_records = 512;
+    config.logger.max_batch_delay = 1000us;
+    config.logger.overflow = af::log_overflow_policy::drop_newest;
+    config.logger.backends = {
+        af::tcp_log_backend_config{"127.0.0.1", tcp_port, 1ms, af::thread_selector::io(0)},
+    };
+    config.shutdown.log_flush_timeout = 5s;
+    return config;
 }
 
 } // namespace
@@ -179,55 +209,66 @@ int main() {
     }
 
     constexpr int task_count = 4;
-    constexpr int expected_records =
+    constexpr int expected_business_records =
         task_count * static_cast<int>(runtime_tcp_records_per_task) + 1;
     std::atomic<int> received{0};
-    std::thread receiver_thread(
-        [&] { receive_stream_lines(listener, received, expected_records); });
+    std::atomic<bool> accepted_connection{false};
+    std::thread receiver_thread([&] {
+        receive_stream_lines(listener, received, expected_business_records + 2,
+                             accepted_connection);
+    });
 
-    runtime_tcp_async::init();
+    af::runtime runtime(make_runtime_config(tcp_port));
+    if (!runtime.start()) {
+        std::cerr << "failed to start runtime\n";
+        close_fd(listener);
+        receiver_thread.join();
+        return 1;
+    }
 
-    af::AsyncLogConfig config = af::AsyncLogConfig::ordered(runtime_tcp_async::thread_count);
-    config.queue_capacity = 1U << 15U;
-    config.max_batch_size = 512;
-    config.overflow_policy = af::LogOverflowPolicy::DropNewest;
-    config.flush_poll_interval = 1ms;
-    config.backends.push_back(af::make_runtime_tcp_log_backend<runtime_tcp_async>({
-        .thread = RuntimeTcpThreads::IO_0,
-        .host = "127.0.0.1",
-        .port = tcp_port,
-        .reconnect_interval = 1ms,
-        .batch_queue_capacity = 128,
-        .max_batch_records = 128,
-        .max_batches_per_run = 64,
-    }));
+    LOG(INFO) << "tcp log backend warmup";
+    const bool warmup_flushed = runtime.flush_logger(5s);
+    const bool connected = wait_until_true(accepted_connection);
+    const int received_after_connect = received.load(std::memory_order_acquire);
+    LOG(INFO) << "tcp log backend ready";
+    const bool ready_flushed = runtime.flush_logger(5s);
+    const bool ready_received = wait_for_count(received, received_after_connect + 1);
+    const int received_before_tasks = received.load(std::memory_order_acquire);
 
-    auto logging = af::start_async_logging_for_runtime<runtime_tcp_async>(std::move(config),
-                                                                          RuntimeTcpThreads::IO_0);
+    const af::thread_group_ref logic_threads = runtime.thread_group("tcp-log-cpu");
+    if (logic_threads.empty()) {
+        std::cerr << "runtime has no tcp-log-cpu threads\n";
+        runtime.stop();
+        close_fd(listener);
+        receiver_thread.join();
+        return 1;
+    }
 
     std::atomic<int> completed{0};
     bool started = true;
     for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(task_count); ++i) {
-        started = runtime_tcp_async::start_task<RuntimeTcpLogTask>(i, &completed) && started;
+        auto task = af::make_task<RuntimeTcpLogTask>(runtime, i, completed);
+        started = task->do_it(logic_threads) && started;
     }
 
     const bool completed_all = wait_for_completion(completed, task_count);
     LOG(INFO) << "external tcp log after runtime tasks";
 
-    const bool flushed = logging->flush(5s);
-    const af::AsyncLogStats stats = logging->stats();
-    logging->stop();
-    runtime_tcp_async::shutdown();
+    const bool flushed = runtime.flush_logger(5s);
+    runtime.stop();
 
     receiver_thread.join();
     close_fd(listener);
 
     std::cout << "started=" << started << " completed=" << completed.load(std::memory_order_acquire)
-              << " accepted=" << stats.accepted << " dropped=" << stats.dropped
+              << " warmup_flushed=" << warmup_flushed << " connected=" << connected
+              << " ready_flushed=" << ready_flushed << " ready_received=" << ready_received
               << " flushed=" << flushed
               << " tcp_received=" << received.load(std::memory_order_acquire) << '\n';
-    return started && completed_all && flushed && stats.dropped == 0U &&
-                   received.load(std::memory_order_acquire) == expected_records
+    return started && completed_all && warmup_flushed && connected && ready_flushed &&
+                   ready_received && flushed &&
+                   received.load(std::memory_order_acquire) >=
+                       received_before_tasks + expected_business_records
                ? 0
                : 1;
 }
