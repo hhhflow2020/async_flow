@@ -14,6 +14,10 @@
 #include <pthread.h>
 #include <unistd.h>
 
+#if defined(__linux__)
+#include <sched.h>
+#endif
+
 #include <gtest/gtest.h>
 
 #include "af/async_runtime.hpp"
@@ -92,6 +96,7 @@ static_assert(af::supports_openat2 == af::platform_linux);
 static_assert(af::supports_sendfile == af::platform_linux);
 static_assert(af::supports_splice == af::platform_linux);
 static_assert(af::supports_zero_copy_send == af::platform_linux);
+static_assert(af::supports_thread_affinity == af::platform_linux);
 static_assert(af::platform_posix != af::platform_windows);
 static_assert(std::is_same_v<af::task_result, af::TaskResult>);
 static_assert(std::is_same_v<af::schedule_mode, af::ScheduleMode>);
@@ -189,6 +194,53 @@ private:
     std::string &observed_name_;
     std::atomic<int> &counter_;
 };
+
+#if defined(__linux__)
+[[nodiscard]] std::uint32_t first_allowed_cpu_id() noexcept {
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    if (::pthread_getaffinity_np(::pthread_self(), sizeof(set), &set) != 0) {
+        return std::numeric_limits<std::uint32_t>::max();
+    }
+    for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) {
+        if (CPU_ISSET(cpu, &set)) {
+            return static_cast<std::uint32_t>(cpu);
+        }
+    }
+    return std::numeric_limits<std::uint32_t>::max();
+}
+
+class ThreadAffinityProbeWork final : public af::runtime_work {
+public:
+    ThreadAffinityProbeWork(std::uint32_t expected_cpu, std::atomic<int> &counter,
+                            std::atomic<bool> &matches)
+        : expected_cpu_(expected_cpu), counter_(counter), matches_(matches) {}
+
+    void run(af::runtime &owner) noexcept override {
+        static_cast<void>(owner);
+        cpu_set_t set;
+        CPU_ZERO(&set);
+        bool matches = false;
+        if (::pthread_getaffinity_np(::pthread_self(), sizeof(set), &set) == 0) {
+            int selected_count = 0;
+            for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) {
+                if (CPU_ISSET(cpu, &set)) {
+                    ++selected_count;
+                }
+            }
+            matches = expected_cpu_ < CPU_SETSIZE &&
+                      CPU_ISSET(static_cast<int>(expected_cpu_), &set) && selected_count == 1;
+        }
+        matches_.store(matches, std::memory_order_release);
+        counter_.fetch_add(1, std::memory_order_release);
+    }
+
+private:
+    std::uint32_t expected_cpu_;
+    std::atomic<int> &counter_;
+    std::atomic<bool> &matches_;
+};
+#endif
 
 class PostedRuntimeWork final : public af::runtime_work {
 public:
@@ -879,6 +931,37 @@ TEST(RuntimeConfigTests, RuntimeThreadNameDiagnosticsControlsOsThreadName) {
     constexpr std::string_view expected_name = "af-diag-0";
     EXPECT_EQ(observe_name(true), expected_name);
     EXPECT_NE(observe_name(false), expected_name);
+}
+
+TEST(RuntimeConfigTests, RuntimeAppliesThreadAffinityOnSupportedPlatforms) {
+    if (!af::supports_thread_affinity) {
+        GTEST_SKIP() << "thread affinity is not supported on this platform";
+    }
+#if defined(__linux__)
+    const std::uint32_t cpu_id = first_allowed_cpu_id();
+    if (cpu_id == std::numeric_limits<std::uint32_t>::max()) {
+        GTEST_SKIP() << "no allowed CPU is visible for affinity test";
+    }
+
+    af::runtime_config config;
+    config.threads = {af::cpu_threads("affinity", 1)};
+    config.threads[0].affinity.cpu_ids = {cpu_id};
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    std::atomic<int> counter{0};
+    std::atomic<bool> matches{false};
+    ThreadAffinityProbeWork work(cpu_id, counter, matches);
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 1));
+    const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
+    ASSERT_TRUE(runtime.post(cpu_thread, &work));
+    ASSERT_TRUE(wait_for_counter(counter, 1));
+    EXPECT_TRUE(matches.load(std::memory_order_acquire));
+
+    runtime.stop();
+#endif
 }
 
 TEST(RuntimeConfigTests, ResolvesRuntimeConfigThreadMetadataAndSelectors) {

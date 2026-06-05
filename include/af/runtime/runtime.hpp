@@ -19,6 +19,7 @@
 #include "af/detail/runtime/atomic_wait.hpp"
 #include "af/detail/runtime/cpu_relax.hpp"
 #include "af/detail/runtime/runtime_service_task.hpp"
+#include "af/detail/thread/thread_attributes.hpp"
 #include "af/detail/thread/thread_name.hpp"
 #include "af/runtime/config_resolution.hpp"
 #include "af/runtime/reactor.hpp"
@@ -348,6 +349,7 @@ private:
             current_runtime_ = &owner_;
             current_executor_ = this;
             current_thread_index_ = thread_.index;
+            static_cast<void>(detail::set_current_thread_affinity(thread_.affinity));
             if (owner_.config().diagnostics.enable_thread_name && thread_.set_os_thread_name) {
                 detail::set_current_thread_name(thread_.name, thread_.group_offset);
             }

@@ -13,6 +13,7 @@ inline constexpr bool platform_posix = detail::platform_posix;
 inline constexpr bool supports_epoll = detail::supports_epoll;
 inline constexpr bool supports_kqueue = detail::supports_kqueue;
 inline constexpr bool supports_native_io_wait = detail::supports_native_io_wait;
+inline constexpr bool supports_thread_affinity = detail::supports_thread_affinity;
 inline constexpr bool supports_eventfd = platform_linux;
 inline constexpr bool supports_timerfd = platform_linux;
 inline constexpr bool supports_openat2 = platform_linux;
