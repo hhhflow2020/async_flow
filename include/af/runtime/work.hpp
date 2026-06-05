@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "af/detail/queue/intrusive_mpsc_queue.hpp"
+#include "af/runtime/detail/pooled_object.hpp"
 
 namespace af {
 
@@ -31,10 +32,13 @@ public:
     static_assert(std::is_invocable_v<Fn &, runtime &> || std::is_invocable_v<Fn &>,
                   "af::runtime::post callable must be invocable as fn(runtime&) or fn()");
 
-    explicit runtime_function_work(Fn &&fn) noexcept(std::is_nothrow_move_constructible_v<Fn>)
-        : fn_(std::move(fn)) {}
+    using destroy_fn = void (*)(runtime_function_work *) noexcept;
 
-    explicit runtime_function_work(const Fn &fn) : fn_(fn) {}
+    runtime_function_work(destroy_fn destroy,
+                          Fn &&fn) noexcept(std::is_nothrow_move_constructible_v<Fn>)
+        : destroy_(destroy), fn_(std::move(fn)) {}
+
+    runtime_function_work(destroy_fn destroy, const Fn &fn) : destroy_(destroy), fn_(fn) {}
 
     void run(runtime &owner) noexcept override {
         try {
@@ -45,10 +49,15 @@ public:
             }
         } catch (...) {
         }
-        delete this;
+        destroy();
+    }
+
+    void destroy() noexcept {
+        destroy_(this);
     }
 
 private:
+    destroy_fn destroy_{nullptr};
     Fn fn_;
 };
 

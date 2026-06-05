@@ -115,6 +115,29 @@ TEST(RuntimeFunctionPostTests, MoveOnlyCallableIsDestroyedAfterRun) {
     runtime.stop();
 }
 
+TEST(RuntimeFunctionPostTests, CallablePostRunsWithConfiguredPoolSizeClass) {
+    af::runtime_config config;
+    config.threads = {af::cpu_threads("logic", 1)};
+    config.task_pool.local_cache_size = 3;
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    EXPECT_EQ(runtime.config().task_pool.local_cache_size, 4U);
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 1));
+
+    std::atomic<int> runs{0};
+    std::atomic<int> destroys{0};
+    std::atomic<std::uint16_t> observed{af::runtime_invalid_thread_index};
+    const af::thread_ref target = runtime.cpu_threads().front();
+
+    ASSERT_TRUE(runtime.post(target, MoveOnlyCallback(runs, destroys, observed)));
+    ASSERT_TRUE(wait_for_counter(runs, 1));
+    ASSERT_TRUE(wait_for_counter(destroys, 1));
+    EXPECT_EQ(observed.load(std::memory_order_acquire), target.index);
+    runtime.stop();
+}
+
 TEST(RuntimeFunctionPostTests, FailedPostDestroysCallable) {
     af::runtime_config config;
     config.threads = {af::cpu_threads("logic", 1)};

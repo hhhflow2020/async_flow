@@ -267,17 +267,23 @@ public:
         }
 
         using work_type = detail::runtime_function_work<std::decay_t<Fn>>;
-        work_type *work = nullptr;
-        try {
-            work = new work_type(std::forward<Fn>(fn));
-        } catch (...) {
-            return false;
-        }
-        if (post(thread, static_cast<runtime_work *>(work))) [[likely]] {
-            return true;
-        }
-        delete work;
-        return false;
+        return detail::visit_runtime_pooled_object_pool_holder<work_type>(
+            config().task_pool.local_cache_size, [&](auto &holder) -> bool {
+                work_type *work = nullptr;
+                try {
+                    work = holder.pool.create(
+                        &detail::destroy_runtime_pooled_object<
+                            work_type, std::decay_t<decltype(holder)>::local_cache_capacity>,
+                        std::forward<Fn>(fn));
+                } catch (...) {
+                    return false;
+                }
+                if (post(thread, static_cast<runtime_work *>(work))) [[likely]] {
+                    return true;
+                }
+                work->destroy();
+                return false;
+            });
     }
 
     template <typename Fn,
