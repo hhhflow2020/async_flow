@@ -1,68 +1,76 @@
 # AsyncFlow 下一代 Runtime 架构设计
 
-本文档整理下一代 AsyncFlow 架构方案，覆盖 runtime、task、对象池、timer、reactor、net、logger、配置和优雅退出。目标是高性能、低耦合、职责清晰，并让 API 对用户足够直接。
+本文档是 AsyncFlow 下一代 runtime、task、timer、reactor、network 和 logger 的目标架构蓝图。它描述后续重构和实现应对齐的设计，不把历史兼容层作为目标形态。
 
-## 设计原则
+## 目标
 
-- C++17。
-- 配置使用普通 `struct`，不使用 builder 链式构造。
-- 类、函数、枚举值、变量使用 `lower_case`；成员变量使用尾部 `_`。
-- 线程类型只保留 `io` 和 `cpu`。
-- 不使用 local queue，不使用 SPSC queue。
-- 每个 executor 一个 intrusive unbounded MPSC task inbox。
-- 对象池持续扩展 slab，除非系统内存耗尽。
-- reactor 统一抽象 epoll/kqueue/select。
-- 日志消费者绑定 runtime 线程，作为 service task 运行。
-- 网络 fd 操作只在 owner reactor 线程执行，跨线程操作通过 task 显式调度。
+- C++17 标准，允许使用 C++17 及以上编译器编译。
+- conan 管理第三方依赖：`abseil/20260107.1`、`gtest/1.17.0`、`benchmark/1.9.5`、`protobuf/7.35.0`。
+- 使用现代 CMake：target 级 include、compile feature、link library 和测试/benchmark 目标。
+- 类、函数、枚举值和变量使用 `lower_case`；成员变量额外使用尾部 `_`。
+- 配置使用普通 `struct`，允许少量命名工厂函数，不使用 builder 链式构造。
+- 线程类型只保留 `thread_kind::io` 和 `thread_kind::cpu`。
+- IO 后端只保留 `epoll`、`kqueue`、`select` 三类 reactor backend；不保留 `io_uring` 路径和兼容桩。
+- 每个 executor 一个 intrusive unbounded MPSC task inbox；不使用 local queue，不使用 SPSC queue。
+- CPU executor 空闲等待使用 futex/atomic wait，IO executor 空闲等待进入 reactor poll。
+- 对象池是高性能分配器，不承担固定容量背压；除非系统内存耗尽，否则持续扩展 slab。
+- 日志消费者绑定 runtime 线程，以 service task 方式运行，不创建独立 consumer 线程。
+- 网络 fd 的真实操作只在 owner reactor 线程执行；跨线程控制和发送通过 task 显式调度到 owner 线程。
+- 默认网络 readiness 使用 LT 模式，避免 one-shot 每次事件后重新注册带来的系统调用开销。
 
-## 顶层结构
+## 总体结构
 
 ```text
-runtime
-  config
+af::runtime
+  runtime_config
   executor[]
     thread_ref
-    kind: io/cpu
-    task_inbox
-    timer_wheel
+    thread_kind: io/cpu
+    intrusive_mpsc_task_inbox
+    timer_backend
     reactor, only io executor
-    service_tasks
+    service_task list
+    executor_local_cache
   task_pool
   timer_pool
   log_record_pool
   logger
 ```
 
-`runtime` 提供基础运行能力。`logger`、`tcp_server`、`udp_socket`、metrics、trace 等组件使用 runtime 的 task、timer、reactor 能力，但不侵入 executor 主循环。
+`runtime` 只提供通用执行能力：线程、任务、定时器、reactor、service task、对象池和生命周期。网络、日志、metrics、trace 等组件建立在这些能力上，不把组件专属逻辑写死到 executor 主循环。
 
 ## 配置模型
 
-配置是可直接读写的普通结构体：
+配置是普通数据对象，用户可以直接读写字段：
 
 ```cpp
 af::runtime_config cfg;
 
 cfg.threads = {
     af::io_threads("io", 4),
-    af::cpu_threads("cpu", 8),
+    af::cpu_threads("logic", 8),
 };
 
 cfg.scheduler.task_drain_budget = 256;
+cfg.scheduler.service_task_budget = 32;
 cfg.task_pool.local_cache_size = 256;
+cfg.timer.kind = af::timer_kind::hierarchical_wheel;
+cfg.reactor.backend = af::reactor_backend::auto_select;
+
 cfg.logger = af::log_config::ordered();
 cfg.logger.consumer_thread = af::thread_selector::cpu(0);
 cfg.logger.backends = {
-    af::file_log_backend_config{"server.log"},
+    af::file_log_backend_config{.path = "server.log"},
 };
 
 af::runtime rt(cfg);
 ```
 
-命名工厂函数只生成配置值，不隐藏复杂运行逻辑：
+命名工厂函数只负责生成配置值，不隐藏运行逻辑：
 
 ```cpp
 af::io_threads("io", 4);
-af::cpu_threads("cpu", 8);
+af::cpu_threads("logic", 8);
 af::log_config::ordered();
 af::tcp_endpoint::any(8080);
 af::tcp_endpoint::any_v6(8080);
@@ -83,52 +91,46 @@ struct runtime_config {
 };
 ```
 
-普通用户通常只需要配置 `threads`、`logger` 和业务 server listener。高级用户再调整 scheduler、pool、timer、reactor 的预算和策略。
+普通用户通常只需要配置 `threads`、`logger` 和业务网络入口。高级用户再调整 scheduler、pool、timer、reactor 的预算和策略。
 
 ### thread_layout_config
 
-线程配置需要表达名称、数量、类型和可选系统属性：
-
-```cpp
-struct thread_group_config {
-    std::string name;
-    thread_kind kind;
-    std::size_t count;
-    thread_affinity_config affinity;
-    thread_priority_config priority;
-    bool set_os_thread_name = true;
-};
-```
-
-推荐入口：
-
-```cpp
-cfg.threads = {
-    af::io_threads("io", 4),
-    af::cpu_threads("logic", 8),
-};
-```
-
-`thread_kind` 只保留：
+线程配置表达名称、数量、类型和可选系统属性：
 
 ```cpp
 enum class thread_kind {
     io,
     cpu,
 };
+
+struct thread_group_config {
+    std::string name;
+    thread_kind kind = thread_kind::cpu;
+    std::size_t count = 1;
+    thread_affinity_config affinity;
+    thread_priority_config priority;
+    bool set_os_thread_name = true;
+};
 ```
 
-epoll/kqueue/select 属于 `reactor_backend`，不属于线程类型。
+runtime 解析配置后提供轻量 view：
 
-当前实例 runtime 在 executor 线程入口会应用 thread layout 的系统属性：`diagnostics.enable_thread_name` 和 group 的 `set_os_thread_name` 控制线程命名；Linux 上非空 `affinity.cpu_ids` 会通过 `pthread_setaffinity_np` 绑定当前 runtime 线程；`thread_priority_config` 使用明确的 Linux nice 语义，`enabled=false` 时完全不改线程优先级，启用时 `value` 必须在 `[-20, 19]`，Linux 上对当前 runtime 线程调用 per-thread `setpriority`。非 Linux 平台目前保留为 no-op，避免把不同平台的实时调度策略混进同一个字段。
+```cpp
+af::thread_group_ref io = rt.io_threads();
+af::thread_group_ref logic = rt.thread_group("logic");
+af::thread_ref owner = io.shard(user_id);
+```
 
-实例 runtime 解析 thread layout 后会提供轻量 `thread_ref` / `thread_group_ref`：`rt.io_threads()` 和 `rt.cpu_threads()` 返回按 kind 聚合的只读 view，`rt.thread_group(index)` / `rt.thread_group("logic")` 返回配置中的命名线程组 view；这些 view 不分配、不持有、不加锁。`thread_group_ref::shard(key)` 可按业务 key 选择稳定线程。task 调度、`runtime.post()` 等入口接受 `thread_ref`，为后续 `tcp_server`、`udp_socket` 直接绑定 runtime IO 线程组提供低耦合 API。
+`thread_ref` 只保存 executor index。`thread_group_ref` 只保存 begin/count/runtime 指针或等价轻量引用；`at()` 和 `shard()` 是整数运算，不加锁、不分配。
+
+线程启动时可按配置调用系统接口设置线程名、CPU affinity 和 nice priority。非 Linux 平台不支持的属性保持 no-op，不能把不同平台的实时调度策略混在同一个字段里。
 
 ### scheduler_config
 
 ```cpp
 struct scheduler_config {
     std::size_t task_drain_budget = 256;
+    std::size_t timer_drain_budget = 256;
     std::size_t service_task_budget = 32;
     std::chrono::nanoseconds max_task_run_slice = 0ns;
     idle_wait_strategy idle_wait = idle_wait_strategy::futex;
@@ -136,7 +138,7 @@ struct scheduler_config {
 };
 ```
 
-`max_task_run_slice = 0ns` 表示只按数量预算，不按时间片强制切换。CPU 线程空闲时按 `idle_wait` 选择 futex park、spin 或 yield；IO 线程空闲时由 reactor timeout 和 wake fd 负责等待。
+`max_task_run_slice = 0ns` 表示只按数量预算，不按时间强制切换。CPU executor 空闲时按 `idle_wait` 选择 futex park、spin 或 yield；IO executor 空闲时由 reactor timeout 和 wake fd 统一等待。
 
 ### task_pool_config
 
@@ -149,15 +151,13 @@ struct task_pool_config {
 };
 ```
 
-对象池不设置总容量上限。只要系统还能分配内存，就继续申请新的 slab。需要可恢复失败的业务可使用 `try_make_task<T>()`。
-
-当前实例 runtime 的 typed task pool 仍基于模板化 `ObjectPool`，以保持 slot 布局、local cache 和 remote release 批量参数在编译期固定。`task_pool.local_cache_size` 会在配置解析时规整到 2..4096 的 2 次幂 size class，并按 size class 选择对应的 typed pool；默认 256 走热路径，较小 size class 会同步降低 remote release batch，避免本地缓存容量小于批量释放阈值。`task_pool.slab_object_count` 已作为每个 Task 类型、每个 size class 静态池的 reserve-at-least 初始预热容量生效，`task_pool.oom` 已作用于 `make_task<T>()` 的对象池分配失败；用户构造函数抛出的异常不会被改写为对象池 OOM。日志 record pool 已接入 `logger.record_pool.slab_object_count` 作为每个日志 lane/shard 的初始 slab 容量，并接入 `logger.record_pool.local_cache_size` 作为每线程 record slot 缓存容量，减少多生产者 acquire/release 争用同一 slab free-head。真正 per-runtime task slab 大小和统计开关还需要后续引入 runtime-parameterized pool 后完整接入。
+对象池不设置总容量上限。只要系统还能分配内存，就继续申请新的 slab。`make_task<T>()` 默认返回非空指针或按 OOM 策略终止/抛出；可恢复业务使用 `try_make_task<T>()`。
 
 ### timer_config
 
 ```cpp
 struct timer_config {
-    timer_kind kind = timer_kind::min_heap;
+    timer_kind kind = timer_kind::hierarchical_wheel;
     std::chrono::milliseconds tick = 1ms;
     std::size_t wheel_slots = 4096;
     std::size_t drain_budget = 256;
@@ -165,9 +165,7 @@ struct timer_config {
 };
 ```
 
-每个 executor 自己拥有 timer 结构。跨线程注册定时器时，先把 task 以 `TimerArming` 状态投递到目标 executor 的同一个 intrusive MPSC inbox，再由目标 executor 在线程内挂入本地 timer 结构，因此 timer 数据结构不需要锁。
-
-当前实现支持每 executor 本地 min-heap 和分层时间轮两种 backend。`timer_kind::min_heap` 按 deadline 和 arm sequence 建堆，适合 timer 数量中低且需要严格全局排序的场景；`timer_kind::hierarchical_wheel` 使用 executor 私有的 L0/L1/overflow bucket 组织 timer，wait timeout 仍使用精确最近 deadline，避免 tick 粒度导致晚醒。两种 backend 都只在 owner executor 线程内修改数据结构，因此不需要互斥锁。
+默认使用分层时间轮，适合大量 timer。小规模或需要严格 heap 语义的测试场景可以选择 `timer_kind::min_heap`。无论哪种 backend，都只由 owner executor 修改，因此 timer 数据结构不需要 mutex。
 
 ### reactor_config
 
@@ -180,7 +178,7 @@ struct reactor_config {
 };
 ```
 
-默认 Linux 使用 epoll，macOS/BSD 使用 kqueue，必要时 fallback 到 select。默认使用 LT 模式。`event_capacity` 控制后端一次可缓存的事件数组容量，`event_budget` 控制单轮 `poll()` 最多分发的 readiness 事件数，用于限制 IO executor 在 fd 事件上停留的时间，避免饿死 task、timer 和 service task。
+`auto_select` 在 Linux 选择 epoll，在 macOS/BSD 选择 kqueue，其他 POSIX 平台 fallback 到 select。默认 LT 模式。`event_budget` 限制单轮 readiness 分发数量，避免 IO executor 被 fd 事件长期占满。
 
 ### log_config
 
@@ -189,6 +187,7 @@ struct log_config {
     log_ordering ordering = log_ordering::ordered;
     thread_selector consumer_thread = thread_selector::cpu(0);
     std::size_t queue_capacity = 1U << 16U;
+    std::size_t shard_count = 0;
     std::size_t max_batch_records = 256;
     std::chrono::microseconds max_batch_delay = 1000us;
     log_overflow_policy overflow = log_overflow_policy::drop_newest;
@@ -197,7 +196,7 @@ struct log_config {
 };
 ```
 
-日志等级过滤必须在格式化前完成。不匹配等级时不格式化用户消息。
+日志等级过滤必须发生在格式化之前。不匹配等级时不格式化用户消息，也不申请 `log_record`。
 
 ### shutdown_config
 
@@ -210,25 +209,11 @@ struct shutdown_config {
 };
 ```
 
-三个 timeout 字段必须为非负值；`0s` 表示进入对应阶段但不额外等待，负值在
-`validate_runtime_config()` 阶段直接拒绝。
-
-### diagnostics_config
-
-```cpp
-struct diagnostics_config {
-    bool enable_task_id = true;
-    bool enable_stats = true;
-    bool enable_thread_name = true;
-    bool enable_queue_metrics = true;
-};
-```
-
-`enable_task_id` 控制实例 task id 分配和日志 `[task=...]` 注入；`enable_thread_name` 控制实例 runtime 是否调用系统线程命名接口。极致热路径或嵌入式场景可以按需关闭诊断能力。
+timeout 必须非负。`0s` 表示进入对应阶段但不额外等待。
 
 ## Executor 模型
 
-每个 executor 对应一个框架线程和一个 task inbox：
+每个 executor 对应一个固定框架线程和一个 task inbox：
 
 ```text
 intrusive_unbounded_mpsc_queue<task>
@@ -237,50 +222,48 @@ intrusive_unbounded_mpsc_queue<task>
 CPU executor 循环：
 
 ```text
-drain task queue with budget
+drain task inbox with budget
 run due timers with budget
 run service tasks with budget
-empty -> futex park or timed futex wait until nearest timer
+if no work:
+  futex/atomic wait until wake or nearest timer
 ```
 
 IO executor 循环：
 
 ```text
-drain task queue with budget
+drain task inbox with budget
 run due timers with budget
 run service tasks with budget
+compute timeout from nearest timer and service need
 reactor.poll(timeout)
-handle io events
-empty -> reactor/futex park
+dispatch readiness events with budget
 ```
 
-service task 是长期服务对象，例如 logger、metrics、trace。executor 只知道 service task 的通用接口，不知道 logger 内部细节。
+task、timer、service task 和 reactor event 都有预算。这样 IO 线程既能处理 fd 事件，也能处理调度到本线程的 task，同时避免某一类工作长期占满 executor。
 
-当前静态 runtime 和实例 runtime 都已具备通用 service task 骨架：service 对象通过 `register_service_task()` 在 owner runtime 线程注册，executor 每轮按 `service_task_budget` 调用 `run_service()`；外部生产者只更新 service 自己的 pending 状态并调用 `wake_service_tasks()` 唤醒目标 executor。service 列表仅在 owner runtime 线程访问，因此不需要互斥锁。实例 runtime 的 executor 已按 `scheduler.task_drain_budget` 限制每轮 task inbox drain 数量，按 `timer.drain_budget` 限制每轮到期 timer 数量，并在 `scheduler.max_task_run_slice` 非零时额外按时间片提前让出，避免长任务流饿死 timer、service task 和 reactor poll。静态 runtime 的日志消费者已经迁移到这个通用 service task 接口；实例 runtime 已支持从 `runtime_config.logger` 自动创建 runtime-owned async logger，日志消费者绑定到配置指定的 runtime 线程。
-
-实例 runtime 还提供函数式 `post(thread_ref, fn)` 控制面入口：callable 会被包装成一次性 `runtime_work`，按 `task_pool.local_cache_size` 选择同一套 size-class pooled object，并按 `task_pool.slab_object_count` 对该 callable work 类型做首次 reserve，再投递到目标 executor 的 intrusive MPSC inbox，执行完成后在目标线程归还对象池；投递失败会立即释放 callable。`schedule_after(thread_ref, delay, fn)` / `schedule_at(thread_ref, time, fn)` 则会把 callable 包装成隐藏 `runtime_task`，走 task 对象池和目标 executor 本地 timer backend。该入口用于控制任务、server/listener 管理、超时处理和少量跨线程切换，热路径仍可直接使用自定义 `runtime_work` 或 `runtime_task` 以完全控制生命周期和分配策略。
+same-thread schedule 也进入统一 task inbox。这样所有调度都走同一种顺序语义，不再因为 local queue、SPSC queue、MPSC queue 混用而产生难以解释的执行顺序差异。
 
 ## Task API 与生命周期
 
 任务只能通过 runtime 创建：
 
 ```cpp
-auto task = af::make_task<login_task>(rt);
-task->do_it(conn, req);
+auto* task = af::make_task<login_task>(rt);
+task->do_it(conn, request);
 ```
 
-`make_task<T>()` 默认保证返回非空任务对象或抛出。对象池耗尽时继续扩展 slab；真正 OOM 时按配置执行 fatal 或 throw。当前静态 runtime 实现返回 `TaskHandle<T>`，实例 runtime 实现返回 `runtime_task_handle<T>`；两者都支持 `operator->`，用于持有任务启动前后的生命周期引用。handle 为空只会出现在可恢复创建 API。
-
-需要可恢复失败时使用：
+`make_task<T>()` 返回非空 `T*`。对象池分配失败时按 `task_pool.oom` 处理，不把普通用户路径变成到处判断空指针。需要可恢复失败时使用：
 
 ```cpp
-auto task = Runtime::try_make_task<login_task>();
-if (!task) {
-    // recover or reject request
+if (auto* task = af::try_make_task<login_task>(rt)) {
+    task->do_it(conn, request);
 }
 ```
 
-调度 API：
+task 启动是两步：先创建对象，再由用户调用 `do_it()` 填充上下文并发起第一次调度。用户不需要关心首次 `do_it()` 和后续 `run()` 在 runtime 内部的状态差异；用户只表达任务下一次在哪个线程、哪个时间继续执行。
+
+调度 API 使用 `schedule` 关键词：
 
 ```cpp
 schedule_to(thread_ref target);
@@ -288,61 +271,96 @@ schedule_after(duration delay);
 schedule_after(thread_ref target, duration delay);
 schedule_at(time_point time);
 schedule_at(thread_ref target, time_point time);
-pending_after(duration delay);
-pending_after(thread_ref target, duration delay);
-pending_at(time_point time);
-pending_at(thread_ref target, time_point time);
 reschedule();
 done();
 cancel();
 ```
 
-用户不用关心首次 `do_it()` 和后续 `run()` 的内部差异。task 内部可以维护状态机，但用户看到的语义只有“下一次在哪个线程、哪个时间继续执行”。
+语义：
 
-默认每个 task 创建时分配 `task_id_`。启用 `diagnostics.enable_task_id` 时使用每线程 id block，避免每次创建都访问全局 atomic；禁用时 task id 保持 invalid，日志也不会注入 `[task=...]`，用于对极致热路径关闭诊断开销。
+- `schedule_to(target)`：下一次继续运行到目标 executor。
+- `schedule_after(delay)`：在当前 owner executor 上延迟运行。
+- `schedule_after(target, delay)`：投递到目标 executor，由目标 executor 挂入本地 timer。
+- `schedule_at(time)` / `schedule_at(target, time)`：绝对时间版本。
+- `reschedule()`：回到当前 executor 的 task inbox，让出当前执行机会。
+- `done()`：任务完成并归还对象池。
+- `cancel()`：取消 pending/timer 状态任务；正在运行的业务逻辑不被强杀。
 
-## Task Pool
+每个 task 创建时分配 `task_id_`。启用 `diagnostics.enable_task_id` 时使用每线程 id block，避免每次创建都访问全局 atomic；禁用时 task id 保持 invalid，日志不会注入 `[task=...]`。
+
+## Queue 与背压
+
+task 投递使用 Vyukov intrusive unbounded MPSC linked queue。队列节点就是 task 自身的 intrusive node，不为每次投递额外分配 wrapper。
+
+```text
+producer:
+  task.next = nullptr
+  prev = exchange(head, task)
+  prev.next = task
+
+consumer:
+  drain from tail/stub
+```
+
+task inbox 不因为容量满而拒绝非首次调度。业务入口的限流、连接高水位、日志队列溢出和内存 OOM 是独立问题，不能让 task 自身的继续调度在“队列满”时陷入复杂恢复逻辑。
+
+日志队列是 bounded MPSC，因为后端慢时不能无限吃内存。默认溢出策略是 `drop_newest + dropped counter`，生产者不阻塞；`block` 只能作为显式配置，用于确实希望日志反压业务的场景。
+
+## 对象池
 
 对象池路径：
 
 ```text
-local cache
- -> remote free queue drain
- -> slab refill
- -> system allocate slab
+thread/executor local cache
+ -> drain owner remote free queue in batch
+ -> refill from current slab
+ -> allocate new slab
  -> OOM policy
 ```
 
-要求：
+设计要求：
 
 - 当前 executor 分配走 local cache，无锁。
 - 跨线程释放进入 owner remote free MPSC。
 - owner 批量 drain remote free，再回收到 local cache。
-- task、log record、timer node、net buffer 分不同 pool 或 size class。
-- 高频字段、统计计数器、队列头尾按 cache line 隔离。
+- task、timer node、log record、net buffer 分类型或 size class 管理。
+- 高频字段、统计计数器、队列 head/tail、producer cursor、consumer cursor 按 cache line 隔离。
+- slab 内对象连续存放，提升预取和 cache locality。
+- 对象池不设置固定总容量；内存耗尽前持续提供对象。
 
-对象池不承担背压职责。是否允许任务无限积压由业务入口和调度策略控制，不由 task pool 人为设置固定容量。
+`make_task<T>()`、log record acquire、timer node acquire 都走相同的设计原则，但不要强行共用一个池。不同对象生命周期和访问模式不同，应分 pool 或 size class。
 
 ## Timer
 
-每个 executor 独立管理 timer。`schedule_after()`、`schedule_at()`、`pending_after()` 和 `pending_at()` 会把 task 挂到目标 executor 的 timer 结构。跨线程调用时不直接修改目标 timer，而是先投递到目标 executor 的 inbox，目标线程再完成 timer arm。
+每个 executor 拥有自己的 timer backend。跨线程注册 timer 时，不直接修改目标 timer 结构，而是把 task 投递到目标 executor，由目标 executor 在线程内完成 timer arm。
 
-当前状态机：
+状态流：
 
 ```text
-Created/Pending -> TimerArming -> TimerPending -> Queued -> Starting -> Running
+created
+ -> queued
+ -> running
+ -> timer_arming
+ -> timer_pending
+ -> queued
+ -> running
+ -> done/cancelled
 ```
 
-`TimerArming` 表示 task 已经进入目标 executor inbox，等待目标线程挂 timer。`TimerPending` 表示 task 已在目标 executor 本地 timer backend 中。timer 到期后目标 executor 将 task 转为 `Queued` 并直接执行。`StopImmediately` 退出时会取消仍在 timer backend 中的 task 并释放生命周期引用。
+IO executor 的 `reactor.poll(timeout)` 使用最近 timer deadline 计算 timeout；CPU executor 使用 futex/atomic timed wait。框架不创建额外 timer 线程。
 
-IO executor 的 `reactor.poll(timeout)` 使用最近 timer 的到期时间作为 timeout。这样不会额外创建 timer 线程，也不会忙等。
+定时器分两类：
+
+- frame timing wheel：适合游戏 tick、批处理和固定节奏任务。
+- hierarchical timing wheel：适合大量普通 timeout，近端 bucket 快速触发，远端 bucket 分层推进。
 
 ## Reactor
 
-每个 IO executor 拥有一个 reactor：
+每个 IO executor 拥有一个 reactor 对象：
 
 ```text
-io executor N -> reactor N -> platform backend
+io executor 0 -> reactor 0 -> epoll/kqueue/select
+io executor 1 -> reactor 1 -> epoll/kqueue/select
 ```
 
 统一接口：
@@ -358,11 +376,11 @@ public:
 };
 ```
 
-`fd_event_source` 表示一个 fd 事件源：
+`fd_event_source` 是内部事件源，不作为业务层概念暴露：
 
 ```cpp
 struct fd_event_source {
-    int fd;
+    native_fd fd;
     io_interest interest;
     io_events ready;
     void* owner;
@@ -370,13 +388,11 @@ struct fd_event_source {
 };
 ```
 
-TCP/UDP/Unix socket 只依赖 reactor 抽象，不直接依赖 epoll/kqueue/select。
-
-当前实例 runtime 已经接入基础 reactor 抽象：只有 IO executor 在构造时创建 reactor，CPU executor 继续使用 futex/atomic wait。`runtime::post()` 和 `stop()` 会同时唤醒目标 executor 的 task inbox 与 reactor wake fd，保证 IO 线程阻塞在 `poll(timeout)` 时也能及时处理被调度过来的 task、timer arm 和停止请求。当前新路径已经拆分 public reactor 接口与后端实现，并落地 Linux epoll、macOS/BSD kqueue 和 select fallback；`auto_select` 在 Linux 优先 epoll，在 macOS/BSD 优先 kqueue，最后 fallback 到 select。epoll/kqueue 在系统调用入口按 `reactor.event_budget` 限制单轮返回事件数，select fallback 在 ready fd 收集阶段按同一预算截断。
+TCP、UDP、Unix socket 只依赖 reactor 抽象，不直接依赖 epoll/kqueue/select。LT 模式下，读回调 drain 到 `EAGAIN` 或预算耗尽，写 interest 只在输出队列从空变非空、或从非空变空时修改。这样普通 readiness 处理不需要每次事件后重新 `epoll_ctl` / `kevent`。
 
 ## 网络层
 
-网络层对象：
+网络层目标对象：
 
 ```text
 tcp_server
@@ -384,183 +400,189 @@ tcp_listener
 tcp_connection
 tcp_client
 udp_socket
-unix_listener
-unix_connection
+unix_stream_server
+unix_stream_client
+unix_datagram_socket
 ```
 
-所有真实 fd 操作都必须在 owner IO executor 上执行。跨线程操作通过 task 显式 `schedule_to(owner_thread)`。
+所有 fd 都有明确 owner reactor thread。真实 fd 操作只能在 owner IO executor 上执行。外部线程或 CPU task 要发送、关闭、增加 listener、停止 server 时，应显式创建 task 并 `schedule_to(owner_thread)`。
 
-### TCP Server 配置
+框架不再提供隐藏 command queue，也不在 release 热路径做“外部线程直接调用拒绝”这类同步检查。使用契约是：涉及 reactor 对象生命周期和 fd 操作的 API 必须在 owner reactor 线程调用；debug 构建可以保留 assert 帮助定位误用。
 
-```cpp
-struct tcp_server_config {
-    tcp_connection_config connection;
-    std::chrono::milliseconds connection_close_timeout = 5000ms;
-};
+### TCP Server API
 
-struct tcp_listener_config {
-    tcp_endpoint endpoint;
-    thread_group_ref threads;
-    bool reuse_addr = true;
-    bool reuse_port = false;
-    int backlog = 4096;
-    std::size_t accept_budget = 256;
-    bool ipv6_only = true;
-    tcp_handler* handler = nullptr;
-};
+`tcp_server` 不是业务 task。它是控制对象，持有 listeners、connection table 和 server 生命周期状态。listener 和 connection 通过 reactor event source 驱动；业务需要 CPU 计算时再创建 task。
 
-struct tcp_connection_config {
-    std::size_t read_buffer_size = 16U * 1024U;
-    std::size_t read_budget_bytes = 512U * 1024U;
-    std::size_t write_budget_bytes = 512U * 1024U;
-    std::size_t output_high_watermark = 8U * 1024U * 1024U;
-    bool no_delay = true;
-    bool keepalive = true;
-    std::chrono::seconds idle_timeout = 0s;
-};
-```
-
-使用方式：
+配置示例：
 
 ```cpp
-af::tcp_server_config server_cfg;
+af::net::tcp_server_config server_cfg;
 server_cfg.connection.no_delay = true;
 server_cfg.connection.keepalive = true;
+server_cfg.connection.output_high_watermark = 8U * 1024U * 1024U;
 
-af::tcp_server server(rt, server_cfg);
+af::net::tcp_server server(rt, server_cfg);
 
-af::tcp_listener_config listener;
-listener.endpoint = af::tcp_endpoint::any(8080);
-listener.threads = rt.io_threads();
-listener.reuse_port = true;
-listener.backlog = 4096;
-listener.handler = &handler;
+af::net::tcp_listener_config public_listener;
+public_listener.name = "public";
+public_listener.endpoint = af::net::tcp_endpoint::any(8080);
+public_listener.threads = rt.io_threads();
+public_listener.reuse_addr = true;
+public_listener.reuse_port = true;
+public_listener.backlog = 4096;
+public_listener.accept_budget = 256;
+public_listener.handler = &handler;
 
-server.add_listener(listener);
+server.add_listener(public_listener);
 server.start();
 ```
 
-`tcp_server` 支持多个 listener 和运行中 `add_listener()`。如果需要从外部线程操作 server，用户显式创建 task 并调度到目标 IO 线程。
+以上控制代码应在 server control IO task 中执行。外部线程需要先投递控制 task，再在目标 reactor 线程调用 `add_listener()` / `start()` / `stop()`。
 
-### TCP 流程
+`threads` 可绑定一个或多个 IO 线程。未填写时默认使用 `rt.io_threads()`。运行中 `add_listener()` 和 `remove_listener()` 支持动态监听地址管理，但调用方需要先切到 server control thread。
+
+多 IO 线程监听策略：
+
+- `reuse_port=true`：每个目标 IO 线程各自创建 listen fd，内核分配连接，性能最好。
+- `reuse_port=false`：只在一个 IO 线程创建 listen fd，accepted fd 再按策略分发到目标 IO 线程。
+- 同一个 listen fd 不放入多个 reactor；每个 fd 只属于一个 reactor。
+
+TCP server 流程：
 
 ```text
-start on io thread
-create nonblocking listen fd
-bind/listen
-reactor.add(listener fd)
+control task on io thread
+ -> create nonblocking listen fd
+ -> setsockopt reuse_addr/reuse_port/ipv6_only
+ -> bind/listen
+ -> reactor.add(listener source)
+
 listener readable
-accept loop
-create tcp_connection
-reactor.add(connection fd)
+ -> accept loop until EAGAIN or accept_budget
+ -> set accepted fd nonblocking
+ -> select owner io thread
+ -> create tcp_connection
+ -> reactor.add(connection source)
+
 connection readable
-recv loop
-handler.on_read(conn_ref, bytes)
-business task schedule_to(cpu)
-business done schedule_to(conn.owner_thread())
-conn.send(response)
+ -> recv loop until EAGAIN/read_budget
+ -> handler.on_read(conn_ref, bytes)
+ -> business may make_task and schedule_to(cpu)
+
+business task done
+ -> schedule_to(conn.owner_thread())
+ -> conn.send(response)
 ```
 
-默认 LT 模式。读事件 drain 到 `EAGAIN` 或预算耗尽。写事件只在 output buffer 非空时开启，写完后关闭 writable interest。
-
-### Connection 引用
+### TCP Connection
 
 ```cpp
 tcp_connection_ref
 tcp_connection_handle
 ```
 
-`tcp_connection_ref` 只在 owner IO 线程回调内有效。`tcp_connection_handle` 可跨线程保存，包含 owner thread、slot、generation。旧 handle 不应误发到复用后的新连接。
+`tcp_connection_ref` 只在 owner IO 线程回调内有效，适合直接读写、获取 peer/local endpoint、访问 user context。
 
-## UDP 与 Unix Socket
+`tcp_connection_handle` 可跨线程保存，包含 owner thread、slot、generation。业务层可维护 `user_id -> tcp_connection_handle`，例如登录成功后把用户 id 绑定到连接。owner IO 线程执行 send/close 时校验 generation，避免旧 handle 误发到复用后的新连接。
 
-UDP 使用 `udp_socket` 抽象，server 和 client 共用 datagram 模型：
+发送策略：
 
 ```cpp
-struct udp_socket_config {
-    udp_endpoint endpoint;
-    thread_group_ref threads;
-    bool reuse_addr = true;
-    bool reuse_port = false;
-    std::size_t recv_budget_packets = 256;
-    std::size_t recv_buffer_size = 2048;
-    std::size_t send_queue_high_watermark = 4U * 1024U * 1024U;
-};
+handle.send(buffer);       // 跨线程安全：内部调度到 owner reactor
+ref.send(buffer_view);     // owner IO 线程内热路径
+handle.close_after_flush();
+handle.close_now();
 ```
 
-Unix stream 和 Unix datagram 使用独立 API，避免把 Unix path 混入 TCP/UDP endpoint 心智模型。底层可复用 stream/datagram 热路径。
+写队列只由 owner IO 线程修改。业务线程不直接写 fd。输出 buffer 支持 move buffer、scatter/gather `writev`，可在平台支持时扩展 `sendfile` / `splice` 等零拷贝路径。
+
+### TCP Client
+
+`tcp_client` 是出站连接控制对象。调用方选择 IO 线程，目标 IO 线程创建 nonblocking socket 并执行 `connect`。`EINPROGRESS` 后由 reactor 等待 writable readiness；等待期间 IO 线程继续处理 task、timer 和其他 fd。
+
+连接建立后复用 `tcp_connection` 热路径：读写、关闭、handle generation、输出高水位都与 server accepted connection 一致。
+
+### UDP Socket
+
+`udp_socket` 同时覆盖 UDP server 和 UDP client。server 绑定 local endpoint；client 可绑定 local endpoint 并设置 remote endpoint。
+
+```cpp
+af::net::udp_socket_config cfg;
+cfg.name = "udp-echo";
+cfg.local_endpoint = af::net::udp_endpoint::any(9000);
+cfg.threads = rt.io_threads();
+cfg.reuse_port = true;
+cfg.recv_budget_packets = 256;
+cfg.recv_buffer_size = 2048;
+
+af::net::udp_socket socket(rt, cfg, handler);
+socket.start();
+```
+
+每个 active IO shard 拥有独立 fd、handler 副本、recv buffer 和 event source。`reuse_port=true` 时多 IO 线程各自 bind 同一端口，由内核分发 datagram。跨线程发送通过 `udp_socket_handle::send()` / `send_to()` 调度到目标 shard。
+
+### Unix Socket
+
+Unix stream 使用 `unix_stream_server` / `unix_stream_client`，底层复用 stream connection 热路径。Unix datagram 使用 `unix_datagram_socket`，底层复用 datagram shard 热路径。
+
+Unix path 的 bind、unlink、权限和生命周期与 TCP/UDP endpoint 不同，因此对外 API 独立，不把 path 塞进 TCP/UDP 配置里。
+
+## Packet 与业务分发
+
+框架网络层只提供高性能字节流/datagram 能力，不内置 codec/dispatcher。包格式、包 id、protobuf/json 解析和业务分发由用户组合。
+
+常见 TCP 包格式：
+
+```text
+uint32 length
+uint16 packet_id
+bytes  content
+```
+
+业务可以维护 `packet_id -> handler` 表：
+
+```cpp
+using packet_handler = void (*)(af::net::tcp_connection_handle conn,
+                                af::buffer_view content);
+
+absl::flat_hash_map<std::uint16_t, packet_handler> handlers;
+```
+
+TCP IO 线程负责从连接输入 buffer 中解析完整包，拿到完整包后按包 id 创建对应 task。protobuf 只作为 `tcp_login_server` 示例依赖，不进入框架核心。
 
 ## Logger
 
-logger 由 runtime 拥有，消费者是绑定到 runtime 线程的 service task，不创建独立线程，也不创建长期 consumer task。
-
-当前实例 runtime 已提供两类启动方式：
-
-```cpp
-af::runtime runtime(cfg); // cfg.logger.backends 非空时由 runtime.start() 自动启动
-auto logging = af::start_async_logging_for_runtime(runtime, async_log_config); // 手动模式
-```
-
-自动模式把 `runtime_config.logger` 转换为 `AsyncLogConfig`，按 `consumer_thread` 选择目标 runtime 线程，并把消费者注册为该 executor 上的 service task。没有配置 backend 时不创建全局 Abseil sink。`runtime.stop()` 会先停止日志 admission、drain 已接受记录并 flush backend，再停止 executor；手动模式仍保留给需要自定义 `AsyncLogConfig` 或临时日志管线的场景。
-
-前端流程：
+logger 由 runtime 拥有，消费者绑定到 runtime 某个线程，以 service task 方式运行：
 
 ```text
 LOG
  -> level check
  -> Abseil format
  -> acquire log_record
- -> push bounded MPSC log queue
- -> if empty-to-non-empty, wake consumer
-```
-
-消费者流程：
-
-```text
-consumer service task
- -> drain N records or run T duration
- -> write backend batch
+ -> push bounded MPSC ingress
+ -> empty-to-non-empty wake consumer service task
+ -> consumer batch drain
+ -> backend write
  -> recycle log_record
- -> if queue still non-empty, report did_work and let executor continue polling
- -> else park
 ```
 
-日志队列建议 bounded，默认 `drop_newest + dropped counter`。日志对象池不 bounded，持续扩展 slab 到 OOM。
+默认 `log_ordering::ordered`。ordered 策略给已接受日志分配递增 sequence，consumer 按 sequence 输出。为了减少多生产者写同一个 cache line，可以使用 sharded bounded MPSC ingress：生产者按线程或 CPU shard 写本地 shard，consumer 小批量 merge。sequence 可按线程块分配，减少每条日志访问全局 atomic。
 
-### 日志后端
-
-文件后端：
+`log_ordering::relaxed` 是显式可选策略，允许 consumer 按 shard/batch 到达顺序输出，换取更低 merge 成本。ordered 和 relaxed 的代码路径应隔离清楚，配置入口简单：
 
 ```cpp
-struct file_log_backend_config {
-    std::string path;
-    bool append = true;
-    bool fsync_on_flush = false;
-    std::size_t write_batch_iov = 64;
-};
+cfg.logger = af::log_config::ordered();
+cfg.logger = af::log_config::relaxed();
 ```
 
-UDP/TCP 后端：
+日志队列 bounded，默认满时 `drop_newest` 并增加 dropped counter，避免后端慢时阻塞业务生产者。日志 record pool 不 bounded，持续扩展 slab 到 OOM。
 
-```cpp
-struct udp_log_backend_config {
-    endpoint target;
-    std::size_t max_datagram_size = 1400;
-    thread_selector io_thread;
-};
+后端：
 
-struct tcp_log_backend_config {
-    endpoint target;
-    std::chrono::milliseconds reconnect_interval = 500ms;
-    thread_selector io_thread;
-};
-```
+- file backend：consumer 所在 runtime 线程直接批量写文件。
+- UDP backend：consumer 聚合 batch 后调度到目标 IO reactor 发送。
+- TCP backend：连接、重连和发送都归属目标 IO reactor。
 
-网络日志后端可以由日志消费者聚合 batch，再调度到指定 IO executor，通过 reactor 发送。当前 `runtime_config.logger` 的 `io_thread` 已参与配置校验；实际 file/udp/tcp 后端先复用现有 `LogBackend` 实现，网络后端完全 reactor 化发送仍在后续迁移项中。
-UDP/TCP 日志后端的 `io_thread` 必须解析到 `thread_kind::io` executor；解析失败或指向
-CPU 线程都会在 `validate_runtime_config()` 阶段拒绝。
-
-### 日志生命周期
+日志生命周期：
 
 ```text
 created
@@ -571,93 +593,134 @@ created
  -> stopped
 ```
 
-`accepting` 状态接受用户日志。`stopping` 后停止普通日志 admission。`draining` 消费已接受记录。`flushing` 调用后端 flush。`stopped` 注销 sink 并释放资源。
-
-当前 runtime-owned logger 在 `runtime.stop()` 时会使用 `shutdown.log_flush_timeout` 作为日志消费者 drain/flush 的等待预算；手动 `AsyncLogHandle::stop()` 也提供 timeout 重载。后端自身如果阻塞在不可取消 IO 上，仍需要后端实现自己的 `shutdown()` 解除阻塞。
+`runtime.stop()` 先停止日志 admission，再 drain 已接受记录，最后 flush backend。停止后的普通用户日志不再进入队列，避免退出阶段无限产生日志。
 
 ## 优雅退出
 
-推荐 runtime 停止顺序：
+推荐停止顺序：
 
 ```text
-1. stop_accept
-2. stop_external_task_submission
-3. drain_business_tasks
-4. logger.stop_admission
-5. logger.drain
-6. logger.flush
-7. backend.shutdown
-8. unregister_absl_sink
-9. stop_executors
+1. stop accepting external work
+2. stop tcp/unix listeners and udp receive admission
+3. close active connections after flush
+4. drain business tasks until timeout
+5. stop logger admission
+6. drain logger queue
+7. flush and shutdown log backends
+8. stop service tasks
+9. stop executors and join threads
+10. release pools/slabs
 ```
 
-退出过程中普通用户日志在 `logger.stop_admission` 后不再进入队列，避免退出阶段无限产生日志。必要的 runtime 紧急日志可以进入小型 emergency buffer，或者同步写 stderr。
+running task 不强杀；pending task、timer task 和尚未执行的控制 task 可以在 stop 策略下取消并释放生命周期引用。网络连接优先 `close_after_flush()`，超过 `connection_close_timeout` 后强制 close。
 
-TCP server 停止：
+## 性能原则
 
-```text
-stop accept
-remove listener from reactor
-close listen fd
-close_after_flush active connections
-deadline reached -> force close
-```
+- 任务投递统一 intrusive MPSC，减少多路径顺序语义差异。
+- task inbox unbounded，避免非首次调度遇到队列满后需要复杂恢复。
+- 日志 bounded MPSC，背压点放在日志入口，不让 log record pool 伪装成容量限制器。
+- 对象池快路径使用 local cache，跨线程释放批量回收。
+- 热路径结构按 cache line 对齐，避免 producer/consumer cursor、统计计数器和状态位 false sharing。
+- reactor 默认 LT 模式，只在 fd 注册、interest 变化、取消和关闭时触发内核修改。
+- TCP 读写按预算 drain，避免单连接饿死同 reactor 上的 task/timer/service。
+- handler 按 listener/shard 拷贝，避免多个 IO 线程共享 handler 状态。
+- hot path 优先数组、vector、slot table 和 generation；冷控制面可使用 `absl::flat_hash_map`。
+- 网络输入尽量使用 `buffer_view` 零拷贝解析；输出优先 move buffer 和 scatter/gather。
+- 分支预测上把成功路径、非错误路径和常见 readiness 路径作为直线代码，错误、关闭、溢出走冷函数。
 
-当前模板化 `af::net::tcp_server<Runtime>` 已提供 `tcp_server_config.connection_close_timeout`：`stop()` 会在 owner IO 线程先关闭 listener、对存活连接执行 `close_after_flush()`，连接自然 flush 完会立即结束；超过配置 timeout 后强制关闭剩余连接。`tcp_server_config.connection` 也已作为 listener 默认连接配置接入，覆盖读 buffer、读预算、写预算、输出高水位、`TCP_NODELAY` 和 keepalive；listener options 仍可按监听入口覆盖。实例 runtime 的 `shutdown.connection_close_timeout` 仍待未来网络层迁移到实例 runtime API 后直接接入。
+## 目录布局
 
-task 不强杀正在运行的业务逻辑；pending task 可以取消，running task 通过 stopping 状态自行收敛。
-
-## 目录建议
+目标目录按模块和职责分层：
 
 ```text
 include/af/
   runtime/
+    runtime.hpp
     config_types.hpp
     config_resolution.hpp
-  task/
+    task.hpp
+    work.hpp
+    parallel.hpp
+    detail/
+      executor.hpp
+      executor_loop.hpp
+      task_pool.hpp
+      timer_backend.hpp
+      epoll_reactor.hpp
+      kqueue_reactor.hpp
+      select_reactor.hpp
   queue/
+    intrusive_mpsc_queue.hpp
+    bounded_mpsc_ring.hpp
   memory/
+    slab_pool.hpp
+    cache_line.hpp
   timer/
+    timer_wheel.hpp
+    hierarchical_timer_wheel.hpp
   reactor/
+    reactor.hpp
+    fd_event_source.hpp
   net/
+    endpoint.hpp
     tcp/
+      tcp_server.hpp
+      tcp_listener.hpp
+      tcp_connection.hpp
+      tcp_client.hpp
     udp/
+      udp_socket.hpp
     unix/
+      unix_stream_server.hpp
+      unix_stream_client.hpp
+      unix_datagram_socket.hpp
   log/
+    logger.hpp
+    log_record.hpp
+    log_backend.hpp
+    file_backend.hpp
+    udp_backend.hpp
+    tcp_backend.hpp
   platform/
+    thread_name.hpp
+    affinity.hpp
+    futex.hpp
 ```
 
-平台后端：
+原则：公开 API 和 detail 实现分开；reactor、tcp、udp、unix、log、runtime 不挤在一个大文件里；跨模块只依赖稳定抽象。
 
-```text
-include/af/reactor/epoll_reactor.hpp
-include/af/reactor/kqueue_reactor.hpp
-include/af/reactor/select_reactor.hpp
-```
+## 迁移顺序
 
-## 与当前实现的主要差异
+1. 清理 `io_uring` 相关代码、测试、benchmark 和兼容桩。
+2. 固化 C++17、conan 依赖和现代 CMake target。
+3. 收敛命名、配置结构和 thread layout，只保留 `io/cpu`。
+4. 抽出 queue、memory、timer、reactor 基础模块。
+5. 用实例 runtime 路径承载 task、timer、service task 和 logger。
+6. 重建 TCP server/client、UDP socket、Unix socket，所有 fd 操作 reactor-affine。
+7. 更新 tcp echo server 和 tcp login server 示例；login 示例使用 protobuf。
+8. 删除旧接口、兼容层和历史示例/测试。
+9. 补 correctness stress、TSAN 可运行测试、benchmark 和 perf 分析脚本。
+10. 在远端 Linux 容器中做 GCC/Clang 构建、ctest、benchmark、perf 回归。
 
-- 当前调度已经统一为每 executor 一个 intrusive MPSC task inbox，后续继续收敛配置 API 和命名。
-- 当前线程类型已只保留 `thread_kind::io` 和 `thread_kind::cpu`，epoll/kqueue/select 属于 reactor backend。
-- 当前旧网络 readiness 路径已使用 LT 语义，网络 channel 不使用 one-shot rearm；新的实例 runtime 已提供 `reactor` / `fd_event_source` 抽象、Linux epoll backend、macOS/BSD kqueue backend 和 select fallback，IO executor 可在 `reactor.poll(timeout)` 中同时等待 fd readiness、task wake 和 timer deadline，并已按 `reactor.event_budget` 限制单轮 readiness 分发量。
-- 当前日志 relaxed 模式已使用 bounded MPSC runtime lane 和 sharded MPSC ingress，日志 record pool 已改为可扩展 slab pool，并已按 `logger.record_pool.slab_object_count` 控制每个日志 lane/shard 的初始 slab 容量。
-- 当前 TCP stream 和 UDP/datagram 跨线程操作已迁移为显式 runtime task 调度到 owner reactor；后续继续收敛 API 命名、目录结构和对象池实现。
-- 当前 runtime 已提供 `try_make_task<T>()` 可恢复创建路径；对象池 `try_create()` 在分配或构造失败时返回空指针，并释放已获取 slot；实例 runtime 的 `make_task<T>()` 已接入 `task_pool.slab_object_count` 预热和 `task_pool.oom` 分配失败策略。
-- 当前 executor 已提供通用 service task 注册、注销和唤醒入口；runtime async logger 消费者已迁移为 service task，只有注册/注销使用短 control task 切到 owner executor。
-- 当前日志队列仍是有界队列，record 对象池不再用固定总容量承担背压职责。
-- 当前网络 public API 已补 lower_case 类型别名和 enum 值别名，例如 `tcp_server`、`tcp_client`、`udp_socket`、`send_result::backpressure`、`close_reason::error` 和 Unix socket 相关别名；TCP echo/login 示例已使用新命名作为迁移样板。
-- 当前 task API 已补 `schedule_to(...)` / `pending_to(...)` 及 fast/ordered 变体作为清晰调度入口，旧 `schedule(...)` / `pending_on(...)` 保留兼容。
-- 当前 runtime/task public enum 与容器已补 lower_case 别名，例如 `task_result`、`schedule_mode::ordered`、`shutdown_policy::wait_for_tasks`、`parallel_mode::non_empty_only` 和 `sharded_ops<T>`；示例已迁移到新拼写。
-- 当前已提供 public `runtime_config`、`scheduler_config`、`task_pool_config`、`timer_config`、`reactor_config`、`log_config`、`shutdown_config` 和 `diagnostics_config` 普通结构体，`io_threads()` / `cpu_threads()` 配置值工厂，以及 `resolve_runtime_config()` / `validate_runtime_config()` 解析校验入口。
-- 当前已提供 `af::runtime` 实例生命周期外壳和低层投递通道：构造时使用结构化配置解析校验，`start()` 按配置启动 runtime 线程，每个 executor 拥有 intrusive MPSC inbox，`post()` 可把 `runtime_work` 或一次性 callable 投递到指定线程执行，`schedule_after()` / `schedule_at()` 可把一次性 callable 挂到目标 executor timer；每轮按 `scheduler.task_drain_budget` drain task、按 `timer.drain_budget` drain 到期 timer，且在 `scheduler.max_task_run_slice` 非零时按时间片让出；`scheduler.wake` 已控制投递唤醒策略，默认 empty-to-non-empty 通过消费者 sleep flag 减少重复 wake，并在真正 wait 前复查队列/定时器/service task；CPU executor 空闲等待已支持 `scheduler.idle_wait` 的 futex/spin/yield 策略，IO executor 使用 reactor poll；`stop()` 可由外部线程完成 join/回收，也可由 runtime 线程内请求停止而不自 join。
-- 当前实例 runtime 已接入 `diagnostics.enable_thread_name`：开启时按 thread layout 调用系统线程命名接口，关闭时跳过命名调用；单个 thread group 仍可通过 `set_os_thread_name=false` 禁用自身命名。
-- 当前实例 runtime 已在 Linux 上接入 `thread_group_config.affinity.cpu_ids` 和 `thread_priority_config`：executor 线程入口对当前线程调用 `pthread_setaffinity_np` 和 per-thread `setpriority`；非 Linux 平台当前为 no-op。
-- 当前实例 runtime 已提供 service task 注册、注销和唤醒入口：service 列表只在目标 executor 线程内修改，executor 主循环按 `scheduler.service_task_budget` 轮询，外部唤醒不加锁。
-- 当前实例 runtime 已提供 runtime-owned async logger：`runtime.start()` 在 `runtime.config().logger.backends` 非空时自动构造 file/udp/tcp 后端并把消费者注册为 service task，`runtime.stop()` 先 drain/flush 日志再停止 executor；runtime file/tcp/udp 日志示例已迁移到结构化 `runtime_config.logger`；`start_async_logging_for_runtime(runtime&, config, thread)` 仍作为手动自定义入口保留。
-- 当前 runtime-owned async logger 已接入 `shutdown.log_flush_timeout`，用于控制停止时日志 drain/flush 的等待预算；模板化 `tcp_server` 已支持自身 `tcp_server_config.connection_close_timeout` 和 server 级默认 `tcp_connection_config`，但实例 `runtime_config.shutdown.connection_close_timeout` 仍待网络层迁移到实例 runtime API 后直连。
-- 当前实例 runtime 已提供 `af::runtime_task`、`af::make_task<T>(runtime, ...)`、`af::try_make_task<T>(runtime, ...)` 和 `runtime_task_handle<T>`：任务创建走 typed slab object pool，任务 id 默认使用每线程 block 分配，`diagnostics.enable_task_id=false` 时跳过 id 分配并保持 invalid；`schedule_to()` 投递到目标 executor，运行中请求下一跳会延后到当前 `run_task()` 返回后再入队，避免同一个任务对象并发重入。
-- 当前实例 runtime 已提供 `thread_ref` / `thread_group_ref`：`runtime::io_threads()`、`runtime::cpu_threads()` 返回按 kind 聚合的线程索引 view，`runtime::thread_group(index/name)` 返回配置中的命名线程组 view，`thread_group_ref::shard()` 用于稳定分片选择；`runtime::post()` 和 `runtime_task` 调度入口已支持 `thread_ref`，便于后续网络层直接使用 runtime thread group；`basic` 示例已迁移到实例 runtime 作为新 API 样板。
-- 当前实例 runtime 已提供 `runtime::parallel_shards()`、`runtime::parallel_shards_ordered()`、`runtime::start_ordered_task()` 和 `runtime::ordered_last_applied_batch_id()`：分片线程优先使用 `thread_group_ref` 显式绑定，parallel group 通过对象池分配并持有 pending owner task 的生命周期引用，ordered start 状态为 sequencer executor 的 TLS 状态，per-shard ordered guard 仍存放在 owner runtime 的 executor 本地状态中；`parallel_shards`、`ordered_batches`、`crud_apply` 示例已迁移到实例 runtime。
-- 当前实例 runtime 已接入每 executor 本地 timer backend：`schedule_after()` / `schedule_at()` / `pending_after()` / `pending_at()` 先把 task 以 `timer_arming` 状态投递到目标 inbox，目标线程再按 `timer.kind` 挂入 min-heap 或 hierarchical wheel；executor 空闲等待使用最近 timer deadline 作为 atomic/futex timeout，IO executor 则把最近 timer deadline 传给 `reactor.poll(timeout)`；`stop()` 会取消未到期 timer 并释放 task 生命周期引用。
+## 测试与性能验证
 
-后续迁移应先补齐测试和 benchmark，再逐步替换旧路径，避免一次性重写导致行为不可控。
+正确性测试：
+
+- task 跨线程调度、same-thread schedule、timer 到期/取消、shutdown race。
+- MPSC 多生产者压力、对象池跨线程释放、OOM 策略。
+- epoll/kqueue/select backend readiness、wake、close、interest 变化。
+- TCP 多 listener、运行中 add/remove listener、reuse_port、多 IO 线程 accept。
+- TCP handle generation、close_after_flush、输出高水位和跨线程 send。
+- UDP 多 shard recv/send、connected UDP、send_to、stop race。
+- logger ordered/relaxed 顺序、drop counter、flush timeout、backend shutdown。
+
+性能验证：
+
+- task post/hop ops/s。
+- timer schedule/cancel/expire throughput。
+- TCP echo 吞吐、延迟和 CPU 利用率。
+- UDP datagram 吞吐和丢包策略。
+- logger 单生产者、多生产者、ordered merge 和 backend batch 吞吐。
+- perf 观察 cache-misses、branch-misses、cycles、context-switches、syscalls。
+
+远端 Linux 验证应在 `/data` 下使用缓存构建，容器需支持 perf、epoll 和必要内核能力。
