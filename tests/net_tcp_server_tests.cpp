@@ -141,6 +141,28 @@ private:
     return UniqueFd{};
 }
 
+[[nodiscard]] UniqueFd connect_loopback_with_recv_buffer(std::uint16_t port, int recv_buffer_size) {
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = htons(port);
+
+    for (int attempt = 0; attempt < 50; ++attempt) {
+        UniqueFd fd(::socket(AF_INET, SOCK_STREAM, 0));
+        if (fd.get() < 0) {
+            return UniqueFd{};
+        }
+        static_cast<void>(::setsockopt(fd.get(), SOL_SOCKET, SO_RCVBUF, &recv_buffer_size,
+                                       sizeof(recv_buffer_size)));
+        if (::connect(fd.get(), reinterpret_cast<const sockaddr *>(&address), sizeof(address)) ==
+            0) {
+            return fd;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return UniqueFd{};
+}
+
 [[nodiscard]] UniqueFd connect_loopback_v6(std::uint16_t port) {
     sockaddr_in6 address{};
     address.sin6_family = AF_INET6;
@@ -565,6 +587,45 @@ struct CapturedHandleState {
     std::atomic<bool> published{false};
     std::atomic<int> close_count{0};
     af::net::TcpConnectionHandle<NetServerRuntime> handle;
+};
+
+struct StopTimeoutState {
+    std::atomic<bool> accepted{false};
+    std::atomic<int> send_result{-1};
+    std::atomic<int> close_count{0};
+    std::atomic<int> close_reason{-1};
+};
+
+struct FillSendQueueOnAcceptHandler {
+    std::shared_ptr<StopTimeoutState> state;
+
+    void on_accept(af::net::TcpConnectionRef<NetServerRuntime> conn) noexcept {
+        if (state != nullptr) {
+            state->accepted.store(true, std::memory_order_release);
+        }
+
+        std::array<char, 16U * 1024U> payload{};
+        payload.fill('x');
+        af::net::SendResult last_result = af::net::SendResult::Accepted;
+        for (int i = 0; i < 4096; ++i) {
+            last_result = conn.send(af::BufferView(payload.data(), payload.size()));
+            if (last_result == af::net::SendResult::Backpressure ||
+                last_result == af::net::SendResult::Closed) {
+                break;
+            }
+        }
+        if (state != nullptr) {
+            state->send_result.store(static_cast<int>(last_result), std::memory_order_release);
+        }
+    }
+
+    void on_close(af::net::TcpConnectionHandle<NetServerRuntime>,
+                  af::net::CloseReason reason) noexcept {
+        if (state != nullptr) {
+            state->close_reason.store(static_cast<int>(reason), std::memory_order_release);
+            state->close_count.fetch_add(1, std::memory_order_release);
+        }
+    }
 };
 
 struct CloseCallbackHandleState {
@@ -1266,6 +1327,51 @@ TEST(NetTcpServerTests, StopRejectsQueuedWritesFromOldHandles) {
     EXPECT_EQ(state->handle.send(af::Buffer::copy("after-stop", 10)), af::net::SendResult::Closed);
 
     NetServerRuntime::wait_for_idle();
+    NetServerRuntime::shutdown();
+}
+
+TEST(NetTcpServerTests, StopClosesBufferedConnectionsAfterConfiguredTimeout) {
+    const std::uint16_t port = reserve_loopback_port();
+    auto state = std::make_shared<StopTimeoutState>();
+
+    af::net::TcpServerConfig server_config;
+    server_config.connection_close_timeout = std::chrono::milliseconds(20);
+
+    NetServerRuntime::init();
+    ReactorTcpServer<NetServerRuntime> server(server_config);
+    server.bind_threads(NetServerRuntime::thread_group<NetServerIoTag>());
+
+    const auto listener = server.add_listener<FillSendQueueOnAcceptHandler>(
+        {
+            .name = "stop-timeout-fill",
+            .endpoint = af::net::TcpEndpoint::host("127.0.0.1", port),
+            .options =
+                {
+                    .reuse_port = true,
+                    .output_high_watermark = 64U * 1024U,
+                },
+        },
+        FillSendQueueOnAcceptHandler{state});
+    ASSERT_TRUE(listener.ok()) << listener.error;
+    ASSERT_TRUE(server.start());
+
+    UniqueFd fd = connect_loopback_with_recv_buffer(port, 4096);
+    ASSERT_GE(fd.get(), 0);
+    ASSERT_TRUE(
+        wait_until([&] { return state->send_result.load(std::memory_order_acquire) != -1; }));
+    ASSERT_EQ(state->send_result.load(std::memory_order_acquire),
+              static_cast<int>(af::net::SendResult::Backpressure));
+
+    const auto started = std::chrono::steady_clock::now();
+    EXPECT_TRUE(server.stop());
+    NetServerRuntime::wait_for_idle();
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+
+    EXPECT_LT(elapsed, std::chrono::seconds(1));
+    EXPECT_GE(state->close_count.load(std::memory_order_acquire), 1);
+    EXPECT_EQ(state->close_reason.load(std::memory_order_acquire),
+              static_cast<int>(af::net::CloseReason::Local));
+
     NetServerRuntime::shutdown();
 }
 

@@ -4,6 +4,7 @@
 #include <atomic>
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -97,7 +98,9 @@ struct TcpListenerOptions {
     bool unlink_unix_path_on_close{true};
 };
 
-struct TcpServerConfig {};
+struct TcpServerConfig {
+    std::chrono::milliseconds connection_close_timeout{std::chrono::seconds(5)};
+};
 
 struct ListenerId {
     std::uint32_t slot{0};
@@ -541,11 +544,7 @@ public:
         }
         read_paused_ = true;
         close_after_flush_ = true;
-        if (output_.empty()) {
-            close_now(CloseReason::Local);
-            return;
-        }
-        update_interest();
+        flush_output();
     }
 
     [[nodiscard]] bool shutdown_write() noexcept {
@@ -1136,19 +1135,37 @@ public:
         }
     }
 
-    void stop_on_owner() noexcept {
+    void close_listeners_on_owner() noexcept {
         for (auto &listener : listeners_) {
             if (listener != nullptr) {
                 listener->close();
             }
         }
         listeners_.clear();
+    }
+
+    [[nodiscard]] std::size_t close_connections_after_flush_on_owner() noexcept {
+        for (auto &connection : connections_) {
+            if (connection != nullptr && connection->alive()) {
+                connection->close_after_flush();
+            }
+        }
+        reap_retired_connections();
+        return alive_connection_count();
+    }
+
+    void force_close_connections_on_owner() noexcept {
         for (auto &connection : connections_) {
             if (connection != nullptr && connection->alive()) {
                 connection->close(CloseReason::Local);
             }
         }
         reap_retired_connections();
+    }
+
+    void stop_on_owner() noexcept {
+        close_listeners_on_owner();
+        force_close_connections_on_owner();
     }
 
     [[nodiscard]] bool create_connection(std::shared_ptr<ListenerContext> context, int fd,
@@ -1325,6 +1342,16 @@ private:
         if (user_callback_depth_ == 0U) {
             reap_retired_connections();
         }
+    }
+
+    [[nodiscard]] std::size_t alive_connection_count() const noexcept {
+        std::size_t count = 0;
+        for (const auto &connection : connections_) {
+            if (connection != nullptr && connection->alive()) {
+                ++count;
+            }
+        }
+        return count;
     }
 
     void begin_user_callback() noexcept {
@@ -1552,13 +1579,17 @@ private:
 template <typename Runtime> class TcpStopShardTask final : public Runtime::Task {
     using Base = typename Runtime::Task;
     using State = TcpServerState<Runtime>;
+    using Clock = std::chrono::steady_clock;
 
 public:
     explicit TcpStopShardTask(typename Base::FactoryToken token) : Base(token) {}
 
-    bool do_it(std::shared_ptr<State> state, std::uint16_t shard_index) {
+    bool do_it(std::shared_ptr<State> state, std::uint16_t shard_index,
+               std::chrono::milliseconds close_timeout) {
         state_ = std::move(state);
         shard_index_ = shard_index;
+        close_timeout_ = close_timeout.count() < 0 ? std::chrono::milliseconds(0) : close_timeout;
+        deadline_ = Clock::now() + close_timeout_;
         if (state_ == nullptr || shard_index_ >= state_->shards.size() ||
             state_->shards[shard_index_] == nullptr) {
             return false;
@@ -1570,13 +1601,34 @@ private:
     af::TaskResult run() override {
         if (state_ != nullptr && shard_index_ < state_->shards.size() &&
             state_->shards[shard_index_] != nullptr) {
-            state_->shards[shard_index_]->stop_on_owner();
+            auto *shard = state_->shards[shard_index_].get();
+            if (!listeners_closed_) {
+                shard->close_listeners_on_owner();
+                listeners_closed_ = true;
+            }
+
+            const std::size_t remaining =
+                close_timeout_.count() <= 0 ? 0U : shard->close_connections_after_flush_on_owner();
+            const auto now = Clock::now();
+            if (remaining == 0U || close_timeout_.count() <= 0 || now >= deadline_) {
+                shard->force_close_connections_on_owner();
+                return this->done();
+            }
+
+            auto delay = std::chrono::duration_cast<std::chrono::milliseconds>(deadline_ - now);
+            if (delay > std::chrono::milliseconds(1)) {
+                delay = std::chrono::milliseconds(1);
+            }
+            return this->pending_after(Runtime::thread_from_index(shard_index_), delay);
         }
         return this->done();
     }
 
     std::shared_ptr<State> state_;
     std::uint16_t shard_index_{0};
+    std::chrono::milliseconds close_timeout_{0};
+    Clock::time_point deadline_{};
+    bool listeners_closed_{false};
 };
 
 template <typename Runtime> class TcpAdoptConnectionTask final : public Runtime::Task {
@@ -2366,7 +2418,7 @@ public:
             bool scheduled = false;
             try {
                 scheduled = Runtime::template start_task<detail::TcpStopShardTask<Runtime>>(
-                    state, shard_index);
+                    state, shard_index, state->config.connection_close_timeout);
             } catch (...) {
                 scheduled = false;
             }
@@ -2397,6 +2449,9 @@ private:
     }
 
     [[nodiscard]] static TcpServerConfig normalize_config(TcpServerConfig config) noexcept {
+        if (config.connection_close_timeout.count() < 0) {
+            config.connection_close_timeout = std::chrono::milliseconds(0);
+        }
         return config;
     }
 
