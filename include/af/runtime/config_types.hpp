@@ -9,7 +9,7 @@
 #include <variant>
 #include <vector>
 
-#include "af/detail/log/async_logger.hpp"
+#include "af/detail/log/async_log_config.hpp"
 #include "af/thread_kind.hpp"
 
 namespace af {
