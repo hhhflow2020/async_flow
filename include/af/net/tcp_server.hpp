@@ -19,6 +19,7 @@
 #include "af/net/detail/tcp_state.hpp"
 #include "af/net/tcp_connection.hpp"
 #include "af/net/tcp_endpoint.hpp"
+#include "af/net/tcp_server_control.hpp"
 #include "af/net/tcp_types.hpp"
 #include "af/net/thread_list.hpp"
 #include "af/thread_kind.hpp"
@@ -136,6 +137,5 @@ namespace af::net {
 
 template <typename Runtime> using tcp_connection_handle = TcpConnectionHandle<Runtime>;
 template <typename Runtime> using tcp_connection_ref = TcpConnectionRef<Runtime>;
-template <typename Runtime> using tcp_server = TcpServer<Runtime>;
 
 } // namespace af::net

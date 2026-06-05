@@ -139,7 +139,7 @@ class StartServerTask final : public EchoRuntime::Task {
 public:
     explicit StartServerTask(EchoRuntime::Task::FactoryToken token) : EchoRuntime::Task(token) {}
 
-    bool do_it(af::net::tcp_server<EchoRuntime> *server, std::uint16_t port, bool ipv6,
+    bool do_it(af::net::TcpServer<EchoRuntime> *server, std::uint16_t port, bool ipv6,
                std::shared_ptr<ServerLifecycleState> lifecycle) {
         server_ = server;
         port_ = port;
@@ -195,7 +195,7 @@ private:
         return done();
     }
 
-    af::net::tcp_server<EchoRuntime> *server_{nullptr};
+    af::net::TcpServer<EchoRuntime> *server_{nullptr};
     std::shared_ptr<ServerLifecycleState> lifecycle_;
     std::uint16_t port_{0};
     bool ipv6_{false};
@@ -205,7 +205,7 @@ class StopServerTask final : public EchoRuntime::Task {
 public:
     explicit StopServerTask(EchoRuntime::Task::FactoryToken token) : EchoRuntime::Task(token) {}
 
-    bool do_it(af::net::tcp_server<EchoRuntime> *server) {
+    bool do_it(af::net::TcpServer<EchoRuntime> *server) {
         server_ = server;
         return schedule_to_ordered(echo_control_thread());
     }
@@ -220,7 +220,7 @@ private:
         return done();
     }
 
-    af::net::tcp_server<EchoRuntime> *server_{nullptr};
+    af::net::TcpServer<EchoRuntime> *server_{nullptr};
 };
 
 [[nodiscard]] bool wait_for_shutdown_signal(af::SignalSet &signals,
@@ -268,7 +268,7 @@ int main(int argc, char **argv) {
     server_config.connection.keepalive = true;
     server_config.connection_close_timeout = std::chrono::seconds(5);
 
-    af::net::tcp_server<EchoRuntime> server(server_config);
+    af::net::TcpServer<EchoRuntime> server(server_config);
     auto lifecycle = std::make_shared<ServerLifecycleState>();
     if (!EchoRuntime::start_task<StartServerTask>(&server, port, ipv6, lifecycle)) {
         std::cerr << "failed to schedule tcp echo server start\n";
