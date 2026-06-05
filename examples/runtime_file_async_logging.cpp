@@ -6,58 +6,38 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
-#include <memory>
 #include <string>
 #include <thread>
 
-#include "af/async_flow.hpp"
+#include "af/log.hpp"
+#include "af/runtime.hpp"
 
 namespace {
 
-struct RuntimeFileLogicThreadTag;
-struct RuntimeFileIoThreadTag;
-
 inline constexpr std::uint32_t runtime_file_records_per_task = 128;
 
-struct RuntimeFileTraits {
-    static constexpr auto threads = af::thread_layout(
-        af::thread_group<RuntimeFileLogicThreadTag, 2, af::thread_kind::cpu>("file-log-cpu"),
-        af::thread_group<RuntimeFileIoThreadTag, 1, af::thread_kind::io>("file-log-io"));
-    static constexpr af::shutdown_policy shutdown_policy = af::shutdown_policy::wait_for_tasks;
-};
-
-using runtime_file_async = af::AsyncRuntime<RuntimeFileTraits>;
-using RuntimeFileTaskBase = runtime_file_async::Task;
-
-struct RuntimeFileThreads {
-    static constexpr auto logic = runtime_file_async::thread_group<RuntimeFileLogicThreadTag>();
-    static constexpr auto IO_0 =
-        runtime_file_async::thread_group<RuntimeFileIoThreadTag>().template at<0>();
-};
-
-class RuntimeFileLogTask final : public RuntimeFileTaskBase {
+class RuntimeFileLogTask final : public af::runtime_task {
 public:
-    explicit RuntimeFileLogTask(RuntimeFileTaskBase::FactoryToken token)
-        : RuntimeFileTaskBase(token) {}
+    RuntimeFileLogTask(af::runtime_task::factory_token token, af::runtime &owner,
+                       std::uint32_t task_id, std::atomic<int> &completed)
+        : af::runtime_task(token, owner), task_id_(task_id), completed_(completed) {}
 
-    bool do_it(std::uint32_t task_id, std::atomic<int> *completed) {
-        task_id_ = task_id;
-        completed_ = completed;
-        return schedule_to(RuntimeFileThreads::logic.shard(task_id));
+    [[nodiscard]] bool do_it(std::uint16_t thread) noexcept {
+        return schedule_to(thread);
     }
 
 private:
-    af::task_result run() override {
+    af::task_result run_task() noexcept override {
         for (std::uint32_t i = 0; i < runtime_file_records_per_task; ++i) {
             LOG(INFO) << "runtime file log task=" << task_id_ << " seq=" << i
-                      << " thread=" << runtime_file_async::current_thread_index();
+                      << " thread=" << af::runtime::current_thread_index();
         }
-        completed_->fetch_add(1, std::memory_order_release);
+        completed_.fetch_add(1, std::memory_order_release);
         return done();
     }
 
     std::uint32_t task_id_{0};
-    std::atomic<int> *completed_{nullptr};
+    std::atomic<int> &completed_;
 };
 
 bool wait_for_completion(std::atomic<int> &completed, int expected) {
@@ -85,29 +65,25 @@ int main(int argc, char **argv) {
         argc > 1 ? argv[1] : "asyncflow-runtime-file-logging-example.log";
     std::filesystem::remove(log_path);
 
-    runtime_file_async::init();
+    af::runtime_config config;
+    config.threads = {
+        af::cpu_threads("file-log-cpu", 2),
+    };
+    config.logger = af::log_config::ordered();
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+    config.logger.queue_capacity = 1U << 15U;
+    config.logger.max_batch_records = 512;
+    config.logger.max_batch_delay = 1000us;
+    config.logger.backends = {
+        af::file_log_backend_config{log_path.string(), false, true, 64},
+    };
+    config.shutdown.log_flush_timeout = 5s;
 
-    auto backend = std::make_unique<af::RuntimeFileLogBackend<runtime_file_async>>(
-        af::RuntimeFileLogBackendConfig<runtime_file_async>{
-            .thread = RuntimeFileThreads::IO_0,
-            .path = log_path,
-            .append = false,
-            .fsync_on_flush = true,
-            .batch_queue_capacity = 128,
-            .max_batch_records = 256,
-            .max_batches_per_run = 64,
-        });
-    auto *runtime_file_backend = backend.get();
-
-    af::AsyncLogConfig config = af::AsyncLogConfig::ordered(runtime_file_async::thread_count);
-    config.queue_capacity = 1U << 15U;
-    config.max_batch_size = 512;
-    config.overflow_policy = af::LogOverflowPolicy::DropNewest;
-    config.flush_poll_interval = 1ms;
-    config.backends.push_back(std::move(backend));
-
-    auto logging = af::start_async_logging_for_runtime<runtime_file_async>(
-        std::move(config), RuntimeFileThreads::IO_0);
+    af::runtime runtime(config);
+    if (!runtime.start()) {
+        std::cerr << "failed to start runtime\n";
+        return 1;
+    }
 
     constexpr int task_count = 4;
     constexpr int expected_records =
@@ -115,27 +91,23 @@ int main(int argc, char **argv) {
     std::atomic<int> completed{0};
     bool started = true;
     for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(task_count); ++i) {
-        started = runtime_file_async::start_task<RuntimeFileLogTask>(i, &completed) && started;
+        const auto thread =
+            runtime.select_thread(af::thread_selector::cpu(static_cast<std::uint16_t>(i % 2U)));
+        auto task = af::make_task<RuntimeFileLogTask>(runtime, i, completed);
+        started = task->do_it(thread) && started;
     }
 
     const bool completed_all = wait_for_completion(completed, task_count);
     LOG(INFO) << "external runtime file log after runtime tasks";
 
-    const bool flushed = logging->flush(5s);
-    const af::AsyncLogStats stats = logging->stats();
-    const af::RuntimeFileLogBackendStats backend_stats = runtime_file_backend->stats();
-    logging->stop();
-    runtime_file_async::shutdown();
+    const bool flushed = runtime.flush_logger(5s);
+    runtime.stop();
 
     const std::string contents = read_file(log_path);
     const int file_records = static_cast<int>(std::count(contents.begin(), contents.end(), '\n'));
 
     std::cout << "started=" << started << " completed=" << completed.load(std::memory_order_acquire)
-              << " accepted=" << stats.accepted << " dropped=" << stats.dropped
-              << " flushed=" << flushed << " written=" << backend_stats.written_records
-              << " file_records=" << file_records << " file=" << log_path << '\n';
-    return started && completed_all && flushed && stats.dropped == 0U &&
-                   backend_stats.dropped_records == 0U && file_records == expected_records
-               ? 0
-               : 1;
+              << " flushed=" << flushed << " file_records=" << file_records << " file=" << log_path
+              << '\n';
+    return started && completed_all && flushed && file_records == expected_records ? 0 : 1;
 }
