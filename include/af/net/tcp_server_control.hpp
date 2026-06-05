@@ -134,7 +134,7 @@ public:
     }
 
     [[nodiscard]] bool start() noexcept {
-        if (running_) {
+        if (running_ || stopping_connections_) {
             return false;
         }
         if (!on_owner_io_thread()) {
@@ -144,6 +144,7 @@ public:
         running_ = true;
         handle_state_->owner.store(this, std::memory_order_release);
         handle_state_->accepting_operations.store(true, std::memory_order_release);
+        stopping_connections_ = false;
         bool ok = true;
         for (auto &entry_ptr : entries_) {
             if (entry_ptr == nullptr) {
@@ -171,6 +172,7 @@ public:
             return false;
         }
 
+        const std::uint64_t stop_generation = ++stop_generation_;
         handle_state_->accepting_operations.store(false, std::memory_order_release);
         bool ok = true;
         for (auto &entry_ptr : entries_) {
@@ -187,8 +189,10 @@ public:
             entry.listener.reset();
             entry.state = listener_state::configured;
         }
-        close_all_connections();
         running_ = false;
+        if (!begin_connection_stop(stop_generation)) {
+            ok = false;
+        }
         return ok;
     }
 
@@ -674,6 +678,72 @@ private:
         return true;
     }
 
+    [[nodiscard]] bool begin_connection_stop(std::uint64_t generation) noexcept {
+        if (connection_count_ == 0U) {
+            stopping_connections_ = false;
+            return true;
+        }
+
+        stopping_connections_ = true;
+        close_connections_after_flush();
+        if (connection_count_ == 0U) {
+            stopping_connections_ = false;
+            return true;
+        }
+
+        if (config_.connection_close_timeout.count() <= 0) {
+            force_close_stopping_connections(generation);
+            return true;
+        }
+        if (!schedule_stop_force_close(generation)) {
+            force_close_stopping_connections(generation);
+            return false;
+        }
+        return true;
+    }
+
+    void close_connections_after_flush() noexcept {
+        for (auto &entry : connections_) {
+            if (entry == nullptr || !entry->occupied || entry->retired ||
+                entry->connection == nullptr) {
+                continue;
+            }
+            const std::uint32_t slot = entry->slot;
+            const std::uint32_t generation = entry->generation;
+            const bool closed = entry->connection->close_after_flush();
+            if (closed) {
+                retire_connection_slot(slot, generation);
+            }
+        }
+        reap_retired_connections_if_safe();
+    }
+
+    [[nodiscard]] bool schedule_stop_force_close(std::uint64_t generation) noexcept {
+        const af::thread_ref target_thread(af::runtime::current_thread_index());
+        const std::weak_ptr<detail::tcp_connection_handle_state> weak_state = handle_state_;
+        tcp_server *const self = this;
+        return owner_->schedule_after(
+            target_thread, config_.connection_close_timeout, [weak_state, self, generation] {
+                const std::shared_ptr<detail::tcp_connection_handle_state> state =
+                    weak_state.lock();
+                if (state == nullptr) {
+                    return;
+                }
+                if (state->owner.load(std::memory_order_acquire) != self) {
+                    return;
+                }
+                self->force_close_stopping_connections(generation);
+            });
+    }
+
+    void force_close_stopping_connections(std::uint64_t generation) noexcept {
+        if (generation != stop_generation_ || !stopping_connections_) {
+            return;
+        }
+        close_all_connections();
+        stopping_connections_ = false;
+    }
+
     [[nodiscard]] connection_entry *acquire_connection_slot() {
         const std::uint32_t generation = next_connection_generation();
         if (!free_connection_slots_.empty()) {
@@ -738,6 +808,9 @@ private:
             release_connection_slot(retired.slot);
         }
         retired_connection_slots_.clear();
+        if (stopping_connections_ && connection_count_ == 0U) {
+            stopping_connections_ = false;
+        }
     }
 
     void reap_retired_connections_if_safe() noexcept {
@@ -794,7 +867,9 @@ private:
     std::uint32_t next_connection_generation_{1};
     std::size_t listener_count_{0};
     std::size_t connection_count_{0};
+    std::uint64_t stop_generation_{0};
     std::uint32_t user_callback_depth_{0};
+    bool stopping_connections_{false};
     bool running_{false};
 };
 

@@ -121,7 +121,8 @@ public:
         }
         if (output_.empty()) {
             for (;;) {
-                const ssize_t n = ::send(fd_, view.data(), view.size(), send_no_signal_flags());
+                const ssize_t n =
+                    socket_send(fd_, view.data(), view.size(), send_no_signal_flags());
                 if (n == static_cast<ssize_t>(view.size())) {
                     return SendResult::Accepted;
                 }
@@ -350,13 +351,13 @@ private:
             return 0;
         }
         if (send_count == 1U) {
-            return ::send(fd_, iov[0].iov_base, iov[0].iov_len, send_no_signal_flags());
+            return socket_send(fd_, iov[0].iov_base, iov[0].iov_len, send_no_signal_flags());
         }
 
         msghdr message{};
         message.msg_iov = iov.data();
         message.msg_iovlen = static_cast<decltype(message.msg_iovlen)>(send_count);
-        return ::sendmsg(fd_, &message, send_no_signal_flags());
+        return socket_sendmsg(fd_, &message, send_no_signal_flags());
     }
 
     void consume_output(std::size_t written) noexcept {

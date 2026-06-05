@@ -8,6 +8,9 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
+#if defined(__linux__)
+#include <sys/syscall.h>
+#endif
 #include <unistd.h>
 
 namespace af::net::detail {
@@ -27,6 +30,23 @@ namespace af::net::detail {
     return MSG_NOSIGNAL;
 #else
     return 0;
+#endif
+}
+
+[[nodiscard]] inline ssize_t socket_send(int fd, const void *data, std::size_t size,
+                                         int flags) noexcept {
+#if defined(__linux__)
+    return static_cast<ssize_t>(::syscall(SYS_sendto, fd, data, size, flags, nullptr, 0));
+#else
+    return ::send(fd, data, size, flags);
+#endif
+}
+
+[[nodiscard]] inline ssize_t socket_sendmsg(int fd, const msghdr *message, int flags) noexcept {
+#if defined(__linux__)
+    return static_cast<ssize_t>(::syscall(SYS_sendmsg, fd, message, flags));
+#else
+    return ::sendmsg(fd, message, flags);
 #endif
 }
 

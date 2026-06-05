@@ -821,6 +821,35 @@ struct StopTimeoutState {
     std::array<char, 16U * 1024U> payload{};
 };
 
+void runtime_tcp_fill_send_queue_on_accept(void *owner, af::net::tcp_connection_ref conn) noexcept {
+    auto *state = static_cast<StopTimeoutState *>(owner);
+    if (state == nullptr || !conn.valid()) {
+        return;
+    }
+
+    state->accepted.store(true, std::memory_order_release);
+    af::net::send_result last_result = af::net::send_result::accepted;
+    for (int i = 0; i < 4096; ++i) {
+        last_result = conn.send(af::BufferView(state->payload.data(), state->payload.size()));
+        if (last_result == af::net::send_result::backpressure ||
+            last_result == af::net::send_result::closed) {
+            break;
+        }
+    }
+    state->send_result.store(static_cast<int>(last_result), std::memory_order_release);
+}
+
+void runtime_tcp_stop_timeout_close(void *owner, af::net::tcp_connection_ref conn,
+                                    af::net::close_reason reason) noexcept {
+    static_cast<void>(conn);
+    auto *state = static_cast<StopTimeoutState *>(owner);
+    if (state == nullptr) {
+        return;
+    }
+    state->close_reason.store(static_cast<int>(reason), std::memory_order_release);
+    state->close_count.fetch_add(1, std::memory_order_release);
+}
+
 struct FillSendQueueOnAcceptHandler {
     std::shared_ptr<StopTimeoutState> state;
 
@@ -1461,6 +1490,80 @@ TEST(NetTcpServerTests, RuntimeTcpConnectionHandleReportsClosedAfterServerStop) 
     EXPECT_TRUE(state.stop_ok.load(std::memory_order_acquire));
     EXPECT_TRUE(wait_until([&] { return state.closes.load(std::memory_order_acquire) >= 1; }));
     EXPECT_EQ(state.handle.send(af::Buffer::copy("after-stop", 10)), af::net::send_result::closed);
+
+    runtime.stop();
+}
+
+TEST(NetTcpServerTests, RuntimeTcpServerStopClosesBufferedConnectionsAfterConfiguredTimeout) {
+    af::runtime_config config;
+    config.threads = {af::io_threads("net-rt-io", 1)};
+    config.logger.consumer_thread = af::thread_selector::io(0);
+
+    af::runtime runtime(config);
+    RuntimeTcpListenerState lifecycle;
+    auto state = std::make_shared<StopTimeoutState>();
+
+    af::net::tcp_server_config server_config;
+    server_config.connection.write_budget_bytes = 16U * 1024U;
+    server_config.connection.output_high_watermark = 64U * 1024U;
+    server_config.connection_close_timeout = std::chrono::milliseconds(20);
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_until([&] { return runtime.active_thread_count() == 1; }));
+
+    const af::thread_ref io_thread = runtime.select_thread_ref(af::thread_selector::io(0));
+    af::net::tcp_server server(runtime, server_config);
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        af::net::tcp_connection_callbacks callbacks;
+        callbacks.owner = state.get();
+        callbacks.on_accept = &runtime_tcp_fill_send_queue_on_accept;
+        callbacks.on_close = &runtime_tcp_stop_timeout_close;
+
+        af::net::tcp_listener_config listener_config;
+        listener_config.name = "runtime-server-stop-timeout";
+        listener_config.endpoint = af::net::tcp_endpoint::loopback_v4(0);
+        listener_config.threads = {io_thread};
+        listener_config.options.reuse_port = false;
+
+        const af::net::listener_result listener =
+            server.add_listener(std::move(listener_config), callbacks);
+        bool ok = listener.ok() && server.start();
+        const af::net::tcp_endpoint *endpoint = server.local_endpoint(listener.listener);
+        ok = ok && endpoint != nullptr;
+        if (ok) {
+            lifecycle.port.store(endpoint->port, std::memory_order_release);
+        }
+        lifecycle.start_ok.store(ok, std::memory_order_release);
+        lifecycle.started.store(true, std::memory_order_release);
+    }));
+
+    ASSERT_TRUE(wait_until([&] { return lifecycle.started.load(std::memory_order_acquire); }));
+    ASSERT_TRUE(lifecycle.start_ok.load(std::memory_order_acquire));
+    ASSERT_GT(lifecycle.port.load(std::memory_order_acquire), 0U);
+
+    UniqueFd client =
+        connect_loopback_with_recv_buffer(lifecycle.port.load(std::memory_order_acquire), 4096);
+    ASSERT_GE(client.get(), 0);
+    ASSERT_TRUE(
+        wait_until([&] { return state->send_result.load(std::memory_order_acquire) != -1; }));
+    ASSERT_EQ(state->send_result.load(std::memory_order_acquire),
+              static_cast<int>(af::net::send_result::backpressure));
+
+    const auto started = std::chrono::steady_clock::now();
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        lifecycle.stop_ok.store(server.stop(), std::memory_order_release);
+        lifecycle.stopped.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return lifecycle.stopped.load(std::memory_order_acquire); }));
+    EXPECT_TRUE(lifecycle.stop_ok.load(std::memory_order_acquire));
+    ASSERT_TRUE(
+        wait_until([&] { return state->close_count.load(std::memory_order_acquire) >= 1; }));
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+
+    EXPECT_LT(elapsed, std::chrono::seconds(1));
+    EXPECT_GE(elapsed, std::chrono::milliseconds(5));
+    EXPECT_EQ(state->close_reason.load(std::memory_order_acquire),
+              static_cast<int>(af::net::close_reason::local));
 
     runtime.stop();
 }
