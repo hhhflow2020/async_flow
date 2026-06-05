@@ -53,8 +53,9 @@ TEST(NetSocketAddressTests, LowerCaseNetAliasesMatchPublicTypes) {
     static_assert(std::is_same_v<af::net::udp_peer, af::net::UdpPeer>);
 
     static_assert(std::is_class_v<af::net::tcp_server>);
-    static_assert(
-        std::is_same_v<af::net::udp_socket<NetAliasRuntime>, af::net::UdpSocket<NetAliasRuntime>>);
+    static_assert(std::is_class_v<af::net::udp_socket>);
+    static_assert(std::is_class_v<af::net::udp_socket_handle>);
+    static_assert(std::is_class_v<af::net::udp_socket_ref>);
     static_assert(std::is_same_v<af::net::unix_stream_server<NetAliasRuntime>,
                                  af::net::UnixStreamServer<NetAliasRuntime>>);
     static_assert(std::is_same_v<af::net::unix_stream_client<NetAliasRuntime>,

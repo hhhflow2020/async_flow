@@ -411,6 +411,4 @@ private:
     std::shared_ptr<State> state_;
 };
 
-template <typename Runtime> using udp_socket = UdpSocket<Runtime>;
-
 } // namespace af::net

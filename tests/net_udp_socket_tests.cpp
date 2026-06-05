@@ -14,6 +14,7 @@
 #include "af/async_runtime.hpp"
 #include "af/net.hpp"
 #include "af/platform.hpp"
+#include "af/runtime.hpp"
 
 #include "gtest/gtest.h"
 
@@ -265,7 +266,372 @@ private:
     std::uint16_t peer_port_{0};
 };
 
+struct RuntimeUdpState {
+    std::atomic<bool> started{false};
+    std::atomic<bool> start_ok{false};
+    std::atomic<bool> stopped{false};
+    std::atomic<bool> stop_ok{false};
+    std::atomic<int> datagrams{0};
+    std::atomic<int> errors{0};
+    std::atomic<int> last_error{0};
+    std::atomic<int> owner_send_result{-1};
+    std::atomic<std::uint16_t> port{0};
+    std::array<char, 64> data{};
+    std::atomic<std::size_t> size{0};
+    af::net::udp_socket_handle handle;
+};
+
+void runtime_udp_echo_datagram(void *owner, af::net::udp_socket_ref socket, af::BufferView bytes,
+                               const af::net::udp_peer &peer) noexcept {
+    auto *state = static_cast<RuntimeUdpState *>(owner);
+    if (state != nullptr) {
+        state->datagrams.fetch_add(1, std::memory_order_release);
+    }
+    static_cast<void>(socket.send_to(bytes, peer));
+}
+
+void runtime_udp_capture_datagram(void *owner, af::net::udp_socket_ref socket, af::BufferView bytes,
+                                  const af::net::udp_peer &peer) noexcept {
+    static_cast<void>(peer);
+    auto *state = static_cast<RuntimeUdpState *>(owner);
+    if (state == nullptr) {
+        return;
+    }
+    state->handle = socket.handle();
+    const std::size_t size = std::min(bytes.size(), state->data.size());
+    std::memcpy(state->data.data(), bytes.data(), size);
+    state->size.store(size, std::memory_order_release);
+    state->datagrams.fetch_add(1, std::memory_order_release);
+}
+
+void runtime_udp_owner_handle_echo(void *owner, af::net::udp_socket_ref socket,
+                                   af::BufferView bytes, const af::net::udp_peer &peer) noexcept {
+    auto *state = static_cast<RuntimeUdpState *>(owner);
+    const af::net::udp_send_result result = socket.handle().send_to(bytes, peer);
+    if (state != nullptr) {
+        state->owner_send_result.store(static_cast<int>(result), std::memory_order_release);
+        state->datagrams.fetch_add(1, std::memory_order_release);
+    }
+}
+
+void runtime_udp_error(void *owner, af::net::udp_socket_handle socket, int error) noexcept {
+    static_cast<void>(socket);
+    auto *state = static_cast<RuntimeUdpState *>(owner);
+    if (state != nullptr) {
+        state->last_error.store(error, std::memory_order_release);
+        state->errors.fetch_add(1, std::memory_order_release);
+    }
+}
+
 } // namespace
+
+TEST(NetUdpSocketTests, RuntimeUdpSocketEchoesDatagramToRawClient) {
+    af::runtime_config config;
+    config.threads = {af::io_threads("net-rt-io", 1)};
+    config.logger.consumer_thread = af::thread_selector::io(0);
+
+    af::runtime runtime(config);
+    RuntimeUdpState state;
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_until([&] { return runtime.active_thread_count() == 1; }));
+
+    const af::thread_ref io_thread = runtime.select_thread_ref(af::thread_selector::io(0));
+    af::net::udp_socket socket(runtime);
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        af::net::udp_socket_callbacks callbacks;
+        callbacks.owner = &state;
+        callbacks.on_datagram = &runtime_udp_echo_datagram;
+        callbacks.on_error = &runtime_udp_error;
+
+        af::net::udp_socket_config socket_config;
+        socket_config.name = "runtime-udp-echo";
+        socket_config.local_endpoint = af::net::udp_endpoint::loopback_v4(0);
+        socket_config.threads = {io_thread};
+        socket_config.options.reuse_port = false;
+
+        bool ok = socket.start(std::move(socket_config), callbacks);
+        const af::net::udp_endpoint *endpoint = socket.local_endpoint(io_thread);
+        ok = ok && endpoint != nullptr;
+        if (ok) {
+            state.port.store(endpoint->port, std::memory_order_release);
+        }
+        state.start_ok.store(ok, std::memory_order_release);
+        state.started.store(true, std::memory_order_release);
+    }));
+
+    ASSERT_TRUE(wait_until([&] { return state.started.load(std::memory_order_acquire); }));
+    ASSERT_TRUE(state.start_ok.load(std::memory_order_acquire));
+    ASSERT_GT(state.port.load(std::memory_order_acquire), 0U);
+
+    UniqueFd client(::socket(AF_INET, SOCK_DGRAM, 0));
+    ASSERT_GE(client.get(), 0);
+    set_recv_timeout(client.get());
+
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = htons(state.port.load(std::memory_order_acquire));
+    ASSERT_EQ(::sendto(client.get(), "hello", 5, 0, reinterpret_cast<const sockaddr *>(&address),
+                       sizeof(address)),
+              5);
+
+    char buffer[32]{};
+    const ssize_t n = ::recv(client.get(), buffer, sizeof(buffer), 0);
+    ASSERT_EQ(n, 5);
+    EXPECT_EQ(std::string(buffer, static_cast<std::size_t>(n)), "hello");
+    EXPECT_EQ(state.errors.load(std::memory_order_acquire), 0);
+    EXPECT_GE(state.datagrams.load(std::memory_order_acquire), 1);
+
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        state.stop_ok.store(socket.stop(), std::memory_order_release);
+        state.stopped.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return state.stopped.load(std::memory_order_acquire); }));
+    EXPECT_TRUE(state.stop_ok.load(std::memory_order_acquire));
+
+    runtime.stop();
+}
+
+TEST(NetUdpSocketTests, RuntimeUdpSocketOwnerHandleSendsWithoutQueueing) {
+    af::runtime_config config;
+    config.threads = {af::io_threads("net-rt-io", 1)};
+    config.logger.consumer_thread = af::thread_selector::io(0);
+
+    af::runtime runtime(config);
+    RuntimeUdpState state;
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_until([&] { return runtime.active_thread_count() == 1; }));
+
+    const af::thread_ref io_thread = runtime.select_thread_ref(af::thread_selector::io(0));
+    af::net::udp_socket socket(runtime);
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        af::net::udp_socket_callbacks callbacks;
+        callbacks.owner = &state;
+        callbacks.on_datagram = &runtime_udp_owner_handle_echo;
+        callbacks.on_error = &runtime_udp_error;
+
+        af::net::udp_socket_config socket_config;
+        socket_config.name = "runtime-udp-owner-handle";
+        socket_config.local_endpoint = af::net::udp_endpoint::loopback_v4(0);
+        socket_config.threads = {io_thread};
+        socket_config.options.reuse_port = false;
+
+        bool ok = socket.start(std::move(socket_config), callbacks);
+        const af::net::udp_endpoint *endpoint = socket.local_endpoint(io_thread);
+        ok = ok && endpoint != nullptr;
+        if (ok) {
+            state.port.store(endpoint->port, std::memory_order_release);
+        }
+        state.start_ok.store(ok, std::memory_order_release);
+        state.started.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return state.started.load(std::memory_order_acquire); }));
+    ASSERT_TRUE(state.start_ok.load(std::memory_order_acquire));
+
+    UniqueFd client(::socket(AF_INET, SOCK_DGRAM, 0));
+    ASSERT_GE(client.get(), 0);
+    set_recv_timeout(client.get());
+
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = htons(state.port.load(std::memory_order_acquire));
+    ASSERT_EQ(::sendto(client.get(), "owner", 5, 0, reinterpret_cast<const sockaddr *>(&address),
+                       sizeof(address)),
+              5);
+
+    char buffer[32]{};
+    const ssize_t n = ::recv(client.get(), buffer, sizeof(buffer), 0);
+    ASSERT_EQ(n, 5);
+    EXPECT_EQ(std::string(buffer, static_cast<std::size_t>(n)), "owner");
+    EXPECT_EQ(state.owner_send_result.load(std::memory_order_acquire),
+              static_cast<int>(af::net::udp_send_result::accepted));
+
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        state.stop_ok.store(socket.stop(), std::memory_order_release);
+        state.stopped.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return state.stopped.load(std::memory_order_acquire); }));
+    EXPECT_TRUE(state.stop_ok.load(std::memory_order_acquire));
+
+    runtime.stop();
+}
+
+TEST(NetUdpSocketTests, RuntimeUdpConnectedClientSendsThroughHandle) {
+    af::runtime_config config;
+    config.threads = {af::io_threads("net-rt-io", 1)};
+    config.logger.consumer_thread = af::thread_selector::io(0);
+
+    af::runtime runtime(config);
+    RuntimeUdpState server_state;
+    RuntimeUdpState client_state;
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_until([&] { return runtime.active_thread_count() == 1; }));
+
+    const af::thread_ref io_thread = runtime.select_thread_ref(af::thread_selector::io(0));
+    af::net::udp_socket server(runtime);
+    af::net::udp_socket client(runtime);
+
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        af::net::udp_socket_callbacks callbacks;
+        callbacks.owner = &server_state;
+        callbacks.on_datagram = &runtime_udp_echo_datagram;
+        callbacks.on_error = &runtime_udp_error;
+
+        af::net::udp_socket_config socket_config;
+        socket_config.name = "runtime-udp-connected-server";
+        socket_config.local_endpoint = af::net::udp_endpoint::loopback_v4(0);
+        socket_config.threads = {io_thread};
+        socket_config.options.reuse_port = false;
+
+        bool ok = server.start(std::move(socket_config), callbacks);
+        const af::net::udp_endpoint *endpoint = server.local_endpoint(io_thread);
+        ok = ok && endpoint != nullptr;
+        if (ok) {
+            server_state.port.store(endpoint->port, std::memory_order_release);
+        }
+        server_state.start_ok.store(ok, std::memory_order_release);
+        server_state.started.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return server_state.started.load(std::memory_order_acquire); }));
+    ASSERT_TRUE(server_state.start_ok.load(std::memory_order_acquire));
+
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        af::net::udp_socket_callbacks callbacks;
+        callbacks.owner = &client_state;
+        callbacks.on_datagram = &runtime_udp_capture_datagram;
+        callbacks.on_error = &runtime_udp_error;
+
+        af::net::udp_socket_config socket_config;
+        socket_config.name = "runtime-udp-connected-client";
+        socket_config.local_endpoint = af::net::udp_endpoint::loopback_v4(0);
+        socket_config.remote_endpoint =
+            af::net::udp_endpoint::loopback_v4(server_state.port.load(std::memory_order_acquire));
+        socket_config.threads = {io_thread};
+        socket_config.options.reuse_port = false;
+        socket_config.connect_remote = true;
+
+        const bool ok = client.start(std::move(socket_config), callbacks);
+        if (ok) {
+            client_state.handle = client.handle();
+        }
+        client_state.start_ok.store(ok, std::memory_order_release);
+        client_state.started.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return client_state.started.load(std::memory_order_acquire); }));
+    ASSERT_TRUE(client_state.start_ok.load(std::memory_order_acquire));
+    ASSERT_TRUE(client_state.handle.valid());
+
+    EXPECT_EQ(client_state.handle.send(af::Buffer::copy("ping", 4)),
+              af::net::udp_send_result::queued);
+    ASSERT_TRUE(
+        wait_until([&] { return client_state.size.load(std::memory_order_acquire) == 4U; }));
+    EXPECT_EQ(
+        std::string(client_state.data.data(), client_state.size.load(std::memory_order_acquire)),
+        "ping");
+    EXPECT_EQ(client_state.errors.load(std::memory_order_acquire), 0);
+
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        client_state.stop_ok.store(client.stop(), std::memory_order_release);
+        client_state.stopped.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return client_state.stopped.load(std::memory_order_acquire); }));
+    EXPECT_TRUE(client_state.stop_ok.load(std::memory_order_acquire));
+    EXPECT_EQ(client_state.handle.send(af::Buffer::copy("after", 5)),
+              af::net::udp_send_result::closed);
+
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        server_state.stop_ok.store(server.stop(), std::memory_order_release);
+        server_state.stopped.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return server_state.stopped.load(std::memory_order_acquire); }));
+    EXPECT_TRUE(server_state.stop_ok.load(std::memory_order_acquire));
+
+    runtime.stop();
+}
+
+TEST(NetUdpSocketTests, RuntimeUdpConnectedClientUsesMultipleIoShards) {
+    const std::uint16_t port = reserve_udp_loopback_port();
+
+    UniqueFd sink(::socket(AF_INET, SOCK_DGRAM, 0));
+    ASSERT_GE(sink.get(), 0);
+    set_recv_timeout(sink.get());
+    sockaddr_in sink_address{};
+    sink_address.sin_family = AF_INET;
+    sink_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    sink_address.sin_port = htons(port);
+    ASSERT_EQ(
+        ::bind(sink.get(), reinterpret_cast<const sockaddr *>(&sink_address), sizeof(sink_address)),
+        0);
+
+    af::runtime_config config;
+    config.threads = {af::io_threads("net-rt-io", 2)};
+    config.logger.consumer_thread = af::thread_selector::io(0);
+
+    af::runtime runtime(config);
+    RuntimeUdpState state;
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_until([&] { return runtime.active_thread_count() == 2; }));
+
+    const af::thread_ref io_thread0 = runtime.select_thread_ref(af::thread_selector::io(0));
+    const af::thread_ref io_thread1 = runtime.select_thread_ref(af::thread_selector::io(1));
+    af::net::udp_socket socket(runtime);
+
+    ASSERT_TRUE(runtime.post(io_thread0, [&] {
+        af::net::udp_socket_callbacks callbacks;
+        callbacks.owner = &state;
+        callbacks.on_datagram = &runtime_udp_capture_datagram;
+        callbacks.on_error = &runtime_udp_error;
+
+        af::net::udp_socket_config socket_config;
+        socket_config.name = "runtime-udp-two-shard-client";
+        socket_config.local_endpoint = af::net::udp_endpoint::loopback_v4(0);
+        socket_config.remote_endpoint = af::net::udp_endpoint::loopback_v4(port);
+        socket_config.threads = {io_thread0, io_thread1};
+        socket_config.options.reuse_port = true;
+        socket_config.connect_remote = true;
+
+        const bool ok = socket.start(std::move(socket_config), callbacks);
+        state.start_ok.store(ok, std::memory_order_release);
+        state.started.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return state.started.load(std::memory_order_acquire); }));
+    ASSERT_TRUE(state.start_ok.load(std::memory_order_acquire));
+    ASSERT_TRUE(wait_until([&] { return socket.active_shard_count() == 2U; }));
+
+    const std::vector<af::net::udp_socket_handle> handles = socket.handles();
+    ASSERT_EQ(handles.size(), 2U);
+    EXPECT_TRUE(socket.handle_for_thread(io_thread0).valid());
+    EXPECT_TRUE(socket.handle_for_thread(io_thread1).valid());
+
+    EXPECT_EQ(handles[0].send(af::Buffer::copy("one", 3)), af::net::udp_send_result::queued);
+    EXPECT_EQ(handles[1].send(af::Buffer::copy("two", 3)), af::net::udp_send_result::queued);
+
+    std::array<char, 8> buffer{};
+    std::vector<std::string> received;
+    for (int i = 0; i < 2; ++i) {
+        const ssize_t n = ::recv(sink.get(), buffer.data(), buffer.size(), 0);
+        ASSERT_GT(n, 0);
+        received.emplace_back(buffer.data(), static_cast<std::size_t>(n));
+    }
+    std::sort(received.begin(), received.end());
+    EXPECT_EQ(received, (std::vector<std::string>{"one", "two"}));
+
+    ASSERT_TRUE(runtime.post(io_thread0, [&] {
+        state.stop_ok.store(socket.stop(), std::memory_order_release);
+        state.stopped.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return state.stopped.load(std::memory_order_acquire); }));
+    EXPECT_TRUE(state.stop_ok.load(std::memory_order_acquire));
+    ASSERT_TRUE(wait_until([&] { return socket.active_shard_count() == 0U; }));
+    EXPECT_EQ(handles[0].send(af::Buffer::copy("after", 5)), af::net::udp_send_result::closed);
+
+    runtime.stop();
+}
 
 TEST(NetUdpSocketTests, EchoesDatagramToRawClient) {
     const std::uint16_t port = reserve_udp_loopback_port();

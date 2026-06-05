@@ -290,7 +290,4 @@ private:
     detail::UdpSocketShard<Runtime> *shard_{nullptr};
 };
 
-template <typename Runtime> using udp_socket_handle = UdpSocketHandle<Runtime>;
-template <typename Runtime> using udp_socket_ref = UdpSocketRef<Runtime>;
-
 } // namespace af::net

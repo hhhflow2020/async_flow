@@ -38,7 +38,7 @@ select fallback 每次 poll 从当前 channel/wait 表重建 `fd_set`，用非�
 
 `TcpServer` 不以 handler 作为模板参数。handler 绑定在 listener 上，因此同一个 server 可以管理多个监听地址和多种业务入口。
 
-当前 public API 保留 `TcpServer` / `TcpClient` / `UdpSocket` 等历史类型名，同时提供 `tcp_server` / `tcp_client` / `udp_socket` / `unix_stream_server` / `unix_stream_client` / `unix_datagram_socket` 等 lower_case 类型别名，以及 `send_result::backpressure`、`close_reason::error`、`accept_strategy::reuse_port_per_io_thread` 等 enum 值别名，便于新代码逐步迁移到下一代命名风格。
+当前 public API 仍保留 `TcpServer` / `TcpClient` / `UdpSocket` 等历史类型名；下一代实例 runtime 路径提供 `tcp_server` / `tcp_client` / `udp_socket` 等 lower_case 控制对象。旧 lower_case 模板别名会逐步移除，避免新旧语义混在同一个名字上。
 
 ```cpp
 af::net::tcp_server<Runtime> server;
@@ -191,46 +191,56 @@ Unix datagram 默认在 bind 前 unlink 已存在 path，并在 stop/close 后 u
 `udp_socket` 是 IP UDP 的统一 server/client 抽象。server 只绑定本地 IPv4/IPv6 endpoint；client 可以绑定本地 endpoint 并设置 `remote_endpoint + connect_remote=true`。每个绑定 IO shard 拥有独立 fd、handler 副本和读 buffer；跨线程发送通过 runtime task 显式调度到 owner reactor。
 
 ```cpp
-af::net::udp_socket<Runtime> server;
-server.bind_threads(Runtime::thread_group<IoTag>());
+af::net::udp_socket server(runtime);
+af::net::udp_socket_callbacks callbacks{};
+callbacks.owner = &state;
+callbacks.on_datagram = &udp_echo_on_datagram;
+callbacks.on_error = &udp_on_error;
 
-server.start<UdpEchoHandler>({
-    .name = "udp-echo",
-    .local_endpoint = af::net::udp_endpoint::any(9000),
-    .options = {.reuse_port = true},
+runtime.post(io_thread, [&] {
+    af::net::udp_socket_config config;
+    config.name = "udp-echo";
+    config.local_endpoint = af::net::udp_endpoint::any(9000);
+    for (std::uint16_t thread : runtime.io_threads()) {
+        config.threads.push_back(af::thread_ref(thread));
+    }
+    config.options.reuse_port = true;
+    server.start(std::move(config), callbacks);
 });
 ```
 
-推荐 handler 签名：
+推荐 callback 签名：
 
 ```cpp
-struct UdpEchoHandler {
-    void on_datagram(af::net::udp_socket_ref<Runtime> socket,
-                     af::BufferView bytes,
-                     const af::net::udp_endpoint& peer) {
-        socket.send_to(bytes, peer);
-    }
+void udp_echo_on_datagram(void *owner, af::net::udp_socket_ref socket,
+                          af::BufferView bytes,
+                          const af::net::udp_peer &peer) noexcept {
+    static_cast<void>(owner);
+    static_cast<void>(socket.send_to(bytes, peer));
+}
 
-    void on_error(af::net::udp_socket_handle<Runtime> socket, int error) {}
-};
+void udp_on_error(void *owner, af::net::udp_socket_handle socket, int error) noexcept;
 ```
 
 UDP client 示例：
 
 ```cpp
-af::net::udp_socket<Runtime> client;
-client.bind_threads(Runtime::thread_group<IoTag>());
-client.start<ClientHandler>({
-    .name = "udp-client",
-    .local_endpoint = af::net::udp_endpoint::any(0),
-    .remote_endpoint = af::net::udp_endpoint::host("127.0.0.1", 9000),
-    .connect_remote = true,
+af::net::udp_socket client(runtime);
+
+runtime.post(io_thread, [&] {
+    af::net::udp_socket_config config;
+    config.name = "udp-client";
+    config.local_endpoint = af::net::udp_endpoint::any(0);
+    config.remote_endpoint = af::net::udp_endpoint::host("127.0.0.1", 9000);
+    config.threads = {io_thread};
+    config.connect_remote = true;
+    client.start(std::move(config), callbacks);
 });
 
 client.handle().send(af::Buffer::copy("ping", 4));
 ```
 
-`udp_socket::handle()` 在每个调用线程本地轮询 active shard，避免外部生产者默认全部集中到第一个 IO 线程，同时避免所有生产者争用一个全局原子计数器。业务需要固定亲和性时，可以启动后缓存 `handles()`，或用 `handle_for_shard()` 按业务 hash 选择目标 shard。`udp_socket_ref::send_to()` 在 IO 线程同线程发送，走直接 syscall。`udp_socket_handle::send()` / `send_to()` 从业务线程调用时会创建 runtime task 并调度到 socket 所属 IO shard。`udp_send_result::queued` 表示发送 task 已提交；真正的非阻塞 send 在 IO 线程执行。
+`udp_socket::handle()` 在每个调用线程本地轮询 active shard，避免外部生产者默认全部集中到第一个 IO 线程，同时避免所有生产者争用一个全局原子计数器。业务需要固定亲和性时，可以启动后缓存 `handles()`，或用 `handle_for_thread()` 按业务 hash 选择目标 IO 线程。`udp_socket_ref::send_to()` 在 IO 线程同线程发送，走直接 syscall。`udp_socket_handle::send()` / `send_to()` 从业务线程调用时会把发送操作调度到 socket 所属 IO shard。`udp_send_result::queued` 表示发送操作已提交；真正的非阻塞 send 在 IO 线程执行。
 
 ## Listener 与 Handler
 
@@ -238,7 +248,7 @@ TCP 每个 listener 在每个 IO shard 上拥有一份 handler 副本，避免�
 
 UDP 每个 active shard 也拥有独立 handler 副本；datagram 热路径只访问本 shard 的 fd、buffer、handler，不访问全局 mutex。
 
-UDP socket 控制面同样是 reactor-only：`bind_threads()`、`start()`、`stop()` 应由同一个 reactor 线程调用。`start()` 表示 start task 已经提交；实际 `bind/connect/register channel` 在各目标 IO shard 上完成，失败通过 handler 的 `on_error(socket, error)` 回调并异步更新 active shard 快照。
+UDP socket 控制面同样是 reactor-only：`start()`、`stop()` 应由 reactor 线程调用，外部线程先显式 `runtime.post()` 到目标 IO 线程。`start()` 会在当前 shard 立即执行，在其他目标 IO shard 上投递启动工作；实际 `bind/connect/register source` 在各 owner IO shard 上完成，失败通过 `on_error(socket, error)` 回调报告。
 
 ## Accept 策略
 
