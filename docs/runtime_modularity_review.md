@@ -2,31 +2,26 @@
 
 ## 当前拆分
 
-- `detail/runtime/runtime_config.hpp`：traits 归一化和静态校验。
 - `runtime/config_types.hpp`、`runtime/config_resolution.hpp`：public 结构化 runtime 配置类型与解析校验入口，`runtime_config.hpp` 只保留 umbrella include。
-- `runtime_executor.hpp`：executor 声明和对象布局。
-- `runtime_executor_lifecycle.hpp`：启动、停止、线程命名和通知。
-- `runtime_executor_scheduler.hpp`：intrusive MPSC inbox、task 执行循环。
-- `runtime_executor_timer.hpp`：executor 本地 task timer heap、timer 到期执行和退出取消。
-- `runtime_executor_service.hpp`：executor 通用 service task 注册、注销和轮询执行。
-- `runtime_executor_io_backend.hpp`：IO backend 入口、wait/cancel 通用逻辑。
-- `runtime_executor_epoll_backend.hpp`：Linux epoll 实现。
-- `runtime_executor_kqueue_backend.hpp`：macOS/BSD kqueue 实现。
-- `runtime_executor_net_channel.hpp`：网络 channel 注册、更新、注销。
-- `runtime_public_io.hpp`：runtime 对外 IO helper 桥接。
+- `runtime/runtime.hpp`、`runtime/detail/runtime_lifecycle.hpp`：runtime 实例生命周期、线程启动停止、task/service/reactor 注册入口。
+- `runtime/detail/executor.hpp`、`runtime/detail/executor_impl.hpp`：executor 对象布局、intrusive MPSC inbox、task 执行循环、service task 轮询。
+- `runtime/reactor.hpp`、`runtime/detail/epoll_reactor.hpp`、`runtime/detail/kqueue_reactor.hpp`、`runtime/detail/select_reactor.hpp`：统一 reactor 抽象和平台 backend。
+- `runtime/detail/timer_backend.hpp`：executor 本地 timer backend，默认分层时间轮。
+- `runtime/task.hpp`、`runtime/task_impl.hpp`：runtime task 创建、调度、task id 和对象池生命周期。
+- `detail/runtime/`：只保留 `atomic_wait`、`cpu_relax`、`runtime_common_state`、`runtime_service_task`、`timed_atomic_wait` 等跨模块底层组件。
 
 ## 本次收敛结果
 
-复杂 ring 后端已经移除，executor 对象布局只保留 native poller 状态。核心头不再保存 SQ/CQ 指针、operation pool、注册资源表或专属 submit 代码。`runtime_public_io.hpp` 当前只负责 IO wait、cancel 和 timer wait 的公开桥接，不再保留 submit stub。
+旧 `AsyncRuntime<Traits>` 静态模板 runtime、旧 executor backend 以及旧 task registry 已移除。当前公开 runtime 只保留实例化 `af::runtime` 路径，线程布局由结构化 `runtime_config` 解析得到。
 
-task timer 已从 scheduler 主循环中拆到 `runtime_executor_timer.hpp`。scheduler 只编排 drain inbox、run due timers、poll/park 的顺序，timer heap 的入堆、出堆、StopImmediately 取消都在 timer 模块内。
+旧模板 TCP/UDP server/client 及其 detail 实现已移除，`af/net.hpp` 只导出 runtime-native TCP/UDP/Unix API。TCP connection handle 的跨线程操作通过 runtime task/post 调度到 owner reactor thread，不再依赖旧 control thread 状态。
 
-通用 service task 已从 scheduler 主循环中拆到 `runtime_executor_service.hpp`。executor 只保存 `RuntimeServiceTask*` 列表并按预算调用 `run_service()`；service 自身负责 pending 状态和内部队列，跨线程 producer 通过 `wake_service_tasks()` 唤醒 executor。runtime async logger 现在就是一个 service task，消费热路径不再进入 task 状态机。
+通用 service task 由 runtime executor 按预算轮询执行；service 自身负责 pending 状态和内部队列，跨线程 producer 通过 `wake_service_tasks()` 唤醒 executor。runtime async logger 现在就是一个 service task，消费热路径不进入 task 状态机。
 
 ## 模块边界
 
 - runtime 调度和 IO 后端分离。
-- public IO helper 和网络 reactor 分离。
+- public IO helper、runtime reactor 和网络连接生命周期分离。
 - 网络连接生命周期不依赖普通 task pending/resume 热路径。
 - 日志 consumer 通过通用 service task 绑定 runtime 线程，不再使用长期 runtime task 驱动消费；注册/注销仍通过短 control task 在 owner executor 上完成。
 - `make_task<T>()` 和 `try_make_task<T>()` 共享 task pool 生命周期管理；可恢复创建失败路径不影响普通调度热路径。

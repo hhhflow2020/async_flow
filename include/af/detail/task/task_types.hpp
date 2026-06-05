@@ -1,11 +1,5 @@
 #pragma once
 
-template <typename TraitsT> class AsyncRuntime;
-
-namespace detail {
-template <typename RuntimeT, typename TraitsT> class Executor;
-} // namespace detail
-
 enum class TaskResult : std::uint8_t {
     Done,
     Pending,

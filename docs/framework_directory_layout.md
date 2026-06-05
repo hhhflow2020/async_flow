@@ -4,7 +4,8 @@
 
 当前目录按职责拆分：
 
-- `include/af/detail/runtime/`：runtime 配置、executor、调度、task 生命周期、public API。
+- `include/af/runtime/`：runtime 配置、实例生命周期、executor、task、reactor 和 timer backend。
+- `include/af/detail/runtime/`：atomic wait、cpu relax、service task 等跨模块底层组件。
 - `include/af/detail/queue/`：intrusive MPSC、bounded MPSC/MPMC 队列和 backoff。
 - `include/af/detail/memory/`：对象池和连续对象存储。
 - `include/af/detail/io/`：native readiness helper、socket/file/event/timer adapter。
