@@ -178,6 +178,8 @@ private:
     detail::AsyncLogDrainWaiter drain_waiter_;
 };
 
+using async_logger = AsyncLogger;
+
 } // namespace af
 
 #include "af/detail/log/async_logger_config_impl.hpp"

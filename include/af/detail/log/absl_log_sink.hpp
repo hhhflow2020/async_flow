@@ -382,6 +382,8 @@ private:
     std::atomic<bool> registered_{false};
 };
 
+using async_log_handle = AsyncLogHandle;
+
 inline void initialize_absl_log_once() {
     if (absl::log_internal::IsInitialized()) {
         return;

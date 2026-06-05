@@ -14,6 +14,7 @@
 - task inbox 的生产者热路径是单次 atomic exchange 和前驱 next 写入。
 - inbox producer/consumer 游标按 cache line 拆分，降低 false sharing。
 - 日志 record pool 和 runtime task pool 都应按线程局部复用。
+- 对象池 slot 已按 cache line 对齐，block/pool 热原子字段独立对齐；日志 record pool 的 slab free-list 和扩容标志也与热路径数据分离。
 
 ## 分支与系统调用
 
@@ -27,4 +28,5 @@
 - 为 TCP reactor 增加连接读写预算和批量 ready 队列。
 - 为 IO buffer 增加按线程固定大小池。
 - 为 ordered logging 的单 MPSC 队列补充高并发 perf regression 测试。
+- 持续记录 `AsyncLogRecordPool` 单线程、批量和跨线程 release benchmark 结果，避免日志池优化退化。
 - 对 epoll/kqueue poll batch 大小做 benchmark。

@@ -1,5 +1,4 @@
 #include "af/async_flow.hpp"
-#include "af/net.hpp"
 
 #include <type_traits>
 
@@ -22,4 +21,12 @@ TEST(PublicHeaderTests, NetUmbrellaExposesRuntimeNativeApi) {
     static_assert(std::is_class_v<af::net::udp_socket>);
     static_assert(std::is_class_v<af::net::unix_stream_server>);
     static_assert(std::is_class_v<af::net::unix_datagram_socket>);
+}
+
+TEST(PublicHeaderTests, LogUmbrellaExposesLowerCaseNames) {
+    static_assert(std::is_same_v<af::async_log_config, af::AsyncLogConfig>);
+    static_assert(std::is_same_v<af::async_log_stats, af::AsyncLogStats>);
+    static_assert(std::is_same_v<af::async_logger, af::AsyncLogger>);
+    static_assert(std::is_same_v<af::log_backend, af::LogBackend>);
+    static_assert(std::is_same_v<af::async_log_handle, af::AsyncLogHandle>);
 }

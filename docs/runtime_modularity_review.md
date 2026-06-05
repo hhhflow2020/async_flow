@@ -16,12 +16,14 @@
 
 旧模板 TCP/UDP server/client 及其 detail 实现已移除，`af/net.hpp` 只导出 runtime-native TCP/UDP/Unix API。TCP connection handle 的跨线程操作通过 runtime task/post 调度到 owner reactor thread，不再依赖旧 control thread 状态。
 
+`af/async_flow.hpp` 已从默认 umbrella 中移除旧 `af/io.hpp` facade，并改为导出 `af/net.hpp`。旧 `af/io.hpp` 现在只作为显式 opt-in legacy facade 保留，避免新用户从总入口继续走 task 级 `io_*` helper。后续确认没有下游依赖后，可以物理删除 `include/af/io*.hpp` 与 `include/af/detail/io/` 这组历史 helper。
+
 通用 service task 由 runtime executor 按预算轮询执行；service 自身负责 pending 状态和内部队列，跨线程 producer 通过 `wake_service_tasks()` 唤醒 executor。runtime async logger 现在就是一个 service task，消费热路径不进入 task 状态机；推荐手工入口是 `start_runtime_logging()`，runtime 配置了日志后会在 `runtime::start()` 中自动启动并在 `runtime::stop()` 中 drain/flush。
 
 ## 模块边界
 
 - runtime 调度和 IO 后端分离。
-- public IO helper、runtime reactor 和网络连接生命周期分离。
+- legacy public IO helper、runtime reactor 和网络连接生命周期分离；默认公共入口只暴露 runtime-native reactor/net。
 - 网络连接生命周期不依赖普通 task pending/resume 热路径。
 - 日志 consumer 通过通用 service task 绑定 runtime 线程，不再使用长期 runtime task 驱动消费；注册/注销仍通过短 control task 在 owner executor 上完成。
 - `make_task<T>()` 和 `try_make_task<T>()` 共享 task pool 生命周期管理；可恢复创建失败路径不影响普通调度热路径。
@@ -29,6 +31,6 @@
 
 ## 后续拆分建议
 
-- 将 `io_file_*` POSIX helper 按生命周期、读写、metadata 保持独立。
+- 收集下游 `af/io.hpp` 直接依赖，确认迁移窗口后删除旧 async IO facade 文件。
 - 网络 reactor 继续按 poller、channel、tcp server、tcp connection、udp socket、unix socket 拆分。
 - 示例和测试保持按功能命名，避免历史后端名进入文件名。

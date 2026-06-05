@@ -1,5 +1,7 @@
 #pragma once
 
+// Legacy opt-in async IO facade. New code should use af/runtime.hpp and af/net.hpp.
+
 #include "af/platform.hpp"
 
 #include "af/io_types.hpp"

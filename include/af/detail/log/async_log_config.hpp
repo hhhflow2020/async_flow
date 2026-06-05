@@ -98,4 +98,7 @@ struct AsyncLogStats {
     std::uint64_t dropped{0};
 };
 
+using async_log_config = AsyncLogConfig;
+using async_log_stats = AsyncLogStats;
+
 } // namespace af
