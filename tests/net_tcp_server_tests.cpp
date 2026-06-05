@@ -14,6 +14,7 @@
 
 #include "af/async_runtime.hpp"
 #include "af/net.hpp"
+#include "af/net/tcp_server.hpp"
 #include "af/platform.hpp"
 #include "af/runtime.hpp"
 
