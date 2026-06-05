@@ -11,6 +11,50 @@ inline reactor *runtime::current_reactor() noexcept {
     return current_executor_->reactor_backend();
 }
 
+inline bool runtime::register_reactor_source(thread_index thread,
+                                             fd_event_source *source) noexcept {
+    if (!valid_thread(thread) || thread_kind_of(thread) != thread_kind::io || source == nullptr) {
+        return false;
+    }
+    AF_ASSERT(current_runtime_ == this && current_thread_index_ == thread &&
+              "reactor source registration must run on the owner IO runtime thread");
+    if (current_runtime_ != this || current_thread_index_ != thread ||
+        current_executor_ == nullptr) {
+        return false;
+    }
+    reactor *backend = current_executor_->reactor_backend();
+    return backend != nullptr && backend->add(source);
+}
+
+inline bool runtime::update_reactor_source(thread_index thread, fd_event_source *source) noexcept {
+    if (!valid_thread(thread) || thread_kind_of(thread) != thread_kind::io || source == nullptr) {
+        return false;
+    }
+    AF_ASSERT(current_runtime_ == this && current_thread_index_ == thread &&
+              "reactor source update must run on the owner IO runtime thread");
+    if (current_runtime_ != this || current_thread_index_ != thread ||
+        current_executor_ == nullptr) {
+        return false;
+    }
+    reactor *backend = current_executor_->reactor_backend();
+    return backend != nullptr && backend->mod(source);
+}
+
+inline bool runtime::unregister_reactor_source(thread_index thread,
+                                               fd_event_source *source) noexcept {
+    if (!valid_thread(thread) || thread_kind_of(thread) != thread_kind::io || source == nullptr) {
+        return false;
+    }
+    AF_ASSERT(current_runtime_ == this && current_thread_index_ == thread &&
+              "reactor source unregistration must run on the owner IO runtime thread");
+    if (current_runtime_ != this || current_thread_index_ != thread ||
+        current_executor_ == nullptr) {
+        return false;
+    }
+    reactor *backend = current_executor_->reactor_backend();
+    return backend != nullptr && backend->del(source);
+}
+
 namespace detail {
 
 inline const task_pool_config &runtime_task_pool_config(const runtime &owner) noexcept {

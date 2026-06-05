@@ -709,6 +709,7 @@ struct ReactorReadinessState {
     int read_fd{-1};
     int write_fd{-1};
     af::fd_event_source source;
+    af::runtime *runtime{nullptr};
     std::atomic<int> &counter;
     std::atomic<std::uint16_t> &thread;
     std::atomic<std::uint32_t> &events;
@@ -729,8 +730,9 @@ private:
         auto &state = *static_cast<ReactorReadinessState *>(owner);
         std::array<char, 16> buffer{};
         static_cast<void>(::read(state.read_fd, buffer.data(), buffer.size()));
-        if (af::reactor *reactor = af::runtime::current_reactor()) {
-            static_cast<void>(reactor->del(&source));
+        if (state.runtime != nullptr) {
+            static_cast<void>(state.runtime->unregister_reactor_source(
+                af::runtime::current_thread_index(), &source));
         }
         state.thread.store(af::runtime::current_thread_index(), std::memory_order_release);
         state.events.store(events, std::memory_order_release);
@@ -747,13 +749,14 @@ private:
         state_.source.interests = af::reactor_readable;
         state_.source.owner = &state_;
         state_.source.on_event = &ReactorReadinessTask::on_event;
-        if (!reactor->add(&state_.source)) {
+        if (!owner().register_reactor_source(af::runtime::current_thread_index(), &state_.source)) {
             return failed();
         }
 
         const char value = 'x';
         if (::write(state_.write_fd, &value, sizeof(value)) != sizeof(value)) {
-            static_cast<void>(reactor->del(&state_.source));
+            static_cast<void>(owner().unregister_reactor_source(af::runtime::current_thread_index(),
+                                                                &state_.source));
             return failed();
         }
         return done();
@@ -1917,8 +1920,8 @@ void run_reactor_readiness_test(af::reactor_backend backend) {
     std::atomic<int> counter{0};
     std::atomic<std::uint16_t> observed_thread{af::runtime_invalid_thread_index};
     std::atomic<std::uint32_t> observed_events{0};
-    ReactorReadinessState state{pipe_fds[0], pipe_fds[1],     {},
-                                counter,     observed_thread, observed_events};
+    ReactorReadinessState state{pipe_fds[0],     pipe_fds[1],    {}, &runtime, counter,
+                                observed_thread, observed_events};
 
     ASSERT_TRUE(runtime.start());
     ASSERT_TRUE(wait_for_active_threads(runtime, 2));

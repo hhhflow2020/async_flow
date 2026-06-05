@@ -157,6 +157,28 @@ public:
 
     [[nodiscard]] static reactor *current_reactor() noexcept;
 
+    [[nodiscard]] bool register_reactor_source(thread_index thread,
+                                               fd_event_source *source) noexcept;
+
+    [[nodiscard]] bool register_reactor_source(thread_ref thread,
+                                               fd_event_source *source) noexcept {
+        return register_reactor_source(thread.index, source);
+    }
+
+    [[nodiscard]] bool update_reactor_source(thread_index thread, fd_event_source *source) noexcept;
+
+    [[nodiscard]] bool update_reactor_source(thread_ref thread, fd_event_source *source) noexcept {
+        return update_reactor_source(thread.index, source);
+    }
+
+    [[nodiscard]] bool unregister_reactor_source(thread_index thread,
+                                                 fd_event_source *source) noexcept;
+
+    [[nodiscard]] bool unregister_reactor_source(thread_ref thread,
+                                                 fd_event_source *source) noexcept {
+        return unregister_reactor_source(thread.index, source);
+    }
+
     [[nodiscard]] bool logger_started() const noexcept {
         return owned_logger_ != nullptr;
     }
