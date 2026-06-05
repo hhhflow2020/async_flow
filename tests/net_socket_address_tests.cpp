@@ -40,6 +40,7 @@ TEST(NetSocketAddressTests, LowerCaseNetAliasesMatchPublicTypes) {
     static_assert(std::is_same_v<af::net::listener_id, af::net::ListenerId>);
     static_assert(std::is_same_v<af::net::tcp_listener_handle, af::net::TcpListenerHandle>);
     static_assert(std::is_same_v<af::net::listener_result, af::net::ListenerResult>);
+    static_assert(std::is_class_v<af::net::tcp_connection_ref>);
     static_assert(std::is_same_v<af::net::tcp_client_options, af::net::TcpClientOptions>);
     static_assert(
         std::is_same_v<af::net::tcp_client_runtime_config, af::net::TcpClientRuntimeConfig>);

@@ -132,10 +132,3 @@ private:
 } // namespace af::net
 
 #include "af/net/detail/tcp_server_impl.hpp"
-
-namespace af::net {
-
-template <typename Runtime> using tcp_connection_handle = TcpConnectionHandle<Runtime>;
-template <typename Runtime> using tcp_connection_ref = TcpConnectionRef<Runtime>;
-
-} // namespace af::net

@@ -30,7 +30,7 @@ struct EchoRuntimeTraits {
 };
 
 using EchoRuntime = af::AsyncRuntime<EchoRuntimeTraits>;
-using EchoConnectionHandle = af::net::tcp_connection_handle<EchoRuntime>;
+using EchoConnectionHandle = af::net::TcpConnectionHandle<EchoRuntime>;
 
 struct ServerLifecycleState {
     std::atomic<bool> started{false};
@@ -91,12 +91,12 @@ private:
 struct EchoHandler {
     std::shared_ptr<ServerLifecycleState> lifecycle;
 
-    void on_accept(af::net::tcp_connection_ref<EchoRuntime> conn) noexcept {
+    void on_accept(af::net::TcpConnectionRef<EchoRuntime> conn) noexcept {
         LOG(INFO) << "tcp echo accepted listener=" << conn.listener_name()
                   << " slot=" << conn.slot() << " generation=" << conn.generation();
     }
 
-    void on_read(af::net::tcp_connection_ref<EchoRuntime> conn, af::BufferView bytes) noexcept {
+    void on_read(af::net::TcpConnectionRef<EchoRuntime> conn, af::BufferView bytes) noexcept {
         LOG(INFO) << "tcp echo received bytes=" << bytes.size() << " slot=" << conn.slot()
                   << " generation=" << conn.generation();
         if (bytes.empty()) {
@@ -120,7 +120,7 @@ struct EchoHandler {
         }
     }
 
-    void on_close(af::net::tcp_connection_handle<EchoRuntime> conn,
+    void on_close(af::net::TcpConnectionHandle<EchoRuntime> conn,
                   af::net::close_reason reason) noexcept {
         LOG(INFO) << "tcp echo closed slot=" << conn.slot() << " generation=" << conn.generation()
                   << " reason=" << static_cast<unsigned>(reason);

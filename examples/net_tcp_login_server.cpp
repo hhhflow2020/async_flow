@@ -41,7 +41,7 @@ struct LoginRuntimeTraits {
 };
 
 using LoginRuntime = af::AsyncRuntime<LoginRuntimeTraits>;
-using LoginConnectionHandle = af::net::tcp_connection_handle<LoginRuntime>;
+using LoginConnectionHandle = af::net::TcpConnectionHandle<LoginRuntime>;
 
 struct ServerLifecycleState {
     std::atomic<bool> started{false};
@@ -193,12 +193,12 @@ struct LoginHandler {
     std::shared_ptr<ServerLifecycleState> lifecycle;
     absl::flat_hash_map<std::uint64_t, StreamParser> parsers;
 
-    void on_accept(af::net::tcp_connection_ref<LoginRuntime> conn) {
+    void on_accept(af::net::TcpConnectionRef<LoginRuntime> conn) {
         LOG(INFO) << "login connection accepted listener=" << conn.listener_name()
                   << " slot=" << conn.slot() << " generation=" << conn.generation();
     }
 
-    void on_read(af::net::tcp_connection_ref<LoginRuntime> conn, af::BufferView bytes) {
+    void on_read(af::net::TcpConnectionRef<LoginRuntime> conn, af::BufferView bytes) {
         const LoginConnectionHandle handle = conn.handle();
         StreamParser &parser = parsers[connection_key(handle)];
         const PacketParseResult result =
@@ -236,7 +236,7 @@ struct LoginHandler {
         }
     }
 
-    void on_close(af::net::tcp_connection_handle<LoginRuntime> conn, af::net::close_reason reason) {
+    void on_close(af::net::TcpConnectionHandle<LoginRuntime> conn, af::net::close_reason reason) {
         parsers.erase(connection_key(conn));
         LOG(INFO) << "login connection closed slot=" << conn.slot()
                   << " generation=" << conn.generation()
