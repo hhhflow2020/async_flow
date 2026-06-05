@@ -21,7 +21,6 @@
 
 #include <gtest/gtest.h>
 
-#include "af/async_runtime.hpp"
 #include "af/log.hpp"
 #include "af/runtime.hpp"
 
@@ -575,34 +574,6 @@ private:
     std::atomic<int> &completed_;
 };
 
-struct LogUdpIoThreadTag;
-
-inline constexpr af::thread_kind log_udp_io_thread_kind = af::thread_kind::io;
-
-struct LogUdpIoRuntimeTraits {
-    static constexpr auto threads = af::thread_layout(
-        af::thread_group<LogUdpIoThreadTag, 1, log_udp_io_thread_kind>("log-udp-io"));
-    static constexpr af::ShutdownPolicy shutdown_policy = af::ShutdownPolicy::WaitForTasks;
-};
-
-using LogUdpIoRuntime = af::AsyncRuntime<LogUdpIoRuntimeTraits>;
-
-struct LogUdpIoThreads {
-    static constexpr auto IO_0 =
-        LogUdpIoRuntime::thread_group<LogUdpIoThreadTag>().template at<0>();
-};
-
-class LogUdpIoRuntimeGuard {
-public:
-    LogUdpIoRuntimeGuard() {
-        LogUdpIoRuntime::init();
-    }
-
-    ~LogUdpIoRuntimeGuard() {
-        LogUdpIoRuntime::shutdown();
-    }
-};
-
 void close_fd(int &fd) noexcept {
     if (fd >= 0) {
         static_cast<void>(::close(fd));
@@ -778,164 +749,6 @@ TEST(LogTests, RuntimeAsyncLoggingRejectsInvalidConsumerThread) {
             static_cast<void>(logging);
         },
         std::runtime_error);
-}
-
-TEST(LogTests, RuntimeFileBackendWritesBatchesOnIoThread) {
-    const auto path =
-        std::filesystem::path(::testing::TempDir()) / "asyncflow-runtime-log-file.log";
-    std::filesystem::remove(path);
-
-    LogUdpIoRuntimeGuard runtime_guard;
-    af::RuntimeFileLogBackend<LogUdpIoRuntime> backend({
-        .thread = LogUdpIoThreads::IO_0,
-        .path = path,
-        .append = false,
-        .fsync_on_flush = true,
-        .batch_queue_capacity = 8,
-        .max_batch_records = 4,
-        .max_batches_per_run = 8,
-    });
-
-    std::array<af::detail::LogRecord, 4> records;
-    records[0].reset("runtime file backend one\n");
-    records[1].reset("runtime file backend two\n");
-    records[2].reset("runtime file backend three\n");
-    records[3].reset("runtime file backend four\n");
-    std::array<af::detail::LogRecord *, 4> record_ptrs{
-        &records[0],
-        &records[1],
-        &records[2],
-        &records[3],
-    };
-
-    backend.write_batch(
-        af::Span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
-    const bool flushed = backend.flush(std::chrono::seconds(2));
-    const af::RuntimeFileLogBackendStats stats = backend.stats();
-    backend.shutdown();
-
-    const std::string contents = read_file(path);
-    EXPECT_TRUE(flushed);
-    EXPECT_EQ(stats.queued_records, record_ptrs.size());
-    EXPECT_EQ(stats.written_records, record_ptrs.size())
-        << "last_error=" << stats.last_error << " stage=" << stats.last_error_stage;
-    EXPECT_EQ(stats.dropped_records, 0U)
-        << "last_error=" << stats.last_error << " stage=" << stats.last_error_stage;
-    EXPECT_GE(stats.flushes, 1U);
-    EXPECT_NE(contents.find("runtime file backend one\n"), std::string::npos);
-    EXPECT_NE(contents.find("runtime file backend two\n"), std::string::npos);
-    EXPECT_NE(contents.find("runtime file backend three\n"), std::string::npos);
-    EXPECT_NE(contents.find("runtime file backend four\n"), std::string::npos);
-}
-
-TEST(LogTests, RuntimeFileBackendSkipsEmptyRecordsWithoutLeakingBatch) {
-    const auto path =
-        std::filesystem::path(::testing::TempDir()) / "asyncflow-runtime-log-empty.log";
-    std::filesystem::remove(path);
-
-    LogUdpIoRuntimeGuard runtime_guard;
-    af::RuntimeFileLogBackend<LogUdpIoRuntime> backend({
-        .thread = LogUdpIoThreads::IO_0,
-        .path = path,
-        .append = false,
-        .batch_queue_capacity = 1,
-        .max_batch_records = 1,
-        .max_batches_per_run = 1,
-    });
-
-    af::detail::LogRecord empty_record;
-    empty_record.reset("");
-    std::array<af::detail::LogRecord *, 1> empty_ptrs{&empty_record};
-
-    backend.write_batch(
-        af::Span<af::detail::LogRecord *const>(empty_ptrs.data(), empty_ptrs.size()));
-    ASSERT_TRUE(backend.flush(std::chrono::seconds(2)));
-
-    af::RuntimeFileLogBackendStats stats = backend.stats();
-    EXPECT_EQ(stats.queued_records, 0U);
-    EXPECT_EQ(stats.written_records, 0U);
-    EXPECT_EQ(stats.dropped_records, 0U);
-
-    af::detail::LogRecord record;
-    record.reset("runtime file backend after empty\n");
-    std::array<af::detail::LogRecord *, 1> record_ptrs{&record};
-
-    backend.write_batch(
-        af::Span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
-    ASSERT_TRUE(backend.flush(std::chrono::seconds(2)));
-    backend.shutdown();
-
-    stats = backend.stats();
-    EXPECT_EQ(stats.queued_records, 1U);
-    EXPECT_EQ(stats.written_records, 1U);
-    EXPECT_EQ(stats.dropped_records, 0U);
-    EXPECT_NE(read_file(path).find("runtime file backend after empty\n"), std::string::npos);
-}
-
-TEST(LogTests, RuntimeLogBackendRejectsInvalidRuntimeThread) {
-    LogUdpIoRuntimeGuard runtime_guard;
-
-    EXPECT_THROW(
-        {
-            const auto path = std::filesystem::path(::testing::TempDir()) /
-                              "asyncflow-runtime-log-invalid-thread.log";
-            af::RuntimeFileLogBackend<LogUdpIoRuntime> backend({
-                .thread = LogUdpIoRuntime::thread_from_index(LogUdpIoRuntime::invalid_thread_index),
-                .path = path,
-            });
-            static_cast<void>(backend);
-        },
-        std::runtime_error);
-}
-
-TEST(LogTests, RuntimeFileAsyncLoggerBackendWritesOnIoThread) {
-    const auto path =
-        std::filesystem::path(::testing::TempDir()) / "asyncflow-runtime-async-log-file.log";
-    std::filesystem::remove(path);
-
-    LogUdpIoRuntimeGuard runtime_guard;
-    LogTestRuntimeGuard log_consumer_runtime;
-    auto backend = std::make_unique<af::RuntimeFileLogBackend<LogUdpIoRuntime>>(
-        af::RuntimeFileLogBackendConfig<LogUdpIoRuntime>{
-            .thread = LogUdpIoThreads::IO_0,
-            .path = path,
-            .append = false,
-            .fsync_on_flush = true,
-            .batch_queue_capacity = 8,
-            .max_batch_records = 8,
-            .max_batches_per_run = 8,
-        });
-    auto *runtime_file_backend = backend.get();
-
-    af::AsyncLogConfig config;
-    config.queue_capacity = 64;
-    config.max_batch_size = 8;
-    config.flush_poll_interval = std::chrono::milliseconds(1);
-    config.backends.push_back(std::move(backend));
-    auto logging = af::start_async_logging_for_runtime(
-        log_consumer_runtime.runtime(), std::move(config), log_consumer_runtime.runtime_1());
-
-    LOG(INFO) << "runtime file async logger one";
-    LOG(INFO) << "runtime file async logger two";
-    LOG(INFO) << "runtime file async logger three";
-    LOG(INFO) << "runtime file async logger four";
-
-    const bool flushed = logging->flush(std::chrono::seconds(2));
-    const af::RuntimeFileLogBackendStats stats = runtime_file_backend->stats();
-    logging->stop();
-
-    const std::string contents = read_file(path);
-    EXPECT_TRUE(flushed);
-    EXPECT_EQ(stats.queued_records, 4U);
-    EXPECT_EQ(stats.written_records, 4U)
-        << "last_error=" << stats.last_error << " stage=" << stats.last_error_stage;
-    EXPECT_EQ(stats.dropped_records, 0U)
-        << "last_error=" << stats.last_error << " stage=" << stats.last_error_stage;
-    EXPECT_GE(stats.flushes, 1U);
-    EXPECT_NE(contents.find("runtime file async logger one"), std::string::npos);
-    EXPECT_NE(contents.find("runtime file async logger two"), std::string::npos);
-    EXPECT_NE(contents.find("runtime file async logger three"), std::string::npos);
-    EXPECT_NE(contents.find("runtime file async logger four"), std::string::npos);
 }
 
 #if defined(__linux__) || defined(__APPLE__)
@@ -1418,6 +1231,28 @@ TEST(LogTests, RuntimeBoundLogBackendRunsInnerBackendOnConfiguredIoThread) {
     EXPECT_EQ(observing_backend->observed_thread_index(), io_thread);
 
     logging->stop();
+    runtime.stop();
+}
+
+TEST(LogTests, RuntimeBoundLogBackendRejectsInvalidRuntimeThread) {
+    af::runtime_config runtime_config;
+    runtime_config.threads = {
+        af::io_threads("bound-log-io", 1),
+        af::cpu_threads("bound-log-cpu", 1),
+    };
+
+    af::runtime runtime(runtime_config);
+    ASSERT_TRUE(runtime.start());
+
+    af::detail::RuntimeBoundLogBackendConfig bound_config;
+    bound_config.owner = &runtime;
+    bound_config.thread = runtime.invalid_thread_index();
+    bound_config.backend = std::make_unique<CountingLogBackend>();
+
+    EXPECT_THROW(
+        { static_cast<void>(af::detail::make_runtime_bound_log_backend(std::move(bound_config))); },
+        std::runtime_error);
+
     runtime.stop();
 }
 
@@ -2029,197 +1864,4 @@ TEST(LogTests, UdpBackendWritesBatchedRecordsToLoopbackDatagrams) {
     EXPECT_NE(combined.find("udp backend two\n"), std::string::npos);
     EXPECT_NE(combined.find("udp backend three\n"), std::string::npos);
     EXPECT_NE(combined.find("udp backend four\n"), std::string::npos);
-}
-
-TEST(LogTests, RuntimeUdpBackendSendsBatchesOnIoThread) {
-    std::uint16_t port = 0;
-    int socket_fd = make_loopback_udp_socket(port);
-    ASSERT_GE(socket_fd, 0) << std::strerror(errno);
-
-    LogUdpIoRuntimeGuard runtime_guard;
-    af::RuntimeUdpLogBackend<LogUdpIoRuntime> backend({
-        .thread = LogUdpIoThreads::IO_0,
-        .host = "127.0.0.1",
-        .port = port,
-        .batch_queue_capacity = 8,
-        .max_batch_records = 4,
-        .max_datagram_size = 1400,
-        .max_batches_per_run = 8,
-    });
-
-    std::array<af::detail::LogRecord, 4> records;
-    records[0].reset("runtime udp backend one\n");
-    records[1].reset("runtime udp backend two\n");
-    records[2].reset("runtime udp backend three\n");
-    records[3].reset("runtime udp backend four\n");
-    std::array<af::detail::LogRecord *, 4> record_ptrs{
-        &records[0],
-        &records[1],
-        &records[2],
-        &records[3],
-    };
-
-    backend.write_batch(
-        af::Span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
-    ASSERT_TRUE(backend.flush(std::chrono::seconds(2)));
-    const af::RuntimeUdpLogBackendStats stats = backend.stats();
-    EXPECT_EQ(stats.queued_records, record_ptrs.size());
-    EXPECT_EQ(stats.sent_records, record_ptrs.size());
-    EXPECT_EQ(stats.dropped_records, 0U);
-
-    std::array<std::string, 4> received{};
-    const std::size_t received_count = recv_datagrams_until(
-        socket_fd, received, std::chrono::steady_clock::now() + std::chrono::seconds(2));
-    close_fd(socket_fd);
-    backend.shutdown();
-
-    std::string combined;
-    for (const std::string &message : received) {
-        combined.append(message);
-    }
-    EXPECT_EQ(received_count, record_ptrs.size());
-    EXPECT_NE(combined.find("runtime udp backend one\n"), std::string::npos);
-    EXPECT_NE(combined.find("runtime udp backend two\n"), std::string::npos);
-    EXPECT_NE(combined.find("runtime udp backend three\n"), std::string::npos);
-    EXPECT_NE(combined.find("runtime udp backend four\n"), std::string::npos);
-}
-
-TEST(LogTests, RuntimeTcpBackendSendsBatchesOnIoThread) {
-    std::uint16_t port = 0;
-    int listener = make_loopback_tcp_listener(port);
-    ASSERT_GE(listener, 0) << std::strerror(errno);
-
-    std::string received;
-    std::atomic<bool> server_done{false};
-    std::thread server([&] {
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-        int accepted = accept_until(listener, deadline);
-        if (accepted < 0) {
-            server_done.store(true, std::memory_order_release);
-            return;
-        }
-        received = recv_until(accepted, "runtime tcp backend four\n", deadline);
-        close_fd(accepted);
-        server_done.store(true, std::memory_order_release);
-    });
-
-    LogUdpIoRuntimeGuard runtime_guard;
-    af::RuntimeTcpLogBackend<LogUdpIoRuntime> backend({
-        .thread = LogUdpIoThreads::IO_0,
-        .host = "127.0.0.1",
-        .port = port,
-        .reconnect_interval = std::chrono::milliseconds(1),
-        .batch_queue_capacity = 8,
-        .max_batch_records = 4,
-        .max_batches_per_run = 8,
-    });
-
-    std::array<af::detail::LogRecord, 4> records;
-    records[0].reset("runtime tcp backend one\n");
-    records[1].reset("runtime tcp backend two\n");
-    records[2].reset("runtime tcp backend three\n");
-    records[3].reset("runtime tcp backend four\n");
-    std::array<af::detail::LogRecord *, 4> record_ptrs{
-        &records[0],
-        &records[1],
-        &records[2],
-        &records[3],
-    };
-
-    backend.write_batch(
-        af::Span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
-    const bool flushed = backend.flush(std::chrono::seconds(2));
-    const af::RuntimeTcpLogBackendStats stats = backend.stats();
-
-    server.join();
-    close_fd(listener);
-    backend.shutdown();
-
-    EXPECT_TRUE(flushed) << "queued=" << stats.queued_records << " sent=" << stats.sent_records
-                         << " dropped=" << stats.dropped_records
-                         << " last_error=" << stats.last_error
-                         << " stage=" << stats.last_error_stage
-                         << " server_done=" << server_done.load(std::memory_order_acquire)
-                         << " received_size=" << received.size();
-    EXPECT_EQ(stats.queued_records, record_ptrs.size());
-    EXPECT_EQ(stats.sent_records, record_ptrs.size())
-        << "last_error=" << stats.last_error << " stage=" << stats.last_error_stage;
-    EXPECT_EQ(stats.dropped_records, 0U)
-        << "last_error=" << stats.last_error << " stage=" << stats.last_error_stage;
-    EXPECT_TRUE(server_done.load(std::memory_order_acquire));
-    EXPECT_NE(received.find("runtime tcp backend one\n"), std::string::npos);
-    EXPECT_NE(received.find("runtime tcp backend two\n"), std::string::npos);
-    EXPECT_NE(received.find("runtime tcp backend three\n"), std::string::npos);
-    EXPECT_NE(received.find("runtime tcp backend four\n"), std::string::npos);
-}
-
-TEST(LogTests, RuntimeTcpAsyncLoggerBackendSendsOnIoThread) {
-    std::uint16_t port = 0;
-    int listener = make_loopback_tcp_listener(port);
-    ASSERT_GE(listener, 0) << std::strerror(errno);
-
-    std::string received;
-    std::atomic<bool> server_done{false};
-    std::thread server([&] {
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-        int accepted = accept_until(listener, deadline);
-        if (accepted < 0) {
-            server_done.store(true, std::memory_order_release);
-            return;
-        }
-        received = recv_until(accepted, "runtime tcp async logger four", deadline);
-        close_fd(accepted);
-        server_done.store(true, std::memory_order_release);
-    });
-
-    LogUdpIoRuntimeGuard runtime_guard;
-    LogTestRuntimeGuard log_consumer_runtime;
-    auto backend = std::make_unique<af::RuntimeTcpLogBackend<LogUdpIoRuntime>>(
-        af::RuntimeTcpLogBackendConfig<LogUdpIoRuntime>{
-            .thread = LogUdpIoThreads::IO_0,
-            .host = "127.0.0.1",
-            .port = port,
-            .reconnect_interval = std::chrono::milliseconds(1),
-            .batch_queue_capacity = 8,
-            .max_batch_records = 8,
-            .max_batches_per_run = 8,
-        });
-    auto *runtime_tcp_backend = backend.get();
-
-    af::AsyncLogConfig config;
-    config.queue_capacity = 64;
-    config.max_batch_size = 8;
-    config.flush_poll_interval = std::chrono::milliseconds(1);
-    config.backends.push_back(std::move(backend));
-    auto logging = af::start_async_logging_for_runtime(
-        log_consumer_runtime.runtime(), std::move(config), log_consumer_runtime.runtime_1());
-
-    LOG(INFO) << "runtime tcp async logger one";
-    LOG(INFO) << "runtime tcp async logger two";
-    LOG(INFO) << "runtime tcp async logger three";
-    LOG(INFO) << "runtime tcp async logger four";
-
-    const bool flushed = logging->flush(std::chrono::seconds(2));
-    const af::RuntimeTcpLogBackendStats stats = runtime_tcp_backend->stats();
-    logging->stop();
-
-    server.join();
-    close_fd(listener);
-
-    EXPECT_TRUE(flushed) << "queued=" << stats.queued_records << " sent=" << stats.sent_records
-                         << " dropped=" << stats.dropped_records
-                         << " last_error=" << stats.last_error
-                         << " stage=" << stats.last_error_stage
-                         << " server_done=" << server_done.load(std::memory_order_acquire)
-                         << " received_size=" << received.size();
-    EXPECT_EQ(stats.queued_records, 4U);
-    EXPECT_EQ(stats.sent_records, 4U)
-        << "last_error=" << stats.last_error << " stage=" << stats.last_error_stage;
-    EXPECT_EQ(stats.dropped_records, 0U)
-        << "last_error=" << stats.last_error << " stage=" << stats.last_error_stage;
-    EXPECT_TRUE(server_done.load(std::memory_order_acquire));
-    EXPECT_NE(received.find("runtime tcp async logger one"), std::string::npos);
-    EXPECT_NE(received.find("runtime tcp async logger two"), std::string::npos);
-    EXPECT_NE(received.find("runtime tcp async logger three"), std::string::npos);
-    EXPECT_NE(received.find("runtime tcp async logger four"), std::string::npos);
 }
