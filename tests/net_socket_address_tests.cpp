@@ -56,12 +56,14 @@ TEST(NetSocketAddressTests, LowerCaseNetAliasesMatchPublicTypes) {
     static_assert(std::is_class_v<af::net::udp_socket>);
     static_assert(std::is_class_v<af::net::udp_socket_handle>);
     static_assert(std::is_class_v<af::net::udp_socket_ref>);
-    static_assert(std::is_same_v<af::net::unix_stream_server<NetAliasRuntime>,
-                                 af::net::UnixStreamServer<NetAliasRuntime>>);
-    static_assert(std::is_same_v<af::net::unix_stream_client<NetAliasRuntime>,
-                                 af::net::UnixStreamClient<NetAliasRuntime>>);
-    static_assert(std::is_same_v<af::net::unix_datagram_socket<NetAliasRuntime>,
-                                 af::net::UnixDatagramSocket<NetAliasRuntime>>);
+    static_assert(std::is_same_v<af::net::unix_connection_ref, af::net::tcp_connection_ref>);
+    static_assert(std::is_same_v<af::net::unix_connection_handle, af::net::tcp_connection_handle>);
+    static_assert(std::is_same_v<af::net::unix_datagram_socket_ref, af::net::udp_socket_ref>);
+    static_assert(std::is_same_v<af::net::unix_datagram_socket_handle, af::net::udp_socket_handle>);
+    static_assert(std::is_same_v<af::net::unix_datagram_peer, af::net::udp_peer>);
+    static_assert(std::is_class_v<af::net::unix_stream_server>);
+    static_assert(std::is_class_v<af::net::unix_stream_client>);
+    static_assert(std::is_class_v<af::net::unix_datagram_socket>);
 
     static_assert(af::net::address_family::unspecified == af::net::AddressFamily::Unspecified);
     static_assert(af::net::address_family::ipv4 == af::net::AddressFamily::IPv4);

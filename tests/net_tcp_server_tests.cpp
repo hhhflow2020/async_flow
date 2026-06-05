@@ -973,7 +973,7 @@ TEST(NetTcpServerTests, RuntimeTcpListenerReportsEarlyConfigErrors) {
     ASSERT_TRUE(runtime.post(io_thread, [&] {
         af::net::tcp_listener_config listener_config;
         listener_config.name = "runtime-listener-invalid";
-        listener_config.endpoint = af::net::tcp_endpoint::unix_path("/tmp/af-invalid-listener");
+        listener_config.endpoint = af::net::tcp_endpoint::unix_path("");
         af::net::tcp_listener_callbacks callbacks;
         callbacks.owner = &state;
         callbacks.on_error = &runtime_tcp_listener_error;
@@ -986,7 +986,7 @@ TEST(NetTcpServerTests, RuntimeTcpListenerReportsEarlyConfigErrors) {
     ASSERT_TRUE(wait_until([&] { return state.started.load(std::memory_order_acquire); }));
     EXPECT_FALSE(state.start_ok.load(std::memory_order_acquire));
     EXPECT_EQ(state.errors.load(std::memory_order_acquire), 1);
-    EXPECT_EQ(state.last_error.load(std::memory_order_acquire), EAFNOSUPPORT);
+    EXPECT_EQ(state.last_error.load(std::memory_order_acquire), EINVAL);
     EXPECT_FALSE(listener.started());
 
     runtime.stop();

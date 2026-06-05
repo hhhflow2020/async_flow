@@ -44,8 +44,7 @@ inline bool tcp_client::connect(tcp_client_connect_config config,
 
     af::detail::SocketAddress remote;
     int address_error = 0;
-    if (!af::detail::socket_address_from_endpoint(config.remote_endpoint, remote, address_error) ||
-        remote.family == AF_UNIX) {
+    if (!af::detail::socket_address_from_endpoint(config.remote_endpoint, remote, address_error)) {
         return false;
     }
 
@@ -173,7 +172,8 @@ tcp_client::validate_connect_config(const tcp_client_connect_config &config) con
 inline int tcp_client::open_socket(const af::detail::SocketAddress &remote,
                                    const af::detail::SocketAddress &local, bool bind_local,
                                    const tcp_client_connect_config &config) noexcept {
-    int fd = ::socket(remote.family, SOCK_STREAM, IPPROTO_TCP);
+    const bool unix_domain = remote.family == AF_UNIX;
+    int fd = ::socket(remote.family, SOCK_STREAM, unix_domain ? 0 : IPPROTO_TCP);
     if (fd < 0) {
         return -1;
     }
@@ -184,6 +184,16 @@ inline int tcp_client::open_socket(const af::detail::SocketAddress &remote,
         return -1;
     }
     detail::set_no_sigpipe(fd);
+    if (unix_domain) {
+        if (bind_local &&
+            ::bind(fd, reinterpret_cast<const sockaddr *>(&local.storage), local.size) != 0) {
+            const int error = errno == 0 ? EADDRNOTAVAIL : errno;
+            detail::close_fd(fd);
+            errno = error;
+            return -1;
+        }
+        return fd;
+    }
     if (!detail::set_tcp_no_delay(fd, config.connection.no_delay) ||
         !detail::set_socket_keepalive(fd, config.connection.keepalive)) {
         const int error = errno == 0 ? EIO : errno;

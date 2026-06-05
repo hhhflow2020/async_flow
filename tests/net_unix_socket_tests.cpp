@@ -15,9 +15,12 @@
 #include "af/async_runtime.hpp"
 #include "af/net.hpp"
 #include "af/platform.hpp"
+#include "af/runtime.hpp"
 
 #include "gtest/gtest.h"
 
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 namespace {
@@ -355,6 +358,111 @@ struct UnixDatagramNoopHandler {
 
 struct UnixMultiNoopHandler {};
 
+struct RuntimeUnixStreamState {
+    std::atomic<bool> server_started{false};
+    std::atomic<bool> server_start_ok{false};
+    std::atomic<bool> client_started{false};
+    std::atomic<bool> client_start_ok{false};
+    std::atomic<bool> stopped{false};
+    std::atomic<int> accepted{0};
+    std::atomic<int> connected{0};
+    std::atomic<int> errors{0};
+    std::array<char, 64> data{};
+    std::atomic<std::size_t> size{0};
+    af::net::unix_connection_handle handle;
+};
+
+void runtime_unix_stream_accept(void *owner, af::net::unix_connection_ref conn) noexcept {
+    static_cast<void>(conn);
+    auto *state = static_cast<RuntimeUnixStreamState *>(owner);
+    if (state != nullptr) {
+        state->accepted.fetch_add(1, std::memory_order_release);
+    }
+}
+
+void runtime_unix_stream_echo(void *owner, af::net::unix_connection_ref conn,
+                              af::BufferView bytes) noexcept {
+    static_cast<void>(owner);
+    static_cast<void>(conn.send(bytes));
+}
+
+void runtime_unix_stream_connect(void *owner, af::net::unix_connection_ref conn) noexcept {
+    auto *state = static_cast<RuntimeUnixStreamState *>(owner);
+    if (state != nullptr) {
+        state->handle = conn.handle();
+        state->connected.fetch_add(1, std::memory_order_release);
+    }
+    static_cast<void>(conn.send(af::Buffer::copy("runtime-unix", 12)));
+}
+
+void runtime_unix_stream_capture(void *owner, af::net::unix_connection_ref conn,
+                                 af::BufferView bytes) noexcept {
+    auto *state = static_cast<RuntimeUnixStreamState *>(owner);
+    if (state == nullptr) {
+        return;
+    }
+    const std::size_t size = std::min(bytes.size(), state->data.size());
+    std::memcpy(state->data.data(), bytes.data(), size);
+    state->size.store(size, std::memory_order_release);
+    conn.close();
+}
+
+void runtime_unix_stream_error(void *owner, int error) noexcept {
+    static_cast<void>(error);
+    auto *state = static_cast<RuntimeUnixStreamState *>(owner);
+    if (state != nullptr) {
+        state->errors.fetch_add(1, std::memory_order_release);
+    }
+}
+
+struct RuntimeUnixDatagramState {
+    std::atomic<bool> server_started{false};
+    std::atomic<bool> server_start_ok{false};
+    std::atomic<bool> client_started{false};
+    std::atomic<bool> client_start_ok{false};
+    std::atomic<bool> stopped{false};
+    std::atomic<int> datagrams{0};
+    std::atomic<int> errors{0};
+    std::array<char, 64> data{};
+    std::atomic<std::size_t> size{0};
+    af::net::unix_datagram_socket_handle handle;
+};
+
+void runtime_unix_datagram_echo(void *owner, af::net::unix_datagram_socket_ref socket,
+                                af::BufferView bytes,
+                                const af::net::unix_datagram_peer &peer) noexcept {
+    auto *state = static_cast<RuntimeUnixDatagramState *>(owner);
+    if (state != nullptr) {
+        state->datagrams.fetch_add(1, std::memory_order_release);
+    }
+    static_cast<void>(socket.send_to(bytes, peer));
+}
+
+void runtime_unix_datagram_capture(void *owner, af::net::unix_datagram_socket_ref socket,
+                                   af::BufferView bytes,
+                                   const af::net::unix_datagram_peer &peer) noexcept {
+    static_cast<void>(peer);
+    auto *state = static_cast<RuntimeUnixDatagramState *>(owner);
+    if (state == nullptr) {
+        return;
+    }
+    state->handle = socket.handle();
+    const std::size_t size = std::min(bytes.size(), state->data.size());
+    std::memcpy(state->data.data(), bytes.data(), size);
+    state->size.store(size, std::memory_order_release);
+    state->datagrams.fetch_add(1, std::memory_order_release);
+}
+
+void runtime_unix_datagram_error(void *owner, af::net::unix_datagram_socket_handle socket,
+                                 int error) noexcept {
+    static_cast<void>(socket);
+    static_cast<void>(error);
+    auto *state = static_cast<RuntimeUnixDatagramState *>(owner);
+    if (state != nullptr) {
+        state->errors.fetch_add(1, std::memory_order_release);
+    }
+}
+
 } // namespace
 
 TEST(NetUnixSocketTests, ServerAndClientEchoOverUnixStream) {
@@ -557,4 +665,155 @@ TEST(NetUnixSocketTests, DatagramUnlinksStalePathBeforeBind) {
     NetUnixRuntime::wait_for_idle();
     NetUnixRuntime::shutdown();
     EXPECT_NE(::access(path.path().c_str(), F_OK), 0);
+}
+
+TEST(NetUnixSocketTests, RuntimeUnixStreamServerAndClientEcho) {
+    UnixPathGuard path(unique_unix_socket_path());
+    RuntimeUnixStreamState state;
+
+    af::runtime_config config;
+    config.threads = {af::io_threads("net-unix-rt-io", 1)};
+    config.logger.consumer_thread = af::thread_selector::io(0);
+
+    af::runtime runtime(config);
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_until([&] { return runtime.active_thread_count() == 1; }));
+
+    const af::thread_ref io_thread = runtime.select_thread_ref(af::thread_selector::io(0));
+    af::net::unix_stream_server server(runtime);
+    af::net::unix_stream_client client(runtime);
+
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        af::net::unix_stream_callbacks callbacks;
+        callbacks.owner = &state;
+        callbacks.on_accept = &runtime_unix_stream_accept;
+        callbacks.on_read = &runtime_unix_stream_echo;
+
+        af::net::unix_stream_listener_config listener_config;
+        listener_config.name = "runtime-unix-stream";
+        listener_config.endpoint = af::net::unix_endpoint::unix_path(path.path());
+        listener_config.threads = {io_thread};
+
+        const af::net::listener_result listener =
+            server.add_listener(std::move(listener_config), callbacks);
+        const bool ok = listener.ok() && server.start();
+        state.server_start_ok.store(ok, std::memory_order_release);
+        state.server_started.store(true, std::memory_order_release);
+    }));
+
+    ASSERT_TRUE(wait_until([&] { return state.server_started.load(std::memory_order_acquire); }));
+    ASSERT_TRUE(state.server_start_ok.load(std::memory_order_acquire));
+
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        af::net::unix_stream_client_callbacks callbacks;
+        callbacks.owner = &state;
+        callbacks.on_connect = &runtime_unix_stream_connect;
+        callbacks.on_read = &runtime_unix_stream_capture;
+        callbacks.on_error = &runtime_unix_stream_error;
+
+        af::net::unix_stream_connect_config connect_config;
+        connect_config.name = "runtime-unix-stream-client";
+        connect_config.endpoint = af::net::unix_endpoint::unix_path(path.path());
+        connect_config.owner_thread = io_thread;
+        connect_config.connect_timeout = std::chrono::seconds(2);
+
+        const bool ok = client.connect(std::move(connect_config), callbacks);
+        state.client_start_ok.store(ok, std::memory_order_release);
+        state.client_started.store(true, std::memory_order_release);
+    }));
+
+    ASSERT_TRUE(wait_until([&] { return state.client_started.load(std::memory_order_acquire); }));
+    ASSERT_TRUE(state.client_start_ok.load(std::memory_order_acquire));
+    ASSERT_TRUE(wait_until([&] { return state.size.load(std::memory_order_acquire) == 12U; }));
+    EXPECT_EQ(std::string(state.data.data(), state.size.load(std::memory_order_acquire)),
+              "runtime-unix");
+    EXPECT_EQ(state.accepted.load(std::memory_order_acquire), 1);
+    EXPECT_EQ(state.connected.load(std::memory_order_acquire), 1);
+    EXPECT_EQ(state.errors.load(std::memory_order_acquire), 0);
+
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        static_cast<void>(client.stop());
+        const bool server_stopped = server.stop();
+        state.stopped.store(server_stopped, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return state.stopped.load(std::memory_order_acquire); }));
+
+    runtime.stop();
+    EXPECT_NE(::access(path.path().c_str(), F_OK), 0);
+}
+
+TEST(NetUnixSocketTests, RuntimeUnixDatagramServerAndClientEcho) {
+    UnixPathGuard server_path(unique_unix_socket_path());
+    UnixPathGuard client_path(unique_unix_socket_path());
+    RuntimeUnixDatagramState state;
+
+    af::runtime_config config;
+    config.threads = {af::io_threads("net-unix-dgram-rt-io", 1)};
+    config.logger.consumer_thread = af::thread_selector::io(0);
+
+    af::runtime runtime(config);
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_until([&] { return runtime.active_thread_count() == 1; }));
+
+    const af::thread_ref io_thread = runtime.select_thread_ref(af::thread_selector::io(0));
+    af::net::unix_datagram_socket server(runtime);
+    af::net::unix_datagram_socket client(runtime);
+
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        af::net::unix_datagram_callbacks callbacks;
+        callbacks.owner = &state;
+        callbacks.on_datagram = &runtime_unix_datagram_echo;
+        callbacks.on_error = &runtime_unix_datagram_error;
+
+        af::net::unix_datagram_bind_config bind_config;
+        bind_config.name = "runtime-unix-dgram-server";
+        bind_config.local_endpoint = af::net::unix_endpoint::unix_path(server_path.path());
+        bind_config.threads = {io_thread};
+
+        const bool ok = server.bind(std::move(bind_config), callbacks);
+        state.server_start_ok.store(ok, std::memory_order_release);
+        state.server_started.store(true, std::memory_order_release);
+    }));
+
+    ASSERT_TRUE(wait_until([&] { return state.server_started.load(std::memory_order_acquire); }));
+    ASSERT_TRUE(state.server_start_ok.load(std::memory_order_acquire));
+
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        af::net::unix_datagram_callbacks callbacks;
+        callbacks.owner = &state;
+        callbacks.on_datagram = &runtime_unix_datagram_capture;
+        callbacks.on_error = &runtime_unix_datagram_error;
+
+        af::net::unix_datagram_connect_config connect_config;
+        connect_config.name = "runtime-unix-dgram-client";
+        connect_config.local_endpoint = af::net::unix_endpoint::unix_path(client_path.path());
+        connect_config.remote_endpoint = af::net::unix_endpoint::unix_path(server_path.path());
+        connect_config.threads = {io_thread};
+
+        const bool ok = client.connect(std::move(connect_config), callbacks);
+        state.handle = client.handle();
+        state.client_start_ok.store(ok && state.handle.valid(), std::memory_order_release);
+        state.client_started.store(true, std::memory_order_release);
+    }));
+
+    ASSERT_TRUE(wait_until([&] { return state.client_started.load(std::memory_order_acquire); }));
+    ASSERT_TRUE(state.client_start_ok.load(std::memory_order_acquire));
+    EXPECT_EQ(state.handle.send(af::Buffer::copy("runtime-dgram", 13)),
+              af::net::udp_send_result::queued);
+
+    ASSERT_TRUE(wait_until([&] { return state.size.load(std::memory_order_acquire) == 13U; }));
+    EXPECT_EQ(std::string(state.data.data(), state.size.load(std::memory_order_acquire)),
+              "runtime-dgram");
+    EXPECT_EQ(state.errors.load(std::memory_order_acquire), 0);
+
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        const bool client_stopped = client.stop();
+        const bool server_stopped = server.stop();
+        state.stopped.store(client_stopped && server_stopped, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return state.stopped.load(std::memory_order_acquire); }));
+
+    runtime.stop();
+    EXPECT_NE(::access(server_path.path().c_str(), F_OK), 0);
+    EXPECT_NE(::access(client_path.path().c_str(), F_OK), 0);
 }

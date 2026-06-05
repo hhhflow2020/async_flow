@@ -14,9 +14,9 @@
 - `TcpServer`：管理多个 listener、默认 IO 线程组、动态 add/remove listener、启动/停止生命周期。
 - `TcpClient`：在绑定 IO 线程上发起非阻塞 connect，连接成功后交给 `TcpConnection` 统一管理。
 - `UdpSocket`：绑定本地 IPv4/IPv6 endpoint，可选连接 remote endpoint；同一抽象同时覆盖 UDP server/client。
-- `UnixStreamServer` / `UnixStreamClient`：面向 Unix domain stream socket 的 server/client 包装，复用 stream connection 热路径。
-- `UnixDatagramSocket`：面向 Unix domain datagram socket 的 server/client 包装，复用 datagram shard 热路径并管理 path 生命周期。
-- `TcpConnectionHandle` / `UdpSocketHandle`：线程安全的业务侧句柄，跨线程发送会投递到归属 IO shard。
+- `unix_stream_server` / `unix_stream_client`：面向 Unix domain stream socket 的 server/client 控制对象，复用 stream connection 热路径。
+- `unix_datagram_socket`：面向 Unix domain datagram socket 的 server/client 控制对象，复用 datagram shard 热路径并管理 path 生命周期。
+- `tcp_connection_handle` / `udp_socket_handle`：线程安全的业务侧句柄，跨线程发送会投递到归属 IO shard。
 
 ## IO 线程循环
 
@@ -129,29 +129,45 @@ TCP stream 连接建立后的跨线程发送、关闭和控制操作已经通过
 Unix domain stream socket 使用专门的 `unix_stream_server` / `unix_stream_client` API，避免用户直接把 Unix path 塞进 TCP API。底层仍然复用 TCP stream 热路径，所以读写、关闭、跨线程发送和 generation 校验与 TCP stream 完全一致。
 
 ```cpp
-af::net::unix_stream_server<Runtime> server;
-server.bind_threads(Runtime::thread_group<IoTag>());
+af::net::unix_stream_server server(runtime);
+af::net::unix_stream_callbacks callbacks{};
+callbacks.owner = &state;
+callbacks.on_accept = &unix_on_accept;
+callbacks.on_read = &unix_on_read;
+callbacks.on_close = &unix_on_close;
 
-const auto listener = server.add_listener<UnixHandler>({
-    .name = "admin",
-    .endpoint = af::net::unix_endpoint::unix_path("/tmp/af-admin.sock"),
+runtime.post(io_thread, [&] {
+    af::net::unix_stream_listener_config config;
+    config.name = "admin";
+    config.endpoint = af::net::unix_endpoint::unix_path("/tmp/af-admin.sock");
+    config.threads = {io_thread};
+
+    const af::net::listener_result listener =
+        server.add_listener(std::move(config), callbacks);
+    if (listener.ok()) {
+        server.start();
+    }
 });
-
-server.start();
 ```
 
 Unix stream listener 强制使用 `accept_strategy::single_acceptor`：只有一个 IO shard 负责 bind/listen/accept，accepted fd 再按 stream connection 逻辑进入目标 IO shard。这样可以避免多个线程同时 bind 同一个 filesystem path。默认会在 bind 前 unlink 已存在的 path，并在 listener close/stop 后 unlink 绑定 path；可通过 `tcp_listener_options::unlink_existing_unix_path` 和 `unlink_unix_path_on_close` 调整。
 
 ```cpp
-af::net::unix_stream_client<Runtime> client;
+af::net::unix_stream_client client(runtime);
+af::net::unix_stream_client_callbacks callbacks{};
+callbacks.owner = &state;
+callbacks.on_connect = &unix_client_on_connect;
+callbacks.on_read = &unix_client_on_read;
+callbacks.on_close = &unix_client_on_close;
+callbacks.on_error = &unix_client_on_error;
 
-// 在 runtime task 中执行，且后续控制操作固定在同一个 reactor 线程上。
-client.bind_threads(Runtime::thread_group<IoTag>());
-
-client.connect<ClientHandler>({
-    .name = "admin-client",
-    .endpoint = af::net::unix_endpoint::unix_path("/tmp/af-admin.sock"),
-    .connect_timeout = std::chrono::seconds(3),
+runtime.post(io_thread, [&] {
+    af::net::unix_stream_connect_config config;
+    config.name = "admin-client";
+    config.endpoint = af::net::unix_endpoint::unix_path("/tmp/af-admin.sock");
+    config.owner_thread = io_thread;
+    config.connect_timeout = std::chrono::seconds(3);
+    client.connect(std::move(config), callbacks);
 });
 ```
 
@@ -160,25 +176,33 @@ client.connect<ClientHandler>({
 Unix domain datagram socket 使用专门的 `unix_datagram_socket` API。它和 IP UDP 一样是无连接 datagram 模型，但 filesystem path 的 bind/unlink 生命周期不同，所以对外不复用 `udp_socket` 的配置入口。底层仍复用 datagram shard、读预算和跨线程 runtime task 发送逻辑。
 
 ```cpp
-af::net::unix_datagram_socket<Runtime> server;
-server.bind_threads(Runtime::thread_group<IoTag>());
+af::net::unix_datagram_socket server(runtime);
+af::net::unix_datagram_callbacks callbacks{};
+callbacks.owner = &state;
+callbacks.on_datagram = &unix_datagram_on_packet;
+callbacks.on_error = &unix_datagram_on_error;
 
-server.bind<UnixDatagramHandler>({
-    .name = "unix-dgram-server",
-    .local_endpoint = af::net::unix_endpoint::unix_path("/tmp/af-dgram.sock"),
+runtime.post(io_thread, [&] {
+    af::net::unix_datagram_bind_config config;
+    config.name = "unix-dgram-server";
+    config.local_endpoint = af::net::unix_endpoint::unix_path("/tmp/af-dgram.sock");
+    config.threads = {io_thread};
+    server.bind(std::move(config), callbacks);
 });
 ```
 
 连接式 client 可以绑定自己的本地 path，并指定 remote path：
 
 ```cpp
-af::net::unix_datagram_socket<Runtime> client;
-client.bind_threads(Runtime::thread_group<IoTag>());
+af::net::unix_datagram_socket client(runtime);
 
-client.connect<ClientHandler>({
-    .name = "unix-dgram-client",
-    .local_endpoint = af::net::unix_endpoint::unix_path("/tmp/af-dgram-client.sock"),
-    .remote_endpoint = af::net::unix_endpoint::unix_path("/tmp/af-dgram.sock"),
+runtime.post(io_thread, [&] {
+    af::net::unix_datagram_connect_config config;
+    config.name = "unix-dgram-client";
+    config.local_endpoint = af::net::unix_endpoint::unix_path("/tmp/af-dgram-client.sock");
+    config.remote_endpoint = af::net::unix_endpoint::unix_path("/tmp/af-dgram.sock");
+    config.threads = {io_thread};
+    client.connect(std::move(config), callbacks);
 });
 
 client.handle().send(af::Buffer::copy("ping", 4));

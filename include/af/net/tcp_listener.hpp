@@ -59,10 +59,6 @@ public:
         if (!prepare_owner_thread(thread)) {
             return false;
         }
-        if (config.endpoint.family == AddressFamily::Unix) {
-            notify_error(EAFNOSUPPORT);
-            return false;
-        }
         if (!normalize_config(config)) {
             return false;
         }
@@ -74,7 +70,12 @@ public:
             return false;
         }
 
-        int fd = ::socket(address.family, SOCK_STREAM, IPPROTO_TCP);
+        const bool unix_domain = address.family == AF_UNIX;
+        if (unix_domain && config.options.unlink_existing_unix_path) {
+            unlink_unix_path(config.endpoint);
+        }
+
+        int fd = ::socket(address.family, SOCK_STREAM, unix_domain ? 0 : IPPROTO_TCP);
         if (fd < 0) {
             notify_error(errno);
             return false;
@@ -94,6 +95,9 @@ public:
         if (::listen(fd, config.options.backlog) != 0) {
             const int saved_errno = errno == 0 ? EIO : errno;
             ::close(fd);
+            if (unix_domain && config.options.unlink_unix_path_on_close) {
+                unlink_unix_path(config.endpoint);
+            }
             notify_error(saved_errno);
             return false;
         }
@@ -198,6 +202,10 @@ private:
         }
         af::net::detail::set_no_sigpipe(fd);
 
+        if (family == AF_UNIX) {
+            return true;
+        }
+
         int one = 1;
         if (::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) != 0) {
             return false;
@@ -271,9 +279,24 @@ private:
     }
 
     void close_without_unregister() noexcept {
+        const bool unlink_path = fd_ >= 0 && should_unlink_bound_unix_path();
         af::net::detail::close_fd(fd_);
+        if (unlink_path) {
+            unlink_unix_path(config_.endpoint);
+        }
         source_ = af::fd_event_source{};
         started_ = false;
+    }
+
+    [[nodiscard]] bool should_unlink_bound_unix_path() const noexcept {
+        return config_.endpoint.family == AddressFamily::Unix &&
+               config_.options.unlink_unix_path_on_close;
+    }
+
+    static void unlink_unix_path(const tcp_endpoint &endpoint) noexcept {
+        if (endpoint.family == AddressFamily::Unix && !endpoint.address.empty()) {
+            static_cast<void>(::unlink(endpoint.address.c_str()));
+        }
     }
 
     af::runtime *owner_{nullptr};

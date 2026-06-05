@@ -17,6 +17,12 @@ namespace af::net {
 
 namespace detail {
 
+inline void runtime_udp_unlink_unix_path(const udp_endpoint &endpoint) noexcept {
+    if (endpoint.family == address_family::unix_domain && !endpoint.address.empty()) {
+        static_cast<void>(::unlink(endpoint.address.c_str()));
+    }
+}
+
 struct runtime_udp_shard {
     explicit runtime_udp_shard(std::shared_ptr<runtime_udp_state> shared_state,
                                af::thread_ref thread) noexcept
@@ -260,6 +266,10 @@ runtime_udp_start_shard_on_owner(const std::shared_ptr<runtime_udp_state> &state
         return false;
     }
 
+    if (local.family == AF_UNIX && config.options.unlink_existing_unix_path) {
+        runtime_udp_unlink_unix_path(config.local_endpoint);
+    }
+
     int fd = ::socket(local.family, SOCK_DGRAM, 0);
     if (fd < 0) {
         if (callbacks.on_error != nullptr) {
@@ -273,15 +283,18 @@ runtime_udp_start_shard_on_owner(const std::shared_ptr<runtime_udp_state> &state
     }
 
     int one = 1;
-    static_cast<void>(::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)));
+    if (local.family != AF_UNIX) {
+        static_cast<void>(::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)));
 #if defined(SO_REUSEPORT)
-    if (config.options.reuse_port) {
-        static_cast<void>(::setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof(one)));
-    }
+        if (config.options.reuse_port) {
+            static_cast<void>(::setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof(one)));
+        }
 #endif
-    if (local.family == AF_INET6) {
-        const int v6_only = config.options.ipv6_only ? 1 : 0;
-        static_cast<void>(::setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6_only, sizeof(v6_only)));
+        if (local.family == AF_INET6) {
+            const int v6_only = config.options.ipv6_only ? 1 : 0;
+            static_cast<void>(
+                ::setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6_only, sizeof(v6_only)));
+        }
     }
 
     if (::bind(fd, reinterpret_cast<const sockaddr *>(&local.storage), local.size) != 0) {
@@ -300,6 +313,9 @@ runtime_udp_start_shard_on_owner(const std::shared_ptr<runtime_udp_state> &state
             ::connect(fd, reinterpret_cast<const sockaddr *>(&remote.storage), remote.size) != 0) {
             const int error = errno == 0 ? EIO : errno;
             detail::udp_close_fd(fd);
+            if (local.family == AF_UNIX && config.options.unlink_unix_path_on_close) {
+                runtime_udp_unlink_unix_path(config.local_endpoint);
+            }
             if (callbacks.on_error != nullptr) {
                 callbacks.on_error(callbacks.owner, shard.handle(), error);
             }
@@ -329,6 +345,9 @@ runtime_udp_start_shard_on_owner(const std::shared_ptr<runtime_udp_state> &state
     shard.publish_generation_on_owner();
     if (!state->owner->register_reactor_source(shard.owner_thread, &shard.source)) {
         detail::udp_close_fd(shard.fd);
+        if (local.family == AF_UNIX && config.options.unlink_unix_path_on_close) {
+            runtime_udp_unlink_unix_path(config.local_endpoint);
+        }
         shard.socket_family.store(AF_UNSPEC, std::memory_order_release);
         return false;
     }
@@ -349,7 +368,13 @@ inline void runtime_udp_stop_shard_on_owner(const std::shared_ptr<runtime_udp_st
             state->owner->unregister_reactor_source(shard.owner_thread, &shard.source));
         shard.registered = false;
     }
+    const udp_endpoint local_endpoint = shard.local_endpoint;
+    const bool unlink_path = shard.socket_family.load(std::memory_order_acquire) == AF_UNIX &&
+                             shard.options.unlink_unix_path_on_close;
     detail::udp_close_fd(shard.fd);
+    if (unlink_path) {
+        runtime_udp_unlink_unix_path(local_endpoint);
+    }
     shard.socket_family.store(AF_UNSPEC, std::memory_order_release);
     shard.callbacks = {};
     shard.connect_remote = false;
@@ -499,9 +524,11 @@ inline int udp_socket::validate_config(const udp_socket_config &config) const no
 
     af::detail::SocketAddress local{};
     int address_error = 0;
-    if (!af::detail::socket_address_from_endpoint(config.local_endpoint, local, address_error) ||
-        local.family == AF_UNIX) {
+    if (!af::detail::socket_address_from_endpoint(config.local_endpoint, local, address_error)) {
         return address_error == 0 ? EINVAL : address_error;
+    }
+    if (local.family == AF_UNIX && config.threads.size() > 1U) {
+        return EINVAL;
     }
     if (config.threads.size() > 1U && !config.options.reuse_port) {
         return EINVAL;
@@ -509,11 +536,11 @@ inline int udp_socket::validate_config(const udp_socket_config &config) const no
     if (config.connect_remote) {
         af::detail::SocketAddress remote{};
         if (!af::detail::socket_address_from_endpoint(config.remote_endpoint, remote,
-                                                      address_error) ||
-            remote.family == AF_UNIX) {
+                                                      address_error)) {
             return address_error == 0 ? EINVAL : address_error;
         }
-        if (remote.family != local.family || config.remote_endpoint.port == 0U) {
+        if (remote.family != local.family ||
+            (remote.family != AF_UNIX && config.remote_endpoint.port == 0U)) {
             return EINVAL;
         }
     }

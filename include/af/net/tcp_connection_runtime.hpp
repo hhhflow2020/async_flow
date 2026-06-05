@@ -333,7 +333,8 @@ private:
             return false;
         }
         detail::set_no_sigpipe(fd_);
-        if (local_endpoint_.family == address_family::unix_domain) {
+        if (local_endpoint_.family == address_family::unix_domain ||
+            peer_endpoint_.family == address_family::unix_domain) {
             return true;
         }
         return detail::set_tcp_no_delay(fd_, config_.no_delay) &&
