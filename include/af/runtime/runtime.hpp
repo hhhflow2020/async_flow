@@ -17,6 +17,7 @@
 
 #include "af/detail/config.hpp"
 #include "af/detail/runtime/atomic_wait.hpp"
+#include "af/detail/runtime/cpu_relax.hpp"
 #include "af/detail/runtime/runtime_service_task.hpp"
 #include "af/detail/thread/thread_name.hpp"
 #include "af/runtime/config_resolution.hpp"
@@ -232,6 +233,7 @@ private:
               max_task_run_slice_(owner_.config().scheduler.max_task_run_slice),
               timer_drain_budget_(owner_.config().scheduler.timer_drain_budget),
               service_task_budget_(owner_.config().scheduler.service_task_budget),
+              idle_wait_(owner_.config().scheduler.idle_wait),
               wake_policy_(owner_.config().scheduler.wake) {
             timers_.reserve(owner_.config().timer.initial_reserve);
             if (thread_.kind == thread_kind::io) {
@@ -479,12 +481,64 @@ private:
             if (timeout == std::chrono::nanoseconds(0)) {
                 return;
             }
+            if (idle_wait_ == idle_wait_strategy::spin) {
+                spin_until_wake_or_timeout(observed, timeout);
+                return;
+            }
+            if (idle_wait_ == idle_wait_strategy::yield) {
+                yield_until_wake_or_timeout(observed, timeout);
+                return;
+            }
             if (timeout == std::chrono::nanoseconds::max()) {
                 detail::atomic_wait_value(wake_epoch_, observed, std::memory_order_acquire);
                 return;
             }
             static_cast<void>(detail::atomic_wait_value_for(wake_epoch_, observed, timeout,
                                                             std::memory_order_acquire));
+        }
+
+        [[nodiscard]] bool wake_observed(std::uint32_t observed) const noexcept {
+            return stop_requested_.load(std::memory_order_acquire) ||
+                   wake_epoch_.load(std::memory_order_acquire) != observed;
+        }
+
+        void spin_until_wake_or_timeout(std::uint32_t observed,
+                                        std::chrono::nanoseconds timeout) noexcept {
+            wait_polling_until_wake_or_timeout(observed, timeout, false);
+        }
+
+        void yield_until_wake_or_timeout(std::uint32_t observed,
+                                         std::chrono::nanoseconds timeout) noexcept {
+            wait_polling_until_wake_or_timeout(observed, timeout, true);
+        }
+
+        void wait_polling_until_wake_or_timeout(std::uint32_t observed,
+                                                std::chrono::nanoseconds timeout,
+                                                bool yield_wait) noexcept {
+            if (timeout == std::chrono::nanoseconds::max()) {
+                while (!wake_observed(observed)) {
+                    idle_wait_once(yield_wait);
+                }
+                return;
+            }
+
+            const std::int64_t now = steady_now_ns();
+            const std::int64_t timeout_ns = timeout.count();
+            const std::int64_t deadline =
+                timeout_ns > std::numeric_limits<std::int64_t>::max() - now
+                    ? std::numeric_limits<std::int64_t>::max()
+                    : now + timeout_ns;
+            while (!wake_observed(observed) && steady_now_ns() < deadline) {
+                idle_wait_once(yield_wait);
+            }
+        }
+
+        static void idle_wait_once(bool yield_wait) noexcept {
+            if (yield_wait) {
+                std::this_thread::yield();
+                return;
+            }
+            detail::cpu_relax();
         }
 
         [[nodiscard]] bool prepare_wait(std::uint32_t &observed) noexcept {
@@ -547,6 +601,7 @@ private:
         std::size_t service_task_budget_{32};
         std::size_t next_service_task_{0};
         std::uint64_t next_timer_sequence_{0};
+        idle_wait_strategy idle_wait_{idle_wait_strategy::futex};
         wake_policy wake_policy_{wake_policy::empty_to_non_empty};
         alignas(detail::hardware_cache_line_size) std::atomic<bool> sleep_requested_{false};
         alignas(detail::hardware_cache_line_size) std::atomic<std::uint32_t> wake_epoch_{0};

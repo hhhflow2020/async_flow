@@ -181,6 +181,31 @@ private:
     std::atomic<bool> &owner_matches_;
 };
 
+void expect_idle_wait_strategy_accepts_delayed_post(af::idle_wait_strategy strategy) {
+    af::runtime_config config;
+    config.threads = {af::cpu_threads("logic", 1)};
+    config.scheduler.idle_wait = strategy;
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    std::atomic<int> counter{0};
+    std::atomic<std::uint16_t> observed_thread{af::runtime_invalid_thread_index};
+    std::atomic<bool> owner_matches{false};
+    PostedRuntimeWork work(counter, observed_thread, owner_matches);
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 1));
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+    const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
+    ASSERT_TRUE(runtime.post(cpu_thread, &work));
+    ASSERT_TRUE(wait_for_counter(counter, 1));
+    EXPECT_EQ(observed_thread.load(std::memory_order_acquire), cpu_thread);
+    EXPECT_TRUE(owner_matches.load(std::memory_order_acquire));
+
+    runtime.stop();
+}
+
 class StopRuntimeWork final : public af::runtime_work {
 public:
     explicit StopRuntimeWork(std::atomic<int> &counter) : counter_(counter) {}
@@ -400,6 +425,32 @@ private:
     std::atomic<long long> &elapsed_ns_;
     std::chrono::steady_clock::time_point start_{};
 };
+
+void expect_idle_wait_strategy_runs_delayed_task(af::idle_wait_strategy strategy) {
+    af::runtime_config config;
+    config.threads = {af::cpu_threads("logic", 1)};
+    config.scheduler.idle_wait = strategy;
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    std::atomic<int> counter{0};
+    std::atomic<std::uint16_t> observed_thread{af::runtime_invalid_thread_index};
+    std::atomic<long long> elapsed_ns{0};
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 1));
+
+    const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
+    auto task = af::make_task<DelayedRuntimeTask>(runtime, counter, observed_thread, elapsed_ns);
+    ASSERT_TRUE(task->do_it(cpu_thread, std::chrono::milliseconds(5)));
+    task.reset();
+
+    ASSERT_TRUE(wait_for_counter(counter, 1));
+    EXPECT_EQ(observed_thread.load(std::memory_order_acquire), cpu_thread);
+    EXPECT_GE(elapsed_ns.load(std::memory_order_acquire), 1'000'000LL);
+
+    runtime.stop();
+}
 
 class DelayedTwoHopRuntimeTask final : public af::runtime_task {
 public:
@@ -885,6 +936,11 @@ TEST(RuntimeConfigTests, RuntimeWakePolicyEmptyToNonEmptyDrainsQueuedPosts) {
     runtime.stop();
 }
 
+TEST(RuntimeConfigTests, RuntimeIdleWaitSpinAndYieldAcceptDelayedPosts) {
+    expect_idle_wait_strategy_accepts_delayed_post(af::idle_wait_strategy::spin);
+    expect_idle_wait_strategy_accepts_delayed_post(af::idle_wait_strategy::yield);
+}
+
 TEST(RuntimeConfigTests, RuntimeInstanceStopCanBeRequestedFromRuntimeThread) {
     af::runtime_config config;
     config.threads = {
@@ -1168,6 +1224,11 @@ TEST(RuntimeConfigTests, RuntimeTaskScheduleAfterRunsOnTargetThread) {
     EXPECT_GE(elapsed_ns.load(std::memory_order_acquire), 5'000'000LL);
 
     runtime.stop();
+}
+
+TEST(RuntimeConfigTests, RuntimeIdleWaitSpinAndYieldRunDelayedTasks) {
+    expect_idle_wait_strategy_runs_delayed_task(af::idle_wait_strategy::spin);
+    expect_idle_wait_strategy_runs_delayed_task(af::idle_wait_strategy::yield);
 }
 
 TEST(RuntimeConfigTests, RuntimeTaskCanRequestDelayedNextHopWhileRunning) {
