@@ -19,11 +19,11 @@
 #include "af/detail/config.hpp"
 #include "af/detail/net/reactor/net_io_channel.hpp"
 #include "af/detail/net/socket_address.hpp"
+#include "af/net/detail/udp_socket_ops.hpp"
 #include "af/net/tcp_endpoint.hpp"
 #include "af/net/udp_types.hpp"
 #include "af/thread_kind.hpp"
 
-#include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
@@ -48,23 +48,6 @@ enum class UdpSendKind : std::uint8_t {
 } // namespace detail
 
 namespace detail {
-
-[[nodiscard]] inline bool udp_set_nonblocking(int fd) noexcept {
-    const int current = ::fcntl(fd, F_GETFL, 0);
-    return current >= 0 && ::fcntl(fd, F_SETFL, current | O_NONBLOCK) == 0;
-}
-
-[[nodiscard]] inline bool udp_set_cloexec(int fd) noexcept {
-    const int current = ::fcntl(fd, F_GETFD, 0);
-    return current >= 0 && ::fcntl(fd, F_SETFD, current | FD_CLOEXEC) == 0;
-}
-
-inline void udp_close_fd(int &fd) noexcept {
-    if (fd >= 0) {
-        ::close(fd);
-        fd = -1;
-    }
-}
 
 template <typename Runtime> class UdpHandlerBase {
 public:
