@@ -4,7 +4,8 @@
 #include <utility>
 #include <vector>
 
-#include "af/async_runtime.hpp"
+#include "af/detail/config.hpp"
+#include "af/parallel.hpp"
 
 namespace af {
 

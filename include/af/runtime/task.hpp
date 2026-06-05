@@ -188,6 +188,10 @@ protected:
         return task_result::cancelled;
     }
 
+    [[nodiscard]] std::uint32_t last_parallel_failures() const noexcept {
+        return last_parallel_failures_;
+    }
+
 private:
     static constexpr std::uint32_t no_requested_thread = std::numeric_limits<std::uint32_t>::max();
     static constexpr task_id_type task_id_block_size = 1024;
@@ -290,6 +294,7 @@ private:
     task_id_type task_id_{invalid_task_id};
     std::int64_t timer_deadline_ns_{no_timer_deadline_ns};
     destroy_fn destroy_{nullptr};
+    std::uint32_t last_parallel_failures_{0};
 
     template <typename TaskT> friend class runtime_task_handle;
 
@@ -321,6 +326,28 @@ struct runtime_task_access {
     static void cancel_timer(runtime_task *task) noexcept {
         if (task != nullptr) {
             task->cancel_timer();
+        }
+    }
+
+    static void set_last_parallel_failures(runtime_task *task, std::uint32_t failures) noexcept {
+        if (task != nullptr) {
+            task->last_parallel_failures_ = failures;
+        }
+    }
+
+    [[nodiscard]] static bool schedule_to(runtime_task *task, std::uint16_t thread) noexcept {
+        return task != nullptr && task->schedule_to(thread);
+    }
+
+    static void add_lifetime_ref(runtime_task *task) noexcept {
+        if (task != nullptr) {
+            task->add_lifetime_ref();
+        }
+    }
+
+    static void release_lifetime_ref(runtime_task *task) noexcept {
+        if (task != nullptr) {
+            task->release_lifetime_ref();
         }
     }
 };

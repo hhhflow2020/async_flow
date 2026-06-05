@@ -12,15 +12,18 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "af/detail/config.hpp"
 #include "af/detail/runtime/atomic_wait.hpp"
 #include "af/detail/runtime/cpu_relax.hpp"
+#include "af/detail/runtime/runtime_common_state.hpp"
 #include "af/detail/runtime/runtime_service_task.hpp"
 #include "af/detail/thread/thread_attributes.hpp"
 #include "af/detail/thread/thread_name.hpp"
+#include "af/parallel.hpp"
 #include "af/runtime/config_resolution.hpp"
 #include "af/runtime/reactor.hpp"
 #include "af/runtime/task.hpp"
@@ -173,6 +176,7 @@ public:
         try {
             executors_.clear();
             executors_.reserve(resolution_.resolved.threads.size());
+            ordered_batch_state_.assign(resolution_.resolved.threads.size(), ordered_batch_state{});
             for (const auto &thread : resolution_.resolved.threads) {
                 executors_.push_back(std::make_unique<executor>(*this, thread));
             }
@@ -186,6 +190,7 @@ public:
             request_stop();
             join_all();
             executors_.clear();
+            ordered_batch_state_.clear();
             active_thread_count_.store(0, std::memory_order_release);
             state_.store(runtime_state::stopped, std::memory_order_release);
             throw;
@@ -208,6 +213,45 @@ public:
     [[nodiscard]] bool post(thread_ref thread, runtime_work *work) noexcept {
         return post(thread.index, work);
     }
+
+    template <typename Op, typename KeyFn>
+    [[nodiscard]] static ShardedOps<Op> split_by_shard(std::vector<Op> &&ops,
+                                                       std::uint16_t shard_count, KeyFn &&key_fn);
+
+    template <typename Op, typename Handler>
+    [[nodiscard]] bool parallel_shards(thread_group_ref shard_threads, ShardedOps<Op> &sharded_ops,
+                                       parallel_mode mode, runtime_task *owner, Handler &&handler);
+
+    template <typename Op, typename Handler>
+    [[nodiscard]] bool parallel_shards(thread_ref shard_begin, ShardedOps<Op> &sharded_ops,
+                                       parallel_mode mode, runtime_task *owner, Handler &&handler);
+
+    template <typename Op, typename Handler>
+    [[nodiscard]] bool parallel_shards_ordered(thread_group_ref shard_threads,
+                                               ShardedOps<Op> &sharded_ops, std::uint64_t batch_id,
+                                               runtime_task *owner, Handler &&handler);
+
+    template <typename Op, typename Handler>
+    [[nodiscard]] bool parallel_shards_ordered(thread_group_ref shard_threads,
+                                               ShardedOps<Op> &sharded_ops, std::uint64_t batch_id,
+                                               ordered_batch_options options, runtime_task *owner,
+                                               Handler &&handler);
+
+    template <typename Op, typename Handler>
+    [[nodiscard]] bool parallel_shards_ordered(thread_ref shard_begin, ShardedOps<Op> &sharded_ops,
+                                               std::uint64_t batch_id, runtime_task *owner,
+                                               Handler &&handler);
+
+    template <typename Op, typename Handler>
+    [[nodiscard]] bool parallel_shards_ordered(thread_ref shard_begin, ShardedOps<Op> &sharded_ops,
+                                               std::uint64_t batch_id,
+                                               ordered_batch_options options, runtime_task *owner,
+                                               Handler &&handler);
+
+    template <typename StreamTag, typename ApplyTaskT, typename Batch>
+    [[nodiscard]] bool start_ordered_task(thread_ref sequencer_thread, Batch &&batch);
+
+    [[nodiscard]] std::uint64_t ordered_last_applied_batch_id(thread_ref thread) const noexcept;
 
     [[nodiscard]] bool register_service_task(thread_index thread,
                                              detail::RuntimeServiceTask *service) noexcept {
@@ -261,11 +305,20 @@ public:
         }
         join_all();
         executors_.clear();
+        ordered_batch_state_.clear();
         active_thread_count_.store(0, std::memory_order_release);
         state_.store(runtime_state::stopped, std::memory_order_release);
     }
 
 private:
+    using ordered_batch_state = detail::OrderedBatchState;
+
+    enum class ordered_guard_decision : std::uint8_t {
+        run,
+        skip_already_applied,
+        fail,
+    };
+
     class executor {
     public:
         executor(runtime &owner, runtime_thread_info thread)
@@ -729,8 +782,35 @@ private:
     void start_owned_logger_if_configured();
     void stop_owned_logger() noexcept;
 
+    template <typename Op, typename Handler, bool Ordered>
+    [[nodiscard]] bool
+    parallel_shards_impl(std::bool_constant<Ordered>, thread_group_ref shard_threads,
+                         ShardedOps<Op> &sharded_ops, parallel_mode mode, std::uint64_t batch_id,
+                         ordered_batch_options options, runtime_task *owner, Handler &&handler);
+
+    [[nodiscard]] ordered_guard_decision check_order_guard(std::uint64_t batch_id,
+                                                           ordered_batch_options options) noexcept;
+
+    void commit_order_guard(std::uint64_t batch_id) noexcept;
+
+    template <typename StreamTag, typename ApplyTaskT, typename BatchT> struct ordered_start_state;
+
+    template <typename StreamTag, typename ApplyTaskT, typename BatchT>
+    [[nodiscard]] ordered_start_state<StreamTag, ApplyTaskT, BatchT> &
+    ordered_start_state_for_thread();
+
+    template <typename StreamTag, typename ApplyTaskT, typename BatchT> class ordered_start_task;
+
+    template <typename Op, typename Handler, bool Ordered>
+    [[nodiscard]] bool run_parallel_shard(std::uint16_t shard_index, std::uint64_t batch_id,
+                                          ordered_batch_options options, std::vector<Op> &ops,
+                                          Handler &handler) noexcept;
+
+    template <typename Op, typename Handler, bool Ordered> class parallel_shard_task;
+
     runtime_config_resolution resolution_;
     std::vector<std::unique_ptr<executor>> executors_;
+    std::vector<ordered_batch_state> ordered_batch_state_;
     std::unique_ptr<AsyncLogHandle> owned_logger_;
     std::atomic<runtime_state> state_{runtime_state::stopped};
     std::atomic<bool> owned_logger_stop_started_{false};
@@ -806,4 +886,5 @@ inline void runtime::stop_owned_logger() noexcept {
 
 } // namespace af
 
+#include "af/runtime/parallel.hpp"
 #include "af/runtime/task_impl.hpp"

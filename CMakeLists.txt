@@ -155,6 +155,7 @@ if(ASYNCFLOW_BUILD_TESTS)
         tests/runtime_config_tests.cpp
         tests/runtime_backpressure_tests.cpp
         tests/runtime_shutdown_policy_tests.cpp
+        tests/runtime_instance_parallel_tests.cpp
         tests/runtime_parallel_shards_tests.cpp
         tests/runtime_ordered_start_tests.cpp
         tests/runtime_ordered_batch_tests.cpp
