@@ -155,8 +155,9 @@ int main() {
         auto add_task = af::make_task<AddGoldTask>(runtime, completed);
         auto login_task = af::make_task<LoginTask>(runtime, completed);
 
-        started = add_task->do_it(1001U, 100, logic_threads) && started;
-        started = login_task->do_it(1002U, logic_threads, db_threads.front()) && started;
+        const bool add_started = add_task->do_it(1001U, 100, logic_threads);
+        const bool login_started = login_task->do_it(1002U, logic_threads, db_threads.front());
+        started = add_started && login_started;
     }
 
     const bool completed_all = wait_for_counter(completed, 2);

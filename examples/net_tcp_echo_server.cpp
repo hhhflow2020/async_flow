@@ -71,7 +71,7 @@ public:
         : af::runtime_task(token, owner) {}
 
     bool do_it(af::thread_ref cpu_thread, af::net::tcp_connection_handle conn,
-               af::Buffer payload) noexcept {
+               af::buffer payload) noexcept {
         conn_ = conn;
         payload_ = std::move(payload);
         return schedule_to(cpu_thread);
@@ -101,7 +101,7 @@ private:
     }
 
     af::net::tcp_connection_handle conn_;
-    af::Buffer payload_;
+    af::buffer payload_;
 };
 
 void echo_on_accept(void *owner, af::net::tcp_connection_ref conn) noexcept {
@@ -109,7 +109,7 @@ void echo_on_accept(void *owner, af::net::tcp_connection_ref conn) noexcept {
     LOG(INFO) << "tcp echo accepted slot=" << conn.slot() << " generation=" << conn.generation();
 }
 
-void echo_on_read(void *owner, af::net::tcp_connection_ref conn, af::BufferView bytes) noexcept {
+void echo_on_read(void *owner, af::net::tcp_connection_ref conn, af::buffer_view bytes) noexcept {
     auto *state = static_cast<echo_shard_state *>(owner);
     LOG(INFO) << "tcp echo received bytes=" << bytes.size() << " slot=" << conn.slot()
               << " generation=" << conn.generation();
@@ -117,9 +117,9 @@ void echo_on_read(void *owner, af::net::tcp_connection_ref conn, af::BufferView 
         return;
     }
 
-    af::Buffer payload;
+    af::buffer payload;
     try {
-        payload = af::Buffer::copy(bytes);
+        payload = af::buffer::copy(bytes);
     } catch (...) {
         LOG(ERROR) << "tcp echo failed to copy payload slot=" << conn.slot()
                    << " generation=" << conn.generation();
@@ -128,7 +128,8 @@ void echo_on_read(void *owner, af::net::tcp_connection_ref conn, af::BufferView 
     }
 
     auto task = af::make_task<lowercase_echo_task>(*state->runtime);
-    if (!task->do_it(state->cpu_thread, conn.handle(), std::move(payload))) {
+    const bool started = task->do_it(state->cpu_thread, conn.handle(), std::move(payload));
+    if (!started) {
         LOG(ERROR) << "tcp echo failed to schedule compute task slot=" << conn.slot()
                    << " generation=" << conn.generation();
         conn.close(af::net::close_reason::error);
@@ -188,13 +189,13 @@ void start_server_shard(af::net::tcp_server &server, echo_shard_state &state,
     state.lifecycle->record_start(ok, listener.error == 0 ? EIO : listener.error);
 }
 
-[[nodiscard]] bool wait_for_shutdown_signal(af::SignalSet &signals,
+[[nodiscard]] bool wait_for_shutdown_signal(af::signal_set &signals,
                                             const server_lifecycle_state &lifecycle) {
     for (;;) {
         if (lifecycle.failed.load(std::memory_order_acquire)) {
             return false;
         }
-        const af::SignalWaitResult result = signals.wait_for(std::chrono::seconds(1));
+        const af::signal_wait_result result = signals.wait_for(std::chrono::seconds(1));
         if (result.ok()) {
             LOG(INFO) << "tcp echo received signal=" << result.signal;
             return true;
@@ -215,7 +216,7 @@ int main(int argc, char **argv) {
     }
     const bool ipv6 = argc > 2 && std::strcmp(argv[2], "--ipv6") == 0;
 
-    af::SignalSet signals = af::make_termination_signal_set();
+    af::signal_set signals = af::make_termination_signal_set();
     if (!signals.valid()) {
         std::cerr << "failed to install signal set error=" << signals.error() << '\n';
         return 1;

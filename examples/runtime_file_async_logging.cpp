@@ -98,7 +98,8 @@ int main(int argc, char **argv) {
     bool started = true;
     for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(task_count); ++i) {
         auto task = af::make_task<RuntimeFileLogTask>(runtime, i, completed);
-        started = task->do_it(cpu_threads.shard(i)) && started;
+        const bool task_started = task->do_it(cpu_threads.shard(i));
+        started = task_started && started;
     }
 
     const bool completed_all = wait_for_completion(completed, task_count);

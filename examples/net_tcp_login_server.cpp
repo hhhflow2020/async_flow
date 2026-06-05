@@ -66,7 +66,7 @@ struct server_lifecycle_state {
 struct stream_parser {
     std::vector<std::byte> buffered;
 
-    template <typename Fn> [[nodiscard]] packet_parse_result feed(af::BufferView bytes, Fn &&fn);
+    template <typename Fn> [[nodiscard]] packet_parse_result feed(af::buffer_view bytes, Fn &&fn);
 };
 
 struct login_shard_state {
@@ -97,7 +97,7 @@ template <typename Predicate>
     return connection_key(conn.slot(), conn.generation());
 }
 
-[[nodiscard]] af::Buffer make_packet(std::uint16_t packet_id, std::string payload) {
+[[nodiscard]] af::buffer make_packet(std::uint16_t packet_id, std::string payload) {
     if (payload.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()) -
                              sizeof(std::uint16_t)) {
         return {};
@@ -105,7 +105,7 @@ template <typename Predicate>
     const std::uint32_t length = static_cast<std::uint32_t>(sizeof(std::uint16_t) + payload.size());
     const std::uint32_t network_length = htonl(length);
     const std::uint16_t network_id = htons(packet_id);
-    af::Buffer packet = af::Buffer::with_capacity(packet_header_size + payload.size());
+    af::buffer packet = af::buffer::with_capacity(packet_header_size + payload.size());
     if (!packet.try_append(&network_length, sizeof(network_length)) ||
         !packet.try_append(&network_id, sizeof(network_id)) ||
         !packet.try_append(payload.data(), payload.size())) {
@@ -142,7 +142,7 @@ private:
             return done();
         }
 
-        af::Buffer packet = make_packet(login_response_id, std::move(payload));
+        af::buffer packet = make_packet(login_response_id, std::move(payload));
         if (packet.empty()) {
             LOG(ERROR) << "failed to encode login response user=" << user_id_;
             return done();
@@ -165,7 +165,7 @@ private:
 };
 
 template <typename Fn>
-[[nodiscard]] packet_parse_result stream_parser::feed(af::BufferView bytes, Fn &&fn) {
+[[nodiscard]] packet_parse_result stream_parser::feed(af::buffer_view bytes, Fn &&fn) {
     const auto old_size = buffered.size();
     try {
         buffered.resize(old_size + bytes.size());
@@ -198,7 +198,7 @@ template <typename Fn>
         const std::uint16_t packet_id = ntohs(network_id);
         const std::byte *payload = buffered.data() + offset + packet_header_size;
         const std::size_t payload_size = length - sizeof(std::uint16_t);
-        fn(packet_id, af::BufferView(payload, payload_size));
+        fn(packet_id, af::buffer_view(payload, payload_size));
         offset += full_size;
     }
 
@@ -214,7 +214,7 @@ void login_on_accept(void *owner, af::net::tcp_connection_ref conn) noexcept {
               << " generation=" << conn.generation();
 }
 
-void login_on_read(void *owner, af::net::tcp_connection_ref conn, af::BufferView bytes) noexcept {
+void login_on_read(void *owner, af::net::tcp_connection_ref conn, af::buffer_view bytes) noexcept {
     auto *state = static_cast<login_shard_state *>(owner);
     if (state == nullptr || state->runtime == nullptr) {
         conn.close(af::net::close_reason::error);
@@ -223,30 +223,30 @@ void login_on_read(void *owner, af::net::tcp_connection_ref conn, af::BufferView
 
     const af::net::tcp_connection_handle handle = conn.handle();
     stream_parser &parser = state->parsers[connection_key(handle)];
-    const packet_parse_result result =
-        parser.feed(bytes, [&](std::uint16_t packet_id, af::BufferView payload) {
-            if (packet_id != login_request_id) {
-                LOG(WARNING) << "unknown login packet id=" << packet_id
-                             << " slot=" << handle.slot();
-                return;
-            }
+    const packet_parse_result result = parser.feed(bytes, [&](std::uint16_t packet_id,
+                                                              af::buffer_view payload) {
+        if (packet_id != login_request_id) {
+            LOG(WARNING) << "unknown login packet id=" << packet_id << " slot=" << handle.slot();
+            return;
+        }
 
-            asyncflow::examples::net::LoginRequest request;
-            if (!request.ParseFromArray(payload.data(), static_cast<int>(payload.size()))) {
-                LOG(WARNING) << "invalid login protobuf slot=" << handle.slot();
-                return;
-            }
+        asyncflow::examples::net::LoginRequest request;
+        if (!request.ParseFromArray(payload.data(), static_cast<int>(payload.size()))) {
+            LOG(WARNING) << "invalid login protobuf slot=" << handle.slot();
+            return;
+        }
 
-            LOG(INFO) << "login packet parsed user=" << request.user_id()
-                      << " slot=" << handle.slot() << " generation=" << handle.generation();
-            auto task = af::make_task<login_task>(*state->runtime);
-            if (!task->do_it(state->cpu_thread, handle, std::string(request.user_id()),
-                             std::string(request.token()))) {
-                LOG(ERROR) << "failed to schedule login task user=" << request.user_id()
-                           << " slot=" << handle.slot();
-                static_cast<void>(handle.close());
-            }
-        });
+        LOG(INFO) << "login packet parsed user=" << request.user_id() << " slot=" << handle.slot()
+                  << " generation=" << handle.generation();
+        auto task = af::make_task<login_task>(*state->runtime);
+        const bool started = task->do_it(state->cpu_thread, handle, std::string(request.user_id()),
+                                         std::string(request.token()));
+        if (!started) {
+            LOG(ERROR) << "failed to schedule login task user=" << request.user_id()
+                       << " slot=" << handle.slot();
+            static_cast<void>(handle.close());
+        }
+    });
 
     if (result == packet_parse_result::protocol_error) {
         LOG(WARNING) << "login protocol error slot=" << conn.slot()
@@ -315,13 +315,13 @@ void start_server_shard(af::net::tcp_server &server, login_shard_state &state,
     state.lifecycle->record_start(ok, listener.error == 0 ? EIO : listener.error);
 }
 
-[[nodiscard]] bool wait_for_shutdown_signal(af::SignalSet &signals,
+[[nodiscard]] bool wait_for_shutdown_signal(af::signal_set &signals,
                                             const server_lifecycle_state &lifecycle) {
     for (;;) {
         if (lifecycle.failed.load(std::memory_order_acquire)) {
             return false;
         }
-        const af::SignalWaitResult result = signals.wait_for(std::chrono::seconds(1));
+        const af::signal_wait_result result = signals.wait_for(std::chrono::seconds(1));
         if (result.ok()) {
             LOG(INFO) << "tcp login received signal=" << result.signal;
             return true;
@@ -342,7 +342,7 @@ int main(int argc, char **argv) {
     }
     const bool ipv6 = argc > 2 && std::strcmp(argv[2], "--ipv6") == 0;
 
-    af::SignalSet signals = af::make_termination_signal_set();
+    af::signal_set signals = af::make_termination_signal_set();
     if (!signals.valid()) {
         std::cerr << "failed to install signal set error=" << signals.error() << '\n';
         return 1;

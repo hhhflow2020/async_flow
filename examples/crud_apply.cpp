@@ -19,7 +19,7 @@ struct PlayerProfile {
     int gold{0};
 };
 
-using PlayerChangeBatch = af::ChangeBatch<std::uint64_t, PlayerProfile>;
+using PlayerChangeBatch = af::change_batch<std::uint64_t, PlayerProfile>;
 using PlayerStore = absl::flat_hash_map<std::uint64_t, PlayerProfile>;
 
 struct PlayerCrudStream {};
@@ -83,7 +83,7 @@ private:
     }
 
     static bool apply_shard(std::uint16_t shard,
-                            const std::vector<af::CrudOp<std::uint64_t, PlayerProfile>> &ops) {
+                            const std::vector<af::crud_op<std::uint64_t, PlayerProfile>> &ops) {
         auto &store = player_stores[shard];
         for (const auto &op : ops) {
             if (!apply_op(store, op)) {
@@ -93,13 +93,13 @@ private:
         return true;
     }
 
-    static bool apply_op(PlayerStore &store, const af::CrudOp<std::uint64_t, PlayerProfile> &op) {
+    static bool apply_op(PlayerStore &store, const af::crud_op<std::uint64_t, PlayerProfile> &op) {
         switch (op.type) {
-        case af::OpType::Add:
+        case af::op_type::Add:
             store[op.key] = op.value;
             return true;
 
-        case af::OpType::Update: {
+        case af::op_type::Update: {
             auto it = store.find(op.key);
             if (it == store.end()) {
                 return false;
@@ -108,7 +108,7 @@ private:
             return true;
         }
 
-        case af::OpType::Delete:
+        case af::op_type::Delete:
             store.erase(op.key);
             return true;
         }
@@ -129,7 +129,7 @@ private:
     state state_{state::apply};
     af::thread_group_ref logic_threads_;
     PlayerChangeBatch batch_;
-    af::sharded_ops<af::CrudOp<std::uint64_t, PlayerProfile>> sharded_ops_;
+    af::sharded_ops<af::crud_op<std::uint64_t, PlayerProfile>> sharded_ops_;
 };
 
 class SubmitPlayerCrudBatchTask final : public af::runtime_task {
@@ -180,8 +180,8 @@ int main() {
         PlayerChangeBatch{
             2,
             {
-                {af::OpType::Update, 1001U, {3, 250}},
-                {af::OpType::Add, 1003U, {1, 30}},
+                {af::op_type::Update, 1001U, {3, 250}},
+                {af::op_type::Add, 1003U, {1, 30}},
             },
         },
         io_threads.front());
@@ -189,8 +189,8 @@ int main() {
         PlayerChangeBatch{
             1,
             {
-                {af::OpType::Add, 1001U, {2, 100}},
-                {af::OpType::Add, 1002U, {5, 500}},
+                {af::op_type::Add, 1001U, {2, 100}},
+                {af::op_type::Add, 1002U, {5, 500}},
             },
         },
         io_threads.front());
