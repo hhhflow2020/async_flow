@@ -34,6 +34,8 @@ TEST(NetSocketAddressTests, LowerCaseNetAliasesMatchPublicTypes) {
     static_assert(std::is_same_v<af::net::listener_state, af::net::ListenerState>);
     static_assert(std::is_same_v<af::net::remove_listener_policy, af::net::RemoveListenerPolicy>);
     static_assert(std::is_same_v<af::net::tcp_listener_options, af::net::TcpListenerOptions>);
+    static_assert(std::is_same_v<af::net::tcp_connection_config, af::net::TcpConnectionConfig>);
+    static_assert(std::is_same_v<af::net::tcp_listener_config, af::net::TcpListenerConfig>);
     static_assert(std::is_same_v<af::net::tcp_server_config, af::net::TcpServerConfig>);
     static_assert(std::is_same_v<af::net::listener_id, af::net::ListenerId>);
     static_assert(std::is_same_v<af::net::tcp_listener_handle, af::net::TcpListenerHandle>);
@@ -103,6 +105,25 @@ TEST(NetSocketAddressTests, ThreadListCopiesRuntimeThreadGroupRef) {
     EXPECT_EQ(threads[0], af::thread_ref(2));
     EXPECT_EQ(threads[1], af::thread_ref(4));
     EXPECT_EQ(threads[2], af::thread_ref(9));
+}
+
+TEST(NetSocketAddressTests, TcpListenerConfigAcceptsRuntimeThreadRefs) {
+    const std::array<std::uint16_t, 2> indexes{1, 3};
+    af::net::tcp_listener_config config;
+
+    config.name = "public";
+    config.endpoint = af::net::tcp_endpoint::any(8080);
+    config.threads = af::net::thread_list(af::thread_group_ref(indexes.data(), indexes.size()));
+    config.options.reuse_port = true;
+    config.accept_strategy = af::net::accept_strategy::reuse_port_per_io_thread;
+
+    EXPECT_EQ(config.name, "public");
+    EXPECT_EQ(config.endpoint.port, 8080U);
+    ASSERT_EQ(config.threads.size(), indexes.size());
+    EXPECT_EQ(config.threads[0], af::thread_ref(1));
+    EXPECT_EQ(config.threads[1], af::thread_ref(3));
+    EXPECT_TRUE(config.options.reuse_port);
+    EXPECT_EQ(config.accept_strategy, af::net::accept_strategy::reuse_port_per_io_thread);
 }
 
 TEST(NetSocketAddressTests, ConvertsIpv4EndpointToSocketAddress) {

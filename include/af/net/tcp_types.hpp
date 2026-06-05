@@ -4,8 +4,12 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <vector>
 
+#include "af/net/tcp_endpoint.hpp"
 #include "af/net/thread_list.hpp"
+#include "af/runtime_config.hpp"
 
 namespace af::net {
 
@@ -87,6 +91,14 @@ struct TcpConnectionConfig {
 struct TcpServerConfig {
     TcpConnectionConfig connection;
     std::chrono::milliseconds connection_close_timeout{std::chrono::seconds(5)};
+};
+
+struct TcpListenerConfig {
+    std::string name;
+    TcpEndpoint endpoint;
+    std::vector<af::thread_ref> threads;
+    TcpListenerOptions options;
+    AcceptStrategy accept_strategy{AcceptStrategy::Auto};
 };
 
 struct ListenerId {
