@@ -225,6 +225,8 @@ private:
     [[nodiscard]] bool request_schedule_after_running(std::uint16_t thread) noexcept;
     [[nodiscard]] bool request_timer_after_running(std::uint16_t thread,
                                                    std::int64_t deadline_ns) noexcept;
+    [[nodiscard]] bool enqueue_late_request_after_running(std::uint16_t thread,
+                                                          std::int64_t deadline_ns) noexcept;
     [[nodiscard]] bool enqueue_from_state(task_state previous, std::uint16_t thread) noexcept;
     [[nodiscard]] bool enqueue_timer_from_state(task_state previous, std::uint16_t thread,
                                                 std::int64_t deadline_ns) noexcept;

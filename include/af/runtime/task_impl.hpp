@@ -125,7 +125,7 @@ inline bool runtime_task::request_schedule_after_running(std::uint16_t thread) n
     std::uint32_t expected = no_requested_thread;
     if (requested_thread_.compare_exchange_strong(expected, requested, std::memory_order_acq_rel,
                                                   std::memory_order_acquire)) {
-        return true;
+        return enqueue_late_request_after_running(thread, no_timer_deadline_ns);
     }
     if (expected == requested) {
         return true;
@@ -141,7 +141,7 @@ inline bool runtime_task::request_timer_after_running(std::uint16_t thread,
     std::uint32_t expected = no_requested_thread;
     if (requested_thread_.compare_exchange_strong(expected, requested, std::memory_order_acq_rel,
                                                   std::memory_order_acquire)) {
-        return true;
+        return enqueue_late_request_after_running(thread, deadline_ns);
     }
     if (expected == requested) {
         requested_deadline_ns_.store(deadline_ns, std::memory_order_release);
@@ -150,6 +150,25 @@ inline bool runtime_task::request_timer_after_running(std::uint16_t thread,
     requested_deadline_ns_.store(no_timer_deadline_ns, std::memory_order_relaxed);
     AF_ASSERT(false && "a running task can only request one next target thread");
     return false;
+}
+
+inline bool runtime_task::enqueue_late_request_after_running(std::uint16_t thread,
+                                                             std::int64_t deadline_ns) noexcept {
+    if (state_.load(std::memory_order_acquire) != task_state::pending) {
+        return true;
+    }
+
+    std::uint32_t expected = static_cast<std::uint32_t>(thread);
+    if (!requested_thread_.compare_exchange_strong(
+            expected, no_requested_thread, std::memory_order_acq_rel, std::memory_order_acquire)) {
+        return true;
+    }
+
+    if (deadline_ns != no_timer_deadline_ns) {
+        requested_deadline_ns_.store(no_timer_deadline_ns, std::memory_order_release);
+        return enqueue_timer_from_state(task_state::pending, thread, deadline_ns);
+    }
+    return enqueue_from_state(task_state::pending, thread);
 }
 
 inline bool runtime_task::enqueue_next_from_running(std::uint16_t thread) noexcept {
@@ -225,6 +244,22 @@ inline void runtime_task::finish_after_run(task_result result) noexcept {
             return;
         }
         state_.store(task_state::pending, std::memory_order_release);
+        {
+            const std::uint32_t late_requested =
+                requested_thread_.exchange(no_requested_thread, std::memory_order_acq_rel);
+            const std::int64_t late_requested_deadline =
+                requested_deadline_ns_.exchange(no_timer_deadline_ns, std::memory_order_acq_rel);
+            if (late_requested != no_requested_thread) {
+                if (late_requested_deadline != no_timer_deadline_ns) {
+                    static_cast<void>(enqueue_timer_from_state(
+                        task_state::pending, static_cast<std::uint16_t>(late_requested),
+                        late_requested_deadline));
+                } else {
+                    static_cast<void>(enqueue_from_state(
+                        task_state::pending, static_cast<std::uint16_t>(late_requested)));
+                }
+            }
+        }
         return;
     case task_result::again:
         if (requested_deadline != no_timer_deadline_ns) {
