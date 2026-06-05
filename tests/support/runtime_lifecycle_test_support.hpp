@@ -16,8 +16,6 @@ namespace af::test::runtime_lifecycle {
 
 #include "runtime_lifecycle_base_support.hpp"
 
-#include "runtime_lifecycle_backpressure_support.hpp"
-
 #include "runtime_lifecycle_shutdown_support.hpp"
 
 } // namespace af::test::runtime_lifecycle
