@@ -28,7 +28,6 @@ public:
     virtual void shutdown(std::chrono::milliseconds timeout) noexcept = 0;
 };
 
-template <typename RuntimeT> class RuntimeAsyncLogConsumerController;
 class RuntimeInstanceAsyncLogConsumerController;
 
 } // namespace af::detail

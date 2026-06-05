@@ -19,7 +19,6 @@
 
 namespace af {
 
-template <typename RuntimeT> class RuntimeAbslAsyncLogSink;
 class RuntimeInstanceAbslAsyncLogSink;
 
 class AsyncLogger {
@@ -37,9 +36,7 @@ public:
     [[nodiscard]] std::chrono::milliseconds fatal_flush_timeout() const noexcept;
 
 private:
-    template <typename RuntimeT> friend class detail::RuntimeAsyncLogConsumerController;
     friend class detail::RuntimeInstanceAsyncLogConsumerController;
-    template <typename RuntimeT> friend class RuntimeAbslAsyncLogSink;
     friend class RuntimeInstanceAbslAsyncLogSink;
 
     [[nodiscard]] bool try_log_from_runtime_thread(std::uint16_t thread_index,
