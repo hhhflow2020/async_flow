@@ -534,6 +534,26 @@ private:
     const char *message_{"runtime task id log"};
 };
 
+class RuntimeInstanceTaskIdLogTask final : public af::runtime_task {
+public:
+    RuntimeInstanceTaskIdLogTask(af::runtime_task::factory_token token, af::runtime &owner,
+                                 std::atomic<int> &completed)
+        : af::runtime_task(token, owner), completed_(completed) {}
+
+    bool do_it(std::uint16_t target) noexcept {
+        return schedule_to(target);
+    }
+
+private:
+    af::task_result run_task() noexcept override {
+        LOG(INFO) << "runtime instance task id disabled log";
+        completed_.fetch_add(1, std::memory_order_release);
+        return done();
+    }
+
+    std::atomic<int> &completed_;
+};
+
 struct LogUdpIoThreadTag;
 
 inline constexpr af::thread_kind log_udp_io_thread_kind = af::thread_kind::io;
@@ -1202,6 +1222,44 @@ TEST(LogTests, RuntimeInstanceAsyncLoggingUsesStructuredLoggerConfig) {
 
     const std::string contents = read_file(path);
     EXPECT_NE(contents.find("runtime config async logger"), std::string::npos);
+    std::filesystem::remove(path);
+}
+
+TEST(LogTests, RuntimeInstanceTaskIdDiagnosticsCanDisableLogTag) {
+    const auto path =
+        std::filesystem::path(::testing::TempDir()) / "asyncflow-runtime-task-id-disabled.log";
+    std::filesystem::remove(path);
+
+    af::runtime_config runtime_config;
+    runtime_config.threads = {
+        af::cpu_threads("logic", 1),
+    };
+    runtime_config.diagnostics.enable_task_id = false;
+    runtime_config.logger.consumer_thread = af::thread_selector::cpu(0);
+    runtime_config.logger.queue_capacity = 16;
+    runtime_config.logger.max_batch_records = 4;
+    runtime_config.logger.backends = {
+        af::file_log_backend_config{path.string(), false, false, 8},
+    };
+
+    af::runtime runtime(runtime_config);
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(runtime.logger_started());
+
+    std::atomic<int> completed{0};
+    const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
+    auto task = af::make_task<RuntimeInstanceTaskIdLogTask>(runtime, completed);
+    EXPECT_EQ(task->task_id(), af::runtime_invalid_task_id);
+    ASSERT_TRUE(task->do_it(cpu_thread));
+    task.reset();
+
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
+    ASSERT_TRUE(runtime.flush_logger(std::chrono::seconds(2)));
+    runtime.stop();
+
+    const std::string contents = read_file(path);
+    EXPECT_NE(contents.find("runtime instance task id disabled log"), std::string::npos);
+    EXPECT_EQ(contents.find("[task="), std::string::npos);
     std::filesystem::remove(path);
 }
 

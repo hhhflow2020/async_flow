@@ -288,7 +288,7 @@ cancel();
 
 用户不用关心首次 `do_it()` 和后续 `run()` 的内部差异。task 内部可以维护状态机，但用户看到的语义只有“下一次在哪个线程、哪个时间继续执行”。
 
-每个 task 创建时分配 `task_id_`。建议使用每线程 id block，避免每次创建都访问全局 atomic。
+默认每个 task 创建时分配 `task_id_`。启用 `diagnostics.enable_task_id` 时使用每线程 id block，避免每次创建都访问全局 atomic；禁用时 task id 保持 invalid，日志也不会注入 `[task=...]`，用于对极致热路径关闭诊断开销。
 
 ## Task Pool
 
@@ -634,7 +634,7 @@ include/af/reactor/select_reactor.hpp
 - 当前已提供 `af::runtime` 实例生命周期外壳和低层投递通道：构造时使用结构化配置解析校验，`start()` 按配置启动 runtime 线程，每个 executor 拥有 intrusive MPSC inbox，`post()` 可把 `runtime_work` 投递到指定线程执行，每轮按 `scheduler.task_drain_budget` drain task、按 `timer.drain_budget` drain 到期 timer，且在 `scheduler.max_task_run_slice` 非零时按时间片让出；`scheduler.wake` 已控制投递唤醒策略，默认 empty-to-non-empty 通过消费者 sleep flag 减少重复 wake，并在真正 wait 前复查队列/定时器/service task；CPU executor 空闲等待已支持 `scheduler.idle_wait` 的 futex/spin/yield 策略，IO executor 使用 reactor poll；`stop()` 可由外部线程完成 join/回收，也可由 runtime 线程内请求停止而不自 join。
 - 当前实例 runtime 已提供 service task 注册、注销和唤醒入口：service 列表只在目标 executor 线程内修改，executor 主循环按 `scheduler.service_task_budget` 轮询，外部唤醒不加锁。
 - 当前实例 runtime 已提供 runtime-owned async logger：`runtime.start()` 在 `runtime.config().logger.backends` 非空时自动构造 file/udp/tcp 后端并把消费者注册为 service task，`runtime.stop()` 先 drain/flush 日志再停止 executor；`start_async_logging_for_runtime(runtime&, config, thread)` 仍作为手动自定义入口保留。
-- 当前实例 runtime 已提供 `af::runtime_task`、`af::make_task<T>(runtime, ...)`、`af::try_make_task<T>(runtime, ...)` 和 `runtime_task_handle<T>`：任务创建走 typed slab object pool，任务 id 使用每线程 block 分配，`schedule_to()` 投递到目标 executor，运行中请求下一跳会延后到当前 `run_task()` 返回后再入队，避免同一个任务对象并发重入。
+- 当前实例 runtime 已提供 `af::runtime_task`、`af::make_task<T>(runtime, ...)`、`af::try_make_task<T>(runtime, ...)` 和 `runtime_task_handle<T>`：任务创建走 typed slab object pool，任务 id 默认使用每线程 block 分配，`diagnostics.enable_task_id=false` 时跳过 id 分配并保持 invalid；`schedule_to()` 投递到目标 executor，运行中请求下一跳会延后到当前 `run_task()` 返回后再入队，避免同一个任务对象并发重入。
 - 当前实例 runtime 已接入每 executor 本地 timer min-heap：`schedule_after()` / `schedule_at()` / `pending_after()` / `pending_at()` 先把 task 以 `timer_arming` 状态投递到目标 inbox，目标线程再挂入本地 heap；executor 空闲等待使用最近 timer deadline 作为 atomic/futex timeout，IO executor 则把最近 timer deadline 传给 `reactor.poll(timeout)`；`stop()` 会取消未到期 timer 并释放 task 生命周期引用。后续可在不改变 task API 的前提下把 min-heap backend 替换为分层时间轮。
 
 后续迁移应先补齐测试和 benchmark，再逐步替换旧路径，避免一次性重写导致行为不可控。

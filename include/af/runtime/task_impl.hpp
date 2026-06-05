@@ -23,7 +23,8 @@ task_result runtime_task::pending_at(std::chrono::time_point<Clock, Duration> ti
 }
 
 inline runtime_task::runtime_task(factory_token, runtime &owner) noexcept
-    : owner_(&owner), task_id_(allocate_task_id()) {}
+    : owner_(&owner),
+      task_id_(owner.config().diagnostics.enable_task_id ? allocate_task_id() : invalid_task_id) {}
 
 inline bool runtime_task::schedule_to(std::uint16_t thread) noexcept {
     if (owner_ == nullptr || !owner_->valid_thread(thread)) {

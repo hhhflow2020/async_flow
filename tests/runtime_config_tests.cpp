@@ -1268,6 +1268,37 @@ TEST(RuntimeConfigTests, RuntimeMakeTaskSchedulesAndTracksTaskId) {
     runtime.stop();
 }
 
+TEST(RuntimeConfigTests, RuntimeCanDisableTaskIdTracking) {
+    af::runtime_config config;
+    config.threads = {af::cpu_threads("logic", 1)};
+    config.diagnostics.enable_task_id = false;
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    std::atomic<int> counter{0};
+    std::atomic<af::runtime_task_id> observed_task_id{1};
+    std::atomic<af::runtime_task_id> observed_current_task_id{1};
+    std::atomic<std::uint16_t> observed_thread{af::runtime_invalid_thread_index};
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 1));
+
+    const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
+    auto task = af::make_task<InstanceRuntimeTask>(runtime, counter, observed_task_id,
+                                                   observed_current_task_id, observed_thread);
+    EXPECT_EQ(task->task_id(), af::runtime_invalid_task_id);
+    ASSERT_TRUE(task->do_it(cpu_thread));
+    task.reset();
+
+    ASSERT_TRUE(wait_for_counter(counter, 1));
+    EXPECT_EQ(observed_task_id.load(std::memory_order_acquire), af::runtime_invalid_task_id);
+    EXPECT_EQ(observed_current_task_id.load(std::memory_order_acquire),
+              af::runtime_invalid_task_id);
+    EXPECT_EQ(observed_thread.load(std::memory_order_acquire), cpu_thread);
+
+    runtime.stop();
+}
+
 TEST(RuntimeConfigTests, RuntimeTaskDefersRunningScheduleUntilRunReturns) {
     af::runtime_config config;
     config.threads = {
