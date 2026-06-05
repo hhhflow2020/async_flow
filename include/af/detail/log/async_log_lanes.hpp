@@ -26,8 +26,9 @@ struct alignas(hardware_cache_line_size) AsyncLogStatCounter {
 };
 
 struct alignas(hardware_cache_line_size) AsyncLogQueueShard {
-    AsyncLogQueueShard(std::size_t queue_capacity, std::size_t record_capacity)
-        : queue(queue_capacity), records(record_capacity) {}
+    AsyncLogQueueShard(std::size_t queue_capacity, std::size_t record_capacity,
+                       std::size_t record_local_cache_size)
+        : queue(queue_capacity), records(record_capacity, record_local_cache_size) {}
 
     AsyncLogStatCounter accepted;
     AsyncLogStatCounter dropped;
@@ -42,7 +43,8 @@ struct alignas(hardware_cache_line_size) AsyncLogOrderedQueue {
 };
 
 struct alignas(hardware_cache_line_size) AsyncLogProducerShard {
-    explicit AsyncLogProducerShard(std::size_t record_capacity) : records(record_capacity) {}
+    AsyncLogProducerShard(std::size_t record_capacity, std::size_t record_local_cache_size)
+        : records(record_capacity, record_local_cache_size) {}
 
     AsyncLogStatCounter accepted;
     AsyncLogStatCounter dropped;
@@ -50,8 +52,9 @@ struct alignas(hardware_cache_line_size) AsyncLogProducerShard {
 };
 
 struct alignas(hardware_cache_line_size) AsyncLogRuntimeLane {
-    AsyncLogRuntimeLane(std::size_t queue_capacity, std::size_t record_capacity)
-        : queue(queue_capacity), records(record_capacity) {}
+    AsyncLogRuntimeLane(std::size_t queue_capacity, std::size_t record_capacity,
+                        std::size_t record_local_cache_size)
+        : queue(queue_capacity), records(record_capacity, record_local_cache_size) {}
 
     AsyncLogStatCounter accepted;
     AsyncLogStatCounter dropped;

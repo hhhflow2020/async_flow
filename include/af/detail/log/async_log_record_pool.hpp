@@ -29,6 +29,7 @@ class AsyncLogRecordPool {
     static constexpr std::uint32_t null_slot = std::numeric_limits<std::uint32_t>::max();
     static constexpr std::size_t slot_index_bits = sizeof(std::uint32_t) * 8U;
     static constexpr std::uint64_t slot_index_mask = (std::uint64_t{1} << slot_index_bits) - 1U;
+    inline static std::atomic<std::uint64_t> next_cache_token_{1U};
 
     struct Slab;
 
@@ -64,16 +65,30 @@ class AsyncLogRecordPool {
     };
 
 public:
-    explicit AsyncLogRecordPool(std::size_t initial_capacity)
-        : initial_slab_capacity_(validate_capacity(initial_capacity)),
-          next_slab_capacity_(initial_slab_capacity_) {
+    explicit AsyncLogRecordPool(std::size_t initial_capacity, std::size_t local_cache_capacity = 0U)
+        : cache_token_(next_cache_token_.fetch_add(1U, std::memory_order_relaxed)),
+          initial_slab_capacity_(validate_capacity(initial_capacity)),
+          local_cache_capacity_(local_cache_capacity), next_slab_capacity_(initial_slab_capacity_) {
         add_initial_slab();
     }
 
     AsyncLogRecordPool(const AsyncLogRecordPool &) = delete;
     AsyncLogRecordPool &operator=(const AsyncLogRecordPool &) = delete;
 
+    ~AsyncLogRecordPool() {
+        lifetime_.reset();
+    }
+
     [[nodiscard]] LogRecord *try_acquire(std::string_view message) noexcept {
+        if (local_cache_capacity_ != 0U) [[likely]] {
+            if (LogRecord *record = try_acquire_cached(message); record != nullptr) {
+                return record;
+            }
+        }
+        return try_acquire_uncached(message);
+    }
+
+    [[nodiscard]] LogRecord *try_acquire_uncached(std::string_view message) noexcept {
         for (;;) {
             bool reset_failed = false;
             if (LogRecord *record = try_acquire_from_existing(message, reset_failed);
@@ -122,6 +137,81 @@ public:
     }
 
 private:
+    struct LocalCache {
+        AsyncLogRecordPool *owner{nullptr};
+        std::uint64_t owner_token{0};
+        std::weak_ptr<void> owner_lifetime;
+        std::vector<Slot *> slots;
+        std::size_t size{0};
+
+        ~LocalCache() {
+            flush();
+        }
+
+        [[nodiscard]] bool reset_for(AsyncLogRecordPool *pool) noexcept {
+            if (owner == pool && owner_token == pool->cache_token_) [[likely]] {
+                return true;
+            }
+            if (owner == pool) [[unlikely]] {
+                discard();
+            } else {
+                flush();
+            }
+            if (pool == nullptr || pool->local_cache_capacity_ == 0U) {
+                return false;
+            }
+            try {
+                if (slots.size() < pool->local_cache_capacity_) {
+                    slots.resize(pool->local_cache_capacity_);
+                }
+            } catch (...) {
+                return false;
+            }
+            owner = pool;
+            owner_token = pool->cache_token_;
+            owner_lifetime = pool->lifetime_;
+            return true;
+        }
+
+        [[nodiscard]] Slot *pop() noexcept {
+            if (size == 0U) [[unlikely]] {
+                return nullptr;
+            }
+            return slots[--size];
+        }
+
+        [[nodiscard]] Slot **append_begin() noexcept {
+            return slots.data() + size;
+        }
+
+        [[nodiscard]] std::size_t available() const noexcept {
+            return slots.size() - size;
+        }
+
+        void append_commit(std::size_t count) noexcept {
+            size += count;
+        }
+
+        void flush() noexcept {
+            if (size != 0U) {
+                if (auto alive = owner_lifetime.lock(); alive && owner != nullptr) {
+                    owner->release_slots(slots.data(), size);
+                }
+            }
+            size = 0;
+            owner = nullptr;
+            owner_token = 0;
+            owner_lifetime.reset();
+        }
+
+        void discard() noexcept {
+            size = 0;
+            owner = nullptr;
+            owner_token = 0;
+            owner_lifetime.reset();
+        }
+    };
+
     [[nodiscard]] static std::size_t validate_capacity(std::size_t capacity) {
         if (capacity == 0U || capacity >= null_slot) {
             throw std::length_error("async log record pool capacity is out of range");
@@ -149,6 +239,45 @@ private:
         }
         const std::size_t doubled = current * 2U;
         return doubled < current ? max_growth : (doubled > max_growth ? max_growth : doubled);
+    }
+
+    [[nodiscard]] static LocalCache &local_cache() noexcept {
+        thread_local LocalCache cache;
+        return cache;
+    }
+
+    [[nodiscard]] LogRecord *try_acquire_cached(std::string_view message) noexcept {
+        LocalCache &cache = local_cache();
+        if (!cache.reset_for(this)) [[unlikely]] {
+            return nullptr;
+        }
+
+        Slot *slot = cache.pop();
+        if (slot == nullptr) {
+            refill_cache(cache);
+            slot = cache.pop();
+            if (slot == nullptr) {
+                return nullptr;
+            }
+        }
+
+        bool reset_failed = false;
+        return prepare_record(*slot, message, reset_failed);
+    }
+
+    void refill_cache(LocalCache &cache) noexcept {
+        const std::size_t available = cache.available();
+        if (available == 0U) {
+            return;
+        }
+
+        std::size_t count = try_pop_many_from_existing(cache.append_begin(), available);
+        if (count == 0U) {
+            if (Slab *slab = grow(); slab != nullptr) {
+                count = try_pop_many(*slab, cache.append_begin(), available);
+            }
+        }
+        cache.append_commit(count);
     }
 
     void add_initial_slab() {
@@ -179,14 +308,19 @@ private:
             return nullptr;
         }
 
+        return prepare_record(*slot, message, reset_failed);
+    }
+
+    [[nodiscard]] LogRecord *prepare_record(Slot &slot, std::string_view message,
+                                            bool &reset_failed) noexcept {
         try {
-            slot->record.reset(message);
+            slot.record.reset(message);
         } catch (...) {
-            release(slot);
+            release(&slot);
             reset_failed = true;
             return nullptr;
         }
-        return &slot->record;
+        return &slot.record;
     }
 
     [[nodiscard]] Slot *try_pop(Slab &slab) noexcept {
@@ -205,6 +339,48 @@ private:
                 return &slot;
             }
         }
+    }
+
+    [[nodiscard]] std::size_t try_pop_many(Slab &slab, Slot **out, std::size_t max_count) noexcept {
+        if (max_count == 0U) {
+            return 0;
+        }
+
+        std::uint64_t head = slab.free_head.load(std::memory_order_acquire);
+        for (;;) {
+            std::uint32_t index = head_index(head);
+            if (index == null_slot) {
+                return 0;
+            }
+
+            std::size_t count = 0;
+            while (count < max_count && index != null_slot) {
+                Slot &slot = slab.slots[index];
+                out[count] = &slot;
+                ++count;
+                index = slot.next.load(std::memory_order_relaxed);
+            }
+
+            const std::uint64_t desired = pack_head(index, head_version(head) + 1U);
+            if (slab.free_head.compare_exchange_weak(head, desired, std::memory_order_acquire,
+                                                     std::memory_order_acquire)) {
+                return count;
+            }
+        }
+    }
+
+    [[nodiscard]] std::size_t try_pop_many_from_existing(Slot **out,
+                                                         std::size_t max_count) noexcept {
+        std::size_t count = 0;
+        Slab *slab = slab_head_.load(std::memory_order_acquire);
+        while (slab != nullptr && count < max_count) {
+            count += try_pop_many(*slab, out + count, max_count - count);
+            if (count != 0U) {
+                return count;
+            }
+            slab = slab->next.load(std::memory_order_acquire);
+        }
+        return count;
     }
 
     [[nodiscard]] Slab *find_slab_with_free_slot() noexcept {
@@ -248,6 +424,28 @@ private:
         return published;
     }
 
+    void release_slots(Slot *const *slots, std::size_t count) noexcept {
+        std::size_t begin = 0;
+        while (begin < count) {
+            Slot *first = slots[begin];
+            AF_ASSERT(first != nullptr && first->owner == this && first->slab != nullptr);
+            Slab *const slab = first->slab;
+
+            std::size_t end = begin + 1U;
+            while (end < count) {
+                Slot *slot = slots[end];
+                AF_ASSERT(slot != nullptr && slot->owner == this && slot->slab != nullptr);
+                if (slot->slab != slab) {
+                    break;
+                }
+                ++end;
+            }
+
+            release_slots_to_slab(*slab, slots + begin, end - begin);
+            begin = end;
+        }
+    }
+
     void release(Slot *slot) noexcept {
         AF_ASSERT(slot != nullptr && slot->slab != nullptr);
         Slab &slab = *slot->slab;
@@ -256,6 +454,37 @@ private:
         for (;;) {
             slot->next.store(head_index(head), std::memory_order_relaxed);
             const std::uint64_t desired = pack_head(index, head_version(head) + 1U);
+            if (slab.free_head.compare_exchange_weak(head, desired, std::memory_order_release,
+                                                     std::memory_order_relaxed)) {
+                return;
+            }
+        }
+    }
+
+    void release_slots_to_slab(Slab &slab, Slot *const *slots, std::size_t count) noexcept {
+        if (count == 0U) {
+            return;
+        }
+        if (count == 1U) {
+            release(slots[0]);
+            return;
+        }
+
+        Slot *first = slots[0];
+        AF_ASSERT(first != nullptr && first->owner == this && first->slab == &slab);
+        Slot *previous = first;
+        for (std::size_t i = 1; i < count; ++i) {
+            Slot *slot = slots[i];
+            AF_ASSERT(slot != nullptr && slot->owner == this && slot->slab == &slab);
+            previous->next.store(slot->index, std::memory_order_relaxed);
+            previous = slot;
+        }
+
+        const std::uint32_t first_index = first->index;
+        std::uint64_t head = slab.free_head.load(std::memory_order_relaxed);
+        for (;;) {
+            previous->next.store(head_index(head), std::memory_order_relaxed);
+            const std::uint64_t desired = pack_head(first_index, head_version(head) + 1U);
             if (slab.free_head.compare_exchange_weak(head, desired, std::memory_order_release,
                                                      std::memory_order_relaxed)) {
                 return;
@@ -294,7 +523,10 @@ private:
         }
     }
 
+    const std::uint64_t cache_token_;
     const std::size_t initial_slab_capacity_;
+    const std::size_t local_cache_capacity_;
+    std::shared_ptr<void> lifetime_{std::make_shared<std::uint8_t>(0)};
     std::size_t next_slab_capacity_;
     std::vector<std::unique_ptr<Slab>> slabs_;
     alignas(hardware_cache_line_size) std::atomic<Slab *> slab_head_{nullptr};

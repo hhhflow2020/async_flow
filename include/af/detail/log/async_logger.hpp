@@ -128,6 +128,7 @@ struct AsyncLogConfig {
     std::size_t queue_shard_count{0};
     std::size_t runtime_thread_count{0};
     std::size_t runtime_lane_capacity{0};
+    std::size_t record_pool_local_cache_size{256};
     std::size_t record_pool_slab_object_count{0};
     std::size_t max_batch_size{256};
     std::size_t max_consumer_batches_per_run{64};
@@ -163,20 +164,22 @@ public:
               ordered_producer_shard_count_,
               ordered_record_capacity_per_producer_shard(
                   config.queue_capacity, ordered_producer_shard_count_, config.max_batch_size),
-              config.record_pool_slab_object_count)),
+              config.record_pool_slab_object_count, config.record_pool_local_cache_size)),
           queue_shards_(make_queue_shards(
               queue_shard_count_,
               queue_shard_count_ == 0U
                   ? 0U
                   : queue_capacity_per_shard(config.queue_capacity, queue_shard_count_),
-              config.max_batch_size, config.record_pool_slab_object_count)),
+              config.max_batch_size, config.record_pool_slab_object_count,
+              config.record_pool_local_cache_size)),
           runtime_lanes_(make_runtime_lanes(
               runtime_thread_count_,
               queue_capacity_per_runtime_thread(config.runtime_lane_capacity == 0U
                                                     ? config.queue_capacity
                                                     : config.runtime_lane_capacity,
                                                 runtime_thread_count_),
-              config.max_batch_size, config.record_pool_slab_object_count)),
+              config.max_batch_size, config.record_pool_slab_object_count,
+              config.record_pool_local_cache_size)),
           max_batch_size_(config.max_batch_size == 0U ? 1U : config.max_batch_size),
           overflow_spin_count_(config.overflow_spin_count),
           overflow_policy_(config.overflow_policy),
@@ -439,7 +442,8 @@ private:
 
     [[nodiscard]] static detail::AsyncLogProducerShardStorage
     make_ordered_producer_shards(std::size_t shard_count, std::size_t record_capacity,
-                                 std::size_t record_pool_slab_object_count) {
+                                 std::size_t record_pool_slab_object_count,
+                                 std::size_t record_pool_local_cache_size) {
         detail::AsyncLogProducerShardStorage shards;
         if (shard_count == 0U) {
             return shards;
@@ -448,14 +452,15 @@ private:
         shards.reserve_exact(shard_count);
         record_capacity = record_pool_slab_capacity(record_pool_slab_object_count, record_capacity);
         for (std::size_t i = 0; i < shard_count; ++i) {
-            shards.emplace_back(record_capacity);
+            shards.emplace_back(record_capacity, record_pool_local_cache_size);
         }
         return shards;
     }
 
     [[nodiscard]] static detail::AsyncLogQueueShardStorage
     make_queue_shards(std::size_t shard_count, std::size_t capacity_per_shard,
-                      std::size_t max_batch_size, std::size_t record_pool_slab_object_count) {
+                      std::size_t max_batch_size, std::size_t record_pool_slab_object_count,
+                      std::size_t record_pool_local_cache_size) {
         detail::AsyncLogQueueShardStorage shards;
         if (shard_count == 0U) {
             return shards;
@@ -466,14 +471,15 @@ private:
             record_pool_slab_object_count,
             record_capacity_per_shard(capacity_per_shard, max_batch_size));
         for (std::size_t i = 0; i < shard_count; ++i) {
-            shards.emplace_back(capacity_per_shard, record_capacity);
+            shards.emplace_back(capacity_per_shard, record_capacity, record_pool_local_cache_size);
         }
         return shards;
     }
 
     [[nodiscard]] static detail::AsyncLogRuntimeLaneStorage
     make_runtime_lanes(std::size_t thread_count, std::size_t capacity_per_thread,
-                       std::size_t max_batch_size, std::size_t record_pool_slab_object_count) {
+                       std::size_t max_batch_size, std::size_t record_pool_slab_object_count,
+                       std::size_t record_pool_local_cache_size) {
         detail::AsyncLogRuntimeLaneStorage lanes;
         if (thread_count == 0U) {
             return lanes;
@@ -484,7 +490,7 @@ private:
             record_pool_slab_object_count,
             record_capacity_per_shard(capacity_per_thread, max_batch_size));
         for (std::size_t i = 0; i < thread_count; ++i) {
-            lanes.emplace_back(capacity_per_thread, record_capacity);
+            lanes.emplace_back(capacity_per_thread, record_capacity, record_pool_local_cache_size);
         }
         return lanes;
     }

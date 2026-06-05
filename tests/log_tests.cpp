@@ -187,15 +187,17 @@ TEST(LogTests, AsyncLogConfigProfilesSelectQueueStrategy) {
     EXPECT_EQ(ordered.ordering, af::LogOrdering::Relaxed);
     EXPECT_EQ(ordered.runtime_thread_count, af::AsyncLogConfig::auto_runtime_thread_count);
     EXPECT_EQ(ordered.queue_shard_count, af::AsyncLogConfig::auto_queue_shard_count);
+    EXPECT_EQ(ordered.record_pool_local_cache_size, 256U);
     EXPECT_EQ(ordered.record_pool_slab_object_count, 0U);
 }
 
-TEST(LogTests, RuntimeLogConfigCarriesRecordPoolSlabSize) {
+TEST(LogTests, RuntimeLogConfigCarriesRecordPoolConfig) {
     af::log_config source = af::log_config::relaxed();
     source.queue_capacity = 16;
     source.queue_shard_count = 2;
     source.runtime_thread_count = 3;
     source.max_batch_records = 4;
+    source.record_pool.local_cache_size = 5;
     source.record_pool.slab_object_count = 7;
 
     const af::AsyncLogConfig target = af::make_async_log_config(source, 5);
@@ -205,7 +207,26 @@ TEST(LogTests, RuntimeLogConfigCarriesRecordPoolSlabSize) {
     EXPECT_EQ(target.queue_shard_count, 2U);
     EXPECT_EQ(target.runtime_thread_count, 3U);
     EXPECT_EQ(target.max_batch_size, 4U);
+    EXPECT_EQ(target.record_pool_local_cache_size, 5U);
     EXPECT_EQ(target.record_pool_slab_object_count, 7U);
+}
+
+TEST(LogTests, RecordPoolLocalCacheIgnoresStaleSlotsWhenPoolAddressIsReused) {
+    using Pool = af::detail::AsyncLogRecordPool;
+    alignas(Pool) unsigned char storage[sizeof(Pool)];
+
+    auto *pool = new (storage) Pool(2, 2);
+    af::detail::LogRecord *first = pool->try_acquire("first");
+    ASSERT_NE(first, nullptr);
+    af::detail::release_async_log_record(first);
+    pool->~Pool();
+
+    pool = new (storage) Pool(2, 2);
+    af::detail::LogRecord *second = pool->try_acquire("second");
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(second->message(), "second");
+    af::detail::release_async_log_record(second);
+    pool->~Pool();
 }
 
 class BlockingLogBackend final : public af::LogBackend {

@@ -151,7 +151,7 @@ struct task_pool_config {
 
 对象池不设置总容量上限。只要系统还能分配内存，就继续申请新的 slab。需要可恢复失败的业务可使用 `try_make_task<T>()`。
 
-当前实例 runtime 的 typed task pool 仍基于模板化 `ObjectPool`，以保持 slot 布局、local cache 和 remote release 批量参数在编译期固定。`task_pool.slab_object_count` 已作为每个 Task 类型静态池的 reserve-at-least 初始预热容量生效，`task_pool.oom` 已作用于 `make_task<T>()` 的对象池分配失败；用户构造函数抛出的异常不会被改写为对象池 OOM。日志 record pool 已接入 `logger.record_pool.slab_object_count` 作为每个日志 lane/shard 的初始 slab 容量。`local_cache_size`、真正 per-runtime task slab 大小和统计开关还需要后续引入 runtime-parameterized pool 或 size-class pool 后完整接入。
+当前实例 runtime 的 typed task pool 仍基于模板化 `ObjectPool`，以保持 slot 布局、local cache 和 remote release 批量参数在编译期固定。`task_pool.slab_object_count` 已作为每个 Task 类型静态池的 reserve-at-least 初始预热容量生效，`task_pool.oom` 已作用于 `make_task<T>()` 的对象池分配失败；用户构造函数抛出的异常不会被改写为对象池 OOM。日志 record pool 已接入 `logger.record_pool.slab_object_count` 作为每个日志 lane/shard 的初始 slab 容量，并接入 `logger.record_pool.local_cache_size` 作为每线程 record slot 缓存容量，减少多生产者 acquire/release 争用同一 slab free-head。`task_pool.local_cache_size`、真正 per-runtime task slab 大小和统计开关还需要后续引入 runtime-parameterized pool 或 size-class pool 后完整接入。
 
 ### timer_config
 
