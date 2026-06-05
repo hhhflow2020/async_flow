@@ -208,6 +208,7 @@ if(ASYNCFLOW_BUILD_TESTS)
         PROPERTIES
             PROCESSORS 8
             RESOURCE_LOCK asyncflow_runtime_stress
+            RUN_SERIAL TRUE
     )
 endif()
 

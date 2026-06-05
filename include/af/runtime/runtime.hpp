@@ -228,6 +228,7 @@ private:
         executor(runtime &owner, runtime_thread_info thread)
             : owner_(owner), thread_(std::move(thread)),
               task_drain_budget_(owner_.config().scheduler.task_drain_budget),
+              max_task_run_slice_(owner_.config().scheduler.max_task_run_slice),
               timer_drain_budget_(owner_.config().scheduler.timer_drain_budget),
               service_task_budget_(owner_.config().scheduler.service_task_budget) {
             timers_.reserve(owner_.config().timer.initial_reserve);
@@ -373,6 +374,13 @@ private:
         }
 
         [[nodiscard]] bool drain_inbox() noexcept {
+            if (max_task_run_slice_.count() > 0) [[unlikely]] {
+                return drain_inbox_with_time_slice();
+            }
+            return drain_inbox_by_budget();
+        }
+
+        [[nodiscard]] bool drain_inbox_by_budget() noexcept {
             bool did_work = false;
             std::size_t drained = 0;
             while (drained < task_drain_budget_) {
@@ -383,6 +391,25 @@ private:
                 ++drained;
                 did_work = true;
                 work->run(owner_);
+            }
+            return did_work;
+        }
+
+        [[nodiscard]] bool drain_inbox_with_time_slice() noexcept {
+            bool did_work = false;
+            std::size_t drained = 0;
+            const auto deadline = std::chrono::steady_clock::now() + max_task_run_slice_;
+            while (drained < task_drain_budget_) {
+                runtime_work *work = inbox_.try_pop();
+                if (work == nullptr) {
+                    break;
+                }
+                ++drained;
+                did_work = true;
+                work->run(owner_);
+                if (std::chrono::steady_clock::now() >= deadline) {
+                    break;
+                }
             }
             return did_work;
         }
@@ -497,6 +524,7 @@ private:
         std::vector<detail::RuntimeServiceTask *> service_tasks_;
         std::unique_ptr<reactor> reactor_;
         std::size_t task_drain_budget_{256};
+        std::chrono::nanoseconds max_task_run_slice_{0};
         std::size_t timer_drain_budget_{256};
         std::size_t service_task_budget_{32};
         std::size_t next_service_task_{0};

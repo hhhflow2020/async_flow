@@ -42,6 +42,7 @@ enum class runtime_config_status : std::uint8_t {
     log_tcp_backend_host_empty,
     log_tcp_backend_port_zero,
     log_tcp_backend_thread_not_found,
+    scheduler_max_task_run_slice_negative,
 };
 
 [[nodiscard]] inline std::string_view
@@ -61,6 +62,8 @@ runtime_config_status_name(runtime_config_status status) noexcept {
         return "scheduler_timer_drain_budget_zero";
     case runtime_config_status::scheduler_service_task_budget_zero:
         return "scheduler_service_task_budget_zero";
+    case runtime_config_status::scheduler_max_task_run_slice_negative:
+        return "scheduler_max_task_run_slice_negative";
     case runtime_config_status::task_pool_local_cache_size_zero:
         return "task_pool_local_cache_size_zero";
     case runtime_config_status::task_pool_slab_object_count_zero:
@@ -310,6 +313,9 @@ validate_resolved_runtime_config(const resolved_runtime_config &resolved) noexce
     }
     if (config.scheduler.service_task_budget == 0) {
         return runtime_config_error(runtime_config_status::scheduler_service_task_budget_zero);
+    }
+    if (config.scheduler.max_task_run_slice.count() < 0) {
+        return runtime_config_error(runtime_config_status::scheduler_max_task_run_slice_negative);
     }
     if (config.task_pool.local_cache_size == 0) {
         return runtime_config_error(runtime_config_status::task_pool_local_cache_size_zero);

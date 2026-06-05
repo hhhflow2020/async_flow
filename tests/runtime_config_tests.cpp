@@ -250,13 +250,20 @@ private:
 
 class RepostingRuntimeWork final : public af::runtime_work {
 public:
-    RepostingRuntimeWork(std::uint16_t thread, int limit, std::atomic<int> &run_counter)
-        : thread_(thread), limit_(limit), run_counter_(run_counter) {}
+    RepostingRuntimeWork(std::uint16_t thread, int limit, std::atomic<int> &run_counter,
+                         std::atomic<bool> *first_run_gate = nullptr)
+        : thread_(thread), limit_(limit), run_counter_(run_counter),
+          first_run_gate_(first_run_gate) {}
 
     void run(af::runtime &owner) noexcept override {
         const int count = run_counter_.fetch_add(1, std::memory_order_acq_rel) + 1;
         if (count < limit_) {
             static_cast<void>(owner.post(thread_, this));
+        }
+        if (count == 1 && first_run_gate_ != nullptr) {
+            while (!first_run_gate_->load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
         }
     }
 
@@ -264,6 +271,7 @@ private:
     std::uint16_t thread_;
     int limit_;
     std::atomic<int> &run_counter_;
+    std::atomic<bool> *first_run_gate_{nullptr};
 };
 
 class TaskBudgetProbeService final : public af::detail::RuntimeServiceTask {
@@ -712,6 +720,11 @@ TEST(RuntimeConfigTests, RuntimeConfigValidationReportsInvalidFields) {
     EXPECT_EQ(validation.status, af::runtime_config_status::scheduler_task_drain_budget_zero);
 
     config.scheduler.task_drain_budget = 1;
+    config.scheduler.max_task_run_slice = std::chrono::nanoseconds(-1);
+    validation = af::validate_runtime_config(config);
+    EXPECT_EQ(validation.status, af::runtime_config_status::scheduler_max_task_run_slice_negative);
+
+    config.scheduler.max_task_run_slice = std::chrono::nanoseconds(0);
     config.logger.consumer_thread = af::thread_selector::io(0);
     validation = af::validate_runtime_config(config);
     EXPECT_EQ(validation.status, af::runtime_config_status::log_consumer_thread_not_found);
@@ -943,6 +956,49 @@ TEST(RuntimeConfigTests, RuntimeTaskDrainBudgetLetsServiceTasksRunBetweenBursts)
 
     service.mark_pending();
     ASSERT_TRUE(runtime.wake_service_tasks(cpu_thread));
+    ASSERT_TRUE(wait_for_counter(service_counter, 1));
+
+    EXPECT_GT(observed_task_count.load(std::memory_order_acquire), 0);
+    EXPECT_LT(observed_task_count.load(std::memory_order_acquire), task_limit);
+
+    runtime.stop();
+}
+
+TEST(RuntimeConfigTests, RuntimeTaskRunSliceLetsServiceTasksRunBeforeLargeTaskBudget) {
+    af::runtime_config config;
+    config.threads = {af::cpu_threads("logic", 1)};
+    config.scheduler.task_drain_budget = 1000000;
+    config.scheduler.service_task_budget = 1;
+    config.scheduler.max_task_run_slice = std::chrono::nanoseconds(1);
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    std::atomic<int> task_counter{0};
+    std::atomic<int> service_counter{0};
+    std::atomic<int> observed_task_count{-1};
+    std::atomic<int> control_counter{0};
+    std::atomic<bool> register_ok{false};
+    std::atomic<bool> release_first_run{false};
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 1));
+
+    const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
+    TaskBudgetProbeService service(service_counter, task_counter, observed_task_count);
+    ServiceTaskControlWork register_work(ServiceTaskControlWork::action::register_service,
+                                         cpu_thread, service, control_counter, register_ok);
+    ASSERT_TRUE(runtime.post(cpu_thread, &register_work));
+    ASSERT_TRUE(wait_for_counter(control_counter, 1));
+    ASSERT_TRUE(register_ok.load(std::memory_order_acquire));
+
+    constexpr int task_limit = 1000000;
+    RepostingRuntimeWork work(cpu_thread, task_limit, task_counter, &release_first_run);
+    ASSERT_TRUE(runtime.post(cpu_thread, &work));
+    ASSERT_TRUE(wait_for_counter_at_least(task_counter, 1));
+
+    service.mark_pending();
+    ASSERT_TRUE(runtime.wake_service_tasks(cpu_thread));
+    release_first_run.store(true, std::memory_order_release);
     ASSERT_TRUE(wait_for_counter(service_counter, 1));
 
     EXPECT_GT(observed_task_count.load(std::memory_order_acquire), 0);
