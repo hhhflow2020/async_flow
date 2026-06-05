@@ -1,11 +1,15 @@
+#include <array>
 #include <cstdint>
 #include <type_traits>
+#include <vector>
 
 #include <gtest/gtest.h>
 
 #include "af/detail/net/socket_address.hpp"
 #include "af/net.hpp"
 #include "af/net/tcp_endpoint.hpp"
+#include "af/net/thread_list.hpp"
+#include "af/runtime_config.hpp"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -87,6 +91,18 @@ TEST(NetSocketAddressTests, LowerCaseNetAliasesMatchPublicTypes) {
     static_assert(af::net::udp_send_result::backpressure == af::net::UdpSendResult::Backpressure);
     static_assert(af::net::udp_send_result::closed == af::net::UdpSendResult::Closed);
     static_assert(af::net::udp_send_result::unsupported == af::net::UdpSendResult::Unsupported);
+}
+
+TEST(NetSocketAddressTests, ThreadListCopiesRuntimeThreadGroupRef) {
+    const std::array<std::uint16_t, 3> indexes{2, 4, 9};
+    const af::thread_group_ref group(indexes.data(), indexes.size());
+
+    const std::vector<af::thread_ref> threads = af::net::thread_list(group);
+
+    ASSERT_EQ(threads.size(), indexes.size());
+    EXPECT_EQ(threads[0], af::thread_ref(2));
+    EXPECT_EQ(threads[1], af::thread_ref(4));
+    EXPECT_EQ(threads[2], af::thread_ref(9));
 }
 
 TEST(NetSocketAddressTests, ConvertsIpv4EndpointToSocketAddress) {
