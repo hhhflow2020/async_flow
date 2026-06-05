@@ -131,3 +131,72 @@ TEST(RuntimeFunctionPostTests, FailedPostDestroysCallable) {
     EXPECT_EQ(runs.load(std::memory_order_acquire), 0);
     EXPECT_EQ(destroys.load(std::memory_order_acquire), 1);
 }
+
+TEST(RuntimeFunctionPostTests, ScheduleAfterRunsMoveOnlyCallableOnTargetThread) {
+    af::runtime_config config;
+    config.threads = {af::cpu_threads("logic", 1)};
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 1));
+
+    std::atomic<int> runs{0};
+    std::atomic<int> destroys{0};
+    std::atomic<std::uint16_t> observed{af::runtime_invalid_thread_index};
+    const af::thread_ref target = runtime.cpu_threads().front();
+
+    ASSERT_TRUE(runtime.schedule_after(target, std::chrono::milliseconds(5),
+                                       MoveOnlyCallback(runs, destroys, observed)));
+    ASSERT_TRUE(wait_for_counter(runs, 1));
+    ASSERT_TRUE(wait_for_counter(destroys, 1));
+    EXPECT_EQ(observed.load(std::memory_order_acquire), target.index);
+    runtime.stop();
+}
+
+TEST(RuntimeFunctionPostTests, ScheduleAtRunsCallableWithRuntimeOwner) {
+    af::runtime_config config;
+    config.threads = {af::cpu_threads("logic", 1)};
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 1));
+
+    std::atomic<int> runs{0};
+    std::atomic<bool> owner_matches{false};
+    std::atomic<std::uint16_t> observed{af::runtime_invalid_thread_index};
+    const af::thread_ref target = runtime.cpu_threads().front();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(5);
+
+    ASSERT_TRUE(runtime.schedule_at(
+        target, deadline,
+        [&runtime, &runs, &owner_matches, &observed](af::runtime &owner) noexcept {
+            observed.store(af::runtime::current_thread_index(), std::memory_order_release);
+            owner_matches.store(&owner == &runtime, std::memory_order_release);
+            runs.fetch_add(1, std::memory_order_release);
+        }));
+
+    ASSERT_TRUE(wait_for_counter(runs, 1));
+    EXPECT_TRUE(owner_matches.load(std::memory_order_acquire));
+    EXPECT_EQ(observed.load(std::memory_order_acquire), target.index);
+    runtime.stop();
+}
+
+TEST(RuntimeFunctionPostTests, FailedScheduleAfterDestroysCallable) {
+    af::runtime_config config;
+    config.threads = {af::cpu_threads("logic", 1)};
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    const af::thread_ref target = runtime.cpu_threads().front();
+
+    std::atomic<int> runs{0};
+    std::atomic<int> destroys{0};
+    std::atomic<std::uint16_t> observed{af::runtime_invalid_thread_index};
+
+    EXPECT_FALSE(runtime.schedule_after(target, std::chrono::milliseconds(1),
+                                        MoveOnlyCallback(runs, destroys, observed)));
+    EXPECT_EQ(runs.load(std::memory_order_acquire), 0);
+    EXPECT_EQ(destroys.load(std::memory_order_acquire), 1);
+}

@@ -32,6 +32,50 @@ namespace af {
 
 class AsyncLogHandle;
 
+namespace detail {
+
+template <typename Fn> class runtime_delayed_function_task final : public runtime_task {
+public:
+    static_assert(std::is_invocable_v<Fn &, runtime &> || std::is_invocable_v<Fn &>,
+                  "af::runtime::schedule_after callable must be invocable as fn(runtime&) or "
+                  "fn()");
+
+    runtime_delayed_function_task(runtime_task::factory_token token, runtime &owner, Fn &&fn)
+        : runtime_task(token, owner), fn_(std::move(fn)) {}
+
+    runtime_delayed_function_task(runtime_task::factory_token token, runtime &owner, const Fn &fn)
+        : runtime_task(token, owner), fn_(fn) {}
+
+    template <typename Rep, typename Period>
+    [[nodiscard]] bool do_after(std::uint16_t thread,
+                                std::chrono::duration<Rep, Period> delay) noexcept {
+        return schedule_after(thread, delay);
+    }
+
+    template <typename Clock, typename Duration>
+    [[nodiscard]] bool do_at(std::uint16_t thread,
+                             std::chrono::time_point<Clock, Duration> time) noexcept {
+        return schedule_at(thread, time);
+    }
+
+private:
+    task_result run_task() noexcept override {
+        try {
+            if constexpr (std::is_invocable_v<Fn &, runtime &>) {
+                fn_(owner());
+            } else {
+                fn_();
+            }
+        } catch (...) {
+        }
+        return done();
+    }
+
+    Fn fn_;
+};
+
+} // namespace detail
+
 enum class runtime_state : std::uint8_t {
     stopped,
     starting,
@@ -217,7 +261,7 @@ public:
     template <typename Fn,
               typename = std::enable_if_t<!std::is_convertible_v<std::decay_t<Fn>, runtime_work *>>>
     [[nodiscard]] bool post(thread_index thread, Fn &&fn) {
-        if (!valid_thread(thread)) [[unlikely]] {
+        if (!valid_thread(thread) || !running()) [[unlikely]] {
             return false;
         }
 
@@ -239,6 +283,46 @@ public:
               typename = std::enable_if_t<!std::is_convertible_v<std::decay_t<Fn>, runtime_work *>>>
     [[nodiscard]] bool post(thread_ref thread, Fn &&fn) {
         return post(thread.index, std::forward<Fn>(fn));
+    }
+
+    template <typename Fn, typename Rep, typename Period,
+              typename = std::enable_if_t<!std::is_convertible_v<std::decay_t<Fn>, runtime_work *>>>
+    [[nodiscard]] bool schedule_after(thread_index thread, std::chrono::duration<Rep, Period> delay,
+                                      Fn &&fn) {
+        if (!valid_thread(thread) || !running()) [[unlikely]] {
+            return false;
+        }
+
+        using task_type = detail::runtime_delayed_function_task<std::decay_t<Fn>>;
+        auto task = try_make_task<task_type>(*this, std::forward<Fn>(fn));
+        return task && task->do_after(thread, delay);
+    }
+
+    template <typename Fn, typename Rep, typename Period,
+              typename = std::enable_if_t<!std::is_convertible_v<std::decay_t<Fn>, runtime_work *>>>
+    [[nodiscard]] bool schedule_after(thread_ref thread, std::chrono::duration<Rep, Period> delay,
+                                      Fn &&fn) {
+        return schedule_after(thread.index, delay, std::forward<Fn>(fn));
+    }
+
+    template <typename Fn, typename Clock, typename Duration,
+              typename = std::enable_if_t<!std::is_convertible_v<std::decay_t<Fn>, runtime_work *>>>
+    [[nodiscard]] bool schedule_at(thread_index thread,
+                                   std::chrono::time_point<Clock, Duration> time, Fn &&fn) {
+        if (!valid_thread(thread) || !running()) [[unlikely]] {
+            return false;
+        }
+
+        using task_type = detail::runtime_delayed_function_task<std::decay_t<Fn>>;
+        auto task = try_make_task<task_type>(*this, std::forward<Fn>(fn));
+        return task && task->do_at(thread, time);
+    }
+
+    template <typename Fn, typename Clock, typename Duration,
+              typename = std::enable_if_t<!std::is_convertible_v<std::decay_t<Fn>, runtime_work *>>>
+    [[nodiscard]] bool schedule_at(thread_ref thread, std::chrono::time_point<Clock, Duration> time,
+                                   Fn &&fn) {
+        return schedule_at(thread.index, time, std::forward<Fn>(fn));
     }
 
     template <typename Op, typename KeyFn>
