@@ -336,6 +336,7 @@ public:
         listener_config.options = config.options;
         listener_config.options.reuse_port = false;
         listener_config.accept_strategy = accept_strategy::single_acceptor;
+        normalize_listener_owner_thread(listener_config.threads);
         return server_.add_listener_connection(std::move(listener_config), callbacks);
     }
 
@@ -384,6 +385,21 @@ private:
         tcp_config.connection = config.connection;
         tcp_config.connection_close_timeout = config.connection_close_timeout;
         return tcp_config;
+    }
+
+    static void normalize_listener_owner_thread(std::vector<af::thread_ref> &threads) noexcept {
+        if (threads.size() <= 1U || af::runtime::current() == nullptr) {
+            return;
+        }
+
+        const af::thread_ref current_thread(af::runtime::current_thread_index());
+        for (const af::thread_ref thread : threads) {
+            if (thread == current_thread) {
+                threads.front() = current_thread;
+                threads.resize(1U);
+                return;
+            }
+        }
     }
 
     tcp_server server_;
