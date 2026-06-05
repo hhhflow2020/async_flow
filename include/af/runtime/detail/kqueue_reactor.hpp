@@ -25,7 +25,8 @@ namespace af::detail {
 class kqueue_reactor final : public reactor {
 public:
     explicit kqueue_reactor(const reactor_config &config) noexcept
-        : edge_triggered_(config.edge_triggered) {
+        : event_budget_(normalize_event_budget(config.event_budget)),
+          edge_triggered_(config.edge_triggered) {
         init_backend(config.event_capacity);
     }
 
@@ -102,8 +103,8 @@ public:
 
         timespec timeout_value{};
         timespec *timeout_ptr = timeout_to_timespec(timeout, timeout_value);
-        const int count = ::kevent(kqueue_fd_, nullptr, 0, events_.data(),
-                                   static_cast<int>(events_.size()), timeout_ptr);
+        const int count =
+            ::kevent(kqueue_fd_, nullptr, 0, events_.data(), poll_event_limit(), timeout_ptr);
         if (count <= 0) {
             return false;
         }
@@ -161,6 +162,25 @@ public:
 
 private:
     static constexpr uintptr_t wake_ident = 1;
+
+    [[nodiscard]] static std::size_t normalize_event_budget(std::size_t value) noexcept {
+        return value == 0U ? 1U : value;
+    }
+
+    [[nodiscard]] int poll_event_limit() const noexcept {
+        std::size_t limit = events_.size();
+        if (event_budget_ < limit) {
+            limit = event_budget_;
+        }
+        if (limit == 0U) {
+            limit = 1U;
+        }
+        constexpr auto max_int = static_cast<std::size_t>(std::numeric_limits<int>::max());
+        if (limit > max_int) {
+            return std::numeric_limits<int>::max();
+        }
+        return static_cast<int>(limit);
+    }
 
     void init_backend(std::size_t event_capacity) noexcept {
         try {
@@ -358,6 +378,7 @@ private:
     std::vector<fd_event_source *> ready_sources_;
     std::vector<std::uint32_t> ready_events_;
     std::atomic<bool> wake_pending_{false};
+    std::size_t event_budget_{1};
     int kqueue_fd_{-1};
     bool edge_triggered_{false};
 };

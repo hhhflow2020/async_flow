@@ -22,7 +22,8 @@ namespace af::detail {
 
 class select_reactor final : public reactor {
 public:
-    select_reactor() noexcept {
+    explicit select_reactor(const reactor_config &config) noexcept
+        : event_budget_(normalize_event_budget(config.event_budget)) {
         init_wake_pipe();
     }
 
@@ -161,8 +162,10 @@ public:
         ready_sources_.clear();
         ready_events_.clear();
         try {
-            ready_sources_.reserve(sources_.size());
-            ready_events_.reserve(sources_.size());
+            const std::size_t reserve_count =
+                sources_.size() < event_budget_ ? sources_.size() : event_budget_;
+            ready_sources_.reserve(reserve_count);
+            ready_events_.reserve(reserve_count);
         } catch (...) {
             ready_sources_.clear();
             ready_events_.clear();
@@ -182,6 +185,9 @@ public:
                     ready_sources_.clear();
                     ready_events_.clear();
                     return did_work;
+                }
+                if (ready_sources_.size() >= event_budget_) {
+                    break;
                 }
             }
         }
@@ -217,6 +223,10 @@ public:
     }
 
 private:
+    [[nodiscard]] static std::size_t normalize_event_budget(std::size_t value) noexcept {
+        return value == 0U ? 1U : value;
+    }
+
 #if AF_DETAIL_HAS_NATIVE_IO_WAIT
     [[nodiscard]] static bool fd_supported(int fd) noexcept {
         return fd >= 0 && fd < FD_SETSIZE;
@@ -356,11 +366,11 @@ private:
     int wake_read_fd_{-1};
     int wake_write_fd_{-1};
 #endif
+    std::size_t event_budget_{1};
 };
 
 [[nodiscard]] inline std::unique_ptr<reactor> make_select_reactor(const reactor_config &config) {
-    static_cast<void>(config);
-    auto result = std::make_unique<select_reactor>();
+    auto result = std::make_unique<select_reactor>(config);
     if (!result->available()) {
         return nullptr;
     }

@@ -676,6 +676,67 @@ private:
     ReactorReadinessState &state_;
 };
 
+struct ReactorBudgetPipe {
+    ReactorBudgetPipe() = default;
+
+    ~ReactorBudgetPipe() {
+        close_all();
+    }
+
+    ReactorBudgetPipe(const ReactorBudgetPipe &) = delete;
+    ReactorBudgetPipe &operator=(const ReactorBudgetPipe &) = delete;
+
+    [[nodiscard]] bool open_pipe() noexcept {
+        int pipe_fds[2]{-1, -1};
+        if (::pipe(pipe_fds) != 0) {
+            return false;
+        }
+        read_fd = pipe_fds[0];
+        write_fd = pipe_fds[1];
+        return true;
+    }
+
+    [[nodiscard]] bool write_ready_byte() const noexcept {
+        const char value = 'x';
+        return ::write(write_fd, &value, sizeof(value)) == sizeof(value);
+    }
+
+    void close_all() noexcept {
+        if (read_fd >= 0) {
+            ::close(read_fd);
+            read_fd = -1;
+        }
+        if (write_fd >= 0) {
+            ::close(write_fd);
+            write_fd = -1;
+        }
+    }
+
+    int read_fd{-1};
+    int write_fd{-1};
+    af::fd_event_source source{};
+    int callbacks{0};
+    std::uint32_t events{0};
+};
+
+void on_reactor_budget_event(void *owner, af::fd_event_source &, std::uint32_t events) noexcept {
+    auto &pipe = *static_cast<ReactorBudgetPipe *>(owner);
+    char value = 0;
+    static_cast<void>(::read(pipe.read_fd, &value, sizeof(value)));
+    pipe.events |= events;
+    ++pipe.callbacks;
+}
+
+template <std::size_t Size>
+[[nodiscard]] int
+total_reactor_budget_callbacks(const std::array<ReactorBudgetPipe, Size> &pipes) noexcept {
+    int total = 0;
+    for (const ReactorBudgetPipe &pipe : pipes) {
+        total += pipe.callbacks;
+    }
+    return total;
+}
+
 } // namespace
 
 TEST(RuntimeConfigTests, PreservesThreadCountsAboveSixtyFour) {
@@ -1511,6 +1572,47 @@ void run_reactor_readiness_test(af::reactor_backend backend) {
     ::close(pipe_fds[1]);
 }
 
+void run_reactor_event_budget_test(af::reactor_backend backend) {
+    std::array<ReactorBudgetPipe, 3> pipes{};
+
+    af::reactor_config config;
+    config.backend = backend;
+    config.event_capacity = 8;
+    config.event_budget = 1;
+
+    auto reactor = af::make_reactor(config);
+    if (reactor == nullptr) {
+        GTEST_SKIP() << "reactor backend is not supported on this platform";
+    }
+
+    for (ReactorBudgetPipe &pipe : pipes) {
+        ASSERT_TRUE(pipe.open_pipe());
+        pipe.source.fd = pipe.read_fd;
+        pipe.source.interests = af::reactor_readable;
+        pipe.source.owner = &pipe;
+        pipe.source.on_event = &on_reactor_budget_event;
+        ASSERT_TRUE(reactor->add(&pipe.source));
+    }
+    for (const ReactorBudgetPipe &pipe : pipes) {
+        ASSERT_TRUE(pipe.write_ready_byte());
+    }
+
+    for (int expected = 1; expected <= static_cast<int>(pipes.size()); ++expected) {
+        EXPECT_TRUE(reactor->poll(std::chrono::nanoseconds(0)));
+        EXPECT_EQ(total_reactor_budget_callbacks(pipes), expected);
+    }
+
+    for (const ReactorBudgetPipe &pipe : pipes) {
+        EXPECT_EQ(pipe.callbacks, 1);
+        EXPECT_NE(pipe.events & af::reactor_readable, 0U);
+    }
+    EXPECT_FALSE(reactor->poll(std::chrono::nanoseconds(0)));
+
+    for (ReactorBudgetPipe &pipe : pipes) {
+        EXPECT_TRUE(reactor->del(&pipe.source));
+    }
+}
+
 TEST(RuntimeConfigTests, RuntimeSelectReactorDispatchesReadinessOnIoThread) {
     run_reactor_readiness_test(af::reactor_backend::select);
 }
@@ -1531,4 +1633,26 @@ TEST(RuntimeConfigTests, RuntimeKqueueReactorDispatchesReadinessOnIoThread) {
         GTEST_SKIP() << "kqueue is not supported on this platform";
     }
     run_reactor_readiness_test(af::reactor_backend::kqueue);
+}
+
+TEST(RuntimeConfigTests, ReactorEventBudgetLimitsSelectDispatch) {
+    run_reactor_event_budget_test(af::reactor_backend::select);
+}
+
+TEST(RuntimeConfigTests, ReactorEventBudgetLimitsAutoBackendDispatch) {
+    run_reactor_event_budget_test(af::reactor_backend::auto_select);
+}
+
+TEST(RuntimeConfigTests, ReactorEventBudgetLimitsEpollDispatch) {
+    if (!af::supports_epoll) {
+        GTEST_SKIP() << "epoll is not supported on this platform";
+    }
+    run_reactor_event_budget_test(af::reactor_backend::epoll);
+}
+
+TEST(RuntimeConfigTests, ReactorEventBudgetLimitsKqueueDispatch) {
+    if (!af::supports_kqueue) {
+        GTEST_SKIP() << "kqueue is not supported on this platform";
+    }
+    run_reactor_event_budget_test(af::reactor_backend::kqueue);
 }

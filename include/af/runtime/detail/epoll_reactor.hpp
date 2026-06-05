@@ -24,7 +24,8 @@ namespace af::detail {
 class epoll_reactor final : public reactor {
 public:
     explicit epoll_reactor(const reactor_config &config) noexcept
-        : edge_triggered_(config.edge_triggered) {
+        : event_budget_(normalize_event_budget(config.event_budget)),
+          edge_triggered_(config.edge_triggered) {
         init_backend(config.event_capacity);
     }
 
@@ -107,8 +108,7 @@ public:
         }
 
         const int timeout_ms = timeout_to_milliseconds(timeout);
-        const int count =
-            ::epoll_wait(epoll_fd_, events_.data(), static_cast<int>(events_.size()), timeout_ms);
+        const int count = ::epoll_wait(epoll_fd_, events_.data(), poll_event_limit(), timeout_ms);
         if (count <= 0) {
             return false;
         }
@@ -148,6 +148,24 @@ public:
     }
 
 private:
+    [[nodiscard]] static std::size_t normalize_event_budget(std::size_t value) noexcept {
+        return value == 0U ? 1U : value;
+    }
+
+    [[nodiscard]] int poll_event_limit() const noexcept {
+        std::size_t limit = events_.size();
+        if (event_budget_ < limit) {
+            limit = event_budget_;
+        }
+        if (limit == 0U) {
+            limit = 1U;
+        }
+        if (limit > static_cast<std::size_t>(INT_MAX)) {
+            return INT_MAX;
+        }
+        return static_cast<int>(limit);
+    }
+
     void init_backend(std::size_t event_capacity) noexcept {
         try {
             events_.resize(event_capacity == 0U ? 1U : event_capacity);
@@ -352,6 +370,7 @@ private:
     std::vector<fd_event_source *> sources_;
     std::vector<epoll_event> events_;
     std::atomic<bool> wake_pending_{false};
+    std::size_t event_budget_{1};
     int epoll_fd_{-1};
     int wake_fd_{-1};
     bool edge_triggered_{false};
