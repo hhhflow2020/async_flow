@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <charconv>
@@ -24,6 +25,7 @@
 #include "af/detail/log/async_logger.hpp"
 #include "af/detail/log/file_log_backend.hpp"
 #include "af/detail/log/network_log_backend.hpp"
+#include "af/detail/log/runtime_bound_log_backend.hpp"
 #include "af/detail/log/runtime_instance_async_log_consumer.hpp"
 #include "af/thread_kind.hpp"
 
@@ -82,6 +84,74 @@ inline void append_async_log_backend(AsyncLogConfig &target, const log_backend_c
     }
     if (const auto *tcp = std::get_if<tcp_log_backend_config>(&source)) {
         append_async_log_backend(target, *tcp);
+    }
+}
+
+[[nodiscard]] inline std::size_t
+runtime_bound_log_batch_queue_capacity(const log_config &source) noexcept {
+    const std::size_t records_per_batch =
+        source.max_batch_records == 0U ? 1U : source.max_batch_records;
+    const std::size_t records_capacity = source.queue_capacity == 0U ? 1U : source.queue_capacity;
+    const std::size_t batch_capacity =
+        records_capacity / records_per_batch + (records_capacity % records_per_batch != 0U);
+    return std::max<std::size_t>(2U, batch_capacity);
+}
+
+inline void append_runtime_async_log_backend(AsyncLogConfig &target, runtime &owner,
+                                             const log_config &log_source,
+                                             const file_log_backend_config &source) {
+    append_async_log_backend(target, source);
+}
+
+inline void append_runtime_async_log_backend(AsyncLogConfig &target, runtime &owner,
+                                             const log_config &log_source,
+                                             const udp_log_backend_config &source) {
+    UdpLogBackendConfig backend_config;
+    backend_config.host = source.host;
+    backend_config.port = source.port;
+    backend_config.max_datagram_size = source.max_datagram_size;
+
+    RuntimeBoundLogBackendConfig bound_config;
+    bound_config.owner = &owner;
+    bound_config.thread = owner.select_thread(source.io_thread);
+    bound_config.backend = make_udp_log_backend(std::move(backend_config));
+    bound_config.batch_queue_capacity = runtime_bound_log_batch_queue_capacity(log_source);
+    bound_config.max_batch_records = log_source.max_batch_records;
+    bound_config.max_batches_per_run = log_source.max_batch_records;
+    target.backends.push_back(make_runtime_bound_log_backend(std::move(bound_config)));
+}
+
+inline void append_runtime_async_log_backend(AsyncLogConfig &target, runtime &owner,
+                                             const log_config &log_source,
+                                             const tcp_log_backend_config &source) {
+    TcpLogBackendConfig backend_config;
+    backend_config.host = source.host;
+    backend_config.port = source.port;
+    backend_config.reconnect_interval = source.reconnect_interval;
+
+    RuntimeBoundLogBackendConfig bound_config;
+    bound_config.owner = &owner;
+    bound_config.thread = owner.select_thread(source.io_thread);
+    bound_config.backend = make_tcp_log_backend(std::move(backend_config));
+    bound_config.batch_queue_capacity = runtime_bound_log_batch_queue_capacity(log_source);
+    bound_config.max_batch_records = log_source.max_batch_records;
+    bound_config.max_batches_per_run = log_source.max_batch_records;
+    target.backends.push_back(make_runtime_bound_log_backend(std::move(bound_config)));
+}
+
+inline void append_runtime_async_log_backend(AsyncLogConfig &target, runtime &owner,
+                                             const log_config &log_source,
+                                             const log_backend_config &source) {
+    if (const auto *file = std::get_if<file_log_backend_config>(&source)) {
+        append_runtime_async_log_backend(target, owner, log_source, *file);
+        return;
+    }
+    if (const auto *udp = std::get_if<udp_log_backend_config>(&source)) {
+        append_runtime_async_log_backend(target, owner, log_source, *udp);
+        return;
+    }
+    if (const auto *tcp = std::get_if<tcp_log_backend_config>(&source)) {
+        append_runtime_async_log_backend(target, owner, log_source, *tcp);
     }
 }
 
@@ -156,10 +226,9 @@ template <typename TaskId>
 
 } // namespace detail
 
-[[nodiscard]] inline AsyncLogConfig make_async_log_config(
-    const log_config &source,
+inline void apply_async_log_config_fields(
+    AsyncLogConfig &target, const log_config &source,
     std::size_t runtime_thread_count = AsyncLogConfig::auto_runtime_thread_count) {
-    AsyncLogConfig target;
     if (source.ordering == log_ordering::relaxed) {
         const std::size_t resolved_thread_count =
             source.runtime_thread_count == 0U ? runtime_thread_count : source.runtime_thread_count;
@@ -175,6 +244,13 @@ template <typename TaskId>
     target.overflow_policy = source.overflow;
     target.flush_poll_interval =
         detail::async_log_flush_poll_interval_from_batch_delay(source.max_batch_delay);
+}
+
+[[nodiscard]] inline AsyncLogConfig make_async_log_config(
+    const log_config &source,
+    std::size_t runtime_thread_count = AsyncLogConfig::auto_runtime_thread_count) {
+    AsyncLogConfig target;
+    apply_async_log_config_fields(target, source, runtime_thread_count);
     target.backends.reserve(source.backends.size());
     for (const log_backend_config &backend : source.backends) {
         detail::append_async_log_backend(target, backend);
@@ -183,7 +259,14 @@ template <typename TaskId>
 }
 
 [[nodiscard]] inline AsyncLogConfig make_async_log_config(runtime &owner) {
-    return make_async_log_config(owner.config().logger, owner.thread_count());
+    const log_config &source = owner.config().logger;
+    AsyncLogConfig target;
+    apply_async_log_config_fields(target, source, owner.thread_count());
+    target.backends.reserve(source.backends.size());
+    for (const log_backend_config &backend : source.backends) {
+        detail::append_runtime_async_log_backend(target, owner, source, backend);
+    }
+    return target;
 }
 
 namespace detail {

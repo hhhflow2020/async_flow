@@ -1200,6 +1200,46 @@ TEST(LogTests, RuntimeInstanceAsyncLoggingUsesStructuredLoggerConfig) {
     std::filesystem::remove(path);
 }
 
+TEST(LogTests, RuntimeInstanceStructuredUdpBackendSendsFromRuntimeConfig) {
+    std::uint16_t port = 0;
+    int socket_fd = make_loopback_udp_socket(port);
+    ASSERT_GE(socket_fd, 0) << std::strerror(errno);
+
+    af::udp_log_backend_config udp_backend;
+    udp_backend.host = "127.0.0.1";
+    udp_backend.port = port;
+    udp_backend.io_thread = af::thread_selector::io(0);
+
+    af::runtime_config runtime_config;
+    runtime_config.threads = {
+        af::io_threads("log-udp-io", 1),
+        af::cpu_threads("log-udp-cpu", 1),
+    };
+    runtime_config.logger.consumer_thread = af::thread_selector::cpu(0);
+    runtime_config.logger.queue_capacity = 16;
+    runtime_config.logger.max_batch_records = 4;
+    runtime_config.logger.max_batch_delay = std::chrono::microseconds(500);
+    runtime_config.shutdown.log_flush_timeout = std::chrono::seconds(1);
+    runtime_config.logger.backends = {udp_backend};
+
+    af::runtime runtime(runtime_config);
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(runtime.logger_started());
+
+    LOG(INFO) << "runtime config udp backend";
+
+    ASSERT_TRUE(runtime.flush_logger(std::chrono::seconds(2)));
+
+    std::array<std::string, 1> received{};
+    const std::size_t received_count = recv_datagrams_until(
+        socket_fd, received, std::chrono::steady_clock::now() + std::chrono::seconds(2));
+    close_fd(socket_fd);
+    runtime.stop();
+
+    ASSERT_EQ(received_count, 1U);
+    EXPECT_NE(received[0].find("runtime config udp backend"), std::string::npos);
+}
+
 TEST(LogTests, RuntimeInstanceTaskIdDiagnosticsCanDisableLogTag) {
     const auto path =
         std::filesystem::path(::testing::TempDir()) / "asyncflow-runtime-task-id-disabled.log";
@@ -1336,6 +1376,49 @@ TEST(LogTests, RuntimeAwareSinkDefaultConsumerPrefersIoThread) {
     EXPECT_TRUE(observing_backend->ran_on_runtime_thread());
     EXPECT_EQ(observing_backend->observed_thread_index(),
               observing_backend->expected_thread_index());
+}
+
+TEST(LogTests, RuntimeBoundLogBackendRunsInnerBackendOnConfiguredIoThread) {
+    af::runtime_config runtime_config;
+    runtime_config.threads = {
+        af::io_threads("bound-log-io", 1),
+        af::cpu_threads("bound-log-cpu", 1),
+    };
+    runtime_config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(runtime_config);
+    ASSERT_TRUE(runtime.start());
+
+    const af::runtime::thread_index io_thread = runtime.select_thread(af::thread_selector::io(0));
+    const af::runtime::thread_index cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
+
+    auto inner_backend =
+        std::make_unique<RuntimeInstanceThreadObservingLogBackend>(runtime, io_thread);
+    auto *observing_backend = inner_backend.get();
+
+    af::detail::RuntimeBoundLogBackendConfig bound_config;
+    bound_config.owner = &runtime;
+    bound_config.thread = io_thread;
+    bound_config.backend = std::move(inner_backend);
+    bound_config.batch_queue_capacity = 4;
+    bound_config.max_batch_records = 4;
+    bound_config.max_batches_per_run = 4;
+
+    af::AsyncLogConfig config;
+    config.queue_capacity = 16;
+    config.max_batch_size = 4;
+    config.backends.push_back(af::detail::make_runtime_bound_log_backend(std::move(bound_config)));
+    auto logging = af::start_async_logging_for_runtime(runtime, std::move(config), cpu_thread);
+
+    LOG(INFO) << "runtime-bound backend configured io thread";
+
+    ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
+    EXPECT_EQ(observing_backend->record_count(), 1U);
+    EXPECT_TRUE(observing_backend->ran_on_runtime_thread());
+    EXPECT_EQ(observing_backend->observed_thread_index(), io_thread);
+
+    logging->stop();
+    runtime.stop();
 }
 
 TEST(LogTests, RuntimeLaneRecordPoolReusesSlotsAcrossFlushes) {
