@@ -11,7 +11,6 @@
 #include <utility>
 #include <vector>
 
-#include "af/async_runtime.hpp"
 #include "af/detail/config.hpp"
 #include "af/net/detail/tcp_control_tasks.hpp"
 #include "af/net/detail/tcp_handler.hpp"
