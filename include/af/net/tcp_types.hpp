@@ -168,7 +168,4 @@ using listener_id = ListenerId;
 using tcp_listener_handle = TcpListenerHandle;
 using listener_result = ListenerResult;
 
-template <typename Runtime> class TcpConnectionHandle;
-template <typename Runtime> class TcpConnectionRef;
-
 } // namespace af::net

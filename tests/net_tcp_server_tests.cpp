@@ -628,6 +628,77 @@ TEST(NetTcpServerTests, RuntimeTcpServerStartsConfiguredListenersOnRuntimeReacto
     runtime.stop();
 }
 
+TEST(NetTcpServerTests, RuntimeTcpServerRejectsControlFromSecondIoThread) {
+    af::runtime_config config;
+    config.threads = {af::io_threads("net-rt-io", 2)};
+    config.logger.consumer_thread = af::thread_selector::io(0);
+
+    af::runtime runtime(config);
+    RuntimeTcpListenerState state;
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_until([&] { return runtime.active_thread_count() == 2; }));
+
+    const af::thread_ref io_0 = runtime.select_thread_ref(af::thread_selector::io(0));
+    const af::thread_ref io_1 = runtime.select_thread_ref(af::thread_selector::io(1));
+    af::net::tcp_server server(runtime);
+
+    std::atomic<bool> second_done{false};
+    std::atomic<bool> second_ok{true};
+    std::atomic<int> second_error{0};
+
+    ASSERT_TRUE(runtime.post(io_0, [&] {
+        af::net::tcp_listener_callbacks callbacks;
+        callbacks.owner = &state;
+        callbacks.on_accept = &runtime_tcp_listener_accept;
+        callbacks.on_error = &runtime_tcp_listener_error;
+
+        af::net::tcp_listener_config listener_config;
+        listener_config.name = "runtime-server-owner";
+        listener_config.endpoint = af::net::tcp_endpoint::loopback_v4(0);
+        listener_config.threads = {io_0};
+        listener_config.options.reuse_port = false;
+
+        const af::net::listener_result listener =
+            server.add_listener(std::move(listener_config), callbacks);
+        state.start_ok.store(listener.ok() && server.start(), std::memory_order_release);
+        state.started.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return state.started.load(std::memory_order_acquire); }));
+    ASSERT_TRUE(state.start_ok.load(std::memory_order_acquire));
+
+    ASSERT_TRUE(runtime.post(io_1, [&] {
+        af::net::tcp_listener_callbacks callbacks;
+        callbacks.owner = &state;
+        callbacks.on_accept = &runtime_tcp_listener_accept;
+        callbacks.on_error = &runtime_tcp_listener_error;
+
+        af::net::tcp_listener_config listener_config;
+        listener_config.name = "runtime-server-wrong-owner";
+        listener_config.endpoint = af::net::tcp_endpoint::loopback_v4(0);
+        listener_config.threads = {io_1};
+        listener_config.options.reuse_port = false;
+
+        const af::net::listener_result listener =
+            server.add_listener(std::move(listener_config), callbacks);
+        second_ok.store(listener.ok(), std::memory_order_release);
+        second_error.store(listener.error, std::memory_order_release);
+        second_done.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return second_done.load(std::memory_order_acquire); }));
+    EXPECT_FALSE(second_ok.load(std::memory_order_acquire));
+    EXPECT_EQ(second_error.load(std::memory_order_acquire), EPERM);
+
+    ASSERT_TRUE(runtime.post(io_0, [&] {
+        state.stop_ok.store(server.stop(), std::memory_order_release);
+        state.stopped.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return state.stopped.load(std::memory_order_acquire); }));
+    EXPECT_TRUE(state.stop_ok.load(std::memory_order_acquire));
+
+    runtime.stop();
+}
+
 TEST(NetTcpServerTests, RuntimeTcpServerStartsListenerAddedWhileRunning) {
     af::runtime_config config;
     config.threads = {af::io_threads("net-rt-io", 1)};

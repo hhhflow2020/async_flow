@@ -364,12 +364,12 @@ public:
     }
 
 private:
-    friend std::unique_ptr<AsyncLogHandle> start_async_logging_for_runtime(runtime &owner,
-                                                                           AsyncLogConfig config);
+    friend std::unique_ptr<AsyncLogHandle> start_runtime_logging(runtime &owner,
+                                                                 AsyncLogConfig config);
 
     friend std::unique_ptr<AsyncLogHandle>
-    start_async_logging_for_runtime(runtime &owner, AsyncLogConfig config,
-                                    runtime::thread_index consumer_thread);
+    start_runtime_logging(runtime &owner, AsyncLogConfig config,
+                          runtime::thread_index consumer_thread);
 
     void register_sink() {
         absl::AddLogSink(sink_.get());
@@ -396,8 +396,8 @@ inline void initialize_absl_log_once() {
 }
 
 [[nodiscard]] inline std::unique_ptr<AsyncLogHandle>
-start_async_logging_for_runtime(runtime &owner, AsyncLogConfig config,
-                                runtime::thread_index consumer_thread) {
+start_runtime_logging(runtime &owner, AsyncLogConfig config,
+                      runtime::thread_index consumer_thread) {
     if (config.runtime_thread_count == 0U) {
         config.runtime_thread_count = owner.thread_count();
     }
@@ -418,17 +418,16 @@ start_async_logging_for_runtime(runtime &owner, AsyncLogConfig config,
     return handle;
 }
 
-[[nodiscard]] inline std::unique_ptr<AsyncLogHandle>
-start_async_logging_for_runtime(runtime &owner, AsyncLogConfig config) {
-    return start_async_logging_for_runtime(owner, std::move(config),
-                                           default_async_log_consumer_thread(owner));
+[[nodiscard]] inline std::unique_ptr<AsyncLogHandle> start_runtime_logging(runtime &owner,
+                                                                           AsyncLogConfig config) {
+    return start_runtime_logging(owner, std::move(config),
+                                 default_async_log_consumer_thread(owner));
 }
 
-[[nodiscard]] inline std::unique_ptr<AsyncLogHandle>
-start_async_logging_for_runtime(runtime &owner) {
+[[nodiscard]] inline std::unique_ptr<AsyncLogHandle> start_runtime_logging(runtime &owner) {
     const runtime::thread_index consumer_thread =
         owner.select_thread(owner.config().logger.consumer_thread);
-    return start_async_logging_for_runtime(owner, make_async_log_config(owner), consumer_thread);
+    return start_runtime_logging(owner, make_async_log_config(owner), consumer_thread);
 }
 
 } // namespace af

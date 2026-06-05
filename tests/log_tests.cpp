@@ -724,8 +724,8 @@ TEST(LogTests, AsyncFileBackendWritesAbslFormattedMessages) {
     af::AsyncLogConfig config;
     config.backends.push_back(af::make_file_log_backend({.path = path, .append = false}));
     LogTestRuntimeGuard runtime_guard;
-    auto logging = af::start_async_logging_for_runtime(runtime_guard.runtime(), std::move(config),
-                                                       runtime_guard.runtime_1());
+    auto logging = af::start_runtime_logging(runtime_guard.runtime(), std::move(config),
+                                             runtime_guard.runtime_1());
 
     LOG(INFO) << "af async file backend test";
 
@@ -744,8 +744,8 @@ TEST(LogTests, RuntimeAsyncLoggingRejectsInvalidConsumerThread) {
             af::AsyncLogConfig config;
             config.backends.push_back(std::make_unique<CountingLogBackend>());
             auto logging =
-                af::start_async_logging_for_runtime(runtime_guard.runtime(), std::move(config),
-                                                    runtime_guard.runtime().invalid_thread_index());
+                af::start_runtime_logging(runtime_guard.runtime(), std::move(config),
+                                          runtime_guard.runtime().invalid_thread_index());
             static_cast<void>(logging);
         },
         std::runtime_error);
@@ -760,8 +760,8 @@ TEST(LogTests, RuntimeAwareSinkUsesConfiguredRuntimeThreadName) {
     config.backends.push_back(std::move(backend));
 
     LogTestRuntimeGuard runtime_guard;
-    auto logging = af::start_async_logging_for_runtime(runtime_guard.runtime(), std::move(config),
-                                                       runtime_guard.runtime_1());
+    auto logging = af::start_runtime_logging(runtime_guard.runtime(), std::move(config),
+                                             runtime_guard.runtime_1());
     LOG(INFO) << "named runtime log consumer thread";
     ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
     logging->stop();
@@ -778,8 +778,8 @@ TEST(LogTests, RuntimeAwareSinkKeepsProducerThreadIdInAbslPrefix) {
     config.backends.push_back(std::move(backend));
 
     LogTestRuntimeGuard runtime_guard;
-    auto logging = af::start_async_logging_for_runtime(runtime_guard.runtime(), std::move(config),
-                                                       runtime_guard.runtime_1());
+    auto logging = af::start_runtime_logging(runtime_guard.runtime(), std::move(config),
+                                             runtime_guard.runtime_1());
 
     std::atomic<int> completed{0};
     ASSERT_TRUE(start_log_task<RuntimeThreadIdProbeLogTask>(
@@ -862,8 +862,8 @@ TEST(LogTests, QueueOverflowDropsNewestWithoutBlockingProducer) {
     config.overflow_policy = af::LogOverflowPolicy::DropNewest;
     config.backends.push_back(std::move(backend));
     LogTestRuntimeGuard runtime_guard;
-    auto logging = af::start_async_logging_for_runtime(runtime_guard.runtime(), std::move(config),
-                                                       runtime_guard.runtime_1());
+    auto logging = af::start_runtime_logging(runtime_guard.runtime(), std::move(config),
+                                             runtime_guard.runtime_1());
 
     LOG(INFO) << "block log worker";
     ASSERT_TRUE(blocking_backend->wait_until_entered(std::chrono::seconds(2)));
@@ -890,8 +890,8 @@ TEST(LogTests, RuntimeAwareSinkUsesRuntimeLaneWhenExternalMpscIsFull) {
     config.max_batch_size = 1;
     config.overflow_policy = af::LogOverflowPolicy::DropNewest;
     config.backends.push_back(std::move(backend));
-    auto logging = af::start_async_logging_for_runtime(runtime_guard.runtime(), std::move(config),
-                                                       runtime_guard.runtime_1());
+    auto logging = af::start_runtime_logging(runtime_guard.runtime(), std::move(config),
+                                             runtime_guard.runtime_1());
 
     LOG(INFO) << "block log worker";
     ASSERT_TRUE(blocking_backend->wait_until_entered(std::chrono::seconds(2)));
@@ -928,8 +928,8 @@ TEST(LogTests, RuntimeAwareSinkDrainsOnConfiguredRuntimeThread) {
     config.queue_capacity = 16;
     config.max_batch_size = 4;
     config.backends.push_back(std::move(backend));
-    auto logging = af::start_async_logging_for_runtime(runtime_guard.runtime(), std::move(config),
-                                                       runtime_guard.runtime_1());
+    auto logging = af::start_runtime_logging(runtime_guard.runtime(), std::move(config),
+                                             runtime_guard.runtime_1());
 
     LOG(INFO) << "runtime-bound consumer external log";
 
@@ -962,8 +962,7 @@ TEST(LogTests, RuntimeInstanceAwareSinkDrainsOnConfiguredRuntimeThread) {
     log_config.queue_capacity = 16;
     log_config.max_batch_size = 4;
     log_config.backends.push_back(std::move(backend));
-    auto logging =
-        af::start_async_logging_for_runtime(runtime, std::move(log_config), consumer_thread);
+    auto logging = af::start_runtime_logging(runtime, std::move(log_config), consumer_thread);
 
     LOG(INFO) << "runtime instance-bound consumer external log";
 
@@ -1145,8 +1144,8 @@ TEST(LogTests, RuntimeAwareSinkCanStopFromConsumerRuntimeThread) {
     config.queue_capacity = 16;
     config.max_batch_size = 4;
     config.backends.push_back(std::move(backend));
-    auto logging = af::start_async_logging_for_runtime(runtime_guard.runtime(), std::move(config),
-                                                       runtime_guard.runtime_1());
+    auto logging = af::start_runtime_logging(runtime_guard.runtime(), std::move(config),
+                                             runtime_guard.runtime_1());
 
     std::atomic<int> completed{0};
     ASSERT_TRUE(start_log_task<RuntimeStopLoggingTask>(
@@ -1177,7 +1176,7 @@ TEST(LogTests, RuntimeAwareSinkDefaultConsumerPrefersIoThread) {
     config.queue_capacity = 16;
     config.max_batch_size = 4;
     config.backends.push_back(std::move(backend));
-    auto logging = af::start_async_logging_for_runtime(runtime, std::move(config));
+    auto logging = af::start_runtime_logging(runtime, std::move(config));
 
     LOG(INFO) << "default runtime-bound consumer external log";
 
@@ -1221,7 +1220,7 @@ TEST(LogTests, RuntimeBoundLogBackendRunsInnerBackendOnConfiguredIoThread) {
     config.queue_capacity = 16;
     config.max_batch_size = 4;
     config.backends.push_back(af::detail::make_runtime_bound_log_backend(std::move(bound_config)));
-    auto logging = af::start_async_logging_for_runtime(runtime, std::move(config), cpu_thread);
+    auto logging = af::start_runtime_logging(runtime, std::move(config), cpu_thread);
 
     LOG(INFO) << "runtime-bound backend configured io thread";
 
@@ -1268,8 +1267,8 @@ TEST(LogTests, RuntimeLaneRecordPoolReusesSlotsAcrossFlushes) {
     config.backends.push_back(std::move(backend));
 
     LogTestRuntimeGuard runtime_guard;
-    auto logging = af::start_async_logging_for_runtime(runtime_guard.runtime(), std::move(config),
-                                                       runtime_guard.runtime_1());
+    auto logging = af::start_runtime_logging(runtime_guard.runtime(), std::move(config),
+                                             runtime_guard.runtime_1());
 
     constexpr int record_count = 32;
     for (int i = 0; i < record_count; ++i) {
@@ -1316,8 +1315,8 @@ TEST(LogTests, RuntimeAwareSinkTagsFirstUserLogFieldWithRuntimeTaskId) {
     config.queue_capacity = 16;
     config.backends.push_back(af::make_file_log_backend({.path = path, .append = false}));
     LogTestRuntimeGuard runtime_guard;
-    auto logging = af::start_async_logging_for_runtime(runtime_guard.runtime(), std::move(config),
-                                                       runtime_guard.runtime_0());
+    auto logging = af::start_runtime_logging(runtime_guard.runtime(), std::move(config),
+                                             runtime_guard.runtime_0());
     std::atomic<int> runtime_completed{0};
     std::atomic<af::runtime_task_id> observed_task_id{af::runtime_invalid_task_id};
     std::atomic<af::runtime_task_id> observed_current_task_id{af::runtime_invalid_task_id};
@@ -1355,8 +1354,8 @@ TEST(LogTests, RuntimeAwareSinkTagsEachUserLogLineAfterPrefix) {
     config.queue_capacity = 16;
     config.backends.push_back(af::make_file_log_backend({.path = path, .append = false}));
     LogTestRuntimeGuard runtime_guard;
-    auto logging = af::start_async_logging_for_runtime(runtime_guard.runtime(), std::move(config),
-                                                       runtime_guard.runtime_0());
+    auto logging = af::start_runtime_logging(runtime_guard.runtime(), std::move(config),
+                                             runtime_guard.runtime_0());
     std::atomic<int> runtime_completed{0};
     std::atomic<af::runtime_task_id> observed_task_id{af::runtime_invalid_task_id};
     std::atomic<af::runtime_task_id> observed_current_task_id{af::runtime_invalid_task_id};

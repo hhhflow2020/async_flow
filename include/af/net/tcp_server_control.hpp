@@ -39,9 +39,9 @@ public:
             handle_state_->accepting_operations.store(false, std::memory_order_release);
         }
         if (running_) {
-            AF_ASSERT(on_owner_io_thread() &&
+            AF_ASSERT(on_control_thread() &&
                       "tcp_server must be stopped on the owner reactor thread before destruction");
-            if (on_owner_io_thread()) {
+            if (on_control_thread()) {
                 static_cast<void>(stop());
             }
         }
@@ -137,7 +137,7 @@ public:
         if (running_ || stopping_connections_) {
             return false;
         }
-        if (!on_owner_io_thread()) {
+        if (!prepare_current_control_thread()) {
             return false;
         }
 
@@ -168,7 +168,7 @@ public:
         if (!running_) {
             return false;
         }
-        if (!on_owner_io_thread()) {
+        if (!on_control_thread()) {
             return false;
         }
 
@@ -200,7 +200,7 @@ public:
         tcp_listener_handle handle,
         remove_listener_policy policy = remove_listener_policy::stop_accept_only) noexcept {
         static_cast<void>(policy);
-        if (!on_owner_io_thread()) {
+        if (!on_control_thread()) {
             return false;
         }
         listener_entry *entry = find_entry(handle);
@@ -292,11 +292,11 @@ private:
         std::uint32_t generation{0};
     };
 
-    [[nodiscard]] af::thread_ref current_owner_thread() const noexcept {
-        if (!on_owner_io_thread()) {
+    [[nodiscard]] af::thread_ref current_owner_thread() noexcept {
+        if (!prepare_current_control_thread()) {
             return {};
         }
-        return af::thread_ref(af::runtime::current_thread_index());
+        return control_thread_;
     }
 
     [[nodiscard]] bool on_owner_io_thread() const noexcept {
@@ -305,6 +305,23 @@ private:
         }
         const af::runtime::thread_index index = af::runtime::current_thread_index();
         return owner_->valid_thread(index) && owner_->thread_kind_of(index) == af::thread_kind::io;
+    }
+
+    [[nodiscard]] bool on_control_thread() const noexcept {
+        return on_owner_io_thread() && control_thread_.valid() &&
+               af::runtime::current_thread_index() == control_thread_.index;
+    }
+
+    [[nodiscard]] bool prepare_current_control_thread() noexcept {
+        if (!on_owner_io_thread()) {
+            return false;
+        }
+        const af::thread_ref current_thread(af::runtime::current_thread_index());
+        if (!control_thread_) {
+            control_thread_ = current_thread;
+            return true;
+        }
+        return control_thread_ == current_thread;
     }
 
     [[nodiscard]] bool
@@ -526,7 +543,7 @@ private:
         if (owned_fd < 0) {
             return false;
         }
-        if (!on_owner_io_thread()) {
+        if (!on_control_thread()) {
             ::close(owned_fd);
             return false;
         }
@@ -580,7 +597,7 @@ private:
 
     [[nodiscard]] connection_entry *find_connection_entry(std::uint32_t slot,
                                                           std::uint32_t generation) noexcept {
-        if (!on_owner_io_thread() || slot >= connections_.size()) {
+        if (!on_control_thread() || slot >= connections_.size()) {
             return nullptr;
         }
         connection_entry *entry = connections_[slot].get();
@@ -858,6 +875,7 @@ private:
     af::runtime *owner_{nullptr};
     tcp_server_config config_;
     std::shared_ptr<detail::tcp_connection_handle_state> handle_state_;
+    af::thread_ref control_thread_{};
     std::vector<std::unique_ptr<listener_entry>> entries_;
     std::vector<std::unique_ptr<connection_entry>> connections_;
     std::vector<std::uint32_t> free_listener_slots_;

@@ -11,13 +11,10 @@
 
 namespace af::net {
 
-template <typename Runtime> class UdpSocketHandle;
-template <typename Runtime> class UdpSocketRef;
 class udp_socket_handle;
 class udp_socket_ref;
 
 namespace detail {
-template <typename Runtime> class UdpSocketShard;
 struct runtime_udp_shard;
 } // namespace detail
 
@@ -75,11 +72,8 @@ public:
     }
 
 private:
-    template <typename Runtime> friend class UdpSocketHandle;
-    template <typename Runtime> friend class UdpSocketRef;
     friend class udp_socket_handle;
     friend class udp_socket_ref;
-    template <typename Runtime> friend class detail::UdpSocketShard;
     friend struct detail::runtime_udp_shard;
 
     void assign(const sockaddr *address, socklen_t size) noexcept {

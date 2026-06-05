@@ -251,7 +251,7 @@ inline void runtime::start_owned_logger_if_configured() {
         return;
     }
     owned_logger_stop_started_.store(false, std::memory_order_release);
-    owned_logger_ = start_async_logging_for_runtime(*this);
+    owned_logger_ = start_runtime_logging(*this);
 }
 
 inline void runtime::stop_owned_logger() noexcept {

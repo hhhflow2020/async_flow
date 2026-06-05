@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <thread>
 #include <vector>
 
 #include "af/detail/log/async_logger.hpp"
@@ -188,7 +187,12 @@ private:
                    std::chrono::steady_clock::now() < deadline) {
                 const bool did_work = run_service(max_batches_per_run_);
                 if (!did_work && !finished_.load(std::memory_order_acquire)) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    auto retry_deadline =
+                        std::chrono::steady_clock::now() + std::chrono::milliseconds(1);
+                    if (retry_deadline > deadline) {
+                        retry_deadline = deadline;
+                    }
+                    static_cast<void>(wait_until_finished(retry_deadline));
                 }
             }
             return;

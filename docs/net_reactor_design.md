@@ -6,14 +6,14 @@
 
 ## 分层
 
-- `EventPoller`：封装 epoll/kqueue 的注册、更新、删除、等待和唤醒。
-- `Channel`：保存 fd、interest、ready events、owner 和回调。
-- `IpEndpoint`：当前 IPv4/IPv6 endpoint 的轻量表示，并承载 Unix path 作为过渡别名；`TcpEndpoint`、`UdpEndpoint`、`UnixEndpoint` 是语义化别名。
-- `TcpListener`：监听 fd、accept 循环、listener id、监听配置和 handler 绑定。
-- `TcpConnection`：连接 fd、读 buffer、写队列、关闭状态、所属 listener 和用户上下文。
-- `TcpServer`：管理多个 listener、默认 IO 线程组、动态 add/remove listener、启动/停止生命周期。
-- `TcpClient`：在绑定 IO 线程上发起非阻塞 connect，连接成功后交给 `TcpConnection` 统一管理。
-- `UdpSocket`：绑定本地 IPv4/IPv6 endpoint，可选连接 remote endpoint；同一抽象同时覆盖 UDP server/client。
+- `reactor`：统一封装 epoll/kqueue/select 的注册、更新、删除、等待和唤醒。
+- `fd_event_source`：保存 fd、interest、ready events、owner 和回调。
+- `tcp_endpoint` / `udp_endpoint` / `unix_endpoint`：IPv4、IPv6 和 Unix path endpoint 的语义化表示。
+- `tcp_listener`：监听 fd、accept 循环、listener id、监听配置和 handler 绑定。
+- `tcp_connection`：连接 fd、读 buffer、写队列、关闭状态、所属 listener 和用户上下文。
+- `tcp_server`：管理同一个 control IO 线程上的多个 listener、连接表和启动/停止生命周期。
+- `tcp_client`：在绑定 IO 线程上发起非阻塞 connect，连接成功后交给 `tcp_connection` 统一管理。
+- `udp_socket`：绑定本地 IPv4/IPv6 endpoint，可选连接 remote endpoint；同一抽象同时覆盖 UDP server/client。
 - `unix_stream_server` / `unix_stream_client`：面向 Unix domain stream socket 的 server/client 控制对象，复用 stream connection 热路径。
 - `unix_datagram_socket`：面向 Unix domain datagram socket 的 server/client 控制对象，复用 datagram shard 热路径并管理 path 生命周期。
 - `tcp_connection_handle` / `udp_socket_handle`：线程安全的业务侧句柄，跨线程发送会投递到归属 IO shard。
@@ -36,34 +36,49 @@ select fallback 每次 poll 从当前 channel/wait 表重建 `fd_set`，用非�
 
 ## TCP Server API
 
-`TcpServer` 不以 handler 作为模板参数。handler 绑定在 listener 上，因此同一个 server 可以管理多个监听地址和多种业务入口。
+`tcp_server` 不以 handler 作为模板参数。handler 绑定在 listener 上，因此同一个 server 可以管理多个监听地址和多种业务入口。
 
-当前 public API 仍保留 `TcpServer` / `TcpClient` / `UdpSocket` 等历史类型名；下一代实例 runtime 路径提供 `tcp_server` / `tcp_client` / `udp_socket` 等 lower_case 控制对象。旧 lower_case 模板别名会逐步移除，避免新旧语义混在同一个名字上。
+当前 public API 已收敛到 runtime-native lower_case 控制对象：`tcp_server`、`tcp_client`、`udp_socket`、`unix_stream_server`、`unix_stream_client` 和 `unix_datagram_socket`。旧模板 `TcpServer<Runtime>`、`TcpClient<Runtime>`、`UdpSocket<Runtime>` 路径已移除。
 
 ```cpp
-af::net::tcp_server<Runtime> server;
+af::net::tcp_server server(runtime);
+af::net::tcp_connection_callbacks callbacks{};
+callbacks.owner = &state;
+callbacks.on_accept = &on_accept;
+callbacks.on_read = &on_read;
+callbacks.on_close = &on_close;
 
 // 在 runtime task 中执行，且后续控制操作固定在同一个 reactor 线程上。
-server.bind_threads(Runtime::thread_group<IoTag>());
-auto public_listener = server.add_listener<PublicHandler>({
-    .name = "public",
-    .endpoint = af::net::tcp_endpoint::any(8080),
-    .options = {.reuse_port = true},
+runtime.post(io_thread, [&] {
+    af::net::tcp_listener_config listener;
+    listener.name = "public";
+    listener.endpoint = af::net::tcp_endpoint::any(8080);
+    listener.threads = {io_thread};
+    listener.options.reuse_port = true;
+
+    const af::net::listener_result public_listener =
+        server.add_listener(std::move(listener), callbacks);
+    if (public_listener.ok()) {
+        server.start();
+    }
 });
-const bool scheduled = public_listener.ok() && server.start();
 ```
 
-`TcpServerConfig` 是 server/shard 级配置，包含默认 `connection` 配置和 `connection_close_timeout`。`connection` 会作为 listener 的默认连接配置，覆盖读 buffer、读预算、写预算、输出高水位、`TCP_NODELAY` 和 keepalive；`TcpListenerOptions` 仍可在单个 listener 上覆盖这些连接热路径参数，并继续承载 `backlog`、`reuse_port`、`ipv6_only`、accept 预算和 Unix path 生命周期选项。
+`tcp_server_config` 是 server 级配置，包含默认 `connection` 配置和 `connection_close_timeout`。`connection` 会作为 listener 的默认连接配置，覆盖读 buffer、读预算、写预算、输出高水位、`TCP_NODELAY` 和 keepalive；`tcp_listener_options` 仍可在单个 listener 上覆盖这些连接热路径参数，并继续承载 `backlog`、`reuse_port`、`ipv6_only`、accept 预算和 Unix path 生命周期选项。
 
-运行中可以动态增加或移除 listener。TCP server 控制面是 reactor-only：`bind_threads()`、`add_listener()`、`remove_listener()`、`start()`、`stop()` 应由同一个 reactor 线程调用；外部线程应显式投递一个 runtime task 到该 reactor。框架把这作为无锁控制面的使用契约，不为外部直接调用额外建立同步兼容层。
+运行中可以动态增加或移除 listener。TCP server 控制面是 reactor-only：`add_listener()`、`remove_listener()`、`start()`、`stop()` 应由同一个 control reactor 线程调用；外部线程应显式投递一个 runtime task 到该 reactor。`tcp_server` 内部 listener table 和 connection table 不加锁，第一次控制操作会绑定 control IO 线程，后续从其他 IO 线程控制同一个 server 会失败，避免无锁状态被并发修改。
+
+当前实现的一个约束是：单次 `add_listener()` 只绑定当前 control IO 线程。要在多个 IO 线程上监听同一端口，现阶段应为每个 IO 线程创建独立 `tcp_server` / listener 控制对象，或等待后续 shard 化 server API。目标架构中的 `listener.threads = rt.io_threads()` 会在后续实现中统一展开为每个 IO shard 的 listener。
 
 `start()` / 动态 `add_listener()` 表示控制任务已成功提交；真正的 `bind/listen/register channel` 在目标 IO shard 上异步完成。监听 fd 打开失败会通过 handler 的 `on_error(listener, error)` 或 `on_listener_error(listener, error)` 回调报告。这样控制面不需要 mutex、condition variable 或跨线程 barrier，也不会在 IO 线程上等待自身任务。
 
 ```cpp
-const af::net::listener_result result = server.add_listener<MetricsHandler>({
-    .name = "metrics",
-    .endpoint = af::net::tcp_endpoint::loopback(9100),
-});
+af::net::tcp_listener_config metrics;
+metrics.name = "metrics";
+metrics.endpoint = af::net::tcp_endpoint::loopback(9100);
+metrics.threads = {io_thread};
+
+const af::net::listener_result result = server.add_listener(std::move(metrics), callbacks);
 
 if (result.ok()) {
     server.remove_listener(result.listener,
@@ -73,7 +88,7 @@ if (result.ok()) {
 
 `remove_listener_policy::stop_accept_only` 只停止 accept，不影响已建立连接；`close_existing_connections` 会同时关闭该 listener 下已有连接。
 
-`TcpServer::stop()` 会先停止 accept 并从 reactor 移除 listener，然后对活跃连接执行 `close_after_flush()`；连接自然 flush 完会立即关闭，超过 `connection_close_timeout` 后强制关闭剩余连接，避免生产退出时被慢客户端无限拖住。
+`tcp_server::stop()` 会先停止 accept 并从 reactor 移除 listener，然后对活跃连接执行 `close_after_flush()`；连接自然 flush 完会立即关闭，超过 `connection_close_timeout` 后强制关闭剩余连接，避免生产退出时被慢客户端无限拖住。
 
 ## TCP Client API
 
