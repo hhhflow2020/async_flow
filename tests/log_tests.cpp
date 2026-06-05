@@ -11,6 +11,7 @@
 #include <iterator>
 #include <mutex>
 #include <new>
+#include <stdexcept>
 #include "af/span.hpp"
 #include <sstream>
 #include <string>
@@ -208,6 +209,12 @@ TEST(LogTests, RuntimeLogConfigCarriesRecordPoolConfig) {
     EXPECT_EQ(target.max_batch_size, 4U);
     EXPECT_EQ(target.record_pool_local_cache_size, 5U);
     EXPECT_EQ(target.record_pool_slab_object_count, 7U);
+}
+
+TEST(LogTests, RecordPoolRejectsOversizedLocalCache) {
+    EXPECT_THROW(
+        af::detail::AsyncLogRecordPool(2, af::async_log_record_pool_max_local_cache_size + 1U),
+        std::length_error);
 }
 
 TEST(LogTests, RecordPoolLocalCacheIgnoresStaleSlotsWhenPoolAddressIsReused) {

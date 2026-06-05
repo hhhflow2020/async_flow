@@ -27,6 +27,8 @@ enum class LogOrdering : std::uint8_t {
 using log_overflow_policy = LogOverflowPolicy;
 using log_ordering = LogOrdering;
 
+inline constexpr std::size_t async_log_record_pool_max_local_cache_size = 4096;
+
 struct AsyncLogConfig {
     static constexpr std::size_t default_queue_capacity = 1U << 16U;
     static constexpr std::size_t auto_queue_shard_count = 0U;

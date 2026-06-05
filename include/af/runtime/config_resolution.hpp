@@ -33,6 +33,7 @@ enum class runtime_config_status : std::uint8_t {
     log_queue_capacity_zero,
     log_max_batch_records_zero,
     log_record_pool_local_cache_size_zero,
+    log_record_pool_local_cache_size_too_large,
     log_record_pool_slab_object_count_zero,
     log_consumer_thread_not_found,
     log_file_backend_path_empty,
@@ -102,6 +103,8 @@ runtime_config_status_name(runtime_config_status status) noexcept {
         return "log_max_batch_records_zero";
     case runtime_config_status::log_record_pool_local_cache_size_zero:
         return "log_record_pool_local_cache_size_zero";
+    case runtime_config_status::log_record_pool_local_cache_size_too_large:
+        return "log_record_pool_local_cache_size_too_large";
     case runtime_config_status::log_record_pool_slab_object_count_zero:
         return "log_record_pool_slab_object_count_zero";
     case runtime_config_status::log_consumer_thread_not_found:
@@ -471,6 +474,10 @@ validate_resolved_runtime_config(const resolved_runtime_config &resolved) noexce
     }
     if (config.logger.record_pool.local_cache_size == 0) {
         return runtime_config_error(runtime_config_status::log_record_pool_local_cache_size_zero);
+    }
+    if (config.logger.record_pool.local_cache_size > async_log_record_pool_max_local_cache_size) {
+        return runtime_config_error(
+            runtime_config_status::log_record_pool_local_cache_size_too_large);
     }
     if (config.logger.record_pool.slab_object_count == 0) {
         return runtime_config_error(runtime_config_status::log_record_pool_slab_object_count_zero);

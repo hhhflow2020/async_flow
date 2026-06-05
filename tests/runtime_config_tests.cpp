@@ -1195,6 +1195,14 @@ TEST(RuntimeConfigTests, RuntimeConfigValidationReportsInvalidFields) {
     EXPECT_EQ(af::runtime_config_status_name(validation.status),
               "log_record_pool_local_cache_size_zero");
 
+    config.logger.record_pool.local_cache_size =
+        af::async_log_record_pool_max_local_cache_size + 1U;
+    validation = af::validate_runtime_config(config);
+    EXPECT_EQ(validation.status,
+              af::runtime_config_status::log_record_pool_local_cache_size_too_large);
+    EXPECT_EQ(af::runtime_config_status_name(validation.status),
+              "log_record_pool_local_cache_size_too_large");
+
     config.logger.record_pool.local_cache_size = 1;
     config.logger.record_pool.slab_object_count = 0;
     validation = af::validate_runtime_config(config);

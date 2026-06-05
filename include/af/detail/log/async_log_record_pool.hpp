@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -10,6 +11,7 @@
 #include <vector>
 
 #include "af/detail/config.hpp"
+#include "af/detail/log/async_log_config.hpp"
 #include "af/detail/log/log_record.hpp"
 #include "af/detail/queue/queue_backoff.hpp"
 #include "af/span.hpp"
@@ -68,7 +70,8 @@ public:
     explicit AsyncLogRecordPool(std::size_t initial_capacity, std::size_t local_cache_capacity = 0U)
         : cache_token_(next_cache_token_.fetch_add(1U, std::memory_order_relaxed)),
           initial_slab_capacity_(validate_capacity(initial_capacity)),
-          local_cache_capacity_(local_cache_capacity), next_slab_capacity_(initial_slab_capacity_) {
+          local_cache_capacity_(validate_local_cache_capacity(local_cache_capacity)),
+          next_slab_capacity_(initial_slab_capacity_) {
         add_initial_slab();
     }
 
@@ -137,11 +140,12 @@ public:
     }
 
 private:
-    struct LocalCache {
+    struct alignas(hardware_cache_line_size) LocalCache {
         AsyncLogRecordPool *owner{nullptr};
         std::uint64_t owner_token{0};
         std::weak_ptr<void> owner_lifetime;
-        std::vector<Slot *> slots;
+        std::array<Slot *, async_log_record_pool_max_local_cache_size> slots{};
+        std::size_t capacity{0};
         std::size_t size{0};
 
         ~LocalCache() {
@@ -158,18 +162,13 @@ private:
                 flush();
             }
             if (pool == nullptr || pool->local_cache_capacity_ == 0U) {
-                return false;
-            }
-            try {
-                if (slots.size() < pool->local_cache_capacity_) {
-                    slots.resize(pool->local_cache_capacity_);
-                }
-            } catch (...) {
+                capacity = 0;
                 return false;
             }
             owner = pool;
             owner_token = pool->cache_token_;
             owner_lifetime = pool->lifetime_;
+            capacity = pool->local_cache_capacity_;
             return true;
         }
 
@@ -185,7 +184,7 @@ private:
         }
 
         [[nodiscard]] std::size_t available() const noexcept {
-            return slots.size() - size;
+            return capacity - size;
         }
 
         void append_commit(std::size_t count) noexcept {
@@ -199,6 +198,7 @@ private:
                 }
             }
             size = 0;
+            capacity = 0;
             owner = nullptr;
             owner_token = 0;
             owner_lifetime.reset();
@@ -206,6 +206,7 @@ private:
 
         void discard() noexcept {
             size = 0;
+            capacity = 0;
             owner = nullptr;
             owner_token = 0;
             owner_lifetime.reset();
@@ -215,6 +216,13 @@ private:
     [[nodiscard]] static std::size_t validate_capacity(std::size_t capacity) {
         if (capacity == 0U || capacity >= null_slot) {
             throw std::length_error("async log record pool capacity is out of range");
+        }
+        return capacity;
+    }
+
+    [[nodiscard]] static std::size_t validate_local_cache_capacity(std::size_t capacity) {
+        if (capacity > async_log_record_pool_max_local_cache_size) {
+            throw std::length_error("async log record pool local cache size is out of range");
         }
         return capacity;
     }
