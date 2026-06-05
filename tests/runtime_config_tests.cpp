@@ -23,75 +23,12 @@
 
 #include <gtest/gtest.h>
 
-#include "af/async_runtime.hpp"
 #include "af/platform.hpp"
 #include "af/runtime.hpp"
 #include "af/runtime_config.hpp"
 
 namespace {
 
-struct ConfigThreadTag;
-struct ConfigLogicThreadTag;
-struct ConfigIoThreadTag;
-struct ConfigLogThreadTag;
-
-struct AboveSixtyFourThreadTraits {
-    static constexpr auto threads = af::thread_layout(af::thread_group<ConfigThreadTag, 257>());
-};
-
-using AboveSixtyFourRuntime = af::AsyncRuntime<AboveSixtyFourThreadTraits>;
-
-static_assert(AboveSixtyFourRuntime::thread_count == 257U);
-static_assert(AboveSixtyFourRuntime::invalid_thread_index == 257U);
-static_assert(AboveSixtyFourRuntime::Config::task_pool_remote_release_batch_size == 64U);
-static_assert(AboveSixtyFourRuntime::Config::task_pool_chunk_size == 256U);
-static_assert(!AboveSixtyFourRuntime::Config::task_pool_cache_slot_index);
-static_assert(AboveSixtyFourRuntime::Config::task_pool_local_cache_set_size == 1U);
-static_assert(AboveSixtyFourRuntime::Config::task_pool_direct_release_set_size == 4U);
-static_assert(AboveSixtyFourRuntime::Config::task_pool_local_cache_capacity == 64U);
-static_assert(AboveSixtyFourRuntime::Config::timer_drain_budget == 256U);
-static_assert(AboveSixtyFourRuntime::Config::timer_reserve == 1024U);
-static_assert(AboveSixtyFourRuntime::Config::service_task_budget == 32U);
-
-struct ThreadLayoutMetadataTraits {
-    static constexpr auto threads =
-        af::thread_layout(af::thread_group<ConfigLogicThreadTag, 3, af::thread_kind::cpu>("logic"),
-                          af::thread_group<ConfigIoThreadTag, 2, af::thread_kind::io>("io"),
-                          af::thread_group<ConfigLogThreadTag, 1, af::thread_kind::cpu>("log"));
-};
-
-using ThreadLayoutMetadataRuntime = af::AsyncRuntime<ThreadLayoutMetadataTraits>;
-using ConfigLogicGroup =
-    decltype(ThreadLayoutMetadataRuntime::thread_group<ConfigLogicThreadTag>());
-
-static_assert(ThreadLayoutMetadataRuntime::thread_count == 6U);
-static_assert(sizeof(ThreadLayoutMetadataRuntime::Thread) == sizeof(std::uint16_t));
-static_assert(std::is_empty_v<ConfigLogicGroup>);
-
-struct RemoteBatchOverrideTraits {
-    static constexpr auto threads = af::thread_layout(af::thread_group<ConfigThreadTag, 1>());
-    static constexpr std::size_t task_pool_remote_release_batch_size = 32;
-    static constexpr std::size_t task_pool_chunk_size = 512;
-    static constexpr bool task_pool_cache_slot_index = true;
-    static constexpr std::size_t task_pool_local_cache_set_size = 16;
-    static constexpr std::size_t task_pool_direct_release_set_size = 8;
-    static constexpr std::size_t task_pool_local_cache_capacity = 128;
-    static constexpr std::size_t timer_drain_budget = 64;
-    static constexpr std::size_t timer_reserve = 2048;
-    static constexpr std::size_t service_task_budget = 8;
-};
-
-using RemoteBatchOverrideRuntime = af::AsyncRuntime<RemoteBatchOverrideTraits>;
-
-static_assert(RemoteBatchOverrideRuntime::Config::task_pool_remote_release_batch_size == 32U);
-static_assert(RemoteBatchOverrideRuntime::Config::task_pool_chunk_size == 512U);
-static_assert(RemoteBatchOverrideRuntime::Config::task_pool_cache_slot_index);
-static_assert(RemoteBatchOverrideRuntime::Config::task_pool_local_cache_set_size == 16U);
-static_assert(RemoteBatchOverrideRuntime::Config::task_pool_direct_release_set_size == 8U);
-static_assert(RemoteBatchOverrideRuntime::Config::task_pool_local_cache_capacity == 128U);
-static_assert(RemoteBatchOverrideRuntime::Config::timer_drain_budget == 64U);
-static_assert(RemoteBatchOverrideRuntime::Config::timer_reserve == 2048U);
-static_assert(RemoteBatchOverrideRuntime::Config::service_task_budget == 8U);
 static_assert(af::supports_native_io_wait == (af::supports_epoll || af::supports_kqueue));
 static_assert(af::supports_eventfd == af::platform_linux);
 static_assert(af::supports_timerfd == af::platform_linux);
@@ -858,55 +795,83 @@ total_reactor_budget_callbacks(const std::array<ReactorBudgetPipe, Size> &pipes)
 } // namespace
 
 TEST(RuntimeConfigTests, PreservesThreadCountsAboveSixtyFour) {
-    EXPECT_EQ(AboveSixtyFourRuntime::thread_count, 257U);
-    EXPECT_EQ(AboveSixtyFourRuntime::invalid_thread_index, 257U);
+    af::runtime_config config;
+    config.threads = {af::cpu_threads("logic", 257)};
+
+    const auto resolution = af::resolve_runtime_config(config);
+    ASSERT_TRUE(resolution);
+    EXPECT_EQ(resolution.resolved.thread_count(), 257U);
+    EXPECT_EQ(resolution.resolved.invalid_thread_index(), 257U);
+    EXPECT_TRUE(resolution.resolved.valid_thread(256U));
+    EXPECT_FALSE(resolution.resolved.valid_thread(257U));
 }
 
 TEST(RuntimeConfigTests, ThreadLayoutGroupsCarryKindNameAndIndexMetadata) {
-    constexpr auto logic = ThreadLayoutMetadataRuntime::thread_group<ConfigLogicThreadTag>();
-    constexpr auto io = ThreadLayoutMetadataRuntime::thread_group<ConfigIoThreadTag>();
-    constexpr auto log = ThreadLayoutMetadataRuntime::thread_group<ConfigLogThreadTag>();
+    af::runtime_config config;
+    config.threads = {
+        af::cpu_threads("logic", 3),
+        af::io_threads("io", 2),
+        af::cpu_threads("log", 1),
+    };
 
-    EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_index(logic.begin()), 0U);
-    EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_index(logic.template at<2>()), 2U);
-    EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_index(io.begin()), 3U);
-    EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_index(io.shard(5U)), 4U);
-    EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_index(log.begin()), 5U);
-    EXPECT_TRUE(logic.contains(logic.template at<1>()));
-    EXPECT_FALSE(logic.contains(io.template at<0>()));
-    EXPECT_FALSE(log.contains(io.template at<0>()));
-    EXPECT_EQ(logic.offset_of(logic.template at<2>()), 2U);
+    const auto resolution = af::resolve_runtime_config(config);
+    ASSERT_TRUE(resolution);
+    const auto &resolved = resolution.resolved;
+    EXPECT_EQ(resolved.thread_count(), 6U);
+    EXPECT_EQ(sizeof(af::thread_ref), sizeof(std::uint16_t));
 
-    EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_kind(logic.template at<0>()),
-              af::thread_kind::cpu);
-    EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_kind(io.template at<0>()), af::thread_kind::io);
-    EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_kind(log.template at<0>()), af::thread_kind::cpu);
-    EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_name(logic.template at<0>()), "logic");
-    EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_name(io.template at<1>()), "io");
-    EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_name(log.template at<0>()), "log");
-    EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_group_offset(io.template at<1>()), 1U);
-    EXPECT_EQ(ThreadLayoutMetadataRuntime::thread_group_offset(log.template at<0>()), 0U);
+    const af::thread_group_ref logic = resolved.thread_group("logic");
+    const af::thread_group_ref io = resolved.thread_group("io");
+    const af::thread_group_ref log = resolved.thread_group("log");
+    ASSERT_EQ(logic.size(), 3U);
+    ASSERT_EQ(io.size(), 2U);
+    ASSERT_EQ(log.size(), 1U);
+
+    EXPECT_EQ(logic.front(), af::thread_ref(0));
+    EXPECT_EQ(logic.at(2), af::thread_ref(2));
+    EXPECT_EQ(io.front(), af::thread_ref(3));
+    EXPECT_EQ(io.shard(5U), af::thread_ref(4));
+    EXPECT_EQ(log.front(), af::thread_ref(5));
+    EXPECT_TRUE(logic.contains(logic.at(1)));
+    EXPECT_FALSE(logic.contains(io.front()));
+    EXPECT_FALSE(log.contains(io.front()));
+
+    EXPECT_EQ(resolved.thread_kind_of(logic.front()), af::thread_kind::cpu);
+    EXPECT_EQ(resolved.thread_kind_of(io.front()), af::thread_kind::io);
+    EXPECT_EQ(resolved.thread_kind_of(log.front()), af::thread_kind::cpu);
+    EXPECT_EQ(resolved.thread_name(logic.front()), "logic");
+    EXPECT_EQ(resolved.thread_name(io.at(1)), "io");
+    EXPECT_EQ(resolved.thread_name(log.front()), "log");
+    EXPECT_EQ(resolved.thread_group_offset(io.at(1)), 1U);
+    EXPECT_EQ(resolved.thread_group_offset(log.front()), 0U);
 }
 
-TEST(RuntimeConfigTests, DefaultsAndOverridesTaskPoolRemoteReleaseBatchSize) {
-    EXPECT_EQ(AboveSixtyFourRuntime::Config::task_pool_remote_release_batch_size, 64U);
-    EXPECT_EQ(AboveSixtyFourRuntime::Config::task_pool_chunk_size, 256U);
-    EXPECT_FALSE(AboveSixtyFourRuntime::Config::task_pool_cache_slot_index);
-    EXPECT_EQ(AboveSixtyFourRuntime::Config::task_pool_local_cache_set_size, 1U);
-    EXPECT_EQ(AboveSixtyFourRuntime::Config::task_pool_direct_release_set_size, 4U);
-    EXPECT_EQ(AboveSixtyFourRuntime::Config::task_pool_local_cache_capacity, 64U);
-    EXPECT_EQ(AboveSixtyFourRuntime::Config::timer_drain_budget, 256U);
-    EXPECT_EQ(AboveSixtyFourRuntime::Config::timer_reserve, 1024U);
-    EXPECT_EQ(AboveSixtyFourRuntime::Config::service_task_budget, 32U);
-    EXPECT_EQ(RemoteBatchOverrideRuntime::Config::task_pool_remote_release_batch_size, 32U);
-    EXPECT_EQ(RemoteBatchOverrideRuntime::Config::task_pool_chunk_size, 512U);
-    EXPECT_TRUE(RemoteBatchOverrideRuntime::Config::task_pool_cache_slot_index);
-    EXPECT_EQ(RemoteBatchOverrideRuntime::Config::task_pool_local_cache_set_size, 16U);
-    EXPECT_EQ(RemoteBatchOverrideRuntime::Config::task_pool_direct_release_set_size, 8U);
-    EXPECT_EQ(RemoteBatchOverrideRuntime::Config::task_pool_local_cache_capacity, 128U);
-    EXPECT_EQ(RemoteBatchOverrideRuntime::Config::timer_drain_budget, 64U);
-    EXPECT_EQ(RemoteBatchOverrideRuntime::Config::timer_reserve, 2048U);
-    EXPECT_EQ(RemoteBatchOverrideRuntime::Config::service_task_budget, 8U);
+TEST(RuntimeConfigTests, DefaultsAndOverridesPoolTimerAndServiceBudgets) {
+    af::runtime_config defaults;
+    defaults.threads = {af::cpu_threads("logic", 1)};
+    auto resolution = af::resolve_runtime_config(defaults);
+    ASSERT_TRUE(resolution);
+    EXPECT_EQ(resolution.resolved.config.task_pool.local_cache_size, 256U);
+    EXPECT_EQ(resolution.resolved.config.task_pool.slab_object_count, 4096U);
+    EXPECT_EQ(resolution.resolved.config.timer.drain_budget, 256U);
+    EXPECT_EQ(resolution.resolved.config.timer.initial_reserve, 1024U);
+    EXPECT_EQ(resolution.resolved.config.scheduler.service_task_budget, 32U);
+
+    af::runtime_config overrides;
+    overrides.threads = {af::cpu_threads("logic", 1)};
+    overrides.task_pool.local_cache_size = 128;
+    overrides.task_pool.slab_object_count = 512;
+    overrides.timer.drain_budget = 64;
+    overrides.timer.initial_reserve = 2048;
+    overrides.scheduler.service_task_budget = 8;
+
+    resolution = af::resolve_runtime_config(overrides);
+    ASSERT_TRUE(resolution);
+    EXPECT_EQ(resolution.resolved.config.task_pool.local_cache_size, 128U);
+    EXPECT_EQ(resolution.resolved.config.task_pool.slab_object_count, 512U);
+    EXPECT_EQ(resolution.resolved.config.timer.drain_budget, 64U);
+    EXPECT_EQ(resolution.resolved.config.timer.initial_reserve, 2048U);
+    EXPECT_EQ(resolution.resolved.config.scheduler.service_task_budget, 8U);
 }
 
 TEST(RuntimeConfigTests, RuntimeConfigUsesPlainStructDefaultsAndFactories) {
