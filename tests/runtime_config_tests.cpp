@@ -452,6 +452,10 @@ public:
         return schedule_to(thread);
     }
 
+    [[nodiscard]] bool do_it(af::thread_ref thread) noexcept {
+        return schedule_to(thread);
+    }
+
 private:
     af::task_result run_task() noexcept override {
         observed_task_id_.store(task_id(), std::memory_order_release);
@@ -992,6 +996,8 @@ TEST(RuntimeConfigTests, ResolvesRuntimeConfigThreadMetadataAndSelectors) {
     EXPECT_EQ(resolved.select_thread(af::thread_selector::cpu(2)), 4U);
     EXPECT_EQ(resolved.select_thread(af::thread_selector::thread(3)), 3U);
     EXPECT_EQ(resolved.select_thread(af::thread_selector::io(2)), resolved.invalid_thread_index());
+    EXPECT_EQ(resolved.select_thread_ref(af::thread_selector::cpu(2)), af::thread_ref(4));
+    EXPECT_FALSE(resolved.select_thread_ref(af::thread_selector::io(2)));
     EXPECT_EQ(resolved.thread_name(0), "io");
     EXPECT_EQ(resolved.thread_name(3), "logic");
     EXPECT_EQ(resolved.thread_name(resolved.invalid_thread_index()), "invalid");
@@ -1000,6 +1006,20 @@ TEST(RuntimeConfigTests, ResolvesRuntimeConfigThreadMetadataAndSelectors) {
     EXPECT_EQ(resolved.thread_group_offset(0), 0U);
     EXPECT_EQ(resolved.thread_group_offset(1), 1U);
     EXPECT_EQ(resolved.thread_group_offset(4), 2U);
+
+    const af::thread_group_ref io_threads = resolved.io_thread_group();
+    const af::thread_group_ref cpu_threads = resolved.cpu_thread_group();
+    ASSERT_EQ(io_threads.size(), 2U);
+    ASSERT_EQ(cpu_threads.size(), 3U);
+    EXPECT_EQ(io_threads.front(), af::thread_ref(0));
+    EXPECT_EQ(io_threads[1], af::thread_ref(1));
+    EXPECT_EQ(io_threads.shard(3), af::thread_ref(1));
+    EXPECT_TRUE(io_threads.contains(af::thread_ref(0)));
+    EXPECT_FALSE(io_threads.contains(af::thread_ref(2)));
+    EXPECT_EQ(cpu_threads.front(), af::thread_ref(2));
+    EXPECT_EQ(cpu_threads.shard(5), af::thread_ref(4));
+    EXPECT_EQ(resolved.thread_name(cpu_threads.shard(2)), "logic");
+    EXPECT_EQ(resolved.thread_group_offset(cpu_threads.shard(2)), 2U);
 }
 
 TEST(RuntimeConfigTests, RuntimeConfigValidationReportsInvalidFields) {
@@ -1150,6 +1170,8 @@ TEST(RuntimeConfigTests, RuntimeInstanceExposesResolvedThreadMetadata) {
     EXPECT_FALSE(runtime.valid_thread(3));
     EXPECT_EQ(runtime.select_thread(af::thread_selector::io(1)), 1U);
     EXPECT_EQ(runtime.select_thread(af::thread_selector::cpu(0)), 2U);
+    EXPECT_EQ(runtime.select_thread_ref(af::thread_selector::io(1)), af::thread_ref(1));
+    EXPECT_EQ(runtime.select_thread_ref(af::thread_selector::cpu(0)), af::thread_ref(2));
     EXPECT_EQ(runtime.thread_kind_of(0), af::thread_kind::io);
     EXPECT_EQ(runtime.thread_kind_of(2), af::thread_kind::cpu);
     EXPECT_EQ(runtime.thread_name(0), "io");
@@ -1158,6 +1180,17 @@ TEST(RuntimeConfigTests, RuntimeInstanceExposesResolvedThreadMetadata) {
     EXPECT_EQ(runtime.thread_group_offset(2), 0U);
     EXPECT_EQ(runtime.resolved_config().cpu_threads.size(), 1U);
     EXPECT_EQ(runtime.resolved_config().io_threads.size(), 2U);
+
+    const af::thread_group_ref io_threads = runtime.io_threads();
+    const af::thread_group_ref cpu_threads = runtime.cpu_threads();
+    ASSERT_EQ(io_threads.size(), 2U);
+    ASSERT_EQ(cpu_threads.size(), 1U);
+    EXPECT_TRUE(runtime.valid_thread(io_threads.front()));
+    EXPECT_EQ(runtime.thread_kind_of(io_threads.front()), af::thread_kind::io);
+    EXPECT_EQ(runtime.thread_name(cpu_threads.front()), "logic");
+    EXPECT_EQ(runtime.thread_group_offset(io_threads.shard(3)), 1U);
+    EXPECT_TRUE(io_threads.contains(af::thread_ref(1)));
+    EXPECT_FALSE(cpu_threads.contains(af::thread_ref(1)));
 }
 
 TEST(RuntimeConfigTests, RuntimeInstanceStartStopRunsConfiguredThreads) {
@@ -1208,20 +1241,20 @@ TEST(RuntimeConfigTests, RuntimeInstancePostRunsWorkOnTargetThread) {
     ASSERT_TRUE(runtime.start());
     ASSERT_TRUE(wait_for_active_threads(runtime, 3));
 
-    const auto io_thread = runtime.select_thread(af::thread_selector::io(0));
-    const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(1));
+    const af::thread_ref io_thread = runtime.io_threads().front();
+    const af::thread_ref cpu_thread = runtime.cpu_threads().shard(1);
     ASSERT_TRUE(runtime.post(io_thread, &first));
     ASSERT_TRUE(runtime.post(cpu_thread, &second));
     ASSERT_TRUE(wait_for_counter(counter, 2));
-    EXPECT_EQ(first_thread.load(std::memory_order_acquire), io_thread);
-    EXPECT_EQ(second_thread.load(std::memory_order_acquire), cpu_thread);
+    EXPECT_EQ(first_thread.load(std::memory_order_acquire), io_thread.index);
+    EXPECT_EQ(second_thread.load(std::memory_order_acquire), cpu_thread.index);
     EXPECT_TRUE(first_owner_matches.load(std::memory_order_acquire));
     EXPECT_TRUE(second_owner_matches.load(std::memory_order_acquire));
 
     ASSERT_TRUE(runtime.post(cpu_thread, &drain));
     runtime.stop();
     EXPECT_EQ(counter.load(std::memory_order_acquire), 3);
-    EXPECT_EQ(drain_thread.load(std::memory_order_acquire), cpu_thread);
+    EXPECT_EQ(drain_thread.load(std::memory_order_acquire), cpu_thread.index);
     EXPECT_TRUE(drain_owner_matches.load(std::memory_order_acquire));
     EXPECT_FALSE(runtime.post(cpu_thread, &first));
 }

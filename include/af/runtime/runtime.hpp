@@ -82,20 +82,48 @@ public:
         return resolution_.resolved.valid_thread(index);
     }
 
+    [[nodiscard]] bool valid_thread(thread_ref thread) const noexcept {
+        return resolution_.resolved.valid_thread(thread);
+    }
+
     [[nodiscard]] af::thread_kind thread_kind_of(thread_index index) const noexcept {
         return resolution_.resolved.thread_kind_of(index);
+    }
+
+    [[nodiscard]] af::thread_kind thread_kind_of(thread_ref thread) const noexcept {
+        return resolution_.resolved.thread_kind_of(thread);
     }
 
     [[nodiscard]] std::string_view thread_name(thread_index index) const noexcept {
         return resolution_.resolved.thread_name(index);
     }
 
+    [[nodiscard]] std::string_view thread_name(thread_ref thread) const noexcept {
+        return resolution_.resolved.thread_name(thread);
+    }
+
     [[nodiscard]] thread_index thread_group_offset(thread_index index) const noexcept {
         return resolution_.resolved.thread_group_offset(index);
     }
 
+    [[nodiscard]] thread_index thread_group_offset(thread_ref thread) const noexcept {
+        return resolution_.resolved.thread_group_offset(thread);
+    }
+
     [[nodiscard]] thread_index select_thread(thread_selector selector) const noexcept {
         return resolution_.resolved.select_thread(selector);
+    }
+
+    [[nodiscard]] thread_ref select_thread_ref(thread_selector selector) const noexcept {
+        return resolution_.resolved.select_thread_ref(selector);
+    }
+
+    [[nodiscard]] thread_group_ref io_threads() const noexcept {
+        return resolution_.resolved.io_thread_group();
+    }
+
+    [[nodiscard]] thread_group_ref cpu_threads() const noexcept {
+        return resolution_.resolved.cpu_thread_group();
     }
 
     [[nodiscard]] thread_index active_thread_count() const noexcept {
@@ -167,6 +195,10 @@ public:
         executors_[thread]->enqueue(work);
         leave_post();
         return true;
+    }
+
+    [[nodiscard]] bool post(thread_ref thread, runtime_work *work) noexcept {
+        return post(thread.index, work);
     }
 
     [[nodiscard]] bool register_service_task(thread_index thread,

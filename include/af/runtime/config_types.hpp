@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <utility>
 #include <variant>
@@ -12,6 +13,9 @@
 #include "af/thread_kind.hpp"
 
 namespace af {
+
+inline constexpr std::uint16_t runtime_invalid_thread_index =
+    std::numeric_limits<std::uint16_t>::max();
 
 enum class idle_wait_strategy : std::uint8_t {
     futex,
@@ -72,6 +76,96 @@ struct thread_selector {
     [[nodiscard]] static constexpr thread_selector thread(std::uint16_t index_value) noexcept {
         return {thread_selector_kind::absolute, index_value};
     }
+};
+
+struct thread_ref {
+    std::uint16_t index{runtime_invalid_thread_index};
+
+    constexpr thread_ref() noexcept = default;
+    explicit constexpr thread_ref(std::uint16_t thread_index) noexcept : index(thread_index) {}
+
+    [[nodiscard]] constexpr bool valid() const noexcept {
+        return index != runtime_invalid_thread_index;
+    }
+
+    [[nodiscard]] explicit constexpr operator bool() const noexcept {
+        return valid();
+    }
+
+    [[nodiscard]] friend constexpr bool operator==(thread_ref lhs, thread_ref rhs) noexcept {
+        return lhs.index == rhs.index;
+    }
+
+    [[nodiscard]] friend constexpr bool operator!=(thread_ref lhs, thread_ref rhs) noexcept {
+        return !(lhs == rhs);
+    }
+};
+
+class thread_group_ref {
+public:
+    using const_iterator = const std::uint16_t *;
+
+    constexpr thread_group_ref() noexcept = default;
+    constexpr thread_group_ref(const std::uint16_t *threads, std::size_t count) noexcept
+        : threads_(threads), count_(count) {}
+
+    [[nodiscard]] constexpr bool empty() const noexcept {
+        return count_ == 0;
+    }
+
+    [[nodiscard]] constexpr std::size_t size() const noexcept {
+        return count_;
+    }
+
+    [[nodiscard]] constexpr const std::uint16_t *data() const noexcept {
+        return threads_;
+    }
+
+    [[nodiscard]] constexpr const_iterator begin() const noexcept {
+        return threads_;
+    }
+
+    [[nodiscard]] constexpr const_iterator end() const noexcept {
+        return count_ == 0 ? threads_ : threads_ + count_;
+    }
+
+    [[nodiscard]] constexpr thread_ref at(std::size_t index) const noexcept {
+        if (threads_ == nullptr || index >= count_) {
+            return {};
+        }
+        return thread_ref(threads_[index]);
+    }
+
+    [[nodiscard]] constexpr thread_ref operator[](std::size_t index) const noexcept {
+        return at(index);
+    }
+
+    [[nodiscard]] constexpr thread_ref front() const noexcept {
+        return at(0);
+    }
+
+    [[nodiscard]] constexpr thread_ref shard(std::size_t value) const noexcept {
+        if (threads_ == nullptr || count_ == 0) {
+            return {};
+        }
+        return thread_ref(threads_[value % count_]);
+    }
+
+    [[nodiscard]] constexpr bool contains(thread_ref thread) const noexcept {
+        if (threads_ == nullptr) {
+            return false;
+        }
+        for (std::size_t i = 0; i < count_; ++i) {
+            if (threads_[i] == thread.index) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+private:
+    const std::uint16_t *threads_{nullptr};
+    std::size_t count_{0};
 };
 
 struct thread_affinity_config {

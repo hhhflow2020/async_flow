@@ -82,12 +82,26 @@ protected:
         return schedule_to(thread);
     }
 
+    [[nodiscard]] bool schedule(thread_ref thread) noexcept {
+        return schedule_to(thread);
+    }
+
     [[nodiscard]] bool schedule_to(std::uint16_t thread) noexcept;
+
+    [[nodiscard]] bool schedule_to(thread_ref thread) noexcept {
+        return schedule_to(thread.index);
+    }
 
     template <typename Rep, typename Period>
     [[nodiscard]] bool schedule_after(std::uint16_t thread,
                                       std::chrono::duration<Rep, Period> delay) noexcept {
         return schedule_after_ns(thread, normalize_delay(delay));
+    }
+
+    template <typename Rep, typename Period>
+    [[nodiscard]] bool schedule_after(thread_ref thread,
+                                      std::chrono::duration<Rep, Period> delay) noexcept {
+        return schedule_after(thread.index, delay);
     }
 
     template <typename Rep, typename Period>
@@ -100,13 +114,27 @@ protected:
     }
 
     template <typename Clock, typename Duration>
+    [[nodiscard]] bool schedule_at(thread_ref thread,
+                                   std::chrono::time_point<Clock, Duration> time) noexcept {
+        return schedule_at(thread.index, time);
+    }
+
+    template <typename Clock, typename Duration>
     [[nodiscard]] bool schedule_at(std::chrono::time_point<Clock, Duration> time) noexcept;
 
     task_result pending_to(std::uint16_t thread) noexcept {
         return schedule_to(thread) ? task_result::pending : task_result::cancelled;
     }
 
+    task_result pending_to(thread_ref thread) noexcept {
+        return pending_to(thread.index);
+    }
+
     task_result pending(std::uint16_t thread) noexcept {
+        return pending_to(thread);
+    }
+
+    task_result pending(thread_ref thread) noexcept {
         return pending_to(thread);
     }
 
@@ -117,12 +145,24 @@ protected:
     }
 
     template <typename Rep, typename Period>
+    task_result pending_after(thread_ref thread,
+                              std::chrono::duration<Rep, Period> delay) noexcept {
+        return pending_after(thread.index, delay);
+    }
+
+    template <typename Rep, typename Period>
     task_result pending_after(std::chrono::duration<Rep, Period> delay) noexcept;
 
     template <typename Clock, typename Duration>
     task_result pending_at(std::uint16_t thread,
                            std::chrono::time_point<Clock, Duration> time) noexcept {
         return schedule_at(thread, time) ? task_result::pending : task_result::cancelled;
+    }
+
+    template <typename Clock, typename Duration>
+    task_result pending_at(thread_ref thread,
+                           std::chrono::time_point<Clock, Duration> time) noexcept {
+        return pending_at(thread.index, time);
     }
 
     template <typename Clock, typename Duration>

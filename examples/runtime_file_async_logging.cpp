@@ -22,7 +22,7 @@ public:
                        std::uint32_t task_id, std::atomic<int> &completed)
         : af::runtime_task(token, owner), task_id_(task_id), completed_(completed) {}
 
-    [[nodiscard]] bool do_it(std::uint16_t thread) noexcept {
+    [[nodiscard]] bool do_it(af::thread_ref thread) noexcept {
         return schedule_to(thread);
     }
 
@@ -88,13 +88,17 @@ int main(int argc, char **argv) {
     constexpr int task_count = 4;
     constexpr int expected_records =
         task_count * static_cast<int>(runtime_file_records_per_task) + 1;
+    const af::thread_group_ref cpu_threads = runtime.cpu_threads();
+    if (cpu_threads.empty()) {
+        std::cerr << "runtime has no cpu threads\n";
+        runtime.stop();
+        return 1;
+    }
     std::atomic<int> completed{0};
     bool started = true;
     for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(task_count); ++i) {
-        const auto thread =
-            runtime.select_thread(af::thread_selector::cpu(static_cast<std::uint16_t>(i % 2U)));
         auto task = af::make_task<RuntimeFileLogTask>(runtime, i, completed);
-        started = task->do_it(thread) && started;
+        started = task->do_it(cpu_threads.shard(i)) && started;
     }
 
     const bool completed_all = wait_for_completion(completed, task_count);

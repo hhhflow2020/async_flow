@@ -13,9 +13,6 @@
 
 namespace af {
 
-inline constexpr std::uint16_t runtime_invalid_thread_index =
-    std::numeric_limits<std::uint16_t>::max();
-
 enum class runtime_config_status : std::uint8_t {
     ok,
     no_threads,
@@ -167,11 +164,23 @@ struct resolved_runtime_config {
         return index < thread_count();
     }
 
+    [[nodiscard]] bool valid_thread(thread_ref thread) const noexcept {
+        return valid_thread(thread.index);
+    }
+
+    [[nodiscard]] thread_ref thread_at(std::uint16_t index) const noexcept {
+        return valid_thread(index) ? thread_ref(index) : thread_ref();
+    }
+
     [[nodiscard]] af::thread_kind thread_kind_of(std::uint16_t index) const noexcept {
         if (!valid_thread(index)) {
             return af::thread_kind::cpu;
         }
         return threads[index].kind;
+    }
+
+    [[nodiscard]] af::thread_kind thread_kind_of(thread_ref thread) const noexcept {
+        return thread_kind_of(thread.index);
     }
 
     [[nodiscard]] std::string_view thread_name(std::uint16_t index) const noexcept {
@@ -181,11 +190,19 @@ struct resolved_runtime_config {
         return threads[index].name;
     }
 
+    [[nodiscard]] std::string_view thread_name(thread_ref thread) const noexcept {
+        return thread_name(thread.index);
+    }
+
     [[nodiscard]] std::uint16_t thread_group_offset(std::uint16_t index) const noexcept {
         if (!valid_thread(index)) {
             return 0;
         }
         return threads[index].group_offset;
+    }
+
+    [[nodiscard]] std::uint16_t thread_group_offset(thread_ref thread) const noexcept {
+        return thread_group_offset(thread.index);
     }
 
     [[nodiscard]] std::uint16_t select_thread(thread_selector selector) const noexcept {
@@ -204,6 +221,18 @@ struct resolved_runtime_config {
             return valid_thread(selector.index) ? selector.index : invalid_thread_index();
         }
         return invalid_thread_index();
+    }
+
+    [[nodiscard]] thread_ref select_thread_ref(thread_selector selector) const noexcept {
+        return thread_at(select_thread(selector));
+    }
+
+    [[nodiscard]] thread_group_ref io_thread_group() const noexcept {
+        return thread_group_ref(io_threads.data(), io_threads.size());
+    }
+
+    [[nodiscard]] thread_group_ref cpu_thread_group() const noexcept {
+        return thread_group_ref(cpu_threads.data(), cpu_threads.size());
     }
 };
 
