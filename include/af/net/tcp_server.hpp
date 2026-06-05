@@ -19,9 +19,11 @@
 #include "af/async_runtime.hpp"
 #include "af/buffer/buffer.hpp"
 #include "af/detail/config.hpp"
-#include "af/net/detail/tcp_handler.hpp"
 #include "af/detail/net/reactor/net_io_channel.hpp"
 #include "af/detail/net/socket_address.hpp"
+#include "af/net/detail/tcp_handler.hpp"
+#include "af/net/detail/tcp_socket_ops.hpp"
+#include "af/net/detail/tcp_state.hpp"
 #include "af/net/tcp_endpoint.hpp"
 #include "af/net/tcp_types.hpp"
 #include "af/thread_kind.hpp"
@@ -38,131 +40,6 @@
 namespace af::net {
 
 namespace detail {
-
-template <typename Runtime> class TcpConnection;
-template <typename Runtime> class TcpServerShard;
-template <typename Runtime> class TcpListenerShard;
-template <typename Runtime> struct TcpListenerContext;
-template <typename Runtime> struct TcpListenerEntry;
-template <typename Runtime> struct TcpServerState;
-template <typename Runtime> class TcpAdoptConnectionTask;
-template <typename Runtime> class TcpConnectionCommandTask;
-
-enum class TcpConnectionCommandKind : std::uint8_t {
-    Send,
-    Close,
-    CloseAfterFlush,
-    ShutdownWrite,
-    PauseRead,
-    ResumeRead,
-    SetNoDelay,
-    SetKeepAlive,
-};
-
-template <typename Runtime> struct TcpListenerContext {
-    ListenerId id{};
-    std::string name;
-    TcpEndpoint endpoint;
-    TcpListenerOptions options;
-    std::vector<std::uint16_t> target_shards;
-    std::uint32_t next_target_shard{0};
-    std::unique_ptr<TcpHandlerBase<Runtime>> handler;
-};
-
-template <typename Runtime> struct TcpListenerEntry {
-    using Thread = typename Runtime::Thread;
-
-    ListenerId id{};
-    std::string name;
-    TcpEndpoint endpoint;
-    TcpListenerOptions options;
-    AcceptStrategy accept_strategy{AcceptStrategy::Auto};
-    std::vector<Thread> threads;
-    std::vector<std::uint16_t> active_shards;
-    std::vector<std::uint16_t> starting_shards;
-    std::vector<std::uint16_t> started_shards;
-    std::unique_ptr<TcpHandlerBase<Runtime>> handler_prototype;
-    ListenerState state{ListenerState::Configured};
-    std::size_t pending_start_shards{0};
-    int start_error{0};
-};
-
-template <typename Runtime> struct TcpServerState {
-    using Thread = typename Runtime::Thread;
-    using Shard = TcpServerShard<Runtime>;
-    using ListenerEntry = TcpListenerEntry<Runtime>;
-
-    TcpServerConfig config;
-    std::uint16_t control_thread_index{Runtime::invalid_thread_index};
-    bool running{false};
-    alignas(af::detail::hardware_cache_line_size) std::atomic<bool> accepting_connection_tasks{
-        false};
-    std::vector<Thread> default_threads;
-    std::vector<std::unique_ptr<Shard>> shards;
-    std::vector<std::unique_ptr<ListenerEntry>> listeners;
-    std::vector<std::uint32_t> listener_generations;
-    std::vector<std::uint32_t> free_listener_slots;
-};
-
-[[nodiscard]] inline bool set_nonblocking(int fd) noexcept {
-    const int current = ::fcntl(fd, F_GETFL, 0);
-    return current >= 0 && ::fcntl(fd, F_SETFL, current | O_NONBLOCK) == 0;
-}
-
-[[nodiscard]] inline bool set_cloexec(int fd) noexcept {
-    const int current = ::fcntl(fd, F_GETFD, 0);
-    return current >= 0 && ::fcntl(fd, F_SETFD, current | FD_CLOEXEC) == 0;
-}
-
-[[nodiscard]] inline int send_no_signal_flags() noexcept {
-#if defined(MSG_NOSIGNAL)
-    return MSG_NOSIGNAL;
-#else
-    return 0;
-#endif
-}
-
-[[nodiscard]] inline int accept_nonblocking(int listener_fd, sockaddr *address,
-                                            socklen_t *address_size) noexcept {
-#if defined(__linux__)
-    return ::accept4(listener_fd, address, address_size, SOCK_NONBLOCK | SOCK_CLOEXEC);
-#else
-    const int fd = ::accept(listener_fd, address, address_size);
-    if (fd >= 0 && (!set_nonblocking(fd) || !set_cloexec(fd))) {
-        const int error = errno == 0 ? EIO : errno;
-        ::close(fd);
-        errno = error;
-        return -1;
-    }
-    return fd;
-#endif
-}
-
-inline void set_no_sigpipe(int fd) noexcept {
-#if defined(SO_NOSIGPIPE)
-    int one = 1;
-    static_cast<void>(::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one)));
-#else
-    static_cast<void>(fd);
-#endif
-}
-
-[[nodiscard]] inline bool set_tcp_no_delay(int fd, bool enabled) noexcept {
-    int value = enabled ? 1 : 0;
-    return ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &value, sizeof(value)) == 0;
-}
-
-[[nodiscard]] inline bool set_socket_keepalive(int fd, bool enabled) noexcept {
-    int value = enabled ? 1 : 0;
-    return ::setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &value, sizeof(value)) == 0;
-}
-
-inline void close_fd(int &fd) noexcept {
-    if (fd >= 0) {
-        ::close(fd);
-        fd = -1;
-    }
-}
 
 template <typename Runtime> class TcpConnection {
 public:
