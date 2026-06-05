@@ -2,7 +2,7 @@
 
 日期：2026-06-03
 
-本文档说明 AsyncFlow runtime 的任务投递语义，重点是 runtime 内部线程、自身目标线程、外部线程三类生产者在 `Auto` / `Fast` / `Ordered` 模式下如何进入目标 executor。
+本文档说明 AsyncFlow runtime 的任务投递语义，重点是 runtime 内部线程、自身目标线程、外部线程三类生产者如何进入目标 executor。
 
 ## 队列拓扑
 
@@ -16,25 +16,15 @@ runtime 每个固定线程拥有一个入口：
 - same-thread、cross-thread、external producer 共享同一个目标 admission order。
 - 生产者使用 intrusive node，不为每次 task 投递分配队列节点。
 
-## 调度模式
+## 统一调度语义
 
-`schedule_mode::auto_select` 是默认模式：
+所有 task 调度都进入目标 executor 的 intrusive MPSC inbox：
 
 - runtime 线程 -> 自身目标线程：target intrusive MPSC inbox。
 - runtime 线程 -> 其他 runtime 线程：target intrusive MPSC inbox。
 - 外部线程 -> runtime 目标线程：target intrusive MPSC inbox。
 
-`schedule_mode::fast` 表示调用者明确要求 runtime 线程生产者：
-
-- runtime 线程 -> 目标线程：target intrusive MPSC inbox。
-- 外部线程调用会失败。
-
-`schedule_mode::ordered` 表示调用者明确强调目标线程上的统一入队顺序：
-
-- runtime 线程 -> 目标线程：target intrusive MPSC inbox。
-- 外部线程 -> runtime 目标线程：target intrusive MPSC inbox。
-
-因此，runtime 内部线程投递到自身目标时不再有隐藏 local queue；需要表达“只允许 runtime 线程调用”时使用 `Fast`，需要在调用点强调统一顺序语义时使用 `Ordered`。
+因此，runtime 内部线程投递到自身目标时不再有隐藏 local queue。当前 runtime 不再暴露 `Auto` / `Fast` / `Ordered` 调度模式：统一 inbox 本身就是顺序语义，外部线程是否允许调用由具体 API 的使用契约和对象 owner 线程约束表达。
 
 ## API 选择建议
 
@@ -44,24 +34,10 @@ runtime 每个固定线程拥有一个入口：
 return pending_to(TargetThread);
 ```
 
-如果调用点已经确认在 runtime 线程内，并且外部线程调用应被拒绝，可以使用 fast API：
-
-```cpp
-return pending_fast(TargetThread);
-```
-
-如果多个生产者必须在同一个目标线程上保持统一 admission order，使用 ordered API：
-
-```cpp
-return pending_ordered(TargetThread);
-```
-
 首次启动任务时同理：
 
 ```cpp
-return schedule_to(TargetThread);          // 默认 Auto
-return schedule_to_fast(TargetThread);     // runtime-only 快速路径
-return schedule_to_ordered(TargetThread);  // 强制目标 MPSC 顺序路径
+return schedule_to(TargetThread);
 ```
 
 延迟调度使用同一套目标 admission 入口，但不会直接进入 ready 队列：
@@ -73,9 +49,7 @@ return pending_after(TargetThread, 20ms);
 
 延迟 task 先以 `TimerArming` 状态进入目标 executor inbox，目标线程再挂入本地 timer heap。timer 到期后由目标 executor 转为 `Queued` 并执行。这个路径保持 timer 结构单线程访问，不引入锁，也不会恢复旧的 local queue/SPSC 双路径。
 
-不要把 `Fast` 当作“更快版本的 Ordered”。当前实现下二者都进入目标 inbox；`Fast` 的语义是 runtime-thread-only，`Ordered` 的语义是调用点显式要求目标 admission order。
-
-`ScheduleMode::Auto` / `Fast` / `Ordered` 和 `schedule(...)` / `pending_on(...)` 仍保留为兼容入口；新代码推荐使用 `schedule_mode::auto_select` / `fast` / `ordered` 与 `schedule_to(...)` / `pending_to(...)`，让“切到目标线程”的语义更直接。
+旧 `ScheduleMode` / `schedule_mode` 兼容枚举已经移除。新代码只使用 `schedule_to(...)` / `pending_to(...)`，让“切到目标线程”的语义保持直接。
 
 ## 队列满载语义
 
@@ -90,16 +64,16 @@ task inbox 是 intrusive unbounded MPSC，不再用队列容量拒绝任务投�
 - `RuntimeBackpressureTests.UnboundedInboxAcceptsTasksBehindBlockingOwner`
 - `RuntimeBackpressureTests.UnboundedInboxAllowsManyExternalProducers`
 - `RuntimeBackpressureTests.RuntimeThreadFanoutUsesUnifiedInbox`
-- `RuntimeBackpressureTests.SameThreadAutoAndOrderedUseUnifiedInbox`
+- `RuntimeBackpressureTests.SameThreadRuntimeProducerUsesUnifiedInbox`
 - `RuntimeFixture.ScheduleToAliasRunsOnRequestedThread`
 - `RuntimeFixture.PendingToAliasResumesOnRequestedThread`
 - `RuntimeFixture.DelayedStartRunsOnRequestedThreadAfterDelay`
 - `RuntimeFixture.PendingAfterResumesOnRequestedThreadAfterDelay`
 - `RuntimeShutdownTests.StopImmediatelyCancelsAndDestroysDelayedTasks`
 
-其中 `SameThreadAutoAndOrderedUseUnifiedInbox` 专门验证 self-post 场景：
+其中 `SameThreadRuntimeProducerUsesUnifiedInbox` 专门验证 self-post 场景：
 
-- runtime 线程投递自身目标时，`Auto` 与 `Ordered` 都进入统一 inbox。
+- runtime 线程投递自身目标时进入统一 inbox。
 - owner 正在运行阻塞任务时，后续任务仍能进入同一个 unbounded inbox，证明 task 调度不再受旧 bounded 队列容量限制。
 
 这个测试直接证明 runtime 内部线程投递自身目标时，不再存在 local queue 和 MPSC 的双路径顺序差异。

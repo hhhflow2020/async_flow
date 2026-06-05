@@ -13,20 +13,6 @@ enum class TaskResult : std::uint8_t {
     cancelled = Cancelled,
 };
 
-enum class ScheduleMode : std::uint8_t {
-    // Default task admission path. The next runtime architecture routes every
-    // producer through the target executor intrusive MPSC inbox.
-    Auto,
-    // Runtime-thread producer only. This keeps call sites explicit when a task
-    // relies on framework-thread-only scheduling.
-    Fast,
-    // Explicitly preserve one target-inbox admission order across producers.
-    Ordered,
-    auto_select = Auto,
-    fast = Fast,
-    ordered = Ordered,
-};
-
 enum class ShutdownPolicy : std::uint8_t {
     WaitForTasks,
     StopImmediately,
@@ -54,6 +40,5 @@ enum class TaskState : std::uint8_t {
 };
 
 using task_result = TaskResult;
-using schedule_mode = ScheduleMode;
 using shutdown_policy = ShutdownPolicy;
 using task_state = TaskState;

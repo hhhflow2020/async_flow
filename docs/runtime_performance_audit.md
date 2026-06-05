@@ -4,7 +4,7 @@
 
 - 每个 executor 使用一个 intrusive unbounded MPSC inbox。
 - runtime 线程、外部线程和 same-thread self-post 共享目标 executor admission order。
-- `Fast` 只表达 runtime-thread-only；`Ordered` 表达显式顺序语义，二者不再切换到不同物理队列。
+- 调度不再暴露 `Fast` / `Ordered` 模式；统一 inbox 是唯一 admission 语义。
 - executor 阻塞前先 drain task，避免事件线程饥饿。
 
 ## Cache 与 false sharing
@@ -17,7 +17,7 @@
 
 ## 分支与系统调用
 
-- 调度模式在 API 层显式表达，减少热路径猜测。
+- 调度热路径不需要按模式分支选择不同队列。
 - IO readiness 只在 interest 变化时更新 poller。
 - eventfd/user event 唤醒合并，避免无意义 syscall。
 - 网络读写 drain 到 would-block 或预算耗尽。
