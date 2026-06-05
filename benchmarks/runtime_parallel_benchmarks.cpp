@@ -8,7 +8,14 @@
 namespace {
 
 void BM_RuntimeParallelShards(benchmark::State &state) {
-    af_bench::runtime::Runtime::init();
+    af::runtime runtime(af_bench::runtime::make_runtime_config());
+    if (!runtime.start()) {
+        state.SkipWithError("af::runtime::start failed");
+        return;
+    }
+    af_bench::runtime::wait_for_active_threads(runtime);
+    const auto threads = af_bench::runtime::select_threads(runtime);
+
     for (auto _ : state) {
         const int task_count = static_cast<int>(state.range(0));
         std::atomic<int> remaining{0};
@@ -16,12 +23,10 @@ void BM_RuntimeParallelShards(benchmark::State &state) {
         bool launch_failed = false;
         for (int i = 0; i < task_count; ++i) {
             remaining.fetch_add(1, std::memory_order_relaxed);
-            const bool ok =
-                af_bench::runtime::Runtime::start_task<af_bench::runtime::ParallelShardTask>(
-                    &remaining, &sum);
-            if (!ok) {
-                af_bench::runtime::undo_remaining(remaining);
-                state.SkipWithError("Runtime::start_task<ParallelShardTask> failed");
+            auto task = af::make_task<af_bench::runtime::ParallelShardTask>(runtime);
+            if (!task->do_it(threads, &remaining, &sum)) {
+                af_bench::runtime::mark_one_done(remaining);
+                state.SkipWithError("ParallelShardTask::do_it failed");
                 launch_failed = true;
                 break;
             }
@@ -32,7 +37,7 @@ void BM_RuntimeParallelShards(benchmark::State &state) {
             break;
         }
     }
-    af_bench::runtime::Runtime::shutdown();
+    runtime.stop();
 
     state.SetItemsProcessed(state.iterations() * state.range(0));
 }

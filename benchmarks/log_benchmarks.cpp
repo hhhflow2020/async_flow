@@ -4,12 +4,13 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
-#include "af/span.hpp"
 #include <string_view>
 #include <thread>
 #include <vector>
 
 #include <benchmark/benchmark.h>
+
+#include "af/log.hpp"
 
 namespace {
 
@@ -29,15 +30,19 @@ private:
 
 void run_async_logger_external_producer_benchmark(benchmark::State &state,
                                                   af::LogOrdering ordering) {
-    using Runtime = af_bench::runtime::Runtime;
-
     const int producer_count = static_cast<int>(state.range(0));
     const int records_per_producer = static_cast<int>(state.range(1));
     const auto total_records = static_cast<std::uint64_t>(producer_count) *
                                static_cast<std::uint64_t>(records_per_producer);
     constexpr std::string_view message = "asyncflow benchmark log message";
 
-    Runtime::init();
+    af::runtime runtime(af_bench::runtime::make_runtime_config());
+    if (!runtime.start()) {
+        state.SkipWithError("af::runtime::start failed");
+        return;
+    }
+    af_bench::runtime::wait_for_active_threads(runtime);
+    const auto threads = af_bench::runtime::select_threads(runtime);
 
     auto backend = std::make_unique<CountingLogBackend>();
     auto *counting_backend = backend.get();
@@ -53,10 +58,10 @@ void run_async_logger_external_producer_benchmark(benchmark::State &state,
     config.backends.push_back(std::move(backend));
 
     auto logger = std::make_shared<af::AsyncLogger>(std::move(config));
-    af::detail::RuntimeAsyncLogConsumerController<Runtime> consumer(
-        logger, af_bench::runtime::BenchThreads::IO_0, 1024);
+    af::detail::RuntimeInstanceAsyncLogConsumerController consumer(runtime, logger,
+                                                                   threads.io_0.index, 1024);
     if (!consumer.start()) {
-        Runtime::shutdown();
+        runtime.stop();
         state.SkipWithError("failed to start async log consumer");
         return;
     }
@@ -135,9 +140,9 @@ void run_async_logger_external_producer_benchmark(benchmark::State &state,
     for (std::thread &producer : producers) {
         producer.join();
     }
-    consumer.shutdown();
+    consumer.shutdown(std::chrono::seconds(10));
     logger.reset();
-    Runtime::shutdown();
+    runtime.stop();
 
     if (!failed) {
         state.SetItemsProcessed(state.iterations() * static_cast<std::int64_t>(total_records));

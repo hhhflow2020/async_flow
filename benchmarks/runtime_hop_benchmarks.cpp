@@ -7,198 +7,137 @@
 
 namespace {
 
-template <std::size_t TaskPoolRemoteReleaseBatchSize, bool TaskPoolCacheSlotIndex,
-          std::size_t TaskPoolChunkSize = 256, std::size_t TaskPoolLocalCacheSetSize = 1,
-          std::size_t TaskPoolDirectReleaseSetSize = 4, std::size_t TaskPoolLocalCacheCapacity = 64>
-struct BatchRuntimeTraits {
-    static constexpr auto threads = af_bench::runtime::BenchRuntimeTraits::threads;
-    static constexpr std::size_t task_pool_remote_release_batch_size =
-        TaskPoolRemoteReleaseBatchSize;
-    static constexpr std::size_t task_pool_chunk_size = TaskPoolChunkSize;
-    static constexpr bool task_pool_cache_slot_index = TaskPoolCacheSlotIndex;
-    static constexpr std::size_t task_pool_local_cache_set_size = TaskPoolLocalCacheSetSize;
-    static constexpr std::size_t task_pool_direct_release_set_size = TaskPoolDirectReleaseSetSize;
-    static constexpr std::size_t task_pool_local_cache_capacity = TaskPoolLocalCacheCapacity;
-};
+void run_cross_thread_hop_benchmark(benchmark::State &state, std::size_t local_cache_size,
+                                    std::size_t slab_object_count) {
+    af::runtime runtime(
+        af_bench::runtime::make_runtime_config(local_cache_size, slab_object_count));
+    if (!runtime.start()) {
+        state.SkipWithError("af::runtime::start failed");
+        return;
+    }
+    af_bench::runtime::wait_for_active_threads(runtime);
+    const auto threads = af_bench::runtime::select_threads(runtime);
 
-template <typename RuntimeT> class BatchHopTask final : public RuntimeT::Task {
-    using Task = typename RuntimeT::Task;
-    using Thread = typename RuntimeT::Thread;
-
-public:
-    explicit BatchHopTask(typename Task::FactoryToken token) : Task(token) {}
-
-    bool do_it(int hops, std::atomic<int> *remaining) {
-        hops_ = hops;
-        remaining_ = remaining;
-        return this->schedule(af_bench::runtime::BenchThreads::Logic_0);
+    for (auto _ : state) {
+        const int task_count = static_cast<int>(state.range(0));
+        std::atomic<int> remaining{0};
+        bool launch_failed = false;
+        for (int i = 0; i < task_count; ++i) {
+            remaining.fetch_add(1, std::memory_order_relaxed);
+            auto task = af::make_task<af_bench::runtime::HopTask>(runtime);
+            if (!task->do_it(threads, 8, &remaining)) {
+                af_bench::runtime::mark_one_done(remaining);
+                state.SkipWithError("HopTask::do_it failed");
+                launch_failed = true;
+                break;
+            }
+        }
+        af_bench::runtime::wait_zero(remaining);
+        if (launch_failed) {
+            break;
+        }
     }
 
-private:
-    af::TaskResult run() override {
-        if (hops_-- > 0) {
-            const auto next = RuntimeT::current_thread() == af_bench::runtime::BenchThreads::Logic_0
-                                  ? af_bench::runtime::BenchThreads::Logic_1
-                                  : af_bench::runtime::BenchThreads::Logic_0;
-            return this->pending_on(next);
-        }
+    runtime.stop();
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
 
-        if (remaining_->fetch_sub(1, std::memory_order_acq_rel) == 1) {
-            af::detail::atomic_notify_one(*remaining_);
+void run_same_thread_benchmark(benchmark::State &state) {
+    af::runtime runtime(af_bench::runtime::make_runtime_config());
+    if (!runtime.start()) {
+        state.SkipWithError("af::runtime::start failed");
+        return;
+    }
+    af_bench::runtime::wait_for_active_threads(runtime);
+    const auto threads = af_bench::runtime::select_threads(runtime);
+
+    for (auto _ : state) {
+        const int task_count = static_cast<int>(state.range(0));
+        std::atomic<int> remaining{0};
+        bool launch_failed = false;
+        for (int i = 0; i < task_count; ++i) {
+            remaining.fetch_add(1, std::memory_order_relaxed);
+            auto task = af::make_task<af_bench::runtime::SameThreadTask>(runtime);
+            if (!task->do_it(threads.logic_0, 8, &remaining)) {
+                af_bench::runtime::mark_one_done(remaining);
+                state.SkipWithError("SameThreadTask::do_it failed");
+                launch_failed = true;
+                break;
+            }
         }
-        return this->done();
+        af_bench::runtime::wait_zero(remaining);
+        if (launch_failed) {
+            break;
+        }
     }
 
-    int hops_{0};
-    std::atomic<int> *remaining_{nullptr};
-};
+    runtime.stop();
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
 
-class ScheduleModeHopTask final : public af_bench::runtime::Task {
-    using TaskBase = af_bench::runtime::Task;
+void run_io_thread_hop_benchmark(benchmark::State &state) {
+    af::runtime runtime(af_bench::runtime::make_runtime_config());
+    if (!runtime.start()) {
+        state.SkipWithError("af::runtime::start failed");
+        return;
+    }
+    af_bench::runtime::wait_for_active_threads(runtime);
+    const auto threads = af_bench::runtime::select_threads(runtime);
 
-public:
-    explicit ScheduleModeHopTask(TaskBase::FactoryToken token) : TaskBase(token) {}
-
-    bool do_it(int hops, af::ScheduleMode mode, std::atomic<int> *remaining) {
-        hops_ = hops;
-        mode_ = mode;
-        remaining_ = remaining;
-        return schedule(af_bench::runtime::BenchThreads::Logic_0);
+    for (auto _ : state) {
+        const int task_count = static_cast<int>(state.range(0));
+        std::atomic<int> remaining{0};
+        bool launch_failed = false;
+        for (int i = 0; i < task_count; ++i) {
+            remaining.fetch_add(1, std::memory_order_relaxed);
+            auto task = af::make_task<af_bench::runtime::IoHopTask>(runtime);
+            if (!task->do_it(threads, &remaining)) {
+                af_bench::runtime::mark_one_done(remaining);
+                state.SkipWithError("IoHopTask::do_it failed");
+                launch_failed = true;
+                break;
+            }
+        }
+        af_bench::runtime::wait_zero(remaining);
+        if (launch_failed) {
+            break;
+        }
     }
 
-private:
-    af::TaskResult run() override {
-        if (hops_-- > 0) {
-            const auto next = af_bench::runtime::Runtime::current_thread() ==
-                                      af_bench::runtime::BenchThreads::Logic_0
-                                  ? af_bench::runtime::BenchThreads::Logic_1
-                                  : af_bench::runtime::BenchThreads::Logic_0;
-            return pending_on(next, mode_);
-        }
-
-        if (remaining_->fetch_sub(1, std::memory_order_acq_rel) == 1) {
-            af::detail::atomic_notify_one(*remaining_);
-        }
-        return done();
-    }
-
-    int hops_{0};
-    af::ScheduleMode mode_{af::ScheduleMode::Auto};
-    std::atomic<int> *remaining_{nullptr};
-};
+    runtime.stop();
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
 
 void BM_RuntimeCrossThreadHop(benchmark::State &state) {
-    af_bench::runtime::Runtime::init();
-    for (auto _ : state) {
-        const int task_count = static_cast<int>(state.range(0));
-        std::atomic<int> remaining{0};
-        bool launch_failed = false;
-        for (int i = 0; i < task_count; ++i) {
-            remaining.fetch_add(1, std::memory_order_relaxed);
-            const bool ok =
-                af_bench::runtime::Runtime::start_task<af_bench::runtime::HopTask>(8, &remaining);
-            if (!ok) {
-                af_bench::runtime::undo_remaining(remaining);
-                state.SkipWithError("Runtime::start_task<HopTask> failed");
-                launch_failed = true;
-                break;
-            }
-        }
-        af_bench::runtime::wait_zero(remaining);
-        if (launch_failed) {
-            break;
-        }
-    }
-    af_bench::runtime::Runtime::shutdown();
-
-    state.SetItemsProcessed(state.iterations() * state.range(0));
+    run_cross_thread_hop_benchmark(state, 256, 4096);
 }
 
-template <std::size_t TaskPoolRemoteReleaseBatchSize, bool TaskPoolCacheSlotIndex,
-          std::size_t TaskPoolChunkSize = 256, std::size_t TaskPoolLocalCacheSetSize = 1,
-          std::size_t TaskPoolDirectReleaseSetSize = 4, std::size_t TaskPoolLocalCacheCapacity = 64>
-void BM_RuntimeCrossThreadHopTaskPoolBatch(benchmark::State &state) {
-    using Runtime = af::AsyncRuntime<BatchRuntimeTraits<
-        TaskPoolRemoteReleaseBatchSize, TaskPoolCacheSlotIndex, TaskPoolChunkSize,
-        TaskPoolLocalCacheSetSize, TaskPoolDirectReleaseSetSize, TaskPoolLocalCacheCapacity>>;
-
-    Runtime::init();
-    for (auto _ : state) {
-        const int task_count = static_cast<int>(state.range(0));
-        std::atomic<int> remaining{0};
-        bool launch_failed = false;
-        for (int i = 0; i < task_count; ++i) {
-            remaining.fetch_add(1, std::memory_order_relaxed);
-            const bool ok = Runtime::template start_task<BatchHopTask<Runtime>>(8, &remaining);
-            if (!ok) {
-                af_bench::runtime::undo_remaining(remaining);
-                state.SkipWithError("Runtime::start_task<BatchHopTask> failed");
-                launch_failed = true;
-                break;
-            }
-        }
-        af_bench::runtime::wait_zero(remaining);
-        if (launch_failed) {
-            break;
-        }
-    }
-    Runtime::shutdown();
-
-    state.SetItemsProcessed(state.iterations() * state.range(0));
+void BM_RuntimeCrossThreadHopCache4(benchmark::State &state) {
+    run_cross_thread_hop_benchmark(state, 4, 4096);
 }
 
-void BM_RuntimeScheduleModeHop(benchmark::State &state, af::ScheduleMode mode) {
-    af_bench::runtime::Runtime::init();
-    for (auto _ : state) {
-        const int task_count = static_cast<int>(state.range(0));
-        std::atomic<int> remaining{0};
-        bool launch_failed = false;
-        for (int i = 0; i < task_count; ++i) {
-            remaining.fetch_add(1, std::memory_order_relaxed);
-            const bool ok =
-                af_bench::runtime::Runtime::start_task<ScheduleModeHopTask>(8, mode, &remaining);
-            if (!ok) {
-                af_bench::runtime::undo_remaining(remaining);
-                state.SkipWithError("Runtime::start_task<ScheduleModeHopTask> failed");
-                launch_failed = true;
-                break;
-            }
-        }
-        af_bench::runtime::wait_zero(remaining);
-        if (launch_failed) {
-            break;
-        }
-    }
-    af_bench::runtime::Runtime::shutdown();
+void BM_RuntimeCrossThreadHopCache64(benchmark::State &state) {
+    run_cross_thread_hop_benchmark(state, 64, 4096);
+}
 
-    state.SetItemsProcessed(state.iterations() * state.range(0));
+void BM_RuntimeCrossThreadHopCache1024(benchmark::State &state) {
+    run_cross_thread_hop_benchmark(state, 1024, 4096);
+}
+
+void BM_RuntimeCrossThreadHopSlab1024(benchmark::State &state) {
+    run_cross_thread_hop_benchmark(state, 256, 1024);
+}
+
+void BM_RuntimeCrossThreadHopSlab8192(benchmark::State &state) {
+    run_cross_thread_hop_benchmark(state, 256, 8192);
+}
+
+void BM_RuntimeSameThreadReschedule(benchmark::State &state) {
+    run_same_thread_benchmark(state);
 }
 
 void BM_RuntimeIoThreadHop(benchmark::State &state) {
-    af_bench::runtime::Runtime::init();
-    for (auto _ : state) {
-        const int task_count = static_cast<int>(state.range(0));
-        std::atomic<int> remaining{0};
-        bool launch_failed = false;
-        for (int i = 0; i < task_count; ++i) {
-            remaining.fetch_add(1, std::memory_order_relaxed);
-            const bool ok =
-                af_bench::runtime::Runtime::start_task<af_bench::runtime::IoHopTask>(&remaining);
-            if (!ok) {
-                af_bench::runtime::undo_remaining(remaining);
-                state.SkipWithError("Runtime::start_task<IoHopTask> failed");
-                launch_failed = true;
-                break;
-            }
-        }
-        af_bench::runtime::wait_zero(remaining);
-        if (launch_failed) {
-            break;
-        }
-    }
-    af_bench::runtime::Runtime::shutdown();
-
-    state.SetItemsProcessed(state.iterations() * state.range(0));
+    run_io_thread_hop_benchmark(state);
 }
 
 BENCHMARK(BM_RuntimeCrossThreadHop)
@@ -206,62 +145,32 @@ BENCHMARK(BM_RuntimeCrossThreadHop)
     ->Arg(8192)
     ->UseRealTime()
     ->Unit(benchmark::kMillisecond);
-BENCHMARK_TEMPLATE(BM_RuntimeCrossThreadHopTaskPoolBatch, 8, false)
+BENCHMARK(BM_RuntimeCrossThreadHopCache4)
     ->Arg(1024)
     ->Arg(8192)
     ->UseRealTime()
     ->Unit(benchmark::kMillisecond);
-BENCHMARK_TEMPLATE(BM_RuntimeCrossThreadHopTaskPoolBatch, 32, false)
+BENCHMARK(BM_RuntimeCrossThreadHopCache64)
     ->Arg(1024)
     ->Arg(8192)
     ->UseRealTime()
     ->Unit(benchmark::kMillisecond);
-BENCHMARK_TEMPLATE(BM_RuntimeCrossThreadHopTaskPoolBatch, 64, false)
+BENCHMARK(BM_RuntimeCrossThreadHopCache1024)
     ->Arg(1024)
     ->Arg(8192)
     ->UseRealTime()
     ->Unit(benchmark::kMillisecond);
-BENCHMARK_TEMPLATE(BM_RuntimeCrossThreadHopTaskPoolBatch, 64, false, 256, 8, 4, 64)
+BENCHMARK(BM_RuntimeCrossThreadHopSlab1024)
     ->Arg(1024)
     ->Arg(8192)
     ->UseRealTime()
     ->Unit(benchmark::kMillisecond);
-BENCHMARK_TEMPLATE(BM_RuntimeCrossThreadHopTaskPoolBatch, 64, true)
+BENCHMARK(BM_RuntimeCrossThreadHopSlab8192)
     ->Arg(1024)
     ->Arg(8192)
     ->UseRealTime()
     ->Unit(benchmark::kMillisecond);
-BENCHMARK_TEMPLATE(BM_RuntimeCrossThreadHopTaskPoolBatch, 64, false, 256, 8, 4, 128)
-    ->Arg(1024)
-    ->Arg(8192)
-    ->UseRealTime()
-    ->Unit(benchmark::kMillisecond);
-BENCHMARK_TEMPLATE(BM_RuntimeCrossThreadHopTaskPoolBatch, 64, false, 256, 1, 4, 128)
-    ->Arg(1024)
-    ->Arg(8192)
-    ->UseRealTime()
-    ->Unit(benchmark::kMillisecond);
-BENCHMARK_TEMPLATE(BM_RuntimeCrossThreadHopTaskPoolBatch, 128, false, 256, 1, 4, 128)
-    ->Arg(1024)
-    ->Arg(8192)
-    ->UseRealTime()
-    ->Unit(benchmark::kMillisecond);
-BENCHMARK_TEMPLATE(BM_RuntimeCrossThreadHopTaskPoolBatch, 64, false, 512)
-    ->Arg(1024)
-    ->Arg(8192)
-    ->UseRealTime()
-    ->Unit(benchmark::kMillisecond);
-BENCHMARK_TEMPLATE(BM_RuntimeCrossThreadHopTaskPoolBatch, 64, false, 1024)
-    ->Arg(1024)
-    ->Arg(8192)
-    ->UseRealTime()
-    ->Unit(benchmark::kMillisecond);
-BENCHMARK_CAPTURE(BM_RuntimeScheduleModeHop, Fast, af::ScheduleMode::Fast)
-    ->Arg(1024)
-    ->Arg(8192)
-    ->UseRealTime()
-    ->Unit(benchmark::kMillisecond);
-BENCHMARK_CAPTURE(BM_RuntimeScheduleModeHop, Ordered, af::ScheduleMode::Ordered)
+BENCHMARK(BM_RuntimeSameThreadReschedule)
     ->Arg(1024)
     ->Arg(8192)
     ->UseRealTime()
