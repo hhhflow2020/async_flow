@@ -446,6 +446,9 @@ TEST(NetUdpSocketTests, RuntimeUdpSocketOwnerHandleSendsWithoutQueueing) {
     const ssize_t n = ::recv(client.get(), buffer, sizeof(buffer), 0);
     ASSERT_EQ(n, 5);
     EXPECT_EQ(std::string(buffer, static_cast<std::size_t>(n)), "owner");
+    ASSERT_TRUE(wait_until([&] {
+        return state.owner_send_result.load(std::memory_order_acquire) != -1;
+    }));
     EXPECT_EQ(state.owner_send_result.load(std::memory_order_acquire),
               static_cast<int>(af::net::udp_send_result::accepted));
 
