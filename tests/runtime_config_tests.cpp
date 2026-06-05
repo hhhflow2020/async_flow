@@ -328,6 +328,37 @@ private:
     std::atomic<bool> pending_{false};
 };
 
+class TimerBudgetProbeService final : public af::detail::RuntimeServiceTask {
+public:
+    TimerBudgetProbeService(std::atomic<int> &service_counter, std::atomic<int> &timer_counter,
+                            std::atomic<int> &observed_timer_count)
+        : service_counter_(service_counter), timer_counter_(timer_counter),
+          observed_timer_count_(observed_timer_count) {}
+
+    void mark_pending() noexcept {
+        pending_.store(true, std::memory_order_release);
+    }
+
+    [[nodiscard]] bool run_service(std::size_t budget) noexcept override {
+        static_cast<void>(budget);
+        if (!pending_.exchange(false, std::memory_order_acq_rel)) {
+            return false;
+        }
+        const int previous = service_counter_.fetch_add(1, std::memory_order_acq_rel);
+        if (previous == 0) {
+            observed_timer_count_.store(timer_counter_.load(std::memory_order_acquire),
+                                        std::memory_order_release);
+        }
+        return true;
+    }
+
+private:
+    std::atomic<int> &service_counter_;
+    std::atomic<int> &timer_counter_;
+    std::atomic<int> &observed_timer_count_;
+    std::atomic<bool> pending_{false};
+};
+
 class InstanceRuntimeTask final : public af::runtime_task {
 public:
     InstanceRuntimeTask(af::runtime_task::factory_token token, af::runtime &owner,
@@ -355,6 +386,27 @@ private:
     std::atomic<af::runtime_task_id> &observed_task_id_;
     std::atomic<af::runtime_task_id> &observed_current_task_id_;
     std::atomic<std::uint16_t> &observed_thread_;
+};
+
+class TimerBudgetRuntimeTask final : public af::runtime_task {
+public:
+    TimerBudgetRuntimeTask(af::runtime_task::factory_token token, af::runtime &owner,
+                           std::atomic<int> &counter, TimerBudgetProbeService &service)
+        : af::runtime_task(token, owner), counter_(counter), service_(service) {}
+
+    [[nodiscard]] bool do_it(std::uint16_t thread) noexcept {
+        return schedule_after(thread, std::chrono::nanoseconds(0));
+    }
+
+private:
+    af::task_result run_task() noexcept override {
+        counter_.fetch_add(1, std::memory_order_acq_rel);
+        service_.mark_pending();
+        return done();
+    }
+
+    std::atomic<int> &counter_;
+    TimerBudgetProbeService &service_;
 };
 
 class TwoHopRuntimeTask final : public af::runtime_task {
@@ -656,7 +708,6 @@ TEST(RuntimeConfigTests, RuntimeConfigUsesPlainStructDefaultsAndFactories) {
 
     EXPECT_TRUE(config.threads.empty());
     EXPECT_EQ(config.scheduler.task_drain_budget, 256U);
-    EXPECT_EQ(config.scheduler.timer_drain_budget, 256U);
     EXPECT_EQ(config.scheduler.service_task_budget, 32U);
     EXPECT_EQ(config.scheduler.max_task_run_slice.count(), 0);
     EXPECT_EQ(config.scheduler.idle_wait, af::idle_wait_strategy::futex);
@@ -666,6 +717,7 @@ TEST(RuntimeConfigTests, RuntimeConfigUsesPlainStructDefaultsAndFactories) {
     EXPECT_EQ(config.task_pool.oom, af::oom_policy::fatal);
     EXPECT_EQ(config.timer.kind, af::timer_kind::min_heap);
     EXPECT_EQ(config.timer.tick, std::chrono::milliseconds(1));
+    EXPECT_EQ(config.timer.drain_budget, 256U);
     EXPECT_EQ(config.reactor.backend, af::reactor_backend::auto_select);
     EXPECT_EQ(config.reactor.event_capacity, 1024U);
     EXPECT_EQ(config.logger.ordering, af::log_ordering::ordered);
@@ -776,6 +828,11 @@ TEST(RuntimeConfigTests, RuntimeConfigValidationReportsInvalidFields) {
     EXPECT_EQ(validation.status, af::runtime_config_status::scheduler_max_task_run_slice_negative);
 
     config.scheduler.max_task_run_slice = std::chrono::nanoseconds(0);
+    config.timer.drain_budget = 0;
+    validation = af::validate_runtime_config(config);
+    EXPECT_EQ(validation.status, af::runtime_config_status::timer_drain_budget_zero);
+
+    config.timer.drain_budget = 1;
     config.timer.kind = af::timer_kind::hierarchical_wheel;
     validation = af::validate_runtime_config(config);
     EXPECT_EQ(validation.status, af::runtime_config_status::timer_kind_unsupported);
@@ -1052,6 +1109,51 @@ TEST(RuntimeConfigTests, RuntimeTaskDrainBudgetLetsServiceTasksRunBetweenBursts)
 
     EXPECT_GT(observed_task_count.load(std::memory_order_acquire), 0);
     EXPECT_LT(observed_task_count.load(std::memory_order_acquire), task_limit);
+
+    runtime.stop();
+}
+
+TEST(RuntimeConfigTests, RuntimeTimerDrainBudgetLetsServiceTasksRunBetweenDueTimers) {
+    af::runtime_config config;
+    config.threads = {af::cpu_threads("logic", 1)};
+    config.timer.drain_budget = 1;
+    config.scheduler.service_task_budget = 1;
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+
+    af::runtime runtime(config);
+    std::atomic<int> timer_counter{0};
+    std::atomic<int> service_counter{0};
+    std::atomic<int> observed_timer_count{-1};
+    std::atomic<int> control_counter{0};
+    std::atomic<bool> register_ok{false};
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_for_active_threads(runtime, 1));
+
+    const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
+    TimerBudgetProbeService service(service_counter, timer_counter, observed_timer_count);
+    ServiceTaskControlWork register_work(ServiceTaskControlWork::action::register_service,
+                                         cpu_thread, service, control_counter, register_ok);
+    ASSERT_TRUE(runtime.post(cpu_thread, &register_work));
+    ASSERT_TRUE(wait_for_counter(control_counter, 1));
+    ASSERT_TRUE(register_ok.load(std::memory_order_acquire));
+
+    auto task0 = af::make_task<TimerBudgetRuntimeTask>(runtime, timer_counter, service);
+    auto task1 = af::make_task<TimerBudgetRuntimeTask>(runtime, timer_counter, service);
+    auto task2 = af::make_task<TimerBudgetRuntimeTask>(runtime, timer_counter, service);
+    auto task3 = af::make_task<TimerBudgetRuntimeTask>(runtime, timer_counter, service);
+    ASSERT_TRUE(task0->do_it(cpu_thread));
+    ASSERT_TRUE(task1->do_it(cpu_thread));
+    ASSERT_TRUE(task2->do_it(cpu_thread));
+    ASSERT_TRUE(task3->do_it(cpu_thread));
+    task0.reset();
+    task1.reset();
+    task2.reset();
+    task3.reset();
+
+    ASSERT_TRUE(wait_for_counter_at_least(service_counter, 1));
+    EXPECT_EQ(observed_timer_count.load(std::memory_order_acquire), 1);
+    ASSERT_TRUE(wait_for_counter(timer_counter, 4));
 
     runtime.stop();
 }

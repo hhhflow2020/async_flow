@@ -112,7 +112,6 @@ using thread_layout_config = std::vector<thread_group_config>;
 
 struct scheduler_config {
     std::size_t task_drain_budget{256};
-    std::size_t timer_drain_budget{256};
     std::size_t service_task_budget{32};
     std::chrono::nanoseconds max_task_run_slice{0};
     idle_wait_strategy idle_wait{idle_wait_strategy::futex};

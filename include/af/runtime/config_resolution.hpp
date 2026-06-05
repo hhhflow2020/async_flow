@@ -22,7 +22,6 @@ enum class runtime_config_status : std::uint8_t {
     thread_group_count_zero,
     thread_count_overflow,
     scheduler_task_drain_budget_zero,
-    scheduler_timer_drain_budget_zero,
     scheduler_service_task_budget_zero,
     task_pool_local_cache_size_zero,
     task_pool_slab_object_count_zero,
@@ -59,8 +58,6 @@ runtime_config_status_name(runtime_config_status status) noexcept {
         return "thread_count_overflow";
     case runtime_config_status::scheduler_task_drain_budget_zero:
         return "scheduler_task_drain_budget_zero";
-    case runtime_config_status::scheduler_timer_drain_budget_zero:
-        return "scheduler_timer_drain_budget_zero";
     case runtime_config_status::scheduler_service_task_budget_zero:
         return "scheduler_service_task_budget_zero";
     case runtime_config_status::scheduler_max_task_run_slice_negative:
@@ -310,9 +307,6 @@ validate_resolved_runtime_config(const resolved_runtime_config &resolved) noexce
 
     if (config.scheduler.task_drain_budget == 0) {
         return runtime_config_error(runtime_config_status::scheduler_task_drain_budget_zero);
-    }
-    if (config.scheduler.timer_drain_budget == 0) {
-        return runtime_config_error(runtime_config_status::scheduler_timer_drain_budget_zero);
     }
     if (config.scheduler.service_task_budget == 0) {
         return runtime_config_error(runtime_config_status::scheduler_service_task_budget_zero);

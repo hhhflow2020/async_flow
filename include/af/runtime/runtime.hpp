@@ -231,7 +231,7 @@ private:
             : owner_(owner), thread_(std::move(thread)),
               task_drain_budget_(owner_.config().scheduler.task_drain_budget),
               max_task_run_slice_(owner_.config().scheduler.max_task_run_slice),
-              timer_drain_budget_(owner_.config().scheduler.timer_drain_budget),
+              timer_drain_budget_(owner_.config().timer.drain_budget),
               service_task_budget_(owner_.config().scheduler.service_task_budget),
               idle_wait_(owner_.config().scheduler.idle_wait),
               wake_policy_(owner_.config().scheduler.wake) {
