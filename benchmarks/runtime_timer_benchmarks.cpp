@@ -59,6 +59,12 @@ void wait_zero(std::atomic<int> &remaining) {
     }
 }
 
+void undo_remaining(std::atomic<int> &remaining) {
+    if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+        af::detail::atomic_notify_one(remaining);
+    }
+}
+
 void BM_RuntimeTimerScheduleAfter(benchmark::State &state, af::timer_kind timer_kind) {
     af::runtime runtime(make_timer_runtime_config(timer_kind));
     if (!runtime.start()) {
@@ -70,15 +76,22 @@ void BM_RuntimeTimerScheduleAfter(benchmark::State &state, af::timer_kind timer_
 
     for (auto _ : state) {
         const int task_count = static_cast<int>(state.range(0));
-        std::atomic<int> remaining{task_count};
+        std::atomic<int> remaining{0};
+        bool launch_failed = false;
         for (int i = 0; i < task_count; ++i) {
+            remaining.fetch_add(1, std::memory_order_relaxed);
             auto task = af::make_task<RuntimeTimerTask>(runtime);
             if (!task->do_it(target, remaining)) {
+                undo_remaining(remaining);
                 state.SkipWithError("RuntimeTimerTask::do_it failed");
+                launch_failed = true;
                 break;
             }
         }
         wait_zero(remaining);
+        if (launch_failed) {
+            break;
+        }
     }
 
     runtime.stop();
