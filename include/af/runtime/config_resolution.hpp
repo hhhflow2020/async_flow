@@ -30,6 +30,7 @@ enum class runtime_config_status : std::uint8_t {
     timer_wheel_slots_zero,
     timer_drain_budget_zero,
     timer_initial_reserve_zero,
+    timer_kind_unsupported,
     reactor_event_capacity_zero,
     reactor_event_budget_zero,
     log_queue_capacity_zero,
@@ -76,6 +77,8 @@ runtime_config_status_name(runtime_config_status status) noexcept {
         return "timer_drain_budget_zero";
     case runtime_config_status::timer_initial_reserve_zero:
         return "timer_initial_reserve_zero";
+    case runtime_config_status::timer_kind_unsupported:
+        return "timer_kind_unsupported";
     case runtime_config_status::reactor_event_capacity_zero:
         return "reactor_event_capacity_zero";
     case runtime_config_status::reactor_event_budget_zero:
@@ -334,6 +337,9 @@ validate_resolved_runtime_config(const resolved_runtime_config &resolved) noexce
     }
     if (config.timer.initial_reserve == 0) {
         return runtime_config_error(runtime_config_status::timer_initial_reserve_zero);
+    }
+    if (config.timer.kind != timer_kind::min_heap) {
+        return runtime_config_error(runtime_config_status::timer_kind_unsupported);
     }
     if (config.reactor.event_capacity == 0) {
         return runtime_config_error(runtime_config_status::reactor_event_capacity_zero);

@@ -127,7 +127,7 @@ struct task_pool_config {
 };
 
 struct timer_config {
-    timer_kind kind{timer_kind::hierarchical_wheel};
+    timer_kind kind{timer_kind::min_heap};
     std::chrono::milliseconds tick{1};
     std::size_t wheel_slots{4096};
     std::size_t drain_budget{256};

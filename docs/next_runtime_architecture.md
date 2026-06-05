@@ -154,7 +154,7 @@ struct task_pool_config {
 
 ```cpp
 struct timer_config {
-    timer_kind kind = timer_kind::hierarchical_wheel;
+    timer_kind kind = timer_kind::min_heap;
     std::chrono::milliseconds tick = 1ms;
     std::size_t wheel_slots = 4096;
     std::size_t drain_budget = 256;
@@ -164,7 +164,7 @@ struct timer_config {
 
 每个 executor 自己拥有 timer 结构。跨线程注册定时器时，先把 task 以 `TimerArming` 状态投递到目标 executor 的同一个 intrusive MPSC inbox，再由目标 executor 在线程内挂入本地 timer 结构，因此 timer 数据结构不需要锁。
 
-当前实现先使用每 executor 本地 min-heap，按 deadline 和 arm sequence 排序，配置项对应 `timer_drain_budget` 和 `timer_reserve` traits。后续可以在不改变 task API 和 executor 主循环的前提下，把 heap backend 替换成分层时间轮。
+当前实现先使用每 executor 本地 min-heap，按 deadline 和 arm sequence 排序；`timer_kind::hierarchical_wheel` 仅作为后续 backend 目标保留，当前配置为该值会校验失败，避免用户误以为已经启用时间轮。后续可以在不改变 task API 和 executor 主循环的前提下，把 heap backend 替换成分层时间轮。
 
 ### reactor_config
 
