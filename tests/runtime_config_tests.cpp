@@ -1076,6 +1076,29 @@ TEST(RuntimeConfigTests, RuntimeConfigValidationReportsInvalidFields) {
     validation = af::validate_runtime_config(config);
     EXPECT_EQ(validation.status, af::runtime_config_status::log_file_backend_path_empty);
     EXPECT_EQ(validation.index, 0U);
+
+    config.threads = {af::cpu_threads("logic", 1)};
+    config.logger.consumer_thread = af::thread_selector::cpu(0);
+    config.logger.backends.clear();
+    config.shutdown.drain_timeout = std::chrono::seconds(-1);
+    validation = af::validate_runtime_config(config);
+    EXPECT_EQ(validation.status, af::runtime_config_status::shutdown_drain_timeout_negative);
+    EXPECT_EQ(af::runtime_config_status_name(validation.status), "shutdown_drain_timeout_negative");
+
+    config.shutdown.drain_timeout = std::chrono::seconds(0);
+    config.shutdown.connection_close_timeout = std::chrono::seconds(-1);
+    validation = af::validate_runtime_config(config);
+    EXPECT_EQ(validation.status,
+              af::runtime_config_status::shutdown_connection_close_timeout_negative);
+    EXPECT_EQ(af::runtime_config_status_name(validation.status),
+              "shutdown_connection_close_timeout_negative");
+
+    config.shutdown.connection_close_timeout = std::chrono::seconds(0);
+    config.shutdown.log_flush_timeout = std::chrono::seconds(-1);
+    validation = af::validate_runtime_config(config);
+    EXPECT_EQ(validation.status, af::runtime_config_status::shutdown_log_flush_timeout_negative);
+    EXPECT_EQ(af::runtime_config_status_name(validation.status),
+              "shutdown_log_flush_timeout_negative");
 }
 
 TEST(RuntimeConfigTests, RuntimeInstanceRejectsInvalidConfig) {

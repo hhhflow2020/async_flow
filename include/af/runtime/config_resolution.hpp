@@ -45,6 +45,9 @@ enum class runtime_config_status : std::uint8_t {
     log_tcp_backend_port_zero,
     log_tcp_backend_thread_not_found,
     scheduler_max_task_run_slice_negative,
+    shutdown_drain_timeout_negative,
+    shutdown_connection_close_timeout_negative,
+    shutdown_log_flush_timeout_negative,
 };
 
 [[nodiscard]] inline std::string_view
@@ -64,6 +67,12 @@ runtime_config_status_name(runtime_config_status status) noexcept {
         return "scheduler_service_task_budget_zero";
     case runtime_config_status::scheduler_max_task_run_slice_negative:
         return "scheduler_max_task_run_slice_negative";
+    case runtime_config_status::shutdown_drain_timeout_negative:
+        return "shutdown_drain_timeout_negative";
+    case runtime_config_status::shutdown_connection_close_timeout_negative:
+        return "shutdown_connection_close_timeout_negative";
+    case runtime_config_status::shutdown_log_flush_timeout_negative:
+        return "shutdown_log_flush_timeout_negative";
     case runtime_config_status::task_pool_local_cache_size_zero:
         return "task_pool_local_cache_size_zero";
     case runtime_config_status::task_pool_slab_object_count_zero:
@@ -361,6 +370,16 @@ validate_resolved_runtime_config(const resolved_runtime_config &resolved) noexce
     }
     if (!resolved.valid_thread(resolved.select_thread(config.logger.consumer_thread))) {
         return runtime_config_error(runtime_config_status::log_consumer_thread_not_found);
+    }
+    if (config.shutdown.drain_timeout.count() < 0) {
+        return runtime_config_error(runtime_config_status::shutdown_drain_timeout_negative);
+    }
+    if (config.shutdown.connection_close_timeout.count() < 0) {
+        return runtime_config_error(
+            runtime_config_status::shutdown_connection_close_timeout_negative);
+    }
+    if (config.shutdown.log_flush_timeout.count() < 0) {
+        return runtime_config_error(runtime_config_status::shutdown_log_flush_timeout_negative);
     }
 
     for (std::size_t index = 0; index < config.logger.backends.size(); ++index) {

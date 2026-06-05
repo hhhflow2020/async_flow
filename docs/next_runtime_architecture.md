@@ -208,6 +208,9 @@ struct shutdown_config {
 };
 ```
 
+三个 timeout 字段必须为非负值；`0s` 表示进入对应阶段但不额外等待，负值在
+`validate_runtime_config()` 阶段直接拒绝。
+
 ### diagnostics_config
 
 ```cpp
