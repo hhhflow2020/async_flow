@@ -98,6 +98,8 @@ struct AsyncLogStats {
     std::uint64_t dropped{0};
 };
 
+using log_overflow_policy = LogOverflowPolicy;
+using log_ordering = LogOrdering;
 using async_log_config = AsyncLogConfig;
 using async_log_stats = AsyncLogStats;
 

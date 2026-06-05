@@ -129,4 +129,14 @@ private:
     absl::flat_hash_map<std::uint64_t, Batch> pending_;
 };
 
+using batch_submit_status = BatchSubmitStatus;
+using ordered_batch_failure_action = OrderedBatchFailureAction;
+using ordered_batch_retry_skip_options = OrderedBatchRetrySkipOptions;
+using ordered_batch_failure_decision = OrderedBatchFailureDecision;
+
+template <typename BatchId = std::uint64_t>
+using ordered_batch_retry_skip_policy = OrderedBatchRetrySkipPolicy<BatchId>;
+
+template <typename Batch> using batch_sequencer = BatchSequencer<Batch>;
+
 } // namespace af

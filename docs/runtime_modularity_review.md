@@ -18,6 +18,8 @@
 
 `af/async_flow.hpp` 已从默认 umbrella 中移除旧 `af/io.hpp` facade，并改为导出 `af/net.hpp`。旧 `af/io.hpp` 现在只作为显式 opt-in legacy facade 保留，避免新用户从总入口继续走 task 级 `io_*` helper。后续确认没有下游依赖后，可以物理删除 `include/af/io*.hpp` 与 `include/af/detail/io/` 这组历史 helper。
 
+对外命名继续向 lower_case 迁移：buffer、batch、crud、signal、log 配置/句柄等 public 类型已补 lower_case alias，并通过 public header 测试覆盖。现阶段不直接重命名实现类，避免一次性破坏已有 CamelCase 调用点；后续可以先迁移示例/文档，再按版本窗口删除旧名。
+
 通用 service task 由 runtime executor 按预算轮询执行；service 自身负责 pending 状态和内部队列，跨线程 producer 通过 `wake_service_tasks()` 唤醒 executor。runtime async logger 现在就是一个 service task，消费热路径不进入 task 状态机；推荐手工入口是 `start_runtime_logging()`，runtime 配置了日志后会在 `runtime::start()` 中自动启动并在 `runtime::stop()` 中 drain/flush。
 
 ## 模块边界

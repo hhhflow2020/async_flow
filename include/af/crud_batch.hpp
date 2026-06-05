@@ -67,4 +67,9 @@ template <typename Key, typename Value>
     return split_crud_ops(std::move(ops), shard_count);
 }
 
+using op_type = OpType;
+
+template <typename Key, typename Value> using crud_op = CrudOp<Key, Value>;
+template <typename Key, typename Value> using change_batch = ChangeBatch<Key, Value>;
+
 } // namespace af
