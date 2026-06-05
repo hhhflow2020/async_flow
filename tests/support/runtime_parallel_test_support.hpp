@@ -15,8 +15,6 @@ namespace af::test::runtime_parallel {
 
 #include "runtime_parallel_core_support.hpp"
 
-#include "runtime_parallel_ordered_batch_support.hpp"
-
 #include "runtime_parallel_ordered_start_support.hpp"
 
 } // namespace af::test::runtime_parallel
