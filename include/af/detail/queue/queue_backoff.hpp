@@ -11,9 +11,9 @@ inline void queue_full_cpu_relax() noexcept {
     cpu_relax();
 }
 
-class QueueFullBackoff {
+class queue_full_backoff {
 public:
-    explicit QueueFullBackoff(std::size_t spin_count) noexcept : spin_count_(spin_count) {}
+    explicit queue_full_backoff(std::size_t spin_count) noexcept : spin_count_(spin_count) {}
 
     void wait() noexcept {
         if (spins_ < spin_count_) {
@@ -33,5 +33,7 @@ private:
     const std::size_t spin_count_;
     std::size_t spins_{0};
 };
+
+using QueueFullBackoff = queue_full_backoff;
 
 } // namespace af::detail

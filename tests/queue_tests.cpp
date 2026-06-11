@@ -21,6 +21,7 @@ static_assert(
     std::is_same_v<af::detail::intrusive_mpsc_node<int>, af::detail::IntrusiveMpscNode<int>>);
 static_assert(
     std::is_same_v<af::detail::intrusive_mpsc_queue<int>, af::detail::IntrusiveMpscQueue<int>>);
+static_assert(std::is_same_v<af::detail::queue_full_backoff, af::detail::QueueFullBackoff>);
 
 struct IntrusiveQueueValue {
     int producer{0};

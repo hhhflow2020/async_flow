@@ -128,7 +128,7 @@ inline detail::log_record *async_logger::acquire_record(Lane &lane,
         return lane.records.try_acquire(message);
     }
 
-    detail::QueueFullBackoff backoff(overflow_spin_count_);
+    detail::queue_full_backoff backoff(overflow_spin_count_);
     while (accepting_.load(std::memory_order_acquire)) {
         if (detail::log_record *record = lane.records.try_acquire(message); record != nullptr) {
             return record;
@@ -144,7 +144,7 @@ inline bool async_logger::push_record(Lane &lane, detail::log_record *record) no
         return accepting_.load(std::memory_order_acquire) && lane.queue.try_push(record);
     }
 
-    detail::QueueFullBackoff backoff(overflow_spin_count_);
+    detail::queue_full_backoff backoff(overflow_spin_count_);
     while (accepting_.load(std::memory_order_acquire)) {
         if (lane.queue.try_push(record)) {
             return true;
@@ -160,7 +160,7 @@ inline bool async_logger::push_ordered_record(detail::log_record *record) noexce
         return accepting_.load(std::memory_order_acquire) && ordered_queue_->queue.try_push(record);
     }
 
-    detail::QueueFullBackoff backoff(overflow_spin_count_);
+    detail::queue_full_backoff backoff(overflow_spin_count_);
     while (accepting_.load(std::memory_order_acquire)) {
         if (ordered_queue_->queue.try_push(record)) {
             return true;

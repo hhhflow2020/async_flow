@@ -411,7 +411,7 @@ private:
     }
 
     [[nodiscard]] Slab *grow() noexcept {
-        QueueFullBackoff backoff(64U);
+        queue_full_backoff backoff(64U);
         while (expanding_.test_and_set(std::memory_order_acquire)) {
             backoff.wait();
         }
