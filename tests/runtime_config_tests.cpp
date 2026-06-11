@@ -32,6 +32,61 @@
 
 namespace {
 
+template <typename EnumT, typename = void> struct has_done_value : std::false_type {};
+template <typename EnumT>
+struct has_done_value<EnumT, std::void_t<decltype(EnumT::Done)>> : std::true_type {};
+
+template <typename EnumT, typename = void> struct has_pending_value : std::false_type {};
+template <typename EnumT>
+struct has_pending_value<EnumT, std::void_t<decltype(EnumT::Pending)>> : std::true_type {};
+
+template <typename EnumT, typename = void> struct has_again_value : std::false_type {};
+template <typename EnumT>
+struct has_again_value<EnumT, std::void_t<decltype(EnumT::Again)>> : std::true_type {};
+
+template <typename EnumT, typename = void> struct has_failed_value : std::false_type {};
+template <typename EnumT>
+struct has_failed_value<EnumT, std::void_t<decltype(EnumT::Failed)>> : std::true_type {};
+
+template <typename EnumT, typename = void> struct has_cancelled_value : std::false_type {};
+template <typename EnumT>
+struct has_cancelled_value<EnumT, std::void_t<decltype(EnumT::Cancelled)>> : std::true_type {};
+
+template <typename EnumT, typename = void> struct has_wait_for_tasks_value : std::false_type {};
+template <typename EnumT>
+struct has_wait_for_tasks_value<EnumT, std::void_t<decltype(EnumT::WaitForTasks)>>
+    : std::true_type {};
+
+template <typename EnumT, typename = void> struct has_stop_immediately_value : std::false_type {};
+template <typename EnumT>
+struct has_stop_immediately_value<EnumT, std::void_t<decltype(EnumT::StopImmediately)>>
+    : std::true_type {};
+
+template <typename EnumT, typename = void> struct has_created_value : std::false_type {};
+template <typename EnumT>
+struct has_created_value<EnumT, std::void_t<decltype(EnumT::Created)>> : std::true_type {};
+
+template <typename EnumT, typename = void> struct has_queued_value : std::false_type {};
+template <typename EnumT>
+struct has_queued_value<EnumT, std::void_t<decltype(EnumT::Queued)>> : std::true_type {};
+
+template <typename EnumT, typename = void> struct has_timer_arming_value : std::false_type {};
+template <typename EnumT>
+struct has_timer_arming_value<EnumT, std::void_t<decltype(EnumT::TimerArming)>> : std::true_type {};
+
+template <typename EnumT, typename = void> struct has_timer_pending_value : std::false_type {};
+template <typename EnumT>
+struct has_timer_pending_value<EnumT, std::void_t<decltype(EnumT::TimerPending)>> : std::true_type {
+};
+
+template <typename EnumT, typename = void> struct has_starting_value : std::false_type {};
+template <typename EnumT>
+struct has_starting_value<EnumT, std::void_t<decltype(EnumT::Starting)>> : std::true_type {};
+
+template <typename EnumT, typename = void> struct has_running_value : std::false_type {};
+template <typename EnumT>
+struct has_running_value<EnumT, std::void_t<decltype(EnumT::Running)>> : std::true_type {};
+
 static_assert(af::supports_native_io_wait == (af::supports_epoll || af::supports_kqueue));
 static_assert(af::supports_eventfd == af::platform_linux);
 static_assert(af::supports_timerfd == af::platform_linux);
@@ -54,21 +109,36 @@ static_assert(std::is_same_v<af::parallel_mode, af::ParallelMode>);
 static_assert(std::is_same_v<af::ordered_batch_replay_policy, af::OrderedBatchReplayPolicy>);
 static_assert(std::is_same_v<af::ordered_batch_options, af::OrderedBatchOptions>);
 static_assert(std::is_same_v<af::sharded_ops<int>, af::ShardedOps<int>>);
-static_assert(af::TaskResult::Done == af::task_result::done);
-static_assert(af::TaskResult::Pending == af::task_result::pending);
-static_assert(af::TaskResult::Again == af::task_result::again);
-static_assert(af::TaskResult::Failed == af::task_result::failed);
-static_assert(af::TaskResult::Cancelled == af::task_result::cancelled);
-static_assert(af::ShutdownPolicy::WaitForTasks == af::shutdown_policy::wait_for_tasks);
-static_assert(af::ShutdownPolicy::StopImmediately == af::shutdown_policy::stop_immediately);
-static_assert(af::TaskState::Created == af::task_state::created);
-static_assert(af::TaskState::Queued == af::task_state::queued);
-static_assert(af::TaskState::TimerArming == af::task_state::timer_arming);
-static_assert(af::TaskState::TimerPending == af::task_state::timer_pending);
-static_assert(af::TaskState::Starting == af::task_state::starting);
-static_assert(af::TaskState::Running == af::task_state::running);
-static_assert(af::TaskState::Pending == af::task_state::pending);
-static_assert(af::TaskState::Done == af::task_state::done);
+static_assert(af::task_result::done == af::task_result::done);
+static_assert(af::task_result::pending == af::task_result::pending);
+static_assert(af::task_result::again == af::task_result::again);
+static_assert(af::task_result::failed == af::task_result::failed);
+static_assert(af::task_result::cancelled == af::task_result::cancelled);
+static_assert(!has_done_value<af::task_result>::value);
+static_assert(!has_pending_value<af::task_result>::value);
+static_assert(!has_again_value<af::task_result>::value);
+static_assert(!has_failed_value<af::task_result>::value);
+static_assert(!has_cancelled_value<af::task_result>::value);
+static_assert(af::shutdown_policy::wait_for_tasks == af::shutdown_policy::wait_for_tasks);
+static_assert(af::shutdown_policy::stop_immediately == af::shutdown_policy::stop_immediately);
+static_assert(!has_wait_for_tasks_value<af::shutdown_policy>::value);
+static_assert(!has_stop_immediately_value<af::shutdown_policy>::value);
+static_assert(af::task_state::created == af::task_state::created);
+static_assert(af::task_state::queued == af::task_state::queued);
+static_assert(af::task_state::timer_arming == af::task_state::timer_arming);
+static_assert(af::task_state::timer_pending == af::task_state::timer_pending);
+static_assert(af::task_state::starting == af::task_state::starting);
+static_assert(af::task_state::running == af::task_state::running);
+static_assert(af::task_state::pending == af::task_state::pending);
+static_assert(af::task_state::done == af::task_state::done);
+static_assert(!has_created_value<af::task_state>::value);
+static_assert(!has_queued_value<af::task_state>::value);
+static_assert(!has_timer_arming_value<af::task_state>::value);
+static_assert(!has_timer_pending_value<af::task_state>::value);
+static_assert(!has_starting_value<af::task_state>::value);
+static_assert(!has_running_value<af::task_state>::value);
+static_assert(!has_pending_value<af::task_state>::value);
+static_assert(!has_done_value<af::task_state>::value);
 static_assert(af::parallel_mode::non_empty_only == af::ParallelMode::NonEmptyOnly);
 static_assert(af::parallel_mode::all_shards == af::ParallelMode::AllShards);
 static_assert(af::ordered_batch_replay_policy::strict == af::OrderedBatchReplayPolicy::Strict);
