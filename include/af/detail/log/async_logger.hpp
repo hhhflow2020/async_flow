@@ -176,7 +176,7 @@ private:
     std::size_t next_drain_shard_{0};
     std::size_t next_runtime_drain_thread_{0};
     bool prefer_runtime_drain_{true};
-    detail::AsyncLogDrainWaiter drain_waiter_;
+    detail::async_log_drain_waiter drain_waiter_;
 };
 
 using AsyncLogger = async_logger;

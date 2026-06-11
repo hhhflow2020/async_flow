@@ -7,11 +7,11 @@
 
 namespace af::detail {
 
-class AsyncLogDrainWaiter {
+class async_log_drain_waiter {
 public:
-    AsyncLogDrainWaiter() = default;
-    AsyncLogDrainWaiter(const AsyncLogDrainWaiter &) = delete;
-    AsyncLogDrainWaiter &operator=(const AsyncLogDrainWaiter &) = delete;
+    async_log_drain_waiter() = default;
+    async_log_drain_waiter(const async_log_drain_waiter &) = delete;
+    async_log_drain_waiter &operator=(const async_log_drain_waiter &) = delete;
 
     template <typename WakeFn>
     [[nodiscard]] bool wait_until_drained(std::atomic<std::size_t> &pending,
@@ -41,5 +41,7 @@ public:
 
     void notify_drained() noexcept {}
 };
+
+using AsyncLogDrainWaiter = async_log_drain_waiter;
 
 } // namespace af::detail
