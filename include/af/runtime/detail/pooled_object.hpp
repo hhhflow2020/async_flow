@@ -8,20 +8,21 @@
 
 namespace af::detail {
 
-template <std::size_t LocalCacheCapacity>
+template <std::size_t local_cache_capacity_v>
 inline constexpr std::size_t runtime_pooled_object_remote_release_batch_size =
-    LocalCacheCapacity < 64U ? LocalCacheCapacity : 64U;
+    local_cache_capacity_v < 64U ? local_cache_capacity_v : 64U;
 
-template <typename ObjectT, std::size_t LocalCacheCapacity>
+template <typename object_t, std::size_t local_cache_capacity_v>
 using runtime_pooled_object_pool_type =
-    object_pool<ObjectT, 4096, runtime_pooled_object_remote_release_batch_size<LocalCacheCapacity>,
-                false, 1, 4, LocalCacheCapacity>;
+    object_pool<object_t, 4096,
+                runtime_pooled_object_remote_release_batch_size<local_cache_capacity_v>, false, 1,
+                4, local_cache_capacity_v>;
 
-template <typename ObjectT, std::size_t LocalCacheCapacity>
+template <typename object_t, std::size_t local_cache_capacity_v>
 struct runtime_pooled_object_pool_holder_type {
-    static constexpr std::size_t local_cache_capacity = LocalCacheCapacity;
+    static constexpr std::size_t local_cache_capacity = local_cache_capacity_v;
 
-    runtime_pooled_object_pool_type<ObjectT, LocalCacheCapacity> pool;
+    runtime_pooled_object_pool_type<object_t, local_cache_capacity_v> pool;
     cache_line_atomic<std::size_t> reserved_slots{0};
 
     void reserve_at_least(std::size_t slot_count) {
@@ -45,60 +46,60 @@ struct runtime_pooled_object_pool_holder_type {
     }
 };
 
-template <typename ObjectT, std::size_t LocalCacheCapacity>
-[[nodiscard]] runtime_pooled_object_pool_holder_type<ObjectT, LocalCacheCapacity> &
+template <typename object_t, std::size_t local_cache_capacity_v>
+[[nodiscard]] runtime_pooled_object_pool_holder_type<object_t, local_cache_capacity_v> &
 runtime_pooled_object_pool_holder() {
-    static runtime_pooled_object_pool_holder_type<ObjectT, LocalCacheCapacity> holder;
+    static runtime_pooled_object_pool_holder_type<object_t, local_cache_capacity_v> holder;
     return holder;
 }
 
-template <typename ObjectT, std::size_t LocalCacheCapacity>
-[[nodiscard]] runtime_pooled_object_pool_type<ObjectT, LocalCacheCapacity> &
+template <typename object_t, std::size_t local_cache_capacity_v>
+[[nodiscard]] runtime_pooled_object_pool_type<object_t, local_cache_capacity_v> &
 runtime_pooled_object_pool() {
-    return runtime_pooled_object_pool_holder<ObjectT, LocalCacheCapacity>().pool;
+    return runtime_pooled_object_pool_holder<object_t, local_cache_capacity_v>().pool;
 }
 
-template <typename ObjectT, std::size_t LocalCacheCapacity>
-void destroy_runtime_pooled_object(ObjectT *object) noexcept {
-    runtime_pooled_object_pool<ObjectT, LocalCacheCapacity>().destroy(object);
+template <typename object_t, std::size_t local_cache_capacity_v>
+void destroy_runtime_pooled_object(object_t *object) noexcept {
+    runtime_pooled_object_pool<object_t, local_cache_capacity_v>().destroy(object);
 }
 
-template <typename ObjectT, typename Fn>
+template <typename object_t, typename Fn>
 decltype(auto) visit_runtime_pooled_object_pool_holder(std::size_t local_cache_size, Fn &&fn) {
     if (local_cache_size > 128U && local_cache_size <= 256U) [[likely]] {
-        return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<ObjectT, 256U>());
+        return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<object_t, 256U>());
     }
     if (local_cache_size <= 2U) {
-        return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<ObjectT, 2U>());
+        return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<object_t, 2U>());
     }
     if (local_cache_size <= 4U) {
-        return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<ObjectT, 4U>());
+        return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<object_t, 4U>());
     }
     if (local_cache_size <= 8U) {
-        return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<ObjectT, 8U>());
+        return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<object_t, 8U>());
     }
     if (local_cache_size <= 16U) {
-        return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<ObjectT, 16U>());
+        return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<object_t, 16U>());
     }
     if (local_cache_size <= 32U) {
-        return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<ObjectT, 32U>());
+        return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<object_t, 32U>());
     }
     if (local_cache_size <= 64U) {
-        return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<ObjectT, 64U>());
+        return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<object_t, 64U>());
     }
     if (local_cache_size <= 128U) {
-        return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<ObjectT, 128U>());
+        return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<object_t, 128U>());
     }
     if (local_cache_size <= 512U) {
-        return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<ObjectT, 512U>());
+        return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<object_t, 512U>());
     }
     if (local_cache_size <= 1024U) {
-        return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<ObjectT, 1024U>());
+        return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<object_t, 1024U>());
     }
     if (local_cache_size <= 2048U) {
-        return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<ObjectT, 2048U>());
+        return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<object_t, 2048U>());
     }
-    return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<ObjectT, 4096U>());
+    return std::forward<Fn>(fn)(runtime_pooled_object_pool_holder<object_t, 4096U>());
 }
 
 } // namespace af::detail

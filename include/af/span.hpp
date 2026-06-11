@@ -18,15 +18,17 @@ public:
 
     constexpr span(pointer data, std::size_t size) noexcept : data_(data), size_(size) {}
 
-    template <typename U, std::size_t SizeV,
-              typename = typename std::enable_if<std::is_convertible<U *, pointer>::value>::type>
-    constexpr span(std::array<U, SizeV> &values) noexcept : data_(values.data()), size_(SizeV) {}
-
     template <
-        typename U, std::size_t SizeV,
-        typename = typename std::enable_if<std::is_convertible<const U *, pointer>::value>::type>
-    constexpr span(const std::array<U, SizeV> &values) noexcept
-        : data_(values.data()), size_(SizeV) {}
+        typename value_t, std::size_t size_v,
+        typename = typename std::enable_if<std::is_convertible<value_t *, pointer>::value>::type>
+    constexpr span(std::array<value_t, size_v> &values) noexcept
+        : data_(values.data()), size_(size_v) {}
+
+    template <typename value_t, std::size_t size_v,
+              typename = typename std::enable_if<
+                  std::is_convertible<const value_t *, pointer>::value>::type>
+    constexpr span(const std::array<value_t, size_v> &values) noexcept
+        : data_(values.data()), size_(size_v) {}
 
     [[nodiscard]] constexpr pointer data() const noexcept {
         return data_;

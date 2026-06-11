@@ -155,12 +155,12 @@ inline std::uint64_t runtime::ordered_last_applied_batch_id(thread_ref thread) c
     return ordered_batch_state_[thread.index].last_applied_batch_id;
 }
 
-template <typename StreamTag, typename ApplyTaskT, typename Batch>
-bool runtime::start_ordered_task(thread_ref sequencer_thread, Batch &&batch) {
-    using batch_type = std::decay_t<Batch>;
+template <typename stream_tag_t, typename apply_task_t, typename batch_t>
+bool runtime::start_ordered_task(thread_ref sequencer_thread, batch_t &&batch) {
+    using batch_type = std::decay_t<batch_t>;
     try {
-        auto task = make_task<ordered_start_task<StreamTag, ApplyTaskT, batch_type>>(
-            *this, std::forward<Batch>(batch));
+        auto task = make_task<ordered_start_task<stream_tag_t, apply_task_t, batch_type>>(
+            *this, std::forward<batch_t>(batch));
         return task->do_it(sequencer_thread);
     } catch (...) {
         return false;
@@ -270,11 +270,11 @@ inline void runtime::commit_order_guard(std::uint64_t batch_id) noexcept {
     }
 }
 
-template <typename StreamTag, typename ApplyTaskT, typename BatchT>
+template <typename stream_tag_t, typename apply_task_t, typename batch_t>
 struct runtime::ordered_start_state {
     runtime *owner{nullptr};
     std::uint64_t next_batch_id{1};
-    absl::flat_hash_map<std::uint64_t, BatchT> pending;
+    absl::flat_hash_map<std::uint64_t, batch_t> pending;
 
     void reset(runtime &runtime_owner) {
         owner = &runtime_owner;
@@ -282,7 +282,7 @@ struct runtime::ordered_start_state {
         pending.clear();
     }
 
-    [[nodiscard]] bool submit(runtime &runtime_owner, BatchT batch) {
+    [[nodiscard]] bool submit(runtime &runtime_owner, batch_t batch) {
         if (owner != &runtime_owner) {
             reset(runtime_owner);
         }
@@ -303,9 +303,9 @@ struct runtime::ordered_start_state {
         return drain_ready(runtime_owner);
     }
 
-    [[nodiscard]] bool start_ready(runtime &runtime_owner, BatchT batch) {
+    [[nodiscard]] bool start_ready(runtime &runtime_owner, batch_t batch) {
         try {
-            auto task = make_task<ApplyTaskT>(runtime_owner);
+            auto task = make_task<apply_task_t>(runtime_owner);
             if (!task->do_it(std::move(batch))) {
                 return false;
             }
@@ -323,7 +323,7 @@ struct runtime::ordered_start_state {
                 return true;
             }
 
-            BatchT batch = std::move(it->second);
+            batch_t batch = std::move(it->second);
             pending.erase(it);
             if (!start_ready(runtime_owner, std::move(batch))) {
                 return false;
@@ -332,20 +332,20 @@ struct runtime::ordered_start_state {
     }
 };
 
-template <typename StreamTag, typename ApplyTaskT, typename BatchT>
+template <typename stream_tag_t, typename apply_task_t, typename batch_t>
 auto runtime::ordered_start_state_for_thread()
-    -> ordered_start_state<StreamTag, ApplyTaskT, BatchT> & {
-    thread_local ordered_start_state<StreamTag, ApplyTaskT, BatchT> state;
+    -> ordered_start_state<stream_tag_t, apply_task_t, batch_t> & {
+    thread_local ordered_start_state<stream_tag_t, apply_task_t, batch_t> state;
     if (state.owner != this) {
         state.reset(*this);
     }
     return state;
 }
 
-template <typename StreamTag, typename ApplyTaskT, typename BatchT>
+template <typename stream_tag_t, typename apply_task_t, typename batch_t>
 class runtime::ordered_start_task final : public runtime_task {
 public:
-    ordered_start_task(factory_token token, runtime &owner, BatchT batch)
+    ordered_start_task(factory_token token, runtime &owner, batch_t batch)
         : runtime_task(token, owner), batch_(std::move(batch)) {}
 
     [[nodiscard]] bool do_it(thread_ref sequencer_thread) noexcept {
@@ -355,12 +355,13 @@ public:
 private:
     task_result run_task() noexcept override {
         const bool ok =
-            owner().template ordered_start_state_for_thread<StreamTag, ApplyTaskT, BatchT>().submit(
-                owner(), std::move(batch_));
+            owner()
+                .template ordered_start_state_for_thread<stream_tag_t, apply_task_t, batch_t>()
+                .submit(owner(), std::move(batch_));
         return ok ? done() : failed();
     }
 
-    BatchT batch_{};
+    batch_t batch_{};
 };
 
 template <typename Op, typename Handler, bool Ordered>

@@ -12,9 +12,9 @@
 
 namespace af {
 
-template <typename LayoutT> class thread_id {
+template <typename layout_t> class thread_id {
 public:
-    using layout = LayoutT;
+    using layout = layout_t;
 
     constexpr thread_id() noexcept = default;
 
@@ -44,16 +44,16 @@ private:
     std::uint16_t index_{std::numeric_limits<std::uint16_t>::max()};
 };
 
-template <typename ThreadT, std::uint16_t BeginIndexV, std::uint16_t CountV>
+template <typename thread_t, std::uint16_t begin_index_v, std::uint16_t count_v>
 class static_thread_group {
-    static_assert(CountV > 0, "thread groups must contain at least one thread");
+    static_assert(count_v > 0, "thread groups must contain at least one thread");
 
 public:
-    using thread = ThreadT;
+    using thread = thread_t;
 
-    static constexpr std::uint16_t begin_index = BeginIndexV;
-    static constexpr std::uint16_t count = CountV;
-    static constexpr std::uint16_t end_index = BeginIndexV + CountV;
+    static constexpr std::uint16_t begin_index = begin_index_v;
+    static constexpr std::uint16_t count = count_v;
+    static constexpr std::uint16_t end_index = begin_index_v + count_v;
 
     [[nodiscard]] static constexpr thread begin() noexcept {
         return thread::from_index(begin_index);
@@ -97,14 +97,14 @@ public:
     }
 };
 
-template <typename TagT, std::uint16_t CountV, af::thread_kind KindV = af::thread_kind::cpu>
+template <typename tag_t, std::uint16_t count_v, af::thread_kind kind_v = af::thread_kind::cpu>
 struct thread_group_spec {
-    static_assert(CountV > 0, "thread groups must contain at least one thread");
+    static_assert(count_v > 0, "thread groups must contain at least one thread");
 
-    using tag = TagT;
+    using tag = tag_t;
 
-    static constexpr std::uint16_t count = CountV;
-    static constexpr af::thread_kind kind = KindV;
+    static constexpr std::uint16_t count = count_v;
+    static constexpr af::thread_kind kind = kind_v;
 
     constexpr explicit thread_group_spec(const char *name_value = "worker") noexcept
         : name((name_value == nullptr || name_value[0] == '\0') ? "worker" : name_value) {}
@@ -120,10 +120,10 @@ namespace detail {
 
 template <typename> inline constexpr bool thread_layout_always_false_v = false;
 
-template <typename TagT, std::uint16_t CountV> struct thread_group_shape {
-    using tag = TagT;
+template <typename tag_t, std::uint16_t count_v> struct thread_group_shape {
+    using tag = tag_t;
 
-    static constexpr std::uint16_t count = CountV;
+    static constexpr std::uint16_t count = count_v;
 };
 
 template <typename... Groups> struct thread_layout_shape {};
@@ -246,9 +246,9 @@ private:
     std::array<detail::thread_layout_entry, thread_count> entry_table_{};
 };
 
-template <typename TagT, std::uint16_t CountV, af::thread_kind KindV = af::thread_kind::cpu>
+template <typename tag_t, std::uint16_t count_v, af::thread_kind kind_v = af::thread_kind::cpu>
 [[nodiscard]] constexpr auto thread_group(const char *name = "worker") noexcept {
-    return thread_group_spec<TagT, CountV, KindV>{name};
+    return thread_group_spec<tag_t, count_v, kind_v>{name};
 }
 
 template <typename... Specs> [[nodiscard]] constexpr auto thread_layout(Specs... specs) noexcept {

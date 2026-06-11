@@ -150,6 +150,7 @@ TEST(PublicHeaderTests, TaskPublicHeadersDoNotExposeCamelCaseTypeAliases) {
         forbidden_source_snippet{"include/af/detail/task/task_types.hpp", "using TaskResult ="},
         forbidden_source_snippet{"include/af/detail/task/task_types.hpp", "using ShutdownPolicy ="},
         forbidden_source_snippet{"include/af/detail/task/task_types.hpp", "using TaskState ="},
+        forbidden_source_snippet{"include/af/runtime/task.hpp", "TaskT"},
     };
 
     for (const forbidden_source_snippet item : forbidden) {
@@ -166,6 +167,12 @@ TEST(PublicHeaderTests, RuntimeParallelPublicHeaderDoesNotExposeCamelCaseTypeAli
                                  "using RuntimeInstanceParallelGroup ="},
         forbidden_source_snippet{"include/af/runtime/parallel.hpp",
                                  "using RuntimeInstanceParallelGroupPool ="},
+        forbidden_source_snippet{"include/af/runtime/parallel.hpp", "StreamTag"},
+        forbidden_source_snippet{"include/af/runtime/parallel.hpp", "ApplyTaskT"},
+        forbidden_source_snippet{"include/af/runtime/parallel.hpp", "BatchT"},
+        forbidden_source_snippet{"include/af/runtime/runtime.hpp", "StreamTag"},
+        forbidden_source_snippet{"include/af/runtime/runtime.hpp", "ApplyTaskT"},
+        forbidden_source_snippet{"include/af/runtime/runtime.hpp", "BatchT"},
     };
 
     for (const forbidden_source_snippet item : forbidden) {
@@ -193,6 +200,22 @@ TEST(PublicHeaderTests, ObjectPoolDetailHeadersDoNotExposeCamelCaseTypeAliases) 
                                  "using ObjectPoolMultiLocalCacheSet ="},
         forbidden_source_snippet{"include/af/detail/memory/object_pool_local_cache.hpp",
                                  "using ObjectPoolLocalCacheSet ="},
+        forbidden_source_snippet{"include/af/detail/memory/object_pool.hpp",
+                                 "std::size_t ChunkSize"},
+        forbidden_source_snippet{"include/af/detail/memory/object_pool.hpp",
+                                 "std::size_t RemoteReleaseBatchSize"},
+        forbidden_source_snippet{"include/af/detail/memory/object_pool.hpp",
+                                 "CacheAllocatedSlotIndex"},
+        forbidden_source_snippet{"include/af/detail/memory/object_pool_core.hpp",
+                                 "std::size_t ChunkSize"},
+        forbidden_source_snippet{"include/af/detail/memory/object_pool_core.hpp",
+                                 "std::size_t RemoteReleaseBatchSize"},
+        forbidden_source_snippet{"include/af/detail/memory/object_pool_core.hpp",
+                                 "CacheAllocatedSlotIndex"},
+        forbidden_source_snippet{"include/af/detail/memory/object_pool_block.hpp",
+                                 "std::size_t ChunkSize"},
+        forbidden_source_snippet{"include/af/detail/memory/object_pool_block.hpp",
+                                 "CacheAllocatedSlotIndex"},
     };
 
     for (const forbidden_source_snippet item : forbidden) {
@@ -239,6 +262,11 @@ TEST(PublicHeaderTests, InfrastructureDetailHeadersDoNotExposeCamelCaseTypeAlias
                                  "using RuntimeTimerHeap ="},
         forbidden_source_snippet{"include/af/runtime/detail/timer_backend.hpp",
                                  "using RuntimeHierarchicalTimerWheel ="},
+        forbidden_source_snippet{"include/af/runtime/detail/pooled_object.hpp",
+                                 "LocalCacheCapacity"},
+        forbidden_source_snippet{"include/af/runtime/detail/pooled_object.hpp", "ObjectT"},
+        forbidden_source_snippet{"include/af/runtime/detail/task_pool.hpp", "LocalCacheCapacity"},
+        forbidden_source_snippet{"include/af/runtime/detail/task_pool.hpp", "TaskT"},
     };
 
     for (const forbidden_source_snippet item : forbidden) {
@@ -299,6 +327,7 @@ TEST(PublicHeaderTests, UtilityPublicHeadersDoNotExposeCamelCaseTypeAliases) {
         forbidden_source_snippet{"include/af/buffer/buffer.hpp", "using Buffer ="},
         forbidden_source_snippet{"include/af/buffer/buffer.hpp", "using BufferChain ="},
         forbidden_source_snippet{"include/af/span.hpp", "using Span ="},
+        forbidden_source_snippet{"include/af/span.hpp", "SizeV"},
         forbidden_source_snippet{"include/af/signal.hpp", "using SignalWaitResult ="},
         forbidden_source_snippet{"include/af/signal.hpp", "using SignalSet ="},
         forbidden_source_snippet{"include/af/parallel.hpp", "using ParallelMode ="},
@@ -341,6 +370,12 @@ TEST(PublicHeaderTests, ThreadLayoutPublicHeaderDoesNotExposeCamelCaseTypeAliase
         forbidden_source_snippet{"include/af/thread_layout.hpp", "using ThreadLayoutEntry ="},
         forbidden_source_snippet{"include/af/thread_layout.hpp", "using ThreadShape ="},
         forbidden_source_snippet{"include/af/thread_layout.hpp", "using ThreadLayout ="},
+        forbidden_source_snippet{"include/af/thread_layout.hpp", "LayoutT"},
+        forbidden_source_snippet{"include/af/thread_layout.hpp", "ThreadT"},
+        forbidden_source_snippet{"include/af/thread_layout.hpp", "BeginIndexV"},
+        forbidden_source_snippet{"include/af/thread_layout.hpp", "CountV"},
+        forbidden_source_snippet{"include/af/thread_layout.hpp", "TagT"},
+        forbidden_source_snippet{"include/af/thread_layout.hpp", "KindV"},
     };
 
     for (const forbidden_source_snippet item : forbidden) {

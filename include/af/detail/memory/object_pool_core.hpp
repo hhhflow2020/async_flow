@@ -14,12 +14,12 @@
 
 namespace af::detail {
 
-template <typename T, std::size_t ChunkSize = 512, std::size_t RemoteReleaseBatchSize = 1,
-          bool CacheAllocatedSlotIndex = false, std::size_t LocalCacheSetSize = 8,
-          std::size_t DirectReleaseSetSize = 4, std::size_t LocalCacheCapacity = 64>
+template <typename T, std::size_t chunk_size_v = 512, std::size_t remote_release_batch_size_v = 1,
+          bool cache_allocated_slot_index_v = false, std::size_t local_cache_set_size_v = 8,
+          std::size_t direct_release_set_size_v = 4, std::size_t local_cache_capacity_v = 64>
 class object_pool_core {
-    static_assert(ChunkSize > 0, "ObjectPool chunk size must be greater than zero");
-    static_assert(RemoteReleaseBatchSize > 0,
+    static_assert(chunk_size_v > 0, "ObjectPool chunk size must be greater than zero");
+    static_assert(remote_release_batch_size_v > 0,
                   "ObjectPool remote release batch size must be greater than zero");
 
 public:
@@ -140,7 +140,7 @@ public:
     }
 
     void reserve_slots(std::size_t slot_count) {
-        reserve_blocks(slot_count == 0U ? 0U : ((slot_count - 1U) / ChunkSize) + 1U);
+        reserve_blocks(slot_count == 0U ? 0U : ((slot_count - 1U) / chunk_size_v) + 1U);
     }
 
     void reserve_blocks(std::size_t block_count) {
@@ -154,12 +154,12 @@ private:
         return ::new (memory) T(std::forward<Args>(args)...);
     }
 
-    static constexpr std::size_t local_cache_capacity = LocalCacheCapacity;
+    static constexpr std::size_t local_cache_capacity = local_cache_capacity_v;
     static constexpr std::size_t local_cache_flush_count = local_cache_capacity / 2;
-    static constexpr std::size_t remote_release_batch_size = RemoteReleaseBatchSize;
-    static constexpr bool cache_allocated_slot_index = CacheAllocatedSlotIndex;
-    static constexpr std::size_t local_cache_set_size = LocalCacheSetSize;
-    static constexpr std::size_t direct_release_set_size = DirectReleaseSetSize;
+    static constexpr std::size_t remote_release_batch_size = remote_release_batch_size_v;
+    static constexpr bool cache_allocated_slot_index = cache_allocated_slot_index_v;
+    static constexpr std::size_t local_cache_set_size = local_cache_set_size_v;
+    static constexpr std::size_t direct_release_set_size = direct_release_set_size_v;
     static_assert(local_cache_set_size >= 1);
     static_assert(direct_release_set_size >= 1);
     static_assert(local_cache_capacity > 0);
@@ -170,16 +170,17 @@ private:
                   "ObjectPool tagged free stack requires lock-free 64-bit atomics");
     static_assert(std::atomic<void *>::is_always_lock_free,
                   "ObjectPool block list requires lock-free pointer atomics");
-    using block_layout =
-        object_pool_block_layout<T, ChunkSize, CacheAllocatedSlotIndex, LocalCacheCapacity>;
+    using block_layout = object_pool_block_layout<T, chunk_size_v, cache_allocated_slot_index_v,
+                                                  local_cache_capacity_v>;
     using slot_type = typename block_layout::slot;
     using block_type = typename block_layout::block;
-    using local_cache_type = object_pool_local_cache<object_pool_core, slot_type,
-                                                     LocalCacheCapacity, RemoteReleaseBatchSize>;
+    using local_cache_type =
+        object_pool_local_cache<object_pool_core, slot_type, local_cache_capacity_v,
+                                remote_release_batch_size_v>;
     using local_cache_set_type =
-        object_pool_local_cache_set<object_pool_core, slot_type, LocalCacheCapacity,
-                                    RemoteReleaseBatchSize, LocalCacheSetSize,
-                                    DirectReleaseSetSize>;
+        object_pool_local_cache_set<object_pool_core, slot_type, local_cache_capacity_v,
+                                    remote_release_batch_size_v, local_cache_set_size_v,
+                                    direct_release_set_size_v>;
 
     [[nodiscard]] void *acquire_slot() {
         local_cache_type &cache = local_cache();

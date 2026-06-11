@@ -10,23 +10,23 @@
 
 namespace af::detail {
 
-template <typename T, std::size_t ChunkSize, bool CacheAllocatedSlotIndex,
-          std::size_t LocalCacheCapacity>
+template <typename T, std::size_t chunk_size_v, bool cache_allocated_slot_index_v,
+          std::size_t local_cache_capacity_v>
 struct object_pool_block_layout {
     using slot_index_type = std::uint16_t;
 
-    static_assert(LocalCacheCapacity > 0);
+    static_assert(local_cache_capacity_v > 0);
     static_assert(std::atomic<std::uint64_t>::is_always_lock_free,
                   "ObjectPool tagged free stack requires lock-free 64-bit atomics");
     static_assert(std::atomic<slot_index_type>::is_always_lock_free,
                   "ObjectPool free-list slot links require lock-free index atomics");
 
     static constexpr slot_index_type null_slot_index = std::numeric_limits<slot_index_type>::max();
-    static_assert(ChunkSize < static_cast<std::size_t>(null_slot_index),
+    static_assert(chunk_size_v < static_cast<std::size_t>(null_slot_index),
                   "ObjectPool chunk size must leave 48 bits for the free-list ABA tag");
 
-    static constexpr bool cache_allocated_slot_index = CacheAllocatedSlotIndex;
-    static constexpr std::size_t local_cache_capacity = LocalCacheCapacity;
+    static constexpr bool cache_allocated_slot_index = cache_allocated_slot_index_v;
+    static constexpr std::size_t local_cache_capacity = local_cache_capacity_v;
     static constexpr std::size_t slot_index_bits = sizeof(slot_index_type) * 8U;
     static constexpr std::uint64_t slot_index_mask = (std::uint64_t{1} << slot_index_bits) - 1U;
 
@@ -70,11 +70,11 @@ struct object_pool_block_layout {
 
     struct block {
         explicit block() {
-            for (std::size_t i = 0; i < ChunkSize; ++i) {
+            for (std::size_t i = 0; i < chunk_size_v; ++i) {
                 auto &entry = slots[i];
                 entry.owner = this;
                 const auto next =
-                    i + 1U < ChunkSize ? static_cast<slot_index_type>(i + 1U) : null_slot_index;
+                    i + 1U < chunk_size_v ? static_cast<slot_index_type>(i + 1U) : null_slot_index;
                 entry.next_free.store(next, std::memory_order_relaxed);
             }
             free_head.store(pack_free_head(0U, 0U), std::memory_order_relaxed);
@@ -153,7 +153,7 @@ struct object_pool_block_layout {
         block *next{nullptr};
         alignas(hardware_cache_line_size) std::atomic<std::uint64_t> free_head{
             pack_free_head(null_slot_index, 0U)};
-        slot slots[ChunkSize];
+        slot slots[chunk_size_v];
 
     private:
         [[nodiscard]] static constexpr std::uint64_t
@@ -173,7 +173,7 @@ struct object_pool_block_layout {
 
         [[nodiscard]] slot_index_type slot_index(const slot *entry) const noexcept {
             const auto index = static_cast<std::size_t>(entry - slots);
-            AF_ASSERT(index < ChunkSize);
+            AF_ASSERT(index < chunk_size_v);
             return static_cast<slot_index_type>(index);
         }
 

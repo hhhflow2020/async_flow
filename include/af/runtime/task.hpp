@@ -28,11 +28,11 @@ struct runtime_task_access;
 using runtime_task_id = std::uint64_t;
 inline constexpr runtime_task_id runtime_invalid_task_id = 0;
 
-template <typename TaskT, typename... Args>
-[[nodiscard]] TaskT *make_task(runtime &owner, Args &&...args);
+template <typename task_t, typename... Args>
+[[nodiscard]] task_t *make_task(runtime &owner, Args &&...args);
 
-template <typename TaskT, typename... Args>
-[[nodiscard]] TaskT *try_make_task(runtime &owner, Args &&...args) noexcept;
+template <typename task_t, typename... Args>
+[[nodiscard]] task_t *try_make_task(runtime &owner, Args &&...args) noexcept;
 
 class runtime_task : public runtime_work {
 public:
@@ -48,11 +48,11 @@ public:
     private:
         constexpr factory_token() noexcept = default;
 
-        template <typename TaskT, typename... Args>
-        friend TaskT *make_task(runtime &owner, Args &&...args);
+        template <typename task_t, typename... Args>
+        friend task_t *make_task(runtime &owner, Args &&...args);
 
-        template <typename TaskT, typename... Args>
-        friend TaskT *try_make_task(runtime &owner, Args &&...args) noexcept;
+        template <typename task_t, typename... Args>
+        friend task_t *try_make_task(runtime &owner, Args &&...args) noexcept;
     };
 
     runtime_task() = delete;
@@ -283,11 +283,11 @@ private:
     destroy_fn destroy_{nullptr};
     std::uint32_t last_parallel_failures_{0};
 
-    template <typename TaskT, typename... Args>
-    friend TaskT *make_task(runtime &owner, Args &&...args);
+    template <typename task_t, typename... Args>
+    friend task_t *make_task(runtime &owner, Args &&...args);
 
-    template <typename TaskT, typename... Args>
-    friend TaskT *try_make_task(runtime &owner, Args &&...args) noexcept;
+    template <typename task_t, typename... Args>
+    friend task_t *try_make_task(runtime &owner, Args &&...args) noexcept;
 
     friend class runtime;
     friend struct detail::runtime_task_access;
@@ -345,34 +345,34 @@ struct runtime_task_access {
 
 namespace af {
 
-template <typename TaskT, typename... Args> TaskT *make_task(runtime &owner, Args &&...args) {
-    static_assert(std::is_base_of_v<runtime_task, TaskT>,
-                  "TaskT must derive from af::runtime_task");
+template <typename task_t, typename... Args> task_t *make_task(runtime &owner, Args &&...args) {
+    static_assert(std::is_base_of_v<runtime_task, task_t>,
+                  "task_t must derive from af::runtime_task");
     const task_pool_config &pool_config = detail::runtime_task_pool_config(owner);
-    return detail::visit_runtime_task_pool_holder<TaskT>(
-        pool_config.local_cache_size, [&](auto &holder) -> TaskT * {
+    return detail::visit_runtime_task_pool_holder<task_t>(
+        pool_config.local_cache_size, [&](auto &holder) -> task_t * {
             try {
                 holder.reserve_at_least(pool_config.slab_object_count);
             } catch (const std::bad_alloc &) {
                 detail::handle_runtime_task_bad_alloc(owner);
             }
 
-            TaskT *task = holder.pool.create_with_oom_handler(
+            task_t *task = holder.pool.create_with_oom_handler(
                 [&owner] { detail::handle_runtime_task_bad_alloc(owner); },
                 runtime_task::factory_token{}, owner, std::forward<Args>(args)...);
             task->set_destroy_fn(&detail::destroy_runtime_task<
-                                 TaskT, std::decay_t<decltype(holder)>::local_cache_capacity>);
+                                 task_t, std::decay_t<decltype(holder)>::local_cache_capacity>);
             return task;
         });
 }
 
-template <typename TaskT, typename... Args>
-TaskT *try_make_task(runtime &owner, Args &&...args) noexcept {
-    static_assert(std::is_base_of_v<runtime_task, TaskT>,
-                  "TaskT must derive from af::runtime_task");
+template <typename task_t, typename... Args>
+task_t *try_make_task(runtime &owner, Args &&...args) noexcept {
+    static_assert(std::is_base_of_v<runtime_task, task_t>,
+                  "task_t must derive from af::runtime_task");
     const task_pool_config &pool_config = detail::runtime_task_pool_config(owner);
-    return detail::visit_runtime_task_pool_holder<TaskT>(
-        pool_config.local_cache_size, [&](auto &holder) -> TaskT * {
+    return detail::visit_runtime_task_pool_holder<task_t>(
+        pool_config.local_cache_size, [&](auto &holder) -> task_t * {
             if (!holder.try_reserve_at_least(pool_config.slab_object_count)) {
                 return nullptr;
             }
@@ -382,7 +382,7 @@ TaskT *try_make_task(runtime &owner, Args &&...args) noexcept {
                 return nullptr;
             }
             task->set_destroy_fn(&detail::destroy_runtime_task<
-                                 TaskT, std::decay_t<decltype(holder)>::local_cache_capacity>);
+                                 task_t, std::decay_t<decltype(holder)>::local_cache_capacity>);
             return task;
         });
 }

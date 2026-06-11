@@ -317,8 +317,8 @@ public:
                                                ordered_batch_options options, runtime_task *owner,
                                                Handler &&handler);
 
-    template <typename StreamTag, typename ApplyTaskT, typename Batch>
-    [[nodiscard]] bool start_ordered_task(thread_ref sequencer_thread, Batch &&batch);
+    template <typename stream_tag_t, typename apply_task_t, typename batch_t>
+    [[nodiscard]] bool start_ordered_task(thread_ref sequencer_thread, batch_t &&batch);
 
     [[nodiscard]] std::uint64_t ordered_last_applied_batch_id(thread_ref thread) const noexcept;
 
@@ -387,13 +387,15 @@ private:
 
     void commit_order_guard(std::uint64_t batch_id) noexcept;
 
-    template <typename StreamTag, typename ApplyTaskT, typename BatchT> struct ordered_start_state;
+    template <typename stream_tag_t, typename apply_task_t, typename batch_t>
+    struct ordered_start_state;
 
-    template <typename StreamTag, typename ApplyTaskT, typename BatchT>
-    [[nodiscard]] ordered_start_state<StreamTag, ApplyTaskT, BatchT> &
+    template <typename stream_tag_t, typename apply_task_t, typename batch_t>
+    [[nodiscard]] ordered_start_state<stream_tag_t, apply_task_t, batch_t> &
     ordered_start_state_for_thread();
 
-    template <typename StreamTag, typename ApplyTaskT, typename BatchT> class ordered_start_task;
+    template <typename stream_tag_t, typename apply_task_t, typename batch_t>
+    class ordered_start_task;
 
     template <typename Op, typename Handler, bool Ordered>
     [[nodiscard]] bool run_parallel_shard(std::uint16_t shard_index, std::uint64_t batch_id,
