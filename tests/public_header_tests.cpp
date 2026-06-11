@@ -154,6 +154,34 @@
 #error "log detail headers must be installed under af/log/detail"
 #endif
 
+#if !__has_include("af/log/config.hpp")
+#error "log public headers must be installed under af/log"
+#endif
+
+#if !__has_include("af/log/logger.hpp")
+#error "log public headers must be installed under af/log"
+#endif
+
+#if !__has_include("af/log/log_backend.hpp")
+#error "log public headers must be installed under af/log"
+#endif
+
+#if !__has_include("af/log/log_record.hpp")
+#error "log public headers must be installed under af/log"
+#endif
+
+#if !__has_include("af/log/file_backend.hpp")
+#error "log public headers must be installed under af/log"
+#endif
+
+#if !__has_include("af/log/udp_backend.hpp")
+#error "log public headers must be installed under af/log"
+#endif
+
+#if !__has_include("af/log/tcp_backend.hpp")
+#error "log public headers must be installed under af/log"
+#endif
+
 #if __has_include("af/runtime/reactor.hpp")
 #error "reactor headers must live under af/reactor, not af/runtime"
 #endif
@@ -672,6 +700,13 @@ TEST(PublicHeaderTests, PlatformHeadersDoNotExposeLegacyAsyncIoFacadeNames) {
 
 TEST(PublicHeaderTests, LogPublicHeadersDoNotExposeCamelCaseTypeAliases) {
     constexpr std::array forbidden{
+        forbidden_source_snippet{"include/af/log/config.hpp", "using LogOverflowPolicy ="},
+        forbidden_source_snippet{"include/af/log/logger.hpp", "using AsyncLogger ="},
+        forbidden_source_snippet{"include/af/log/log_backend.hpp", "using LogBackend ="},
+        forbidden_source_snippet{"include/af/log/log_record.hpp", "using LogRecord ="},
+        forbidden_source_snippet{"include/af/log/file_backend.hpp", "using FileLogBackend ="},
+        forbidden_source_snippet{"include/af/log/udp_backend.hpp", "using UdpLogBackend ="},
+        forbidden_source_snippet{"include/af/log/tcp_backend.hpp", "using TcpLogBackend ="},
         forbidden_source_snippet{"include/af/log/detail/async_log_config.hpp",
                                  "using LogOverflowPolicy ="},
         forbidden_source_snippet{"include/af/log/detail/async_log_config.hpp",
@@ -698,6 +733,20 @@ TEST(PublicHeaderTests, LogPublicHeadersDoNotExposeCamelCaseTypeAliases) {
                                  "using UdpLogBackend ="},
         forbidden_source_snippet{"include/af/log/detail/network_log_backend.hpp",
                                  "using TcpLogBackend ="},
+    };
+
+    for (const forbidden_source_snippet item : forbidden) {
+        const std::string content = read_source_file(item.relative_path);
+        ASSERT_FALSE(content.empty()) << item.relative_path;
+        EXPECT_EQ(content.find(item.snippet), std::string::npos)
+            << item.relative_path << " still contains " << item.snippet;
+    }
+}
+
+TEST(PublicHeaderTests, LogUmbrellaAndRuntimeConfigUsePublicLogHeaders) {
+    constexpr std::array forbidden{
+        forbidden_source_snippet{"include/af/log.hpp", "af/log/detail/"},
+        forbidden_source_snippet{"include/af/runtime/config_types.hpp", "af/log/detail/"},
     };
 
     for (const forbidden_source_snippet item : forbidden) {

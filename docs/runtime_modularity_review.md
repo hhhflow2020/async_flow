@@ -9,6 +9,7 @@
 - `memory/cache_line.hpp`、`memory/object_pool*.hpp`、`memory/contiguous_object_storage.hpp`：cache-line 对齐基础设施、对象池与连续对象存储；热原子包装不再放在 runtime common state 中。
 - `timer/timer_backend.hpp`、`timer/timer_entry.hpp`、`timer/timer_heap.hpp`、`timer/hierarchical_timer_wheel.hpp`：executor 本地 timer backend 聚合入口、timer entry、min-heap backend 与默认分层时间轮；timer 数据结构已从 runtime detail 目录移入 timer 模块并按职责拆分。
 - `runtime/task.hpp`、`runtime/task_impl.hpp`：runtime task 创建、调度、task id 和对象池生命周期。
+- `log/config.hpp`、`log/logger.hpp`、`log/log_backend.hpp`、`log/file_backend.hpp`、`log/udp_backend.hpp`、`log/tcp_backend.hpp`、`log/log_record.hpp`：日志公开配置、logger、record 和后端入口。
 - `log/detail/`：async logger、日志队列、record pool、runtime 绑定后端和 Abseil sink；日志内部实现已归属到 log 模块下。
 - `detail/runtime/`：只保留 `atomic_wait`、`cpu_relax`、`runtime_common_state`、`runtime_service_task`、`timed_atomic_wait` 等跨模块底层组件。
 
@@ -29,6 +30,8 @@
 queue 基础结构已从 `include/af/detail/queue/` 迁移到 `include/af/queue/`，包含 intrusive MPSC、bounded MPSC/MPMC、公共 ring 序号工具和 backoff。`tests/public_header_tests.cpp` 会阻止旧 `detail/queue` 头文件重新出现，并确认新路径可包含。
 
 日志内部实现已从全局 `include/af/detail/log/` 迁移到 `include/af/log/detail/`，公开入口继续保持 `af/log.hpp`；public header 测试会阻止旧日志 detail 路径重新出现。
+
+`af/log.hpp` 和 runtime 配置现在通过 `include/af/log/*.hpp` public forwarding headers 依赖日志模块，不再直接包含 `af/log/detail/*`。这先把 public/detail include 边界固定住，后续可继续把 logger 与后端实现从转发头拆成更细的公开声明和 detail 实现。
 
 对外命名继续向 lower_case 迁移：batch/crud/parallel utility、compile-time `thread_layout`、task 状态枚举、signal、buffer 以及 log 配置/句柄/后端相关主类型已迁移为 lower_case。public `af::net`、utility、log、task 状态枚举、对象池/log/基础设施 detail 与 compile-time `thread_layout` 的 CamelCase 类型 alias 已删除，并通过 public header 源码扫描测试防回归。examples 中的 runtime task、stream tag 和业务 batch 类型也已迁移为 lower_snake_case；剩余 CamelCase 主要在测试 fixture 内部，用于覆盖旧构造路径、异常路径或平台行为。
 

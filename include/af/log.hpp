@@ -5,11 +5,11 @@
 
 #include "af/runtime.hpp"
 
-#include "af/log/detail/absl_log_sink.hpp"
-#include "af/log/detail/async_logger.hpp"
-#include "af/log/detail/file_log_backend.hpp"
-#include "af/log/detail/log_backend.hpp"
-#include "af/log/detail/network_log_backend.hpp"
+#include "af/log/file_backend.hpp"
+#include "af/log/log_backend.hpp"
+#include "af/log/logger.hpp"
+#include "af/log/tcp_backend.hpp"
+#include "af/log/udp_backend.hpp"
 
 #define AF_LOG(severity)                                                                           \
     ABSL_LOG_IF(severity, ::af::should_log(::af::detail::af_log_level_##severity))
