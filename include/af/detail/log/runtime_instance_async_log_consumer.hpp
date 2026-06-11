@@ -48,7 +48,7 @@ private:
     runtime_instance_async_log_consumer_control_completion *completion_{nullptr};
 };
 
-class runtime_instance_async_log_consumer_controller final : public RuntimeServiceTask,
+class runtime_instance_async_log_consumer_controller final : public runtime_service_task,
                                                              public async_log_consumer_wake_target,
                                                              public async_log_consumer_controller {
 public:

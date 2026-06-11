@@ -70,7 +70,7 @@ struct RuntimeBoundLogBackendStats {
     std::uint64_t flushes{0};
 };
 
-class RuntimeBoundLogBackend final : public log_backend, public RuntimeServiceTask {
+class RuntimeBoundLogBackend final : public log_backend, public runtime_service_task {
 public:
     using Batch = RuntimeBoundLogBatch;
 

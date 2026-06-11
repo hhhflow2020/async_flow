@@ -37,8 +37,8 @@ public:
     void join() noexcept;
 
     [[nodiscard]] reactor *reactor_backend() noexcept;
-    [[nodiscard]] bool register_service_task(RuntimeServiceTask *service) noexcept;
-    [[nodiscard]] bool unregister_service_task(RuntimeServiceTask *service) noexcept;
+    [[nodiscard]] bool register_service_task(runtime_service_task *service) noexcept;
+    [[nodiscard]] bool unregister_service_task(runtime_service_task *service) noexcept;
 
 private:
     void run_loop() noexcept;
@@ -69,7 +69,7 @@ private:
     IntrusiveMpscQueue<runtime_work> inbox_;
     RuntimeTimerHeap timer_heap_;
     RuntimeHierarchicalTimerWheel timer_wheel_;
-    std::vector<RuntimeServiceTask *> service_tasks_;
+    std::vector<runtime_service_task *> service_tasks_;
     std::unique_ptr<reactor> reactor_;
     std::size_t task_drain_budget_{256};
     std::chrono::nanoseconds max_task_run_slice_{0};

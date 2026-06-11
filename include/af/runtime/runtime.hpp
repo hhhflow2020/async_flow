@@ -323,7 +323,7 @@ public:
     [[nodiscard]] std::uint64_t ordered_last_applied_batch_id(thread_ref thread) const noexcept;
 
     [[nodiscard]] bool register_service_task(thread_index thread,
-                                             detail::RuntimeServiceTask *service) noexcept {
+                                             detail::runtime_service_task *service) noexcept {
         if (service == nullptr || thread >= executors_.size()) {
             return false;
         }
@@ -331,7 +331,7 @@ public:
     }
 
     [[nodiscard]] bool unregister_service_task(thread_index thread,
-                                               detail::RuntimeServiceTask *service) noexcept {
+                                               detail::runtime_service_task *service) noexcept {
         if (service == nullptr || thread >= executors_.size()) {
             return false;
         }

@@ -383,7 +383,7 @@ private:
     std::atomic<std::int64_t> *elapsed_ms_{nullptr};
 };
 
-class CountingServiceTask final : public af::detail::RuntimeServiceTask {
+class CountingServiceTask final : public af::detail::runtime_service_task {
 public:
     void add_work(int count) noexcept {
         pending_.fetch_add(count, std::memory_order_release);

@@ -41,6 +41,7 @@ static_assert(af::supports_thread_affinity == af::platform_linux);
 static_assert(af::supports_thread_priority == af::platform_linux);
 static_assert(af::platform_posix != af::platform_windows);
 static_assert(std::is_same_v<af::TaskResult, af::task_result>);
+static_assert(std::is_same_v<af::detail::runtime_service_task, af::detail::RuntimeServiceTask>);
 static_assert(std::is_same_v<af::ShutdownPolicy, af::shutdown_policy>);
 static_assert(std::is_same_v<af::TaskState, af::task_state>);
 static_assert(std::is_same_v<af::parallel_mode, af::ParallelMode>);
@@ -265,7 +266,7 @@ private:
     std::atomic<int> &counter_;
 };
 
-class CountingRuntimeService final : public af::detail::RuntimeServiceTask {
+class CountingRuntimeService final : public af::detail::runtime_service_task {
 public:
     CountingRuntimeService(std::atomic<int> &counter, std::atomic<std::uint16_t> &observed_thread,
                            std::atomic<std::size_t> &observed_budget)
@@ -299,8 +300,9 @@ public:
         unregister_service,
     };
 
-    ServiceTaskControlWork(action op, std::uint16_t thread, af::detail::RuntimeServiceTask &service,
-                           std::atomic<int> &counter, std::atomic<bool> &ok)
+    ServiceTaskControlWork(action op, std::uint16_t thread,
+                           af::detail::runtime_service_task &service, std::atomic<int> &counter,
+                           std::atomic<bool> &ok)
         : op_(op), thread_(thread), service_(service), counter_(counter), ok_(ok) {}
 
     void run(af::runtime &owner) noexcept override {
@@ -314,7 +316,7 @@ public:
 private:
     action op_;
     std::uint16_t thread_;
-    af::detail::RuntimeServiceTask &service_;
+    af::detail::runtime_service_task &service_;
     std::atomic<int> &counter_;
     std::atomic<bool> &ok_;
 };
@@ -345,7 +347,7 @@ private:
     std::atomic<bool> *first_run_gate_{nullptr};
 };
 
-class TaskBudgetProbeService final : public af::detail::RuntimeServiceTask {
+class TaskBudgetProbeService final : public af::detail::runtime_service_task {
 public:
     TaskBudgetProbeService(std::atomic<int> &service_counter, std::atomic<int> &task_counter,
                            std::atomic<int> &observed_task_count)
@@ -374,7 +376,7 @@ private:
     std::atomic<bool> pending_{false};
 };
 
-class TimerBudgetProbeService final : public af::detail::RuntimeServiceTask {
+class TimerBudgetProbeService final : public af::detail::runtime_service_task {
 public:
     TimerBudgetProbeService(std::atomic<int> &service_counter, std::atomic<int> &timer_counter,
                             std::atomic<int> &observed_timer_count)

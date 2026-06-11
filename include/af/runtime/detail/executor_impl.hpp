@@ -96,7 +96,7 @@ inline reactor *runtime_executor::reactor_backend() noexcept {
     return reactor_.get();
 }
 
-inline bool runtime_executor::register_service_task(RuntimeServiceTask *service) noexcept {
+inline bool runtime_executor::register_service_task(runtime_service_task *service) noexcept {
     AF_ASSERT(runtime::current_runtime_ == &owner_ &&
               runtime::current_thread_index_ == thread_.index &&
               "service task registration must run on the owner runtime thread");
@@ -115,7 +115,7 @@ inline bool runtime_executor::register_service_task(RuntimeServiceTask *service)
     }
 }
 
-inline bool runtime_executor::unregister_service_task(RuntimeServiceTask *service) noexcept {
+inline bool runtime_executor::unregister_service_task(runtime_service_task *service) noexcept {
     AF_ASSERT(runtime::current_runtime_ == &owner_ &&
               runtime::current_thread_index_ == thread_.index &&
               "service task unregister must run on the owner runtime thread");
@@ -229,7 +229,7 @@ inline bool runtime_executor::run_service_tasks() noexcept {
         if (next_service_task_ >= service_tasks_.size()) {
             next_service_task_ = 0;
         }
-        RuntimeServiceTask *service = service_tasks_[next_service_task_];
+        runtime_service_task *service = service_tasks_[next_service_task_];
         ++next_service_task_;
         if (service == nullptr) [[unlikely]] {
             continue;
