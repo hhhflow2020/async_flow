@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "af/buffer/buffer.hpp"
-#include "af/net/tcp_endpoint.hpp"
+#include "af/net/endpoint.hpp"
 #include "af/net/tcp_types.hpp"
 #include "af/runtime.hpp"
 

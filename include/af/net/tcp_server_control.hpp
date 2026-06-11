@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-#include "af/net/tcp_endpoint.hpp"
+#include "af/net/endpoint.hpp"
 #include "af/net/detail/tcp_server_shard.hpp"
 #include "af/net/tcp_types.hpp"
 #include "af/runtime.hpp"

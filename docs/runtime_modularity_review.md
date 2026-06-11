@@ -19,6 +19,8 @@
 
 `af/async_flow.hpp` 已从默认 umbrella 中移除旧 `af/io.hpp` facade，并改为导出 `af/net.hpp`。旧 task 级 async IO facade 已物理删除：`include/af/io*.hpp` 与 `include/af/detail/io/` 不再作为公开或兼容入口存在。新网络代码统一走 runtime-native reactor/net API。
 
+共享网络 endpoint 类型已从旧 `net/tcp_endpoint.hpp` 文件名迁移到 `net/endpoint.hpp`，避免 TCP/UDP/Unix endpoint 共用一个 TCP 专属入口名；public header 测试会阻止旧头重新出现。
+
 queue 基础结构已从 `include/af/detail/queue/` 迁移到 `include/af/queue/`，包含 intrusive MPSC、bounded MPSC/MPMC、公共 ring 序号工具和 backoff。`tests/public_header_tests.cpp` 会阻止旧 `detail/queue` 头文件重新出现，并确认新路径可包含。
 
 对外命名继续向 lower_case 迁移：batch/crud/parallel utility、compile-time `thread_layout`、task 状态枚举、signal、buffer 以及 log 配置/句柄/后端相关主类型已迁移为 lower_case。public `af::net`、utility、log、task 状态枚举、对象池/log/基础设施 detail 与 compile-time `thread_layout` 的 CamelCase 类型 alias 已删除，并通过 public header 源码扫描测试防回归。examples 中的 runtime task、stream tag 和业务 batch 类型也已迁移为 lower_snake_case；剩余 CamelCase 主要在测试 fixture 内部，用于覆盖旧构造路径、异常路径或平台行为。

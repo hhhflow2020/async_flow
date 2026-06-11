@@ -154,6 +154,14 @@
 #error "reactor backend headers must live under af/reactor/detail, not af/runtime/detail"
 #endif
 
+#if __has_include("af/net/tcp_endpoint.hpp")
+#error "shared network endpoint header must live at af/net/endpoint.hpp"
+#endif
+
+#if !__has_include("af/net/endpoint.hpp")
+#error "shared network endpoint header must be installed under af/net"
+#endif
+
 #if !__has_include("af/reactor.hpp")
 #error "reactor umbrella header must be installed"
 #endif
@@ -513,11 +521,11 @@ TEST(PublicHeaderTests, NetUmbrellaExposesRuntimeNativeApi) {
 
 TEST(PublicHeaderTests, NetPublicHeadersDoNotExposeCamelCaseTypeAliases) {
     constexpr std::array forbidden{
-        forbidden_source_snippet{"include/af/net/tcp_endpoint.hpp", "using AddressFamily ="},
-        forbidden_source_snippet{"include/af/net/tcp_endpoint.hpp", "using IpEndpoint ="},
-        forbidden_source_snippet{"include/af/net/tcp_endpoint.hpp", "using TcpEndpoint ="},
-        forbidden_source_snippet{"include/af/net/tcp_endpoint.hpp", "using UdpEndpoint ="},
-        forbidden_source_snippet{"include/af/net/tcp_endpoint.hpp", "using UnixEndpoint ="},
+        forbidden_source_snippet{"include/af/net/endpoint.hpp", "using AddressFamily ="},
+        forbidden_source_snippet{"include/af/net/endpoint.hpp", "using IpEndpoint ="},
+        forbidden_source_snippet{"include/af/net/endpoint.hpp", "using TcpEndpoint ="},
+        forbidden_source_snippet{"include/af/net/endpoint.hpp", "using UdpEndpoint ="},
+        forbidden_source_snippet{"include/af/net/endpoint.hpp", "using UnixEndpoint ="},
         forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using SendResult ="},
         forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using CloseReason ="},
         forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using AcceptStrategy ="},

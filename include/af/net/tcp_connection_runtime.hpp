@@ -13,7 +13,7 @@
 #include "af/detail/config.hpp"
 #include "af/net/detail/tcp_socket_ops.hpp"
 #include "af/net/tcp_connection_handle.hpp"
-#include "af/net/tcp_endpoint.hpp"
+#include "af/net/endpoint.hpp"
 #include "af/net/tcp_types.hpp"
 #include "af/runtime.hpp"
 

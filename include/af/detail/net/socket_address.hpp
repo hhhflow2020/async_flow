@@ -5,7 +5,7 @@
 #include <cstring>
 #include <string>
 
-#include "af/net/tcp_endpoint.hpp"
+#include "af/net/endpoint.hpp"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>

@@ -11,7 +11,7 @@
 - `include/af/memory/`：cache-line 对齐基础设施、对象池和连续对象存储。
 - `include/af/platform/`：线程名、线程属性和硬件线程数等平台相关 helper。
 - `include/af/detail/net/`：网络 reactor 内部 channel、socket address 等基础结构。
-- `include/af/net/`：网络层公开 API。
+- `include/af/net/`：网络层公开 API，包含共享 endpoint、TCP/UDP/Unix 控制对象和句柄。
 - `include/af/detail/log/`：异步日志队列、record pool、runtime 后端。
 - `examples/`：可运行示例。
 - `tests/`：单元测试、压力测试和支持 fixture。
