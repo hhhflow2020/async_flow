@@ -17,7 +17,7 @@ namespace {
 
 class CountingLogBackend final : public af::log_backend {
 public:
-    void write_batch(af::span<af::detail::LogRecord *const> records) noexcept override {
+    void write_batch(af::span<af::detail::log_record *const> records) noexcept override {
         records_.fetch_add(records.size(), std::memory_order_relaxed);
     }
 
@@ -163,10 +163,10 @@ void BM_AsyncLoggerRelaxedExternalProducers(benchmark::State &state) {
 void BM_AsyncLogRecordPoolAcquireRelease(benchmark::State &state) {
     constexpr std::string_view message = "asyncflow benchmark log message";
     const auto local_cache_capacity = static_cast<std::size_t>(state.range(0));
-    af::detail::AsyncLogRecordPool pool(4096, local_cache_capacity);
+    af::detail::async_log_record_pool pool(4096, local_cache_capacity);
 
     for (auto _ : state) {
-        af::detail::LogRecord *record = pool.try_acquire(message);
+        af::detail::log_record *record = pool.try_acquire(message);
         if (record == nullptr) [[unlikely]] {
             state.SkipWithError("async log record pool acquire failed");
             break;
@@ -183,8 +183,8 @@ void BM_AsyncLogRecordPoolBatchAcquireRelease(benchmark::State &state) {
     constexpr std::string_view message = "asyncflow benchmark log message";
     const auto batch_size = static_cast<std::size_t>(state.range(0));
     const auto local_cache_capacity = static_cast<std::size_t>(state.range(1));
-    af::detail::AsyncLogRecordPool pool(batch_size * 2U + 1U, local_cache_capacity);
-    std::vector<af::detail::LogRecord *> records(batch_size);
+    af::detail::async_log_record_pool pool(batch_size * 2U + 1U, local_cache_capacity);
+    std::vector<af::detail::log_record *> records(batch_size);
 
     bool failed = false;
     for (auto _ : state) {
@@ -201,11 +201,11 @@ void BM_AsyncLogRecordPoolBatchAcquireRelease(benchmark::State &state) {
         }
         if (failed) {
             af::detail::release_async_log_records(
-                af::span<af::detail::LogRecord *const>(records.data(), acquired));
+                af::span<af::detail::log_record *const>(records.data(), acquired));
             break;
         }
         af::detail::release_async_log_records(
-            af::span<af::detail::LogRecord *const>(records.data(), records.size()));
+            af::span<af::detail::log_record *const>(records.data(), records.size()));
     }
 
     if (!failed) {
@@ -219,8 +219,8 @@ void BM_AsyncLogRecordPoolCrossThreadReleaseBatch(benchmark::State &state) {
     constexpr std::string_view message = "asyncflow benchmark log message";
     const auto batch_size = static_cast<std::size_t>(state.range(0));
     const auto local_cache_capacity = static_cast<std::size_t>(state.range(1));
-    af::detail::AsyncLogRecordPool pool(batch_size * 2U + 1U, local_cache_capacity);
-    std::vector<af::detail::LogRecord *> records(batch_size);
+    af::detail::async_log_record_pool pool(batch_size * 2U + 1U, local_cache_capacity);
+    std::vector<af::detail::log_record *> records(batch_size);
     std::atomic<std::uint64_t> published{0};
     std::atomic<std::uint64_t> consumed{0};
     std::atomic<bool> stop{false};
@@ -241,7 +241,7 @@ void BM_AsyncLogRecordPoolCrossThreadReleaseBatch(benchmark::State &state) {
             }
 
             af::detail::release_async_log_records(
-                af::span<af::detail::LogRecord *const>(records.data(), records.size()));
+                af::span<af::detail::log_record *const>(records.data(), records.size()));
             seen = target;
             consumed.store(target, std::memory_order_release);
         }
@@ -263,7 +263,7 @@ void BM_AsyncLogRecordPoolCrossThreadReleaseBatch(benchmark::State &state) {
         }
         if (failed) {
             af::detail::release_async_log_records(
-                af::span<af::detail::LogRecord *const>(records.data(), acquired));
+                af::span<af::detail::log_record *const>(records.data(), acquired));
             break;
         }
 

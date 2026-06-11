@@ -40,7 +40,7 @@ public:
         close_file();
     }
 
-    void write_batch(af::span<detail::LogRecord *const> records) noexcept override {
+    void write_batch(af::span<detail::log_record *const> records) noexcept override {
         if (records.empty() || !open_if_needed()) {
             return;
         }

@@ -82,7 +82,7 @@ inline void async_logger::abandon_pending_record() noexcept {
     }
 }
 
-inline bool async_logger::drain_some(std::vector<detail::LogRecord *> &batch,
+inline bool async_logger::drain_some(std::vector<detail::log_record *> &batch,
                                      std::size_t max_write_batches) noexcept {
     if (max_write_batches == 0U) {
         max_write_batches = 1U;
@@ -105,12 +105,12 @@ inline bool async_logger::drain_some(std::vector<detail::LogRecord *> &batch,
         }
 
         for (auto &backend : backends_) {
-            backend->write_batch(af::span<detail::LogRecord *const>(batch.data(), batch.size()));
+            backend->write_batch(af::span<detail::log_record *const>(batch.data(), batch.size()));
         }
 
         const auto drained = batch.size();
         detail::release_async_log_records(
-            af::span<detail::LogRecord *const>(batch.data(), drained));
+            af::span<detail::log_record *const>(batch.data(), drained));
         const auto previous_ready = ready_.fetch_sub(drained, std::memory_order_relaxed);
         AF_ASSERT(previous_ready >= drained);
         const auto previous = pending_.fetch_sub(drained, std::memory_order_release);
@@ -124,7 +124,7 @@ inline bool async_logger::drain_some(std::vector<detail::LogRecord *> &batch,
     }
 }
 
-inline void async_logger::collect_batch(std::vector<detail::LogRecord *> &batch,
+inline void async_logger::collect_batch(std::vector<detail::log_record *> &batch,
                                         std::size_t max_records) noexcept {
     if (ordering_ == log_ordering::ordered) [[likely]] {
         collect_ordered_batch(batch, max_records);
@@ -141,11 +141,11 @@ inline void async_logger::collect_batch(std::vector<detail::LogRecord *> &batch,
     prefer_runtime_drain_ = !prefer_runtime_drain_;
 }
 
-inline void async_logger::collect_ordered_batch(std::vector<detail::LogRecord *> &batch,
+inline void async_logger::collect_ordered_batch(std::vector<detail::log_record *> &batch,
                                                 std::size_t max_records) noexcept {
     AF_ASSERT(ordered_queue_ != nullptr);
     constexpr std::size_t max_queue_drain_count = 64;
-    std::array<detail::LogRecord *, max_queue_drain_count> drained;
+    std::array<detail::log_record *, max_queue_drain_count> drained;
     while (batch.size() < max_records) {
         const std::size_t count = ordered_queue_->queue.try_pop_many(
             drained.data(), std::min(drained.size(), max_records - batch.size()));
@@ -156,10 +156,10 @@ inline void async_logger::collect_ordered_batch(std::vector<detail::LogRecord *>
     }
 }
 
-inline void async_logger::collect_shard_batch(std::vector<detail::LogRecord *> &batch,
+inline void async_logger::collect_shard_batch(std::vector<detail::log_record *> &batch,
                                               std::size_t max_records) noexcept {
     constexpr std::size_t max_queue_drain_count = 64;
-    std::array<detail::LogRecord *, max_queue_drain_count> drained;
+    std::array<detail::log_record *, max_queue_drain_count> drained;
     std::size_t empty_visits = 0;
     while (batch.size() < max_records && empty_visits < queue_shard_count_) {
         detail::AsyncLogQueueShard &shard = *queue_shards_[next_drain_shard_];
@@ -177,14 +177,14 @@ inline void async_logger::collect_shard_batch(std::vector<detail::LogRecord *> &
     }
 }
 
-inline void async_logger::collect_runtime_batch(std::vector<detail::LogRecord *> &batch,
+inline void async_logger::collect_runtime_batch(std::vector<detail::log_record *> &batch,
                                                 std::size_t max_records) noexcept {
     if (runtime_thread_count_ == 0U) {
         return;
     }
 
     constexpr std::size_t max_queue_drain_count = 64;
-    std::array<detail::LogRecord *, max_queue_drain_count> drained;
+    std::array<detail::log_record *, max_queue_drain_count> drained;
     std::size_t empty_visits = 0;
     while (batch.size() < max_records && empty_visits < runtime_thread_count_) {
         detail::AsyncLogRuntimeLane &lane = *runtime_lanes_[next_runtime_drain_thread_];

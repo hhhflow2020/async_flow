@@ -80,7 +80,7 @@ public:
           max_batches_per_run_(config.max_batches_per_run == 0U ? 1U : config.max_batches_per_run),
           ready_batches_(normalize_batch_queue_capacity(config.batch_queue_capacity)),
           free_batches_(normalize_batch_queue_capacity(config.batch_queue_capacity)),
-          scratch_records_(std::make_unique<LogRecord[]>(max_batch_records_)) {
+          scratch_records_(std::make_unique<log_record[]>(max_batch_records_)) {
         AF_ASSERT(owner_ != nullptr);
         AF_ASSERT(backend_ != nullptr);
         if (owner_ == nullptr || backend_ == nullptr || !owner_->valid_thread(thread_)) {
@@ -100,7 +100,7 @@ public:
         shutdown();
     }
 
-    void write_batch(af::span<LogRecord *const> records) noexcept override {
+    void write_batch(af::span<log_record *const> records) noexcept override {
         static_cast<void>(enqueue(records));
     }
 
@@ -216,7 +216,7 @@ private:
         }
     }
 
-    [[nodiscard]] bool enqueue(af::span<LogRecord *const> records) noexcept {
+    [[nodiscard]] bool enqueue(af::span<log_record *const> records) noexcept {
         if (records.empty() || stopping_.load(std::memory_order_acquire)) {
             return false;
         }
@@ -242,7 +242,7 @@ private:
             batch->reset();
             const std::size_t begin = index;
             while (index < records.size()) {
-                LogRecord *record = records[index];
+                log_record *record = records[index];
                 const std::string_view message =
                     record == nullptr ? std::string_view{} : record->message();
                 if (message.empty()) {
@@ -312,9 +312,9 @@ private:
     }
 
     [[nodiscard]] static std::size_t
-    count_non_empty_records(af::span<LogRecord *const> records) noexcept {
+    count_non_empty_records(af::span<log_record *const> records) noexcept {
         std::size_t count = 0;
-        for (const LogRecord *record : records) {
+        for (const log_record *record : records) {
             if (record != nullptr && !record->message().empty()) {
                 ++count;
             }
@@ -332,7 +332,7 @@ private:
             return;
         }
         backend_->write_batch(
-            af::span<LogRecord *const>(scratch_record_ptrs_.data(), scratch_record_ptrs_.size()));
+            af::span<log_record *const>(scratch_record_ptrs_.data(), scratch_record_ptrs_.size()));
         written_records_.fetch_add(scratch_record_ptrs_.size(), std::memory_order_relaxed);
     }
 
@@ -444,8 +444,8 @@ private:
     BoundedMpscQueue<Batch> ready_batches_;
     BoundedMpscQueue<Batch> free_batches_;
     ContiguousObjectStorage<Batch> storage_;
-    std::unique_ptr<LogRecord[]> scratch_records_;
-    std::vector<LogRecord *> scratch_record_ptrs_;
+    std::unique_ptr<log_record[]> scratch_records_;
+    std::vector<log_record *> scratch_record_ptrs_;
     Batch *producer_spare_batch_{nullptr};
     CacheLineAtomic<std::uint64_t> queued_records_{0};
     CacheLineAtomic<std::uint64_t> written_records_{0};

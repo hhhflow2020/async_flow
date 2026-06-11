@@ -110,30 +110,30 @@ private:
     template <typename Lane> static void record_dropped(Lane &lane) noexcept;
 
     template <typename Lane>
-    [[nodiscard]] detail::LogRecord *acquire_record(Lane &lane, std::string_view message) noexcept;
+    [[nodiscard]] detail::log_record *acquire_record(Lane &lane, std::string_view message) noexcept;
 
     template <typename Lane>
-    [[nodiscard]] bool push_record(Lane &lane, detail::LogRecord *record) noexcept;
+    [[nodiscard]] bool push_record(Lane &lane, detail::log_record *record) noexcept;
 
-    [[nodiscard]] bool push_ordered_record(detail::LogRecord *record) noexcept;
-    static void release_record(detail::LogRecord *record) noexcept;
+    [[nodiscard]] bool push_ordered_record(detail::log_record *record) noexcept;
+    static void release_record(detail::log_record *record) noexcept;
     static void release_unpublished_record(detail::AsyncLogQueueShard &,
-                                           detail::LogRecord *record) noexcept;
+                                           detail::log_record *record) noexcept;
     static void release_unpublished_record(detail::AsyncLogProducerShard &,
-                                           detail::LogRecord *record) noexcept;
+                                           detail::log_record *record) noexcept;
     static void release_unpublished_record(detail::AsyncLogRuntimeLane &lane,
-                                           detail::LogRecord *record) noexcept;
+                                           detail::log_record *record) noexcept;
 
     void shutdown() noexcept;
     void abandon_pending_record() noexcept;
-    [[nodiscard]] bool drain_some(std::vector<detail::LogRecord *> &batch,
+    [[nodiscard]] bool drain_some(std::vector<detail::log_record *> &batch,
                                   std::size_t max_write_batches) noexcept;
-    void collect_batch(std::vector<detail::LogRecord *> &batch, std::size_t max_records) noexcept;
-    void collect_ordered_batch(std::vector<detail::LogRecord *> &batch,
+    void collect_batch(std::vector<detail::log_record *> &batch, std::size_t max_records) noexcept;
+    void collect_ordered_batch(std::vector<detail::log_record *> &batch,
                                std::size_t max_records) noexcept;
-    void collect_shard_batch(std::vector<detail::LogRecord *> &batch,
+    void collect_shard_batch(std::vector<detail::log_record *> &batch,
                              std::size_t max_records) noexcept;
-    void collect_runtime_batch(std::vector<detail::LogRecord *> &batch,
+    void collect_runtime_batch(std::vector<detail::log_record *> &batch,
                                std::size_t max_records) noexcept;
     void flush_backends() noexcept;
     [[nodiscard]] bool

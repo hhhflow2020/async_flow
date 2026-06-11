@@ -18,16 +18,17 @@
 
 namespace af::detail {
 
-enum class AsyncLogRecordPoolKind : std::uint8_t {
-    Shared,
+enum class async_log_record_pool_kind : std::uint8_t {
+    shared,
+    Shared = shared,
 };
 
-struct AsyncLogRecordPoolSlot {
+struct async_log_record_pool_slot {
     void *owner{nullptr};
-    AsyncLogRecordPoolKind kind{AsyncLogRecordPoolKind::Shared};
+    async_log_record_pool_kind kind{async_log_record_pool_kind::shared};
 };
 
-class AsyncLogRecordPool {
+class async_log_record_pool {
     static constexpr std::uint32_t null_slot = std::numeric_limits<std::uint32_t>::max();
     static constexpr std::size_t slot_index_bits = sizeof(std::uint32_t) * 8U;
     static constexpr std::uint64_t slot_index_mask = (std::uint64_t{1} << slot_index_bits) - 1U;
@@ -35,9 +36,9 @@ class AsyncLogRecordPool {
 
     struct Slab;
 
-    struct alignas(hardware_cache_line_size) Slot : AsyncLogRecordPoolSlot {
+    struct alignas(hardware_cache_line_size) Slot : async_log_record_pool_slot {
         std::atomic<std::uint32_t> next{null_slot};
-        LogRecord record;
+        log_record record;
         Slab *slab{nullptr};
         std::uint32_t index{0};
     };
@@ -48,18 +49,18 @@ class AsyncLogRecordPool {
                   "async log record pool slots must not share cache lines");
 
     struct alignas(hardware_cache_line_size) Slab {
-        Slab(AsyncLogRecordPool *pool, std::size_t capacity)
+        Slab(async_log_record_pool *pool, std::size_t capacity)
             : capacity(validate_capacity(capacity)), slots(new Slot[this->capacity]) {
             for (std::size_t i = 0; i < this->capacity; ++i) {
                 Slot &slot = slots[i];
                 slot.owner = pool;
-                slot.kind = AsyncLogRecordPoolKind::Shared;
+                slot.kind = async_log_record_pool_kind::shared;
                 slot.slab = this;
                 slot.index = static_cast<std::uint32_t>(i);
                 slot.next.store(i + 1U < this->capacity ? static_cast<std::uint32_t>(i + 1U)
                                                         : null_slot,
                                 std::memory_order_relaxed);
-                slot.record.set_pool_slot(static_cast<AsyncLogRecordPoolSlot *>(&slot));
+                slot.record.set_pool_slot(static_cast<async_log_record_pool_slot *>(&slot));
             }
             free_head.store(pack_head(0U, 0U), std::memory_order_relaxed);
         }
@@ -72,7 +73,8 @@ class AsyncLogRecordPool {
     };
 
 public:
-    explicit AsyncLogRecordPool(std::size_t initial_capacity, std::size_t local_cache_capacity = 0U)
+    explicit async_log_record_pool(std::size_t initial_capacity,
+                                   std::size_t local_cache_capacity = 0U)
         : cache_token_(next_cache_token_.fetch_add(1U, std::memory_order_relaxed)),
           initial_slab_capacity_(validate_capacity(initial_capacity)),
           local_cache_capacity_(validate_local_cache_capacity(local_cache_capacity)),
@@ -80,26 +82,26 @@ public:
         add_initial_slab();
     }
 
-    AsyncLogRecordPool(const AsyncLogRecordPool &) = delete;
-    AsyncLogRecordPool &operator=(const AsyncLogRecordPool &) = delete;
+    async_log_record_pool(const async_log_record_pool &) = delete;
+    async_log_record_pool &operator=(const async_log_record_pool &) = delete;
 
-    ~AsyncLogRecordPool() {
+    ~async_log_record_pool() {
         lifetime_.reset();
     }
 
-    [[nodiscard]] LogRecord *try_acquire(std::string_view message) noexcept {
+    [[nodiscard]] log_record *try_acquire(std::string_view message) noexcept {
         if (local_cache_capacity_ != 0U) [[likely]] {
-            if (LogRecord *record = try_acquire_cached(message); record != nullptr) {
+            if (log_record *record = try_acquire_cached(message); record != nullptr) {
                 return record;
             }
         }
         return try_acquire_uncached(message);
     }
 
-    [[nodiscard]] LogRecord *try_acquire_uncached(std::string_view message) noexcept {
+    [[nodiscard]] log_record *try_acquire_uncached(std::string_view message) noexcept {
         for (;;) {
             bool reset_failed = false;
-            if (LogRecord *record = try_acquire_from_existing(message, reset_failed);
+            if (log_record *record = try_acquire_from_existing(message, reset_failed);
                 record != nullptr || reset_failed) {
                 return record;
             }
@@ -109,20 +111,20 @@ public:
                 return nullptr;
             }
             reset_failed = false;
-            if (LogRecord *record = try_acquire_from_slab(*slab, message, reset_failed);
+            if (log_record *record = try_acquire_from_slab(*slab, message, reset_failed);
                 record != nullptr || reset_failed) {
                 return record;
             }
         }
     }
 
-    static void release_slot(AsyncLogRecordPoolSlot *header) noexcept {
+    static void release_slot(async_log_record_pool_slot *header) noexcept {
         auto *slot = static_cast<Slot *>(header);
         AF_ASSERT(slot != nullptr && slot->owner != nullptr && slot->slab != nullptr);
-        static_cast<AsyncLogRecordPool *>(slot->owner)->release(slot);
+        static_cast<async_log_record_pool *>(slot->owner)->release(slot);
     }
 
-    void release_records(af::span<LogRecord *const> records) noexcept {
+    void release_records(af::span<log_record *const> records) noexcept {
         std::size_t begin = 0;
         while (begin < records.size()) {
             auto *first = static_cast<Slot *>(records[begin]->pool_slot());
@@ -146,7 +148,7 @@ public:
 
 private:
     struct alignas(hardware_cache_line_size) LocalCache {
-        AsyncLogRecordPool *owner{nullptr};
+        async_log_record_pool *owner{nullptr};
         std::uint64_t owner_token{0};
         std::weak_ptr<void> owner_lifetime;
         std::array<Slot *, async_log_record_pool_max_local_cache_size> slots{};
@@ -157,7 +159,7 @@ private:
             flush();
         }
 
-        [[nodiscard]] bool reset_for(AsyncLogRecordPool *pool) noexcept {
+        [[nodiscard]] bool reset_for(async_log_record_pool *pool) noexcept {
             if (owner == pool && owner_token == pool->cache_token_) [[likely]] {
                 return true;
             }
@@ -259,7 +261,7 @@ private:
         return cache;
     }
 
-    [[nodiscard]] LogRecord *try_acquire_cached(std::string_view message) noexcept {
+    [[nodiscard]] log_record *try_acquire_cached(std::string_view message) noexcept {
         LocalCache &cache = local_cache();
         if (!cache.reset_for(this)) [[unlikely]] {
             return nullptr;
@@ -301,11 +303,11 @@ private:
         next_slab_capacity_ = next_growth_capacity(initial_slab_capacity_);
     }
 
-    [[nodiscard]] LogRecord *try_acquire_from_existing(std::string_view message,
-                                                       bool &reset_failed) noexcept {
+    [[nodiscard]] log_record *try_acquire_from_existing(std::string_view message,
+                                                        bool &reset_failed) noexcept {
         Slab *slab = slab_head_.load(std::memory_order_acquire);
         while (slab != nullptr) {
-            if (LogRecord *record = try_acquire_from_slab(*slab, message, reset_failed);
+            if (log_record *record = try_acquire_from_slab(*slab, message, reset_failed);
                 record != nullptr || reset_failed) {
                 return record;
             }
@@ -314,8 +316,8 @@ private:
         return nullptr;
     }
 
-    [[nodiscard]] LogRecord *try_acquire_from_slab(Slab &slab, std::string_view message,
-                                                   bool &reset_failed) noexcept {
+    [[nodiscard]] log_record *try_acquire_from_slab(Slab &slab, std::string_view message,
+                                                    bool &reset_failed) noexcept {
         Slot *slot = try_pop(slab);
         if (slot == nullptr) {
             return nullptr;
@@ -324,8 +326,8 @@ private:
         return prepare_record(*slot, message, reset_failed);
     }
 
-    [[nodiscard]] LogRecord *prepare_record(Slot &slot, std::string_view message,
-                                            bool &reset_failed) noexcept {
+    [[nodiscard]] log_record *prepare_record(Slot &slot, std::string_view message,
+                                             bool &reset_failed) noexcept {
         try {
             slot.record.reset(message);
         } catch (...) {
@@ -505,7 +507,7 @@ private:
         }
     }
 
-    void release_records_to_slab(Slab &slab, af::span<LogRecord *const> records) noexcept {
+    void release_records_to_slab(Slab &slab, af::span<log_record *const> records) noexcept {
         if (records.empty()) {
             return;
         }
@@ -546,28 +548,28 @@ private:
     alignas(hardware_cache_line_size) std::atomic_flag expanding_ = ATOMIC_FLAG_INIT;
 };
 
-inline void release_async_log_record(LogRecord *record) noexcept {
-    auto *slot = static_cast<AsyncLogRecordPoolSlot *>(record->pool_slot());
+inline void release_async_log_record(log_record *record) noexcept {
+    auto *slot = static_cast<async_log_record_pool_slot *>(record->pool_slot());
     AF_ASSERT(slot != nullptr);
     switch (slot->kind) {
-    case AsyncLogRecordPoolKind::Shared:
-        AsyncLogRecordPool::release_slot(slot);
+    case async_log_record_pool_kind::shared:
+        async_log_record_pool::release_slot(slot);
         return;
     }
     AF_ASSERT(false);
 }
 
-inline void release_async_log_records(af::span<LogRecord *const> records) noexcept {
+inline void release_async_log_records(af::span<log_record *const> records) noexcept {
     std::size_t begin = 0;
     while (begin < records.size()) {
-        auto *first_slot = static_cast<AsyncLogRecordPoolSlot *>(records[begin]->pool_slot());
+        auto *first_slot = static_cast<async_log_record_pool_slot *>(records[begin]->pool_slot());
         AF_ASSERT(first_slot != nullptr && first_slot->owner != nullptr);
-        const AsyncLogRecordPoolKind kind = first_slot->kind;
+        const async_log_record_pool_kind kind = first_slot->kind;
         void *const owner = first_slot->owner;
 
         std::size_t end = begin + 1U;
         while (end < records.size()) {
-            auto *slot = static_cast<AsyncLogRecordPoolSlot *>(records[end]->pool_slot());
+            auto *slot = static_cast<async_log_record_pool_slot *>(records[end]->pool_slot());
             AF_ASSERT(slot != nullptr && slot->owner != nullptr);
             if (slot->kind != kind || slot->owner != owner) {
                 break;
@@ -577,12 +579,16 @@ inline void release_async_log_records(af::span<LogRecord *const> records) noexce
 
         const auto group = records.subspan(begin, end - begin);
         switch (kind) {
-        case AsyncLogRecordPoolKind::Shared:
-            static_cast<AsyncLogRecordPool *>(owner)->release_records(group);
+        case async_log_record_pool_kind::shared:
+            static_cast<async_log_record_pool *>(owner)->release_records(group);
             break;
         }
         begin = end;
     }
 }
+
+using AsyncLogRecordPoolKind = async_log_record_pool_kind;
+using AsyncLogRecordPoolSlot = async_log_record_pool_slot;
+using AsyncLogRecordPool = async_log_record_pool;
 
 } // namespace af::detail

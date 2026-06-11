@@ -87,14 +87,14 @@ public:
         detail::close_log_socket(fd_);
     }
 
-    void write_batch(af::span<detail::LogRecord *const> records) noexcept override {
+    void write_batch(af::span<detail::log_record *const> records) noexcept override {
         if (records.empty() || !ensure_socket()) {
             return;
         }
 #if defined(__linux__)
         send_batch_best_effort(records);
 #else
-        for (detail::LogRecord *record : records) {
+        for (detail::log_record *record : records) {
             std::string_view message = record->message();
             const std::size_t size = std::min(message.size(), config_.max_datagram_size);
             send_best_effort(message.data(), size);
@@ -157,7 +157,7 @@ private:
     }
 
 #if defined(__linux__)
-    void send_batch_best_effort(af::span<detail::LogRecord *const> records) noexcept {
+    void send_batch_best_effort(af::span<detail::log_record *const> records) noexcept {
         std::size_t index = 0;
         while (index < records.size() && fd_ >= 0) {
             std::size_t count = 0;
@@ -227,7 +227,7 @@ public:
         detail::close_log_socket(fd_);
     }
 
-    void write_batch(af::span<detail::LogRecord *const> records) noexcept override {
+    void write_batch(af::span<detail::log_record *const> records) noexcept override {
         if (records.empty() || !ensure_socket()) {
             return;
         }
@@ -316,7 +316,7 @@ private:
         return true;
     }
 
-    void send_batch_best_effort(af::span<detail::LogRecord *const> records) noexcept {
+    void send_batch_best_effort(af::span<detail::log_record *const> records) noexcept {
         std::size_t index = 0;
         while (index < records.size() && fd_ >= 0) {
             std::size_t count = 0;

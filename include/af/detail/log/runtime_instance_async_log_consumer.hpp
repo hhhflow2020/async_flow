@@ -245,7 +245,7 @@ private:
     std::shared_ptr<async_logger> logger_;
     runtime::thread_index thread_;
     std::size_t max_batches_per_run_;
-    std::vector<LogRecord *> batch_;
+    std::vector<log_record *> batch_;
     CacheLineAtomic<bool> registered_{false};
     CacheLineAtomic<bool> shutdown_started_{false};
     CacheLineAtomic<bool> finished_{false};

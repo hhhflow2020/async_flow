@@ -35,7 +35,7 @@ inline bool async_logger::try_log_on_lane(Lane &lane, std::string_view message) 
         return false;
     }
 
-    detail::LogRecord *record = acquire_record(lane, message);
+    detail::log_record *record = acquire_record(lane, message);
     if (record == nullptr) {
         record_dropped(lane);
         return false;
@@ -91,7 +91,7 @@ inline bool async_logger::try_log_ordered(std::string_view message) noexcept {
         return false;
     }
 
-    detail::LogRecord *record = acquire_record(producer, message);
+    detail::log_record *record = acquire_record(producer, message);
     if (record == nullptr) {
         record_dropped(producer);
         return false;
@@ -122,15 +122,15 @@ template <typename Lane> inline void async_logger::record_dropped(Lane &lane) no
 }
 
 template <typename Lane>
-inline detail::LogRecord *async_logger::acquire_record(Lane &lane,
-                                                       std::string_view message) noexcept {
+inline detail::log_record *async_logger::acquire_record(Lane &lane,
+                                                        std::string_view message) noexcept {
     if (overflow_policy_ == log_overflow_policy::drop_newest) {
         return lane.records.try_acquire(message);
     }
 
     detail::QueueFullBackoff backoff(overflow_spin_count_);
     while (accepting_.load(std::memory_order_acquire)) {
-        if (detail::LogRecord *record = lane.records.try_acquire(message); record != nullptr) {
+        if (detail::log_record *record = lane.records.try_acquire(message); record != nullptr) {
             return record;
         }
         backoff.wait();
@@ -139,7 +139,7 @@ inline detail::LogRecord *async_logger::acquire_record(Lane &lane,
 }
 
 template <typename Lane>
-inline bool async_logger::push_record(Lane &lane, detail::LogRecord *record) noexcept {
+inline bool async_logger::push_record(Lane &lane, detail::log_record *record) noexcept {
     if (overflow_policy_ == log_overflow_policy::drop_newest) {
         return accepting_.load(std::memory_order_acquire) && lane.queue.try_push(record);
     }
@@ -154,7 +154,7 @@ inline bool async_logger::push_record(Lane &lane, detail::LogRecord *record) noe
     return false;
 }
 
-inline bool async_logger::push_ordered_record(detail::LogRecord *record) noexcept {
+inline bool async_logger::push_ordered_record(detail::log_record *record) noexcept {
     AF_ASSERT(ordered_queue_ != nullptr);
     if (overflow_policy_ == log_overflow_policy::drop_newest) {
         return accepting_.load(std::memory_order_acquire) && ordered_queue_->queue.try_push(record);
@@ -170,22 +170,22 @@ inline bool async_logger::push_ordered_record(detail::LogRecord *record) noexcep
     return false;
 }
 
-inline void async_logger::release_record(detail::LogRecord *record) noexcept {
+inline void async_logger::release_record(detail::log_record *record) noexcept {
     detail::release_async_log_record(record);
 }
 
 inline void async_logger::release_unpublished_record(detail::AsyncLogQueueShard &,
-                                                     detail::LogRecord *record) noexcept {
+                                                     detail::log_record *record) noexcept {
     release_record(record);
 }
 
 inline void async_logger::release_unpublished_record(detail::AsyncLogProducerShard &,
-                                                     detail::LogRecord *record) noexcept {
+                                                     detail::log_record *record) noexcept {
     release_record(record);
 }
 
 inline void async_logger::release_unpublished_record(detail::AsyncLogRuntimeLane &lane,
-                                                     detail::LogRecord *record) noexcept {
+                                                     detail::log_record *record) noexcept {
     static_cast<void>(lane);
     release_record(record);
 }

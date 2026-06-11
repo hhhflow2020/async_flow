@@ -18,6 +18,7 @@
 #include <string_view>
 #include <system_error>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -39,6 +40,18 @@ static_assert(alignof(af::detail::CacheLineAtomic<std::uint64_t>) ==
               af::detail::hardware_cache_line_size);
 static_assert(sizeof(af::detail::CacheLineAtomic<std::uint64_t>) >=
               af::detail::hardware_cache_line_size);
+
+TEST(LogTests, LogDetailTypesExposeLowerCasePrimaryNames) {
+    static_assert(std::is_same_v<af::detail::log_record, af::detail::LogRecord>);
+    static_assert(
+        std::is_same_v<af::detail::async_log_record_pool, af::detail::AsyncLogRecordPool>);
+    static_assert(
+        std::is_same_v<af::detail::async_log_record_pool_slot, af::detail::AsyncLogRecordPoolSlot>);
+    static_assert(
+        std::is_same_v<af::detail::async_log_record_pool_kind, af::detail::AsyncLogRecordPoolKind>);
+    static_assert(af::detail::async_log_record_pool_kind::shared ==
+                  af::detail::AsyncLogRecordPoolKind::Shared);
+}
 
 [[nodiscard]] std::string read_file(const std::filesystem::path &path) {
     std::ifstream input(path);
@@ -213,22 +226,22 @@ TEST(LogTests, RuntimeLogConfigCarriesRecordPoolConfig) {
 
 TEST(LogTests, RecordPoolRejectsOversizedLocalCache) {
     EXPECT_THROW(
-        af::detail::AsyncLogRecordPool(2, af::async_log_record_pool_max_local_cache_size + 1U),
+        af::detail::async_log_record_pool(2, af::async_log_record_pool_max_local_cache_size + 1U),
         std::length_error);
 }
 
 TEST(LogTests, RecordPoolLocalCacheIgnoresStaleSlotsWhenPoolAddressIsReused) {
-    using Pool = af::detail::AsyncLogRecordPool;
+    using Pool = af::detail::async_log_record_pool;
     alignas(Pool) unsigned char storage[sizeof(Pool)];
 
     auto *pool = new (storage) Pool(2, 2);
-    af::detail::LogRecord *first = pool->try_acquire("first");
+    af::detail::log_record *first = pool->try_acquire("first");
     ASSERT_NE(first, nullptr);
     af::detail::release_async_log_record(first);
     pool->~Pool();
 
     pool = new (storage) Pool(2, 2);
-    af::detail::LogRecord *second = pool->try_acquire("second");
+    af::detail::log_record *second = pool->try_acquire("second");
     ASSERT_NE(second, nullptr);
     EXPECT_EQ(second->message(), "second");
     af::detail::release_async_log_record(second);
@@ -237,7 +250,7 @@ TEST(LogTests, RecordPoolLocalCacheIgnoresStaleSlotsWhenPoolAddressIsReused) {
 
 class BlockingLogBackend final : public af::log_backend {
 public:
-    void write_batch(af::Span<af::detail::LogRecord *const> records) noexcept override {
+    void write_batch(af::Span<af::detail::log_record *const> records) noexcept override {
         static_cast<void>(records);
         std::unique_lock lock(mutex_);
         entered_ = true;
@@ -266,7 +279,7 @@ private:
 
 class CountingLogBackend final : public af::log_backend {
 public:
-    void write_batch(af::Span<af::detail::LogRecord *const> records) noexcept override {
+    void write_batch(af::Span<af::detail::log_record *const> records) noexcept override {
         record_count_.fetch_add(records.size(), std::memory_order_relaxed);
     }
 
@@ -280,9 +293,9 @@ private:
 
 class CapturingLogBackend final : public af::log_backend {
 public:
-    void write_batch(af::Span<af::detail::LogRecord *const> records) noexcept override {
+    void write_batch(af::Span<af::detail::log_record *const> records) noexcept override {
         std::lock_guard lock(mutex_);
-        for (af::detail::LogRecord *record : records) {
+        for (af::detail::log_record *record : records) {
             messages_.emplace_back(record->message());
         }
     }
@@ -303,7 +316,7 @@ public:
                                              af::runtime::thread_index expected_thread)
         : owner_(owner), expected_thread_index_(expected_thread) {}
 
-    void write_batch(af::Span<af::detail::LogRecord *const> records) noexcept override {
+    void write_batch(af::Span<af::detail::log_record *const> records) noexcept override {
         record_count_.fetch_add(records.size(), std::memory_order_relaxed);
         const bool on_runtime_thread = af::runtime::current() == &owner_;
         ran_on_runtime_thread_.store(on_runtime_thread, std::memory_order_release);
@@ -367,7 +380,7 @@ template <typename T> bool wait_until_at_least(std::atomic<T> &value, T expected
 #if defined(__linux__) || defined(__APPLE__)
 class ThreadNameLogBackend final : public af::log_backend {
 public:
-    void write_batch(af::Span<af::detail::LogRecord *const> records) noexcept override {
+    void write_batch(af::Span<af::detail::log_record *const> records) noexcept override {
         static_cast<void>(records);
         std::array<char, 16> name{};
         if (::pthread_getname_np(::pthread_self(), name.data(), name.size()) != 0) {
@@ -1294,8 +1307,8 @@ TEST(LogTests, RuntimeLaneRecordPoolReusesSlotsAcrossFlushes) {
 }
 
 TEST(LogTests, SharedRecordPoolExpandsAndBatchReleaseReusesSlots) {
-    af::detail::AsyncLogRecordPool pool(4);
-    std::array<af::detail::LogRecord *, 5> records{};
+    af::detail::async_log_record_pool pool(4);
+    std::array<af::detail::log_record *, 5> records{};
 
     for (std::size_t i = 0; i < records.size(); ++i) {
         records[i] = pool.try_acquire("shared batch release log record\n");
@@ -1303,7 +1316,7 @@ TEST(LogTests, SharedRecordPoolExpandsAndBatchReleaseReusesSlots) {
     }
 
     af::detail::release_async_log_records(
-        af::Span<af::detail::LogRecord *const>(records.data(), records.size()));
+        af::Span<af::detail::log_record *const>(records.data(), records.size()));
 
     for (std::size_t i = 0; i < records.size(); ++i) {
         records[i] = pool.try_acquire("shared batch release reused log record\n");
@@ -1311,7 +1324,7 @@ TEST(LogTests, SharedRecordPoolExpandsAndBatchReleaseReusesSlots) {
     }
 
     af::detail::release_async_log_records(
-        af::Span<af::detail::LogRecord *const>(records.data(), records.size()));
+        af::Span<af::detail::log_record *const>(records.data(), records.size()));
 }
 
 TEST(LogTests, RuntimeAwareSinkTagsFirstUserLogFieldWithRuntimeTaskId) {
@@ -1804,12 +1817,12 @@ TEST(LogTests, TcpBackendWritesBatchedRecordsToLoopbackStream) {
         .port = port,
         .reconnect_interval = std::chrono::milliseconds(1),
     });
-    std::array<af::detail::LogRecord, 4> records;
+    std::array<af::detail::log_record, 4> records;
     records[0].reset("tcp backend one\n");
     records[1].reset("tcp backend two\n");
     records[2].reset("tcp backend three\n");
     records[3].reset("tcp backend four\n");
-    std::array<af::detail::LogRecord *, 4> record_ptrs{
+    std::array<af::detail::log_record *, 4> record_ptrs{
         &records[0],
         &records[1],
         &records[2],
@@ -1819,7 +1832,7 @@ TEST(LogTests, TcpBackendWritesBatchedRecordsToLoopbackStream) {
     for (int attempt = 0; attempt < 250 && !server_done.load(std::memory_order_acquire);
          ++attempt) {
         backend.write_batch(
-            af::Span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
+            af::Span<af::detail::log_record *const>(record_ptrs.data(), record_ptrs.size()));
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
 
@@ -1841,12 +1854,12 @@ TEST(LogTests, UdpBackendWritesBatchedRecordsToLoopbackDatagrams) {
         .host = "127.0.0.1",
         .port = port,
     });
-    std::array<af::detail::LogRecord, 4> records;
+    std::array<af::detail::log_record, 4> records;
     records[0].reset("udp backend one\n");
     records[1].reset("udp backend two\n");
     records[2].reset("udp backend three\n");
     records[3].reset("udp backend four\n");
-    std::array<af::detail::LogRecord *, 4> record_ptrs{
+    std::array<af::detail::log_record *, 4> record_ptrs{
         &records[0],
         &records[1],
         &records[2],
@@ -1854,7 +1867,7 @@ TEST(LogTests, UdpBackendWritesBatchedRecordsToLoopbackDatagrams) {
     };
 
     backend.write_batch(
-        af::Span<af::detail::LogRecord *const>(record_ptrs.data(), record_ptrs.size()));
+        af::Span<af::detail::log_record *const>(record_ptrs.data(), record_ptrs.size()));
 
     std::array<std::string, 4> received{};
     const std::size_t received_count = recv_datagrams_until(

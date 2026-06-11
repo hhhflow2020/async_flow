@@ -32,14 +32,14 @@ struct alignas(hardware_cache_line_size) AsyncLogQueueShard {
 
     AsyncLogStatCounter accepted;
     AsyncLogStatCounter dropped;
-    BoundedMpscQueue<LogRecord> queue;
-    AsyncLogRecordPool records;
+    BoundedMpscQueue<log_record> queue;
+    async_log_record_pool records;
 };
 
 struct alignas(hardware_cache_line_size) AsyncLogOrderedQueue {
     explicit AsyncLogOrderedQueue(std::size_t queue_capacity) : queue(queue_capacity) {}
 
-    BoundedMpscQueue<LogRecord> queue;
+    BoundedMpscQueue<log_record> queue;
 };
 
 struct alignas(hardware_cache_line_size) AsyncLogProducerShard {
@@ -48,7 +48,7 @@ struct alignas(hardware_cache_line_size) AsyncLogProducerShard {
 
     AsyncLogStatCounter accepted;
     AsyncLogStatCounter dropped;
-    AsyncLogRecordPool records;
+    async_log_record_pool records;
 };
 
 struct alignas(hardware_cache_line_size) AsyncLogRuntimeLane {
@@ -58,8 +58,8 @@ struct alignas(hardware_cache_line_size) AsyncLogRuntimeLane {
 
     AsyncLogStatCounter accepted;
     AsyncLogStatCounter dropped;
-    BoundedMpscQueue<LogRecord> queue;
-    AsyncLogRecordPool records;
+    BoundedMpscQueue<log_record> queue;
+    async_log_record_pool records;
 };
 
 using AsyncLogQueueShardStorage = ContiguousObjectStorage<AsyncLogQueueShard>;

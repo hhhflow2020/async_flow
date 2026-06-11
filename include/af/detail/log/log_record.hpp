@@ -13,16 +13,16 @@ namespace af::detail {
 
 inline constexpr std::size_t default_log_inline_message_bytes = 1024;
 
-class alignas(hardware_cache_line_size) LogRecord {
+class alignas(hardware_cache_line_size) log_record {
 public:
-    LogRecord() = default;
+    log_record() = default;
 
-    explicit LogRecord(std::string_view message) {
+    explicit log_record(std::string_view message) {
         reset(message);
     }
 
-    LogRecord(const LogRecord &) = delete;
-    LogRecord &operator=(const LogRecord &) = delete;
+    log_record(const log_record &) = delete;
+    log_record &operator=(const log_record &) = delete;
 
     void reset(std::string_view message) {
         assign(message);
@@ -62,5 +62,7 @@ private:
     bool uses_heap_{false};
     void *pool_slot_{nullptr};
 };
+
+using LogRecord = log_record;
 
 } // namespace af::detail
