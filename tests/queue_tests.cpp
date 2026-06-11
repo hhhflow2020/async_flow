@@ -12,10 +12,15 @@
 
 namespace {
 
+static_assert(
+    std::is_same_v<af::detail::intrusive_mpsc_node<int>, af::detail::IntrusiveMpscNode<int>>);
+static_assert(
+    std::is_same_v<af::detail::intrusive_mpsc_queue<int>, af::detail::IntrusiveMpscQueue<int>>);
+
 struct IntrusiveQueueValue {
     int producer{0};
     int sequence{0};
-    af::detail::IntrusiveMpscNode<IntrusiveQueueValue> intrusive_mpsc_node_{this};
+    af::detail::intrusive_mpsc_node<IntrusiveQueueValue> intrusive_mpsc_node_{this};
 };
 
 } // namespace
@@ -207,7 +212,7 @@ TEST(QueueTests, BoundedMpscPushManySupportsConcurrentProducers) {
 }
 
 TEST(QueueTests, IntrusiveMpscReturnsSingleNodeAndAllowsImmediateReuse) {
-    af::detail::IntrusiveMpscQueue<IntrusiveQueueValue> queue;
+    af::detail::intrusive_mpsc_queue<IntrusiveQueueValue> queue;
     IntrusiveQueueValue value;
 
     EXPECT_TRUE(queue.empty());
@@ -223,7 +228,7 @@ TEST(QueueTests, IntrusiveMpscReturnsSingleNodeAndAllowsImmediateReuse) {
 }
 
 TEST(QueueTests, IntrusiveMpscEmptyReportsBufferedTailNode) {
-    af::detail::IntrusiveMpscQueue<IntrusiveQueueValue> queue;
+    af::detail::intrusive_mpsc_queue<IntrusiveQueueValue> queue;
     IntrusiveQueueValue first;
     IntrusiveQueueValue second;
 
@@ -241,7 +246,7 @@ TEST(QueueTests, IntrusiveMpscSupportsConcurrentProducersInPerProducerOrder) {
     constexpr int values_per_producer = 256;
     constexpr int total_values = producer_count * values_per_producer;
 
-    af::detail::IntrusiveMpscQueue<IntrusiveQueueValue> queue;
+    af::detail::intrusive_mpsc_queue<IntrusiveQueueValue> queue;
     std::array<std::array<IntrusiveQueueValue, values_per_producer>, producer_count> values{};
     std::array<std::thread, producer_count> producers;
     std::array<int, producer_count> next_sequence{};

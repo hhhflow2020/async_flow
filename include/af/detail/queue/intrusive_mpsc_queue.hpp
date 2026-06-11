@@ -7,26 +7,26 @@
 
 namespace af::detail {
 
-template <typename T> struct IntrusiveMpscNode {
-    IntrusiveMpscNode() noexcept = default;
+template <typename T> struct intrusive_mpsc_node {
+    intrusive_mpsc_node() noexcept = default;
 
-    explicit IntrusiveMpscNode(T *owner) noexcept : owner(owner) {}
+    explicit intrusive_mpsc_node(T *owner) noexcept : owner(owner) {}
 
-    std::atomic<IntrusiveMpscNode *> next{nullptr};
+    std::atomic<intrusive_mpsc_node *> next{nullptr};
     T *owner{nullptr};
 };
 
-template <typename T> class IntrusiveMpscQueue {
+template <typename T> class intrusive_mpsc_queue {
 public:
-    using Node = IntrusiveMpscNode<T>;
+    using Node = intrusive_mpsc_node<T>;
 
-    IntrusiveMpscQueue() noexcept {
+    intrusive_mpsc_queue() noexcept {
         head_.store(&stub_, std::memory_order_relaxed);
         tail_ = &stub_;
     }
 
-    IntrusiveMpscQueue(const IntrusiveMpscQueue &) = delete;
-    IntrusiveMpscQueue &operator=(const IntrusiveMpscQueue &) = delete;
+    intrusive_mpsc_queue(const intrusive_mpsc_queue &) = delete;
+    intrusive_mpsc_queue &operator=(const intrusive_mpsc_queue &) = delete;
 
     void push(T *value) noexcept {
         AF_ASSERT(value != nullptr);
@@ -106,5 +106,8 @@ private:
     alignas(hardware_cache_line_size) Node *tail_{nullptr};
     Node stub_{};
 };
+
+template <typename T> using IntrusiveMpscNode = intrusive_mpsc_node<T>;
+template <typename T> using IntrusiveMpscQueue = intrusive_mpsc_queue<T>;
 
 } // namespace af::detail

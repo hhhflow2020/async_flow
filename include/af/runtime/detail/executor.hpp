@@ -66,7 +66,7 @@ private:
 
     runtime &owner_;
     runtime_thread_info thread_;
-    IntrusiveMpscQueue<runtime_work> inbox_;
+    intrusive_mpsc_queue<runtime_work> inbox_;
     runtime_timer_heap timer_heap_;
     runtime_hierarchical_timer_wheel timer_wheel_;
     std::vector<runtime_service_task *> service_tasks_;

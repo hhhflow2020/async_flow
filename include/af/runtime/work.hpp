@@ -16,9 +16,9 @@ public:
     virtual void run(runtime &owner) noexcept = 0;
 
 private:
-    detail::IntrusiveMpscNode<runtime_work> intrusive_mpsc_node_{this};
+    detail::intrusive_mpsc_node<runtime_work> intrusive_mpsc_node_{this};
 
-    template <typename T> friend class detail::IntrusiveMpscQueue;
+    template <typename T> friend class detail::intrusive_mpsc_queue;
 };
 
 } // namespace af
