@@ -66,12 +66,14 @@ inline void close_log_socket(int &fd) noexcept {
 }
 
 #if defined(__linux__)
-struct LogMmsgHeader {
+struct log_mmsg_header {
     msghdr msg_hdr{};
     unsigned int msg_len{0};
 };
 
-[[nodiscard]] inline int log_sendmmsg(int fd, LogMmsgHeader *messages, unsigned int count,
+using LogMmsgHeader = log_mmsg_header;
+
+[[nodiscard]] inline int log_sendmmsg(int fd, log_mmsg_header *messages, unsigned int count,
                                       int flags) noexcept {
     return static_cast<int>(::syscall(SYS_sendmmsg, fd, messages, count, flags));
 }
@@ -182,7 +184,7 @@ private:
         }
     }
 
-    [[nodiscard]] bool sendmmsg_best_effort(detail::LogMmsgHeader *messages,
+    [[nodiscard]] bool sendmmsg_best_effort(detail::log_mmsg_header *messages,
                                             std::size_t count) noexcept {
         while (count != 0U && fd_ >= 0) {
             const int sent = detail::log_sendmmsg(fd_, messages, static_cast<unsigned int>(count),
@@ -215,7 +217,7 @@ private:
     int fd_{-1};
 #if defined(__linux__)
     std::array<iovec, max_message_count> iovecs_{};
-    std::array<detail::LogMmsgHeader, max_message_count> messages_{};
+    std::array<detail::log_mmsg_header, max_message_count> messages_{};
 #endif
 };
 

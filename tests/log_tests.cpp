@@ -97,6 +97,9 @@ TEST(LogTests, LogDetailTypesExposeLowerCasePrimaryNames) {
     static_assert(std::is_same_v<af::udp_log_backend, af::UdpLogBackend>);
     static_assert(std::is_same_v<af::tcp_log_backend_options, af::TcpLogBackendConfig>);
     static_assert(std::is_same_v<af::tcp_log_backend, af::TcpLogBackend>);
+#if defined(__linux__)
+    static_assert(std::is_same_v<af::detail::log_mmsg_header, af::detail::LogMmsgHeader>);
+#endif
     static_assert(
         std::is_same_v<af::detail::runtime_bound_log_batch, af::detail::RuntimeBoundLogBatch>);
     static_assert(std::is_same_v<af::detail::runtime_bound_log_backend_config,
