@@ -395,7 +395,7 @@ private:
                 return EOPNOTSUPP;
             }
             if (!config.options.reuse_port ||
-                config.accept_strategy == accept_strategy::single_acceptor) {
+                config.accept_strategy == tcp_accept_strategy::single_acceptor) {
                 return EOPNOTSUPP;
             }
             if (config.endpoint.port == 0U) {

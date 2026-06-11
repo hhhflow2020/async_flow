@@ -79,7 +79,7 @@ public:
         listener_config.threads = std::move(config.threads);
         listener_config.options = config.options;
         listener_config.options.reuse_port = false;
-        listener_config.accept_strategy = accept_strategy::single_acceptor;
+        listener_config.accept_strategy = tcp_accept_strategy::single_acceptor;
         normalize_listener_owner_thread(listener_config.threads);
         return server_.add_listener_connection(std::move(listener_config), callbacks);
     }

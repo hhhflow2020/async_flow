@@ -8,7 +8,8 @@
 - 普通 socket readiness：accept、connect、recv、send、read、write、recvmsg、sendmsg。
 - 网络 reactor 抽象：TCP server/client、IPv4/IPv6 UDP socket server/client、Unix domain stream server/client、Unix domain datagram socket server/client。
 - Linux native helper：eventfd、timerfd、sendfile、splice、openat2、statx、fallocate 等。
-- readiness poller 默认使用 LT 语义；task 级 `io_wait()` 完成后由 runtime 删除或更新 interest，网络 channel 只在 interest 变化时更新。
+- readiness poller 默认使用 LT 语义；网络 fd 由 owner reactor 线程持有，channel/connection
+  只在 interest 变化、取消和关闭时更新 poller。
 - kqueue timeout wait 保持一次性 timer 语义。
 - `asyncflow_select_backend_tests` 会强制关闭 epoll/kqueue 并启用 select，覆盖 fallback readiness wait。
 
@@ -18,10 +19,11 @@
 
 ## 正确性要求
 
-- fd 的 wait、cancel、close 必须回到所属 IO 线程执行。
-- `IoOpState` 只由持有该 task 的线程推进，避免跨线程写状态。
-- readiness wait 完成后恢复同一个 pending task。
-- 取消 readiness 时必须从 poller 删除或更新 interest，并以 `ECANCELED` 恢复 task。
+- fd 的注册、interest 更新、cancel、close 必须回到所属 IO 线程执行。
+- runtime 不再暴露 task 级 IO wait facade；业务 IO 通过 TCP/UDP/Unix socket 抽象进入
+  reactor。
+- readiness 回调在 owner IO 线程执行，读写按预算 drain 到 `EAGAIN` 或状态变化。
+- 取消 readiness 时必须从 poller 删除或更新 interest，并关闭或发布对应连接状态。
 - TCP client 停止时必须在 owner IO 线程取消 pending connect wait，不能等待 `connect_timeout` 或系统 TCP 超时。
 - IO helper 遇到 `EINTR` 重试，遇到 would-block 才进入 wait。
 

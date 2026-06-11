@@ -4,6 +4,10 @@
 
 #include <gtest/gtest.h>
 
+#if __has_include("af/detail/task/task_io_state.hpp")
+#error "legacy task IO facade must not be installed"
+#endif
+
 TEST(PublicHeaderTests, AsyncFlowUmbrellaExposesRuntimeInstanceApi) {
     af::runtime_config config;
     config.threads = {af::cpu_threads("header", 1)};

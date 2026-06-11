@@ -35,7 +35,7 @@ enum class close_reason : std::uint8_t {
     Error = error,
 };
 
-enum class accept_strategy : std::uint8_t {
+enum class tcp_accept_strategy : std::uint8_t {
     auto_select,
     reuse_port_per_io_thread,
     single_acceptor,
@@ -43,6 +43,8 @@ enum class accept_strategy : std::uint8_t {
     ReusePortPerIoThread = reuse_port_per_io_thread,
     SingleAcceptor = single_acceptor,
 };
+
+using accept_strategy = tcp_accept_strategy;
 
 enum class listener_state : std::uint8_t {
     configured,
@@ -98,7 +100,7 @@ struct tcp_listener_config {
     tcp_endpoint endpoint;
     std::vector<af::thread_ref> threads;
     tcp_listener_options options;
-    accept_strategy accept_strategy{af::net::accept_strategy::auto_select};
+    tcp_accept_strategy accept_strategy{tcp_accept_strategy::auto_select};
 };
 
 struct listener_id {
@@ -158,7 +160,7 @@ struct listener_result {
 
 using SendResult = send_result;
 using CloseReason = close_reason;
-using AcceptStrategy = accept_strategy;
+using AcceptStrategy = tcp_accept_strategy;
 using ListenerState = listener_state;
 using RemoveListenerPolicy = remove_listener_policy;
 using TcpListenerOptions = tcp_listener_options;

@@ -30,6 +30,7 @@ TEST(NetSocketAddressTests, LowerCaseNetAliasesMatchPublicTypes) {
 
     static_assert(std::is_same_v<af::net::send_result, af::net::SendResult>);
     static_assert(std::is_same_v<af::net::close_reason, af::net::CloseReason>);
+    static_assert(std::is_same_v<af::net::tcp_accept_strategy, af::net::accept_strategy>);
     static_assert(std::is_same_v<af::net::accept_strategy, af::net::AcceptStrategy>);
     static_assert(std::is_same_v<af::net::listener_state, af::net::ListenerState>);
     static_assert(std::is_same_v<af::net::remove_listener_policy, af::net::RemoveListenerPolicy>);
@@ -77,10 +78,10 @@ TEST(NetSocketAddressTests, LowerCaseNetAliasesMatchPublicTypes) {
     static_assert(af::net::close_reason::local == af::net::CloseReason::Local);
     static_assert(af::net::close_reason::peer == af::net::CloseReason::Peer);
     static_assert(af::net::close_reason::error == af::net::CloseReason::Error);
-    static_assert(af::net::accept_strategy::auto_select == af::net::AcceptStrategy::Auto);
-    static_assert(af::net::accept_strategy::reuse_port_per_io_thread ==
+    static_assert(af::net::tcp_accept_strategy::auto_select == af::net::AcceptStrategy::Auto);
+    static_assert(af::net::tcp_accept_strategy::reuse_port_per_io_thread ==
                   af::net::AcceptStrategy::ReusePortPerIoThread);
-    static_assert(af::net::accept_strategy::single_acceptor ==
+    static_assert(af::net::tcp_accept_strategy::single_acceptor ==
                   af::net::AcceptStrategy::SingleAcceptor);
     static_assert(af::net::listener_state::configured == af::net::ListenerState::Configured);
     static_assert(af::net::listener_state::starting == af::net::ListenerState::Starting);
@@ -118,7 +119,7 @@ TEST(NetSocketAddressTests, TcpListenerConfigAcceptsRuntimeThreadRefs) {
     config.endpoint = af::net::tcp_endpoint::any(8080);
     config.threads = af::net::thread_list(af::thread_group_ref(indexes.data(), indexes.size()));
     config.options.reuse_port = true;
-    config.accept_strategy = af::net::accept_strategy::reuse_port_per_io_thread;
+    config.accept_strategy = af::net::tcp_accept_strategy::reuse_port_per_io_thread;
 
     EXPECT_EQ(config.name, "public");
     EXPECT_EQ(config.endpoint.port, 8080U);
@@ -126,7 +127,7 @@ TEST(NetSocketAddressTests, TcpListenerConfigAcceptsRuntimeThreadRefs) {
     EXPECT_EQ(config.threads[0], af::thread_ref(1));
     EXPECT_EQ(config.threads[1], af::thread_ref(3));
     EXPECT_TRUE(config.options.reuse_port);
-    EXPECT_EQ(config.accept_strategy, af::net::accept_strategy::reuse_port_per_io_thread);
+    EXPECT_EQ(config.accept_strategy, af::net::tcp_accept_strategy::reuse_port_per_io_thread);
 }
 
 TEST(NetSocketAddressTests, ConvertsIpv4EndpointToSocketAddress) {

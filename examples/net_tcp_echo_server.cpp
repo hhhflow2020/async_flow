@@ -173,7 +173,7 @@ void start_server_shard(af::net::tcp_server &server, echo_shard_state &state,
     listener_config.options.reuse_port = reuse_port;
     listener_config.options.ipv6_only = ipv6;
     listener_config.options.accept_budget = 256;
-    listener_config.accept_strategy = af::net::accept_strategy::single_acceptor;
+    listener_config.accept_strategy = af::net::tcp_accept_strategy::single_acceptor;
 
     const af::net::listener_result listener =
         server.add_listener(std::move(listener_config), callbacks);

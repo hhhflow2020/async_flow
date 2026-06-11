@@ -30,7 +30,9 @@
 
 这样可以避免 IO 线程长期阻塞导致同线程 task 饥饿。
 
-网络 channel 不使用 one-shot rearm；读写事件回调负责按预算 drain 到 `EAGAIN` 或输出队列状态变化，再只在 interest 变化时更新 poller。task 级 `io_wait()` 也是 LT readiness，完成后 runtime 删除或更新该 fd 的等待项，因此不会依赖每次事件触发后的 one-shot rearm。
+网络 channel 不使用 one-shot rearm；读写事件回调负责按预算 drain 到 `EAGAIN`
+或输出队列状态变化，再只在 interest 变化、取消和关闭时更新 poller。runtime 不再暴露
+task 级 IO wait facade，业务 IO 通过 TCP/UDP/Unix socket 抽象进入 reactor，因此不会依赖每次事件触发后的 one-shot rearm。
 
 select fallback 每次 poll 从当前 channel/wait 表重建 `fd_set`，用非阻塞 pipe 做跨线程唤醒；这是兼容路径，不改变 epoll/kqueue 的热路径。
 
@@ -165,7 +167,7 @@ runtime.post(io_thread, [&] {
 });
 ```
 
-Unix stream listener 强制使用 `accept_strategy::single_acceptor`：只有一个 IO shard 负责 bind/listen/accept，accepted fd 再按 stream connection 逻辑进入目标 IO shard。这样可以避免多个线程同时 bind 同一个 filesystem path。默认会在 bind 前 unlink 已存在的 path，并在 listener close/stop 后 unlink 绑定 path；可通过 `tcp_listener_options::unlink_existing_unix_path` 和 `unlink_unix_path_on_close` 调整。
+Unix stream listener 强制使用 `tcp_accept_strategy::single_acceptor`：只有一个 IO shard 负责 bind/listen/accept，accepted fd 再按 stream connection 逻辑进入目标 IO shard。这样可以避免多个线程同时 bind 同一个 filesystem path。默认会在 bind 前 unlink 已存在的 path，并在 listener close/stop 后 unlink 绑定 path；可通过 `tcp_listener_options::unlink_existing_unix_path` 和 `unlink_unix_path_on_close` 调整。
 
 ```cpp
 af::net::unix_stream_client client(runtime);
@@ -291,9 +293,9 @@ UDP socket 控制面同样是 reactor-only：`start()`、`stop()` 应由 reactor
 
 ## Accept 策略
 
-- `accept_strategy::auto_select`：默认策略。`reuse_port=true` 时每个目标 IO 线程各自创建 listener fd；`reuse_port=false` 时只在首个 IO 线程监听，保证不会重复 bind。
-- `accept_strategy::reuse_port_per_io_thread`：强制每个目标 IO 线程创建 listener fd，要求 `reuse_port=true`。
-- `accept_strategy::single_acceptor`：只在首个目标 IO 线程 accept，适合不希望或不能使用 `SO_REUSEPORT` 的场景。accepted fd 会通过 runtime task 分发到绑定的 IO 线程，并在目标 IO 线程创建 `tcp_connection`。
+- `tcp_accept_strategy::auto_select`：默认策略。`reuse_port=true` 时每个目标 IO 线程各自创建 listener fd；`reuse_port=false` 时只在首个 IO 线程监听，保证不会重复 bind。
+- `tcp_accept_strategy::reuse_port_per_io_thread`：强制每个目标 IO 线程创建 listener fd，要求 `reuse_port=true`。
+- `tcp_accept_strategy::single_acceptor`：只在首个目标 IO 线程 accept，适合不希望或不能使用 `SO_REUSEPORT` 的场景。accepted fd 会通过 runtime task 分发到绑定的 IO 线程，并在目标 IO 线程创建 `tcp_connection`。
 
 `reuse_port=true` 是 TCP/UDP 多 IO 线程绑定同一端口的最高性能路径：内核把新连接或 datagram 分配给各 IO 线程自己的 fd，后续处理保持本地化。
 
