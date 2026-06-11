@@ -25,7 +25,3 @@ enum class task_state : std::uint8_t {
     pending,
     done,
 };
-
-using TaskResult = task_result;
-using ShutdownPolicy = shutdown_policy;
-using TaskState = task_state;

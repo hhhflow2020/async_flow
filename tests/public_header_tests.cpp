@@ -138,6 +138,21 @@ TEST(PublicHeaderTests, RuntimeTaskExposesOnlyExplicitScheduleNames) {
     static_assert(!runtime_task_legacy_schedule_probe::has_cancelled_helper());
 }
 
+TEST(PublicHeaderTests, TaskPublicHeadersDoNotExposeCamelCaseTypeAliases) {
+    constexpr std::array forbidden{
+        forbidden_source_snippet{"include/af/detail/task/task_types.hpp", "using TaskResult ="},
+        forbidden_source_snippet{"include/af/detail/task/task_types.hpp", "using ShutdownPolicy ="},
+        forbidden_source_snippet{"include/af/detail/task/task_types.hpp", "using TaskState ="},
+    };
+
+    for (const forbidden_source_snippet item : forbidden) {
+        const std::string content = read_source_file(item.relative_path);
+        ASSERT_FALSE(content.empty()) << item.relative_path;
+        EXPECT_EQ(content.find(item.snippet), std::string::npos)
+            << item.relative_path << " still contains " << item.snippet;
+    }
+}
+
 TEST(PublicHeaderTests, NetUmbrellaExposesRuntimeNativeApi) {
     static_assert(std::is_class_v<af::net::tcp_server>);
     static_assert(std::is_class_v<af::net::tcp_client>);
