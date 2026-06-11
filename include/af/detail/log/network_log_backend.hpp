@@ -24,13 +24,13 @@
 
 namespace af {
 
-struct UdpLogBackendConfig {
+struct udp_log_backend_options {
     std::string host;
     std::uint16_t port{0};
     std::size_t max_datagram_size{1400};
 };
 
-struct TcpLogBackendConfig {
+struct tcp_log_backend_options {
     std::string host;
     std::uint16_t port{0};
     std::chrono::milliseconds reconnect_interval{std::chrono::milliseconds(500)};
@@ -79,11 +79,11 @@ struct LogMmsgHeader {
 
 } // namespace detail
 
-class UdpLogBackend final : public log_backend {
+class udp_log_backend final : public log_backend {
 public:
-    explicit UdpLogBackend(UdpLogBackendConfig config) : config_(std::move(config)) {}
+    explicit udp_log_backend(udp_log_backend_options config) : config_(std::move(config)) {}
 
-    ~UdpLogBackend() override {
+    ~udp_log_backend() override {
         detail::close_log_socket(fd_);
     }
 
@@ -211,7 +211,7 @@ private:
     }
 #endif
 
-    UdpLogBackendConfig config_;
+    udp_log_backend_options config_;
     int fd_{-1};
 #if defined(__linux__)
     std::array<iovec, max_message_count> iovecs_{};
@@ -219,11 +219,11 @@ private:
 #endif
 };
 
-class TcpLogBackend final : public log_backend {
+class tcp_log_backend final : public log_backend {
 public:
-    explicit TcpLogBackend(TcpLogBackendConfig config) : config_(std::move(config)) {}
+    explicit tcp_log_backend(tcp_log_backend_options config) : config_(std::move(config)) {}
 
-    ~TcpLogBackend() override {
+    ~tcp_log_backend() override {
         detail::close_log_socket(fd_);
     }
 
@@ -379,19 +379,26 @@ private:
         connect_pending_ = false;
     }
 
-    TcpLogBackendConfig config_;
+    tcp_log_backend_options config_;
     int fd_{-1};
     bool connect_pending_{false};
     std::chrono::steady_clock::time_point next_connect_time_{};
     std::array<iovec, max_iov_count> iovecs_{};
 };
 
-[[nodiscard]] inline std::unique_ptr<log_backend> make_udp_log_backend(UdpLogBackendConfig config) {
-    return std::make_unique<UdpLogBackend>(std::move(config));
+using UdpLogBackendConfig = udp_log_backend_options;
+using TcpLogBackendConfig = tcp_log_backend_options;
+using UdpLogBackend = udp_log_backend;
+using TcpLogBackend = tcp_log_backend;
+
+[[nodiscard]] inline std::unique_ptr<log_backend>
+make_udp_log_backend(udp_log_backend_options config) {
+    return std::make_unique<udp_log_backend>(std::move(config));
 }
 
-[[nodiscard]] inline std::unique_ptr<log_backend> make_tcp_log_backend(TcpLogBackendConfig config) {
-    return std::make_unique<TcpLogBackend>(std::move(config));
+[[nodiscard]] inline std::unique_ptr<log_backend>
+make_tcp_log_backend(tcp_log_backend_options config) {
+    return std::make_unique<tcp_log_backend>(std::move(config));
 }
 
 } // namespace af

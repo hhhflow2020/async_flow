@@ -23,9 +23,9 @@
 
 namespace af::detail {
 
-class RuntimeBoundLogBatch {
+class runtime_bound_log_batch {
 public:
-    explicit RuntimeBoundLogBatch(std::size_t max_records) {
+    explicit runtime_bound_log_batch(std::size_t max_records) {
         messages.reserve(max_records == 0U ? 1U : max_records);
     }
 
@@ -54,7 +54,7 @@ public:
     std::vector<std::string> messages;
 };
 
-struct RuntimeBoundLogBackendConfig {
+struct runtime_bound_log_backend_config {
     runtime *owner{nullptr};
     runtime::thread_index thread{runtime_invalid_thread_index};
     std::unique_ptr<log_backend> backend;
@@ -63,18 +63,18 @@ struct RuntimeBoundLogBackendConfig {
     std::size_t max_batches_per_run{64};
 };
 
-struct RuntimeBoundLogBackendStats {
+struct runtime_bound_log_backend_stats {
     std::uint64_t queued_records{0};
     std::uint64_t written_records{0};
     std::uint64_t dropped_records{0};
     std::uint64_t flushes{0};
 };
 
-class RuntimeBoundLogBackend final : public log_backend, public runtime_service_task {
+class runtime_bound_log_backend final : public log_backend, public runtime_service_task {
 public:
-    using Batch = RuntimeBoundLogBatch;
+    using Batch = runtime_bound_log_batch;
 
-    explicit RuntimeBoundLogBackend(RuntimeBoundLogBackendConfig config)
+    explicit runtime_bound_log_backend(runtime_bound_log_backend_config config)
         : owner_(config.owner), thread_(config.thread), backend_(std::move(config.backend)),
           max_batch_records_(normalize_max_batch_records(config.max_batch_records)),
           max_batches_per_run_(config.max_batches_per_run == 0U ? 1U : config.max_batches_per_run),
@@ -93,10 +93,10 @@ public:
         }
     }
 
-    RuntimeBoundLogBackend(const RuntimeBoundLogBackend &) = delete;
-    RuntimeBoundLogBackend &operator=(const RuntimeBoundLogBackend &) = delete;
+    runtime_bound_log_backend(const runtime_bound_log_backend &) = delete;
+    runtime_bound_log_backend &operator=(const runtime_bound_log_backend &) = delete;
 
-    ~RuntimeBoundLogBackend() override {
+    ~runtime_bound_log_backend() override {
         shutdown();
     }
 
@@ -173,8 +173,8 @@ public:
         return did_work || pending_batches_.load(std::memory_order_acquire) != 0U;
     }
 
-    [[nodiscard]] RuntimeBoundLogBackendStats stats() const noexcept {
-        return RuntimeBoundLogBackendStats{
+    [[nodiscard]] runtime_bound_log_backend_stats stats() const noexcept {
+        return runtime_bound_log_backend_stats{
             queued_records_.load(std::memory_order_relaxed),
             written_records_.load(std::memory_order_relaxed),
             dropped_records_.load(std::memory_order_relaxed),
@@ -460,9 +460,14 @@ private:
     CacheLineAtomic<bool> finished_{false};
 };
 
+using RuntimeBoundLogBatch = runtime_bound_log_batch;
+using RuntimeBoundLogBackendConfig = runtime_bound_log_backend_config;
+using RuntimeBoundLogBackendStats = runtime_bound_log_backend_stats;
+using RuntimeBoundLogBackend = runtime_bound_log_backend;
+
 [[nodiscard]] inline std::unique_ptr<log_backend>
-make_runtime_bound_log_backend(RuntimeBoundLogBackendConfig config) {
-    return std::make_unique<RuntimeBoundLogBackend>(std::move(config));
+make_runtime_bound_log_backend(runtime_bound_log_backend_config config) {
+    return std::make_unique<runtime_bound_log_backend>(std::move(config));
 }
 
 } // namespace af::detail

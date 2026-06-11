@@ -49,7 +49,7 @@ async_log_flush_poll_interval_from_batch_delay(std::chrono::microseconds delay) 
 
 inline void append_async_log_backend(async_log_config &target,
                                      const file_log_backend_config &source) {
-    FileLogBackendConfig backend_config;
+    file_log_backend_options backend_config;
     backend_config.path = source.path;
     backend_config.append = source.append;
     backend_config.fsync_on_flush = source.fsync_on_flush;
@@ -59,20 +59,20 @@ inline void append_async_log_backend(async_log_config &target,
 
 inline void append_async_log_backend(async_log_config &target,
                                      const udp_log_backend_config &source) {
-    UdpLogBackendConfig backend_config;
+    udp_log_backend_options backend_config;
     backend_config.host = source.host;
     backend_config.port = source.port;
     backend_config.max_datagram_size = source.max_datagram_size;
-    target.backends.push_back(std::make_unique<UdpLogBackend>(std::move(backend_config)));
+    target.backends.push_back(std::make_unique<udp_log_backend>(std::move(backend_config)));
 }
 
 inline void append_async_log_backend(async_log_config &target,
                                      const tcp_log_backend_config &source) {
-    TcpLogBackendConfig backend_config;
+    tcp_log_backend_options backend_config;
     backend_config.host = source.host;
     backend_config.port = source.port;
     backend_config.reconnect_interval = source.reconnect_interval;
-    target.backends.push_back(std::make_unique<TcpLogBackend>(std::move(backend_config)));
+    target.backends.push_back(std::make_unique<tcp_log_backend>(std::move(backend_config)));
 }
 
 inline void append_async_log_backend(async_log_config &target, const log_backend_config &source) {
@@ -108,12 +108,12 @@ inline void append_runtime_async_log_backend(async_log_config &target, runtime &
 inline void append_runtime_async_log_backend(async_log_config &target, runtime &owner,
                                              const log_config &log_source,
                                              const udp_log_backend_config &source) {
-    UdpLogBackendConfig backend_config;
+    udp_log_backend_options backend_config;
     backend_config.host = source.host;
     backend_config.port = source.port;
     backend_config.max_datagram_size = source.max_datagram_size;
 
-    RuntimeBoundLogBackendConfig bound_config;
+    runtime_bound_log_backend_config bound_config;
     bound_config.owner = &owner;
     bound_config.thread = owner.select_thread(source.io_thread);
     bound_config.backend = make_udp_log_backend(std::move(backend_config));
@@ -126,12 +126,12 @@ inline void append_runtime_async_log_backend(async_log_config &target, runtime &
 inline void append_runtime_async_log_backend(async_log_config &target, runtime &owner,
                                              const log_config &log_source,
                                              const tcp_log_backend_config &source) {
-    TcpLogBackendConfig backend_config;
+    tcp_log_backend_options backend_config;
     backend_config.host = source.host;
     backend_config.port = source.port;
     backend_config.reconnect_interval = source.reconnect_interval;
 
-    RuntimeBoundLogBackendConfig bound_config;
+    runtime_bound_log_backend_config bound_config;
     bound_config.owner = &owner;
     bound_config.thread = owner.select_thread(source.io_thread);
     bound_config.backend = make_tcp_log_backend(std::move(backend_config));

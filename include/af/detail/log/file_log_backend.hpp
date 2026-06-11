@@ -18,7 +18,7 @@
 
 namespace af {
 
-struct FileLogBackendConfig {
+struct file_log_backend_options {
     std::filesystem::path path;
     bool append{true};
     bool close_on_exec{true};
@@ -26,17 +26,17 @@ struct FileLogBackendConfig {
     std::size_t write_batch_iov{64};
 };
 
-class FileLogBackend final : public log_backend {
+class file_log_backend final : public log_backend {
 public:
-    explicit FileLogBackend(FileLogBackendConfig config)
+    explicit file_log_backend(file_log_backend_options config)
         : path_(config.path.string()), append_(config.append), close_on_exec_(config.close_on_exec),
           fsync_on_flush_(config.fsync_on_flush),
           iovecs_(normalize_write_batch_iov(config.write_batch_iov)) {}
 
-    FileLogBackend(const FileLogBackend &) = delete;
-    FileLogBackend &operator=(const FileLogBackend &) = delete;
+    file_log_backend(const file_log_backend &) = delete;
+    file_log_backend &operator=(const file_log_backend &) = delete;
 
-    ~FileLogBackend() override {
+    ~file_log_backend() override {
         close_file();
     }
 
@@ -133,9 +133,12 @@ private:
     std::vector<iovec> iovecs_;
 };
 
+using FileLogBackendConfig = file_log_backend_options;
+using FileLogBackend = file_log_backend;
+
 [[nodiscard]] inline std::unique_ptr<log_backend>
-make_file_log_backend(FileLogBackendConfig config) {
-    return std::make_unique<FileLogBackend>(std::move(config));
+make_file_log_backend(file_log_backend_options config) {
+    return std::make_unique<file_log_backend>(std::move(config));
 }
 
 } // namespace af

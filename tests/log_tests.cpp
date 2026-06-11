@@ -85,6 +85,20 @@ TEST(LogTests, LogDetailTypesExposeLowerCasePrimaryNames) {
     static_assert(
         af::detail::runtime_instance_async_log_consumer_control_operation::unregister_consumer ==
         af::detail::RuntimeInstanceAsyncLogConsumerControlOperation::Unregister);
+    static_assert(std::is_same_v<af::file_log_backend_options, af::FileLogBackendConfig>);
+    static_assert(std::is_same_v<af::file_log_backend, af::FileLogBackend>);
+    static_assert(std::is_same_v<af::udp_log_backend_options, af::UdpLogBackendConfig>);
+    static_assert(std::is_same_v<af::udp_log_backend, af::UdpLogBackend>);
+    static_assert(std::is_same_v<af::tcp_log_backend_options, af::TcpLogBackendConfig>);
+    static_assert(std::is_same_v<af::tcp_log_backend, af::TcpLogBackend>);
+    static_assert(
+        std::is_same_v<af::detail::runtime_bound_log_batch, af::detail::RuntimeBoundLogBatch>);
+    static_assert(std::is_same_v<af::detail::runtime_bound_log_backend_config,
+                                 af::detail::RuntimeBoundLogBackendConfig>);
+    static_assert(std::is_same_v<af::detail::runtime_bound_log_backend_stats,
+                                 af::detail::RuntimeBoundLogBackendStats>);
+    static_assert(
+        std::is_same_v<af::detail::runtime_bound_log_backend, af::detail::RuntimeBoundLogBackend>);
 }
 
 [[nodiscard]] std::string read_file(const std::filesystem::path &path) {
@@ -1262,7 +1276,7 @@ TEST(LogTests, RuntimeBoundLogBackendRunsInnerBackendOnConfiguredIoThread) {
         std::make_unique<RuntimeInstanceThreadObservingLogBackend>(runtime, io_thread);
     auto *observing_backend = inner_backend.get();
 
-    af::detail::RuntimeBoundLogBackendConfig bound_config;
+    af::detail::runtime_bound_log_backend_config bound_config;
     bound_config.owner = &runtime;
     bound_config.thread = io_thread;
     bound_config.backend = std::move(inner_backend);
@@ -1297,7 +1311,7 @@ TEST(LogTests, RuntimeBoundLogBackendRejectsInvalidRuntimeThread) {
     af::runtime runtime(runtime_config);
     ASSERT_TRUE(runtime.start());
 
-    af::detail::RuntimeBoundLogBackendConfig bound_config;
+    af::detail::runtime_bound_log_backend_config bound_config;
     bound_config.owner = &runtime;
     bound_config.thread = runtime.invalid_thread_index();
     bound_config.backend = std::make_unique<CountingLogBackend>();
@@ -1846,7 +1860,7 @@ TEST(LogTests, TcpBackendWritesBatchedRecordsToLoopbackStream) {
         server_done.store(true, std::memory_order_release);
     });
 
-    af::TcpLogBackend backend({
+    af::tcp_log_backend backend({
         .host = "127.0.0.1",
         .port = port,
         .reconnect_interval = std::chrono::milliseconds(1),
@@ -1884,7 +1898,7 @@ TEST(LogTests, UdpBackendWritesBatchedRecordsToLoopbackDatagrams) {
     int socket_fd = make_loopback_udp_socket(port);
     ASSERT_GE(socket_fd, 0) << std::strerror(errno);
 
-    af::UdpLogBackend backend({
+    af::udp_log_backend backend({
         .host = "127.0.0.1",
         .port = port,
     });
