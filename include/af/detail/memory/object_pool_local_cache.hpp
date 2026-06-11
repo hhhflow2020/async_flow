@@ -9,13 +9,13 @@ namespace af::detail {
 
 template <typename Pool, typename Slot, std::size_t LocalCacheCapacity,
           std::size_t RemoteReleaseBatchSize>
-struct ObjectPoolLocalCache {
+struct object_pool_local_cache {
     Pool *owner{nullptr};
     Slot *slots[LocalCacheCapacity]{};
     std::size_t size{0};
     bool locally_acquired{false};
 
-    ~ObjectPoolLocalCache() {
+    ~object_pool_local_cache() {
         flush();
     }
 
@@ -84,7 +84,7 @@ struct ObjectPoolLocalCache {
     }
 };
 
-template <typename Pool, std::size_t DirectReleaseSetSize> struct ObjectPoolDirectReleaseSet {
+template <typename Pool, std::size_t DirectReleaseSetSize> struct object_pool_direct_release_set {
     Pool *owners[DirectReleaseSetSize]{};
     std::size_t next_victim{0};
 
@@ -133,9 +133,10 @@ template <typename Pool, std::size_t DirectReleaseSetSize> struct ObjectPoolDire
 
 template <typename Pool, typename Slot, std::size_t LocalCacheCapacity,
           std::size_t RemoteReleaseBatchSize, std::size_t DirectReleaseSetSize>
-struct ObjectPoolSingleLocalCacheSet {
-    using LocalCache = ObjectPoolLocalCache<Pool, Slot, LocalCacheCapacity, RemoteReleaseBatchSize>;
-    using DirectReleaseSet = ObjectPoolDirectReleaseSet<Pool, DirectReleaseSetSize>;
+struct object_pool_single_local_cache_set {
+    using LocalCache =
+        object_pool_local_cache<Pool, Slot, LocalCacheCapacity, RemoteReleaseBatchSize>;
+    using DirectReleaseSet = object_pool_direct_release_set<Pool, DirectReleaseSetSize>;
 
     LocalCache primary{};
 
@@ -201,11 +202,12 @@ struct ObjectPoolSingleLocalCacheSet {
 template <typename Pool, typename Slot, std::size_t LocalCacheCapacity,
           std::size_t RemoteReleaseBatchSize, std::size_t LocalCacheSetSize,
           std::size_t DirectReleaseSetSize>
-struct ObjectPoolMultiLocalCacheSet {
+struct object_pool_multi_local_cache_set {
     static constexpr std::size_t overflow_cache_count = LocalCacheSetSize - 1U;
 
-    using LocalCache = ObjectPoolLocalCache<Pool, Slot, LocalCacheCapacity, RemoteReleaseBatchSize>;
-    using DirectReleaseSet = ObjectPoolDirectReleaseSet<Pool, DirectReleaseSetSize>;
+    using LocalCache =
+        object_pool_local_cache<Pool, Slot, LocalCacheCapacity, RemoteReleaseBatchSize>;
+    using DirectReleaseSet = object_pool_direct_release_set<Pool, DirectReleaseSetSize>;
 
     LocalCache primary{};
     std::array<LocalCache, overflow_cache_count> overflow{};
@@ -346,11 +348,39 @@ struct ObjectPoolMultiLocalCacheSet {
 template <typename Pool, typename Slot, std::size_t LocalCacheCapacity,
           std::size_t RemoteReleaseBatchSize, std::size_t LocalCacheSetSize,
           std::size_t DirectReleaseSetSize>
-using ObjectPoolLocalCacheSet = std::conditional_t<
+using object_pool_local_cache_set = std::conditional_t<
     LocalCacheSetSize == 1U,
-    ObjectPoolSingleLocalCacheSet<Pool, Slot, LocalCacheCapacity, RemoteReleaseBatchSize,
-                                  DirectReleaseSetSize>,
-    ObjectPoolMultiLocalCacheSet<Pool, Slot, LocalCacheCapacity, RemoteReleaseBatchSize,
-                                 LocalCacheSetSize, DirectReleaseSetSize>>;
+    object_pool_single_local_cache_set<Pool, Slot, LocalCacheCapacity, RemoteReleaseBatchSize,
+                                       DirectReleaseSetSize>,
+    object_pool_multi_local_cache_set<Pool, Slot, LocalCacheCapacity, RemoteReleaseBatchSize,
+                                      LocalCacheSetSize, DirectReleaseSetSize>>;
+
+template <typename Pool, typename Slot, std::size_t LocalCacheCapacity,
+          std::size_t RemoteReleaseBatchSize>
+using ObjectPoolLocalCache =
+    object_pool_local_cache<Pool, Slot, LocalCacheCapacity, RemoteReleaseBatchSize>;
+
+template <typename Pool, std::size_t DirectReleaseSetSize>
+using ObjectPoolDirectReleaseSet = object_pool_direct_release_set<Pool, DirectReleaseSetSize>;
+
+template <typename Pool, typename Slot, std::size_t LocalCacheCapacity,
+          std::size_t RemoteReleaseBatchSize, std::size_t DirectReleaseSetSize>
+using ObjectPoolSingleLocalCacheSet =
+    object_pool_single_local_cache_set<Pool, Slot, LocalCacheCapacity, RemoteReleaseBatchSize,
+                                       DirectReleaseSetSize>;
+
+template <typename Pool, typename Slot, std::size_t LocalCacheCapacity,
+          std::size_t RemoteReleaseBatchSize, std::size_t LocalCacheSetSize,
+          std::size_t DirectReleaseSetSize>
+using ObjectPoolMultiLocalCacheSet =
+    object_pool_multi_local_cache_set<Pool, Slot, LocalCacheCapacity, RemoteReleaseBatchSize,
+                                      LocalCacheSetSize, DirectReleaseSetSize>;
+
+template <typename Pool, typename Slot, std::size_t LocalCacheCapacity,
+          std::size_t RemoteReleaseBatchSize, std::size_t LocalCacheSetSize,
+          std::size_t DirectReleaseSetSize>
+using ObjectPoolLocalCacheSet =
+    object_pool_local_cache_set<Pool, Slot, LocalCacheCapacity, RemoteReleaseBatchSize,
+                                LocalCacheSetSize, DirectReleaseSetSize>;
 
 } // namespace af::detail

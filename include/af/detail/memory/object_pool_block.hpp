@@ -12,7 +12,7 @@ namespace af::detail {
 
 template <typename T, std::size_t ChunkSize, bool CacheAllocatedSlotIndex,
           std::size_t LocalCacheCapacity>
-struct ObjectPoolBlockLayout {
+struct object_pool_block_layout {
     using slot_index_type = std::uint16_t;
 
     static_assert(LocalCacheCapacity > 0);
@@ -187,5 +187,10 @@ struct ObjectPoolBlockLayout {
         }
     };
 };
+
+template <typename T, std::size_t ChunkSize, bool CacheAllocatedSlotIndex,
+          std::size_t LocalCacheCapacity>
+using ObjectPoolBlockLayout =
+    object_pool_block_layout<T, ChunkSize, CacheAllocatedSlotIndex, LocalCacheCapacity>;
 
 } // namespace af::detail

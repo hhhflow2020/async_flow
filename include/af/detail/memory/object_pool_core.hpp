@@ -171,14 +171,14 @@ private:
     static_assert(std::atomic<void *>::is_always_lock_free,
                   "ObjectPool block list requires lock-free pointer atomics");
     using BlockLayout =
-        ObjectPoolBlockLayout<T, ChunkSize, CacheAllocatedSlotIndex, LocalCacheCapacity>;
+        object_pool_block_layout<T, ChunkSize, CacheAllocatedSlotIndex, LocalCacheCapacity>;
     using Slot = typename BlockLayout::Slot;
     using Block = typename BlockLayout::Block;
     using LocalCache =
-        ObjectPoolLocalCache<object_pool_core, Slot, LocalCacheCapacity, RemoteReleaseBatchSize>;
-    using LocalCacheSet =
-        ObjectPoolLocalCacheSet<object_pool_core, Slot, LocalCacheCapacity, RemoteReleaseBatchSize,
-                                LocalCacheSetSize, DirectReleaseSetSize>;
+        object_pool_local_cache<object_pool_core, Slot, LocalCacheCapacity, RemoteReleaseBatchSize>;
+    using LocalCacheSet = object_pool_local_cache_set<object_pool_core, Slot, LocalCacheCapacity,
+                                                      RemoteReleaseBatchSize, LocalCacheSetSize,
+                                                      DirectReleaseSetSize>;
 
     [[nodiscard]] void *acquire_slot() {
         LocalCache &cache = local_cache();
