@@ -493,6 +493,14 @@ TEST(PublicHeaderTests, ReactorBenchmarksCoverPollBatchSizes) {
     EXPECT_NE(content.find("BM_ReactorKqueueReadyBatchDispatch"), std::string::npos);
 }
 
+TEST(PublicHeaderTests, EpollReactorBatchesReadySourcesBeforeDispatch) {
+    const std::string content = read_source_file("include/af/runtime/detail/epoll_reactor.hpp");
+    ASSERT_FALSE(content.empty());
+    EXPECT_NE(content.find("ready_sources_"), std::string::npos);
+    EXPECT_NE(content.find("ready_events_"), std::string::npos);
+    EXPECT_NE(content.find("append_ready"), std::string::npos);
+}
+
 TEST(PublicHeaderTests, TcpBenchmarksCoverEchoRoundTrip) {
     const std::string cmake = read_source_file("CMakeLists.txt");
     ASSERT_FALSE(cmake.empty());

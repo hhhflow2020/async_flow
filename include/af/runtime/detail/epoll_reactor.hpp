@@ -114,6 +114,9 @@ public:
         }
 
         bool did_work = false;
+        ready_sources_.clear();
+        ready_events_.clear();
+
         for (int i = 0; i < count; ++i) {
             const epoll_event &event = events_[static_cast<std::size_t>(i)];
             if (event.data.ptr == nullptr) {
@@ -126,7 +129,16 @@ public:
             const std::uint32_t events = reactor_events_from_native(event.events);
             if (source != nullptr && source->active_ && source->on_event != nullptr &&
                 events != 0U) {
-                source->on_event(source->owner, *source, events);
+                if (!append_ready(source, events)) {
+                    return did_work;
+                }
+            }
+        }
+
+        for (std::size_t i = 0; i < ready_sources_.size(); ++i) {
+            fd_event_source *source = ready_sources_[i];
+            if (source != nullptr && source->active_ && source->on_event != nullptr) {
+                source->on_event(source->owner, *source, ready_events_[i]);
                 did_work = true;
             }
         }
@@ -168,9 +180,14 @@ private:
 
     void init_backend(std::size_t event_capacity) noexcept {
         try {
-            events_.resize(event_capacity == 0U ? 1U : event_capacity);
+            const std::size_t capacity = event_capacity == 0U ? 1U : event_capacity;
+            events_.resize(capacity);
+            ready_sources_.reserve(capacity);
+            ready_events_.reserve(capacity);
         } catch (...) {
             events_.clear();
+            ready_sources_.clear();
+            ready_events_.clear();
             return;
         }
 
@@ -204,6 +221,8 @@ private:
         }
         sources_.clear();
         events_.clear();
+        ready_sources_.clear();
+        ready_events_.clear();
 
         if (wake_fd_ >= 0) {
             ::close(wake_fd_);
@@ -367,8 +386,29 @@ private:
         wake_pending_.store(false, std::memory_order_relaxed);
     }
 
+    [[nodiscard]] bool append_ready(fd_event_source *source, std::uint32_t events) noexcept {
+        for (std::size_t i = 0; i < ready_sources_.size(); ++i) {
+            if (ready_sources_[i] == source) {
+                ready_events_[i] |= events;
+                return true;
+            }
+        }
+
+        try {
+            ready_sources_.push_back(source);
+            ready_events_.push_back(events);
+        } catch (...) {
+            ready_sources_.clear();
+            ready_events_.clear();
+            return false;
+        }
+        return true;
+    }
+
     std::vector<fd_event_source *> sources_;
     std::vector<epoll_event> events_;
+    std::vector<fd_event_source *> ready_sources_;
+    std::vector<std::uint32_t> ready_events_;
     std::atomic<bool> wake_pending_{false};
     std::size_t event_budget_{1};
     int epoll_fd_{-1};

@@ -22,6 +22,7 @@
 - IO readiness 只在 interest 变化时更新 poller。
 - eventfd/user event 唤醒合并，避免无意义 syscall。
 - 网络读写 drain 到 would-block 或预算耗尽。
+- epoll/select/kqueue reactor 都先收集 ready source 并合并同一 fd 的事件，再批量派发回调，避免 poll batch 内重复 source 造成额外分支和顺序噪声。
 
 ## Benchmark 覆盖
 
@@ -35,5 +36,4 @@
 
 ## 仍可提升
 
-- 为 TCP reactor 增加批量 ready 队列。
 - 为 IO buffer 增加按线程固定大小池。
