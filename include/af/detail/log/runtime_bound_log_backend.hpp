@@ -100,7 +100,7 @@ public:
         shutdown();
     }
 
-    void write_batch(af::Span<LogRecord *const> records) noexcept override {
+    void write_batch(af::span<LogRecord *const> records) noexcept override {
         static_cast<void>(enqueue(records));
     }
 
@@ -216,7 +216,7 @@ private:
         }
     }
 
-    [[nodiscard]] bool enqueue(af::Span<LogRecord *const> records) noexcept {
+    [[nodiscard]] bool enqueue(af::span<LogRecord *const> records) noexcept {
         if (records.empty() || stopping_.load(std::memory_order_acquire)) {
             return false;
         }
@@ -312,7 +312,7 @@ private:
     }
 
     [[nodiscard]] static std::size_t
-    count_non_empty_records(af::Span<LogRecord *const> records) noexcept {
+    count_non_empty_records(af::span<LogRecord *const> records) noexcept {
         std::size_t count = 0;
         for (const LogRecord *record : records) {
             if (record != nullptr && !record->message().empty()) {
@@ -332,7 +332,7 @@ private:
             return;
         }
         backend_->write_batch(
-            af::Span<LogRecord *const>(scratch_record_ptrs_.data(), scratch_record_ptrs_.size()));
+            af::span<LogRecord *const>(scratch_record_ptrs_.data(), scratch_record_ptrs_.size()));
         written_records_.fetch_add(scratch_record_ptrs_.size(), std::memory_order_relaxed);
     }
 

@@ -15,9 +15,9 @@
 
 namespace {
 
-class CountingLogBackend final : public af::LogBackend {
+class CountingLogBackend final : public af::log_backend {
 public:
-    void write_batch(af::Span<af::detail::LogRecord *const> records) noexcept override {
+    void write_batch(af::span<af::detail::LogRecord *const> records) noexcept override {
         records_.fetch_add(records.size(), std::memory_order_relaxed);
     }
 
@@ -30,7 +30,7 @@ private:
 };
 
 void run_async_logger_external_producer_benchmark(benchmark::State &state,
-                                                  af::LogOrdering ordering) {
+                                                  af::log_ordering ordering) {
     const int producer_count = static_cast<int>(state.range(0));
     const int records_per_producer = static_cast<int>(state.range(1));
     const auto total_records = static_cast<std::uint64_t>(producer_count) *
@@ -49,16 +49,16 @@ void run_async_logger_external_producer_benchmark(benchmark::State &state,
     auto *counting_backend = backend.get();
 
     const auto producer_shard_count = static_cast<std::size_t>(producer_count);
-    af::AsyncLogConfig config = ordering == af::LogOrdering::Ordered
-                                    ? af::AsyncLogConfig::ordered(producer_shard_count)
-                                    : af::AsyncLogConfig::relaxed(0U, producer_shard_count);
+    af::async_log_config config = ordering == af::log_ordering::ordered
+                                      ? af::async_log_config::ordered(producer_shard_count)
+                                      : af::async_log_config::relaxed(0U, producer_shard_count);
     config.queue_capacity = static_cast<std::size_t>(total_records + 1024U);
     config.max_batch_size = 256;
     config.max_consumer_batches_per_run = 1024;
-    config.overflow_policy = af::LogOverflowPolicy::DropNewest;
+    config.overflow_policy = af::log_overflow_policy::drop_newest;
     config.backends.push_back(std::move(backend));
 
-    auto logger = std::make_shared<af::AsyncLogger>(std::move(config));
+    auto logger = std::make_shared<af::async_logger>(std::move(config));
     af::detail::RuntimeInstanceAsyncLogConsumerController consumer(runtime, logger,
                                                                    threads.io_0.index, 1024);
     if (!consumer.start()) {
@@ -153,11 +153,11 @@ void run_async_logger_external_producer_benchmark(benchmark::State &state,
 }
 
 void BM_AsyncLoggerOrderedExternalProducers(benchmark::State &state) {
-    run_async_logger_external_producer_benchmark(state, af::LogOrdering::Ordered);
+    run_async_logger_external_producer_benchmark(state, af::log_ordering::ordered);
 }
 
 void BM_AsyncLoggerRelaxedExternalProducers(benchmark::State &state) {
-    run_async_logger_external_producer_benchmark(state, af::LogOrdering::Relaxed);
+    run_async_logger_external_producer_benchmark(state, af::log_ordering::relaxed);
 }
 
 void BM_AsyncLogRecordPoolAcquireRelease(benchmark::State &state) {
@@ -201,11 +201,11 @@ void BM_AsyncLogRecordPoolBatchAcquireRelease(benchmark::State &state) {
         }
         if (failed) {
             af::detail::release_async_log_records(
-                af::Span<af::detail::LogRecord *const>(records.data(), acquired));
+                af::span<af::detail::LogRecord *const>(records.data(), acquired));
             break;
         }
         af::detail::release_async_log_records(
-            af::Span<af::detail::LogRecord *const>(records.data(), records.size()));
+            af::span<af::detail::LogRecord *const>(records.data(), records.size()));
     }
 
     if (!failed) {
@@ -241,7 +241,7 @@ void BM_AsyncLogRecordPoolCrossThreadReleaseBatch(benchmark::State &state) {
             }
 
             af::detail::release_async_log_records(
-                af::Span<af::detail::LogRecord *const>(records.data(), records.size()));
+                af::span<af::detail::LogRecord *const>(records.data(), records.size()));
             seen = target;
             consumed.store(target, std::memory_order_release);
         }
@@ -263,7 +263,7 @@ void BM_AsyncLogRecordPoolCrossThreadReleaseBatch(benchmark::State &state) {
         }
         if (failed) {
             af::detail::release_async_log_records(
-                af::Span<af::detail::LogRecord *const>(records.data(), acquired));
+                af::span<af::detail::LogRecord *const>(records.data(), acquired));
             break;
         }
 

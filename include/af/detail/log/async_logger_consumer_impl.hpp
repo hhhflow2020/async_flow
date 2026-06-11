@@ -105,12 +105,12 @@ inline bool async_logger::drain_some(std::vector<detail::LogRecord *> &batch,
         }
 
         for (auto &backend : backends_) {
-            backend->write_batch(af::Span<detail::LogRecord *const>(batch.data(), batch.size()));
+            backend->write_batch(af::span<detail::LogRecord *const>(batch.data(), batch.size()));
         }
 
         const auto drained = batch.size();
         detail::release_async_log_records(
-            af::Span<detail::LogRecord *const>(batch.data(), drained));
+            af::span<detail::LogRecord *const>(batch.data(), drained));
         const auto previous_ready = ready_.fetch_sub(drained, std::memory_order_relaxed);
         AF_ASSERT(previous_ready >= drained);
         const auto previous = pending_.fetch_sub(drained, std::memory_order_release);

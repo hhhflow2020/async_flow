@@ -35,12 +35,17 @@ class AsyncLogRecordPool {
 
     struct Slab;
 
-    struct Slot : AsyncLogRecordPoolSlot {
+    struct alignas(hardware_cache_line_size) Slot : AsyncLogRecordPoolSlot {
         std::atomic<std::uint32_t> next{null_slot};
         LogRecord record;
         Slab *slab{nullptr};
         std::uint32_t index{0};
     };
+
+    static_assert(alignof(Slot) >= hardware_cache_line_size,
+                  "async log record pool slots must be cache-line aligned");
+    static_assert(sizeof(Slot) % hardware_cache_line_size == 0U,
+                  "async log record pool slots must not share cache lines");
 
     struct alignas(hardware_cache_line_size) Slab {
         Slab(AsyncLogRecordPool *pool, std::size_t capacity)
@@ -61,9 +66,9 @@ class AsyncLogRecordPool {
 
         const std::size_t capacity;
         std::unique_ptr<Slot[]> slots;
+        std::atomic<Slab *> next{nullptr};
         alignas(hardware_cache_line_size) std::atomic<std::uint64_t> free_head{
             pack_head(null_slot, 0U)};
-        std::atomic<Slab *> next{nullptr};
     };
 
 public:
@@ -117,7 +122,7 @@ public:
         static_cast<AsyncLogRecordPool *>(slot->owner)->release(slot);
     }
 
-    void release_records(af::Span<LogRecord *const> records) noexcept {
+    void release_records(af::span<LogRecord *const> records) noexcept {
         std::size_t begin = 0;
         while (begin < records.size()) {
             auto *first = static_cast<Slot *>(records[begin]->pool_slot());
@@ -500,7 +505,7 @@ private:
         }
     }
 
-    void release_records_to_slab(Slab &slab, af::Span<LogRecord *const> records) noexcept {
+    void release_records_to_slab(Slab &slab, af::span<LogRecord *const> records) noexcept {
         if (records.empty()) {
             return;
         }
@@ -552,7 +557,7 @@ inline void release_async_log_record(LogRecord *record) noexcept {
     AF_ASSERT(false);
 }
 
-inline void release_async_log_records(af::Span<LogRecord *const> records) noexcept {
+inline void release_async_log_records(af::span<LogRecord *const> records) noexcept {
     std::size_t begin = 0;
     while (begin < records.size()) {
         auto *first_slot = static_cast<AsyncLogRecordPoolSlot *>(records[begin]->pool_slot());

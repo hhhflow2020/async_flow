@@ -14,7 +14,7 @@ public:
     log_backend &operator=(const log_backend &) = delete;
     virtual ~log_backend() = default;
 
-    virtual void write_batch(af::Span<detail::LogRecord *const> records) noexcept = 0;
+    virtual void write_batch(af::span<detail::LogRecord *const> records) noexcept = 0;
     virtual void flush() noexcept {}
     [[nodiscard]] virtual bool flush(std::chrono::milliseconds timeout) noexcept {
         static_cast<void>(timeout);

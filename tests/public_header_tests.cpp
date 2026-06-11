@@ -36,6 +36,7 @@ TEST(PublicHeaderTests, LogUmbrellaExposesLowerCaseNames) {
 }
 
 TEST(PublicHeaderTests, UtilityUmbrellaExposesLowerCaseNames) {
+    static_assert(std::is_same_v<af::Span<int>, af::span<int>>);
     static_assert(std::is_same_v<af::BufferView, af::buffer_view>);
     static_assert(std::is_same_v<af::Buffer, af::buffer>);
     static_assert(std::is_same_v<af::BufferChain, af::buffer_chain>);

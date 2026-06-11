@@ -31,7 +31,7 @@ public:
         return size_ == 0U;
     }
 
-    [[nodiscard]] constexpr af::Span<const std::byte> span() const noexcept {
+    [[nodiscard]] constexpr af::span<const std::byte> span() const noexcept {
         return {data_, size_};
     }
 
@@ -244,7 +244,7 @@ public:
         return buffers_;
     }
 
-    [[nodiscard]] std::size_t fill_views(af::Span<buffer_view> views) const noexcept {
+    [[nodiscard]] std::size_t fill_views(af::span<buffer_view> views) const noexcept {
         std::size_t count = 0;
         for (std::size_t i = first_; i < buffers_.size() && count < views.size(); ++i) {
             if (buffers_[i].empty()) {

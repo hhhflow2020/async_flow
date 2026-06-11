@@ -6,7 +6,7 @@
 
 namespace af {
 
-template <typename T> class Span {
+template <typename T> class span {
 public:
     using element_type = T;
     using value_type = typename std::remove_cv<T>::type;
@@ -14,17 +14,19 @@ public:
     using reference = T &;
     using iterator = pointer;
 
-    constexpr Span() noexcept = default;
+    constexpr span() noexcept = default;
 
-    constexpr Span(pointer data, std::size_t size) noexcept : data_(data), size_(size) {}
+    constexpr span(pointer data, std::size_t size) noexcept : data_(data), size_(size) {}
 
     template <typename U, std::size_t SizeV,
               typename = typename std::enable_if<std::is_convertible<U *, pointer>::value>::type>
-    constexpr Span(std::array<U, SizeV> &values) noexcept : data_(values.data()), size_(SizeV) {}
+    constexpr span(std::array<U, SizeV> &values) noexcept : data_(values.data()), size_(SizeV) {}
 
-    template <typename U, std::size_t SizeV,
-              typename = typename std::enable_if<std::is_convertible<const U *, pointer>::value>::type>
-    constexpr Span(const std::array<U, SizeV> &values) noexcept : data_(values.data()), size_(SizeV) {}
+    template <
+        typename U, std::size_t SizeV,
+        typename = typename std::enable_if<std::is_convertible<const U *, pointer>::value>::type>
+    constexpr span(const std::array<U, SizeV> &values) noexcept
+        : data_(values.data()), size_(SizeV) {}
 
     [[nodiscard]] constexpr pointer data() const noexcept {
         return data_;
@@ -54,21 +56,23 @@ public:
         return data_ + size_;
     }
 
-    [[nodiscard]] constexpr Span subspan(std::size_t offset) const noexcept {
-        return offset >= size_ ? Span{} : Span{data_ + offset, size_ - offset};
+    [[nodiscard]] constexpr span subspan(std::size_t offset) const noexcept {
+        return offset >= size_ ? span{} : span{data_ + offset, size_ - offset};
     }
 
-    [[nodiscard]] constexpr Span subspan(std::size_t offset, std::size_t count) const noexcept {
+    [[nodiscard]] constexpr span subspan(std::size_t offset, std::size_t count) const noexcept {
         if (offset >= size_) {
             return {};
         }
         const std::size_t remaining = size_ - offset;
-        return Span{data_ + offset, count < remaining ? count : remaining};
+        return span{data_ + offset, count < remaining ? count : remaining};
     }
 
 private:
     pointer data_{nullptr};
     std::size_t size_{0};
 };
+
+template <typename T> using Span = span<T>;
 
 } // namespace af
