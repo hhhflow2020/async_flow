@@ -4,17 +4,21 @@
 #include <new>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
 
 #include <gtest/gtest.h>
 
 #include "af/detail/memory/object_pool.hpp"
+
+static_assert(std::is_same_v<af::detail::object_pool_core<int>, af::detail::ObjectPoolCore<int>>);
+static_assert(std::is_same_v<af::detail::object_pool<int>, af::detail::ObjectPool<int>>);
 
 TEST(PoolTests, ObjectPoolReusesReleasedStorage) {
     struct Payload {
         int value{0};
     };
 
-    af::detail::ObjectPool<Payload, 1> pool;
+    af::detail::object_pool<Payload, 1> pool;
     Payload *first = pool.create();
     first->value = 42;
     pool.destroy(first);

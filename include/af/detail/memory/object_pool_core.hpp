@@ -17,17 +17,17 @@ namespace af::detail {
 template <typename T, std::size_t ChunkSize = 512, std::size_t RemoteReleaseBatchSize = 1,
           bool CacheAllocatedSlotIndex = false, std::size_t LocalCacheSetSize = 8,
           std::size_t DirectReleaseSetSize = 4, std::size_t LocalCacheCapacity = 64>
-class ObjectPoolCore {
+class object_pool_core {
     static_assert(ChunkSize > 0, "ObjectPool chunk size must be greater than zero");
     static_assert(RemoteReleaseBatchSize > 0,
                   "ObjectPool remote release batch size must be greater than zero");
 
 public:
-    ObjectPoolCore() = default;
-    ObjectPoolCore(const ObjectPoolCore &) = delete;
-    ObjectPoolCore &operator=(const ObjectPoolCore &) = delete;
+    object_pool_core() = default;
+    object_pool_core(const object_pool_core &) = delete;
+    object_pool_core &operator=(const object_pool_core &) = delete;
 
-    ~ObjectPoolCore() {
+    ~object_pool_core() {
         tls_caches().discard_if_owner(this);
         Block *block = blocks_.load(std::memory_order_relaxed);
         while (block != nullptr) {
@@ -175,9 +175,9 @@ private:
     using Slot = typename BlockLayout::Slot;
     using Block = typename BlockLayout::Block;
     using LocalCache =
-        ObjectPoolLocalCache<ObjectPoolCore, Slot, LocalCacheCapacity, RemoteReleaseBatchSize>;
+        ObjectPoolLocalCache<object_pool_core, Slot, LocalCacheCapacity, RemoteReleaseBatchSize>;
     using LocalCacheSet =
-        ObjectPoolLocalCacheSet<ObjectPoolCore, Slot, LocalCacheCapacity, RemoteReleaseBatchSize,
+        ObjectPoolLocalCacheSet<object_pool_core, Slot, LocalCacheCapacity, RemoteReleaseBatchSize,
                                 LocalCacheSetSize, DirectReleaseSetSize>;
 
     [[nodiscard]] void *acquire_slot() {
@@ -311,5 +311,12 @@ private:
     alignas(hardware_cache_line_size) std::atomic<Block *> hot_block_{nullptr};
     alignas(hardware_cache_line_size) std::atomic<std::size_t> block_count_{0};
 };
+
+template <typename T, std::size_t ChunkSize = 512, std::size_t RemoteReleaseBatchSize = 1,
+          bool CacheAllocatedSlotIndex = false, std::size_t LocalCacheSetSize = 8,
+          std::size_t DirectReleaseSetSize = 4, std::size_t LocalCacheCapacity = 64>
+using ObjectPoolCore =
+    object_pool_core<T, ChunkSize, RemoteReleaseBatchSize, CacheAllocatedSlotIndex,
+                     LocalCacheSetSize, DirectReleaseSetSize, LocalCacheCapacity>;
 
 } // namespace af::detail

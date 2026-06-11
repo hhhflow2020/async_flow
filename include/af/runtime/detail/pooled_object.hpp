@@ -14,8 +14,8 @@ inline constexpr std::size_t runtime_pooled_object_remote_release_batch_size =
 
 template <typename ObjectT, std::size_t LocalCacheCapacity>
 using RuntimePooledObjectPool =
-    ObjectPool<ObjectT, 4096, runtime_pooled_object_remote_release_batch_size<LocalCacheCapacity>,
-               false, 1, 4, LocalCacheCapacity>;
+    object_pool<ObjectT, 4096, runtime_pooled_object_remote_release_batch_size<LocalCacheCapacity>,
+                false, 1, 4, LocalCacheCapacity>;
 
 template <typename ObjectT, std::size_t LocalCacheCapacity> struct RuntimePooledObjectPoolHolder {
     static constexpr std::size_t local_cache_capacity = LocalCacheCapacity;
