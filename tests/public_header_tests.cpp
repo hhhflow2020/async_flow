@@ -8,6 +8,43 @@
 #error "legacy task IO facade must not be installed"
 #endif
 
+namespace {
+
+class runtime_task_legacy_schedule_probe final : public af::runtime_task {
+public:
+    runtime_task_legacy_schedule_probe(factory_token token, af::runtime &owner)
+        : runtime_task(token, owner) {}
+
+    [[nodiscard]] static constexpr bool has_short_schedule() noexcept {
+        return decltype(test_schedule<runtime_task_legacy_schedule_probe>(0))::value;
+    }
+
+    [[nodiscard]] static constexpr bool has_short_pending() noexcept {
+        return decltype(test_pending<runtime_task_legacy_schedule_probe>(0))::value;
+    }
+
+private:
+    template <typename TaskT>
+    [[nodiscard]] static auto test_schedule(int) noexcept
+        -> decltype(std::declval<TaskT &>().schedule(std::declval<af::thread_ref>()),
+                    std::true_type{});
+
+    template <typename> [[nodiscard]] static std::false_type test_schedule(...) noexcept;
+
+    template <typename TaskT>
+    [[nodiscard]] static auto test_pending(int) noexcept
+        -> decltype(std::declval<TaskT &>().pending(std::declval<af::thread_ref>()),
+                    std::true_type{});
+
+    template <typename> [[nodiscard]] static std::false_type test_pending(...) noexcept;
+
+    af::task_result run_task() noexcept override {
+        return done();
+    }
+};
+
+} // namespace
+
 TEST(PublicHeaderTests, AsyncFlowUmbrellaExposesRuntimeInstanceApi) {
     af::runtime_config config;
     config.threads = {af::cpu_threads("header", 1)};
@@ -17,6 +54,11 @@ TEST(PublicHeaderTests, AsyncFlowUmbrellaExposesRuntimeInstanceApi) {
     EXPECT_EQ(runtime.thread_count(), 1U);
     EXPECT_EQ(runtime.thread_kind_of(runtime.cpu_threads().front()), af::thread_kind::cpu);
     runtime.stop();
+}
+
+TEST(PublicHeaderTests, RuntimeTaskExposesOnlyExplicitScheduleNames) {
+    static_assert(!runtime_task_legacy_schedule_probe::has_short_schedule());
+    static_assert(!runtime_task_legacy_schedule_probe::has_short_pending());
 }
 
 TEST(PublicHeaderTests, NetUmbrellaExposesRuntimeNativeApi) {

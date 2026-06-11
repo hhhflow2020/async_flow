@@ -77,14 +77,6 @@ public:
 protected:
     explicit runtime_task(factory_token, runtime &owner) noexcept;
 
-    [[nodiscard]] bool schedule(std::uint16_t thread) noexcept {
-        return schedule_to(thread);
-    }
-
-    [[nodiscard]] bool schedule(thread_ref thread) noexcept {
-        return schedule_to(thread);
-    }
-
     [[nodiscard]] bool schedule_to(std::uint16_t thread) noexcept;
 
     [[nodiscard]] bool schedule_to(thread_ref thread) noexcept {
@@ -127,14 +119,6 @@ protected:
 
     task_result pending_to(thread_ref thread) noexcept {
         return pending_to(thread.index);
-    }
-
-    task_result pending(std::uint16_t thread) noexcept {
-        return pending_to(thread);
-    }
-
-    task_result pending(thread_ref thread) noexcept {
-        return pending_to(thread);
     }
 
     template <typename Rep, typename Period>
