@@ -441,8 +441,8 @@ private:
     std::unique_ptr<log_backend> backend_;
     const std::size_t max_batch_records_;
     const std::size_t max_batches_per_run_;
-    BoundedMpscQueue<Batch> ready_batches_;
-    BoundedMpscQueue<Batch> free_batches_;
+    bounded_mpsc_queue<Batch> ready_batches_;
+    bounded_mpsc_queue<Batch> free_batches_;
     ContiguousObjectStorage<Batch> storage_;
     std::unique_ptr<log_record[]> scratch_records_;
     std::vector<log_record *> scratch_record_ptrs_;

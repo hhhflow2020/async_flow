@@ -30,7 +30,7 @@ namespace {
 }
 
 void BM_MpscQueuePushPop(benchmark::State &state) {
-    af::detail::BoundedMpscQueue<int> queue(65536);
+    af::detail::bounded_mpsc_queue<int> queue(65536);
     int value = 42;
 
     for (auto _ : state) {
@@ -44,7 +44,7 @@ void BM_MpscQueuePushPop(benchmark::State &state) {
 }
 
 void BM_MpscQueuePushManyPopMany(benchmark::State &state) {
-    af::detail::BoundedMpscQueue<int> queue(65536);
+    af::detail::bounded_mpsc_queue<int> queue(65536);
     std::vector<int> values(static_cast<std::size_t>(state.range(0)));
     std::vector<int *> inputs(values.size());
     std::vector<int *> outputs(values.size());
@@ -74,7 +74,7 @@ void BM_MpscQueueConcurrentProducers(benchmark::State &state) {
     const int values_per_producer = static_cast<int>(state.range(0));
     const int total_values = producer_count * values_per_producer;
 
-    af::detail::BoundedMpscQueue<int> queue(65536);
+    af::detail::bounded_mpsc_queue<int> queue(65536);
     std::vector<std::vector<int>> values(
         producer_count, std::vector<int>(static_cast<std::size_t>(values_per_producer)));
     for (int producer = 0; producer < producer_count; ++producer) {

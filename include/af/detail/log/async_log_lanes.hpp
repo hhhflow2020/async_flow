@@ -32,14 +32,14 @@ struct alignas(hardware_cache_line_size) async_log_queue_shard {
 
     async_log_stat_counter accepted;
     async_log_stat_counter dropped;
-    BoundedMpscQueue<log_record> queue;
+    bounded_mpsc_queue<log_record> queue;
     async_log_record_pool records;
 };
 
 struct alignas(hardware_cache_line_size) async_log_ordered_queue {
     explicit async_log_ordered_queue(std::size_t queue_capacity) : queue(queue_capacity) {}
 
-    BoundedMpscQueue<log_record> queue;
+    bounded_mpsc_queue<log_record> queue;
 };
 
 struct alignas(hardware_cache_line_size) async_log_producer_shard {
@@ -58,7 +58,7 @@ struct alignas(hardware_cache_line_size) async_log_runtime_lane {
 
     async_log_stat_counter accepted;
     async_log_stat_counter dropped;
-    BoundedMpscQueue<log_record> queue;
+    bounded_mpsc_queue<log_record> queue;
     async_log_record_pool records;
 };
 

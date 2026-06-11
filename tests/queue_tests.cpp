@@ -4,6 +4,7 @@
 #include <limits>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
 
 #include <gtest/gtest.h>
 
@@ -12,6 +13,10 @@
 
 namespace {
 
+static_assert(
+    std::is_same_v<af::detail::bounded_mpsc_queue<int>, af::detail::BoundedMpscQueue<int>>);
+static_assert(
+    std::is_same_v<af::detail::bounded_mpmc_queue<int>, af::detail::BoundedMpmcQueue<int>>);
 static_assert(
     std::is_same_v<af::detail::intrusive_mpsc_node<int>, af::detail::IntrusiveMpscNode<int>>);
 static_assert(
@@ -36,7 +41,7 @@ TEST(QueueTests, BoundedQueueSequenceBeforeHandlesUnsignedWrapWindow) {
 }
 
 TEST(QueueTests, BoundedMpscRejectsWhenFull) {
-    af::detail::BoundedMpscQueue<int> queue(2);
+    af::detail::bounded_mpsc_queue<int> queue(2);
     int a = 1;
     int b = 2;
     int c = 3;
@@ -50,7 +55,7 @@ TEST(QueueTests, BoundedMpscRejectsWhenFull) {
 }
 
 TEST(QueueTests, BoundedMpscPopsManyInFifoOrder) {
-    af::detail::BoundedMpscQueue<int> queue(4);
+    af::detail::bounded_mpsc_queue<int> queue(4);
     int a = 1;
     int b = 2;
     int c = 3;
@@ -74,7 +79,7 @@ TEST(QueueTests, BoundedMpscPopsManyInFifoOrder) {
 }
 
 TEST(QueueTests, BoundedMpscPushesManyInFifoOrder) {
-    af::detail::BoundedMpscQueue<int> queue(4);
+    af::detail::bounded_mpsc_queue<int> queue(4);
     int a = 1;
     int b = 2;
     int c = 3;
@@ -94,7 +99,7 @@ TEST(QueueTests, BoundedMpscPushesManyInFifoOrder) {
 }
 
 TEST(QueueTests, BoundedMpscPushManyStopsWhenFull) {
-    af::detail::BoundedMpscQueue<int> queue(2);
+    af::detail::bounded_mpsc_queue<int> queue(2);
     int a = 1;
     int b = 2;
     int c = 3;
@@ -112,7 +117,7 @@ TEST(QueueTests, BoundedMpscSupportsConcurrentProducers) {
     constexpr int values_per_producer = 64;
     constexpr int total_values = producer_count * values_per_producer;
 
-    af::detail::BoundedMpscQueue<int> queue(128);
+    af::detail::bounded_mpsc_queue<int> queue(128);
     std::array<std::array<int, values_per_producer>, producer_count> values{};
     std::array<std::thread, producer_count> producers;
     std::atomic<int> pushed{0};
@@ -155,7 +160,7 @@ TEST(QueueTests, BoundedMpscPushManySupportsConcurrentProducers) {
     constexpr int batch_size = 8;
     constexpr int total_values = producer_count * values_per_producer;
 
-    af::detail::BoundedMpscQueue<int> queue(128);
+    af::detail::bounded_mpsc_queue<int> queue(128);
     std::array<std::array<int, values_per_producer>, producer_count> values{};
     std::array<std::thread, producer_count> producers;
     std::atomic<int> pushed{0};
@@ -295,7 +300,7 @@ TEST(QueueTests, IntrusiveMpscSupportsConcurrentProducersInPerProducerOrder) {
 }
 
 TEST(QueueTests, BoundedMpmcRejectsWhenFull) {
-    af::detail::BoundedMpmcQueue<int> queue(2);
+    af::detail::bounded_mpmc_queue<int> queue(2);
     int a = 1;
     int b = 2;
     int c = 3;
@@ -311,6 +316,6 @@ TEST(QueueTests, BoundedMpmcRejectsWhenFull) {
 TEST(QueueTests, BoundedQueuesRejectOverflowingCapacities) {
     constexpr std::size_t too_large = std::numeric_limits<std::size_t>::max();
 
-    EXPECT_THROW({ af::detail::BoundedMpscQueue<int> queue(too_large); }, std::length_error);
-    EXPECT_THROW({ af::detail::BoundedMpmcQueue<int> queue(too_large); }, std::length_error);
+    EXPECT_THROW({ af::detail::bounded_mpsc_queue<int> queue(too_large); }, std::length_error);
+    EXPECT_THROW({ af::detail::bounded_mpmc_queue<int> queue(too_large); }, std::length_error);
 }

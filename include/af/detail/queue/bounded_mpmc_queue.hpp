@@ -10,9 +10,9 @@
 
 namespace af::detail {
 
-template <typename T> class BoundedMpmcQueue {
+template <typename T> class bounded_mpmc_queue {
 public:
-    explicit BoundedMpmcQueue(std::size_t capacity)
+    explicit bounded_mpmc_queue(std::size_t capacity)
         : capacity_(normalize_bounded_queue_capacity(capacity)), mask_(capacity_ - 1),
           buffer_(std::make_unique<Cell[]>(capacity_)) {
         for (std::size_t i = 0; i < capacity_; ++i) {
@@ -20,8 +20,8 @@ public:
         }
     }
 
-    BoundedMpmcQueue(const BoundedMpmcQueue &) = delete;
-    BoundedMpmcQueue &operator=(const BoundedMpmcQueue &) = delete;
+    bounded_mpmc_queue(const bounded_mpmc_queue &) = delete;
+    bounded_mpmc_queue &operator=(const bounded_mpmc_queue &) = delete;
 
     [[nodiscard]] bool try_push(T *value) noexcept {
         Cell *cell = nullptr;
@@ -84,5 +84,7 @@ private:
     alignas(hardware_cache_line_size) std::atomic<std::size_t> enqueue_pos_{0};
     alignas(hardware_cache_line_size) std::atomic<std::size_t> dequeue_pos_{0};
 };
+
+template <typename T> using BoundedMpmcQueue = bounded_mpmc_queue<T>;
 
 } // namespace af::detail
