@@ -19,6 +19,8 @@
 
 `af/async_flow.hpp` 已从默认 umbrella 中移除旧 `af/io.hpp` facade，并改为导出 `af/net.hpp`。旧 task 级 async IO facade 已物理删除：`include/af/io*.hpp` 与 `include/af/detail/io/` 不再作为公开或兼容入口存在。新网络代码统一走 runtime-native reactor/net API。
 
+旧 `supports_native_io_wait` / `AF_DETAIL_HAS_NATIVE_IO_WAIT` 命名已移除，平台能力改为 `supports_reactor_backend` 与具体 `supports_epoll`、`supports_kqueue`、`supports_select`，避免旧 async IO facade 语义继续污染 reactor 模型。
+
 共享网络 endpoint 类型已从旧 `net/tcp_endpoint.hpp` 文件名迁移到 `net/endpoint.hpp`，避免 TCP/UDP/Unix endpoint 共用一个 TCP 专属入口名；public header 测试会阻止旧头重新出现。
 
 网络内部 socket address helper 已从全局 `detail/net/socket_address.hpp` 移到 `net/detail/socket_address.hpp`，使网络 detail 归属到 net 模块下。

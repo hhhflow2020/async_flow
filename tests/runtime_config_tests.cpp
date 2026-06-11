@@ -122,7 +122,8 @@ template <typename EnumT>
 struct has_skip_already_applied_value<EnumT, std::void_t<decltype(EnumT::SkipAlreadyApplied)>>
     : std::true_type {};
 
-static_assert(af::supports_native_io_wait == (af::supports_epoll || af::supports_kqueue));
+static_assert(af::supports_reactor_backend ==
+              (af::supports_epoll || af::supports_kqueue || af::supports_select));
 static_assert(af::supports_eventfd == af::platform_linux);
 static_assert(af::supports_timerfd == af::platform_linux);
 static_assert(af::supports_openat2 == af::platform_linux);

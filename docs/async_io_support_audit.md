@@ -14,6 +14,7 @@
   `read_budget_datagrams`，避免单连接或单 socket 长时间占用 IO 线程。
 - kqueue timeout wait 保持一次性 timer 语义。
 - `asyncflow_select_backend_tests` 会强制关闭 epoll/kqueue 并启用 select，覆盖 fallback readiness wait。
+- 平台能力命名已收敛到 reactor backend 语义：公开层使用 `supports_epoll`、`supports_kqueue`、`supports_select` 和 `supports_reactor_backend`，不再暴露旧 task 级 `native_io_wait` facade 名称。
 
 ## 已移除能力
 

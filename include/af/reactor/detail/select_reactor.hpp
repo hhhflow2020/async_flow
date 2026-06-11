@@ -12,7 +12,7 @@
 #include "af/detail/config.hpp"
 #include "af/reactor/reactor.hpp"
 
-#if AF_DETAIL_HAS_NATIVE_IO_WAIT
+#if AF_DETAIL_HAS_SELECT
 #include <fcntl.h>
 #include <sys/select.h>
 #include <unistd.h>
@@ -35,7 +35,7 @@ public:
     select_reactor &operator=(const select_reactor &) = delete;
 
     [[nodiscard]] bool available() const noexcept {
-#if AF_DETAIL_HAS_NATIVE_IO_WAIT
+#if AF_DETAIL_HAS_SELECT
         return wake_read_fd_ >= 0 && wake_write_fd_ >= 0;
 #else
         return false;
@@ -43,7 +43,7 @@ public:
     }
 
     [[nodiscard]] bool add(fd_event_source *source) noexcept override {
-#if AF_DETAIL_HAS_NATIVE_IO_WAIT
+#if AF_DETAIL_HAS_SELECT
         if (!available() || !source_supported(source) || source->active_) {
             return false;
         }
@@ -66,7 +66,7 @@ public:
     }
 
     [[nodiscard]] bool mod(fd_event_source *source) noexcept override {
-#if AF_DETAIL_HAS_NATIVE_IO_WAIT
+#if AF_DETAIL_HAS_SELECT
         if (!available() || source == nullptr || !source->active_) {
             return false;
         }
@@ -82,7 +82,7 @@ public:
     }
 
     [[nodiscard]] bool del(fd_event_source *source) noexcept override {
-#if AF_DETAIL_HAS_NATIVE_IO_WAIT
+#if AF_DETAIL_HAS_SELECT
         if (source == nullptr || !source->active_) {
             return false;
         }
@@ -115,7 +115,7 @@ public:
     }
 
     [[nodiscard]] bool poll(std::chrono::nanoseconds timeout) noexcept override {
-#if AF_DETAIL_HAS_NATIVE_IO_WAIT
+#if AF_DETAIL_HAS_SELECT
         if (!available()) {
             return false;
         }
@@ -207,7 +207,7 @@ public:
     }
 
     void wake() noexcept override {
-#if AF_DETAIL_HAS_NATIVE_IO_WAIT
+#if AF_DETAIL_HAS_SELECT
         if (!available()) {
             return;
         }
@@ -227,7 +227,7 @@ private:
         return value == 0U ? 1U : value;
     }
 
-#if AF_DETAIL_HAS_NATIVE_IO_WAIT
+#if AF_DETAIL_HAS_SELECT
     [[nodiscard]] static bool fd_supported(int fd) noexcept {
         return fd >= 0 && fd < FD_SETSIZE;
     }

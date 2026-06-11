@@ -40,18 +40,18 @@
 #endif
 
 #ifndef AF_DETAIL_HAS_SELECT
-#if !AF_DETAIL_HAS_EPOLL && !AF_DETAIL_HAS_KQUEUE
+#if !defined(_WIN32)
 #define AF_DETAIL_HAS_SELECT 1
 #else
 #define AF_DETAIL_HAS_SELECT 0
 #endif
 #endif
 
-#ifndef AF_DETAIL_HAS_NATIVE_IO_WAIT
+#ifndef AF_DETAIL_HAS_REACTOR_BACKEND
 #if AF_DETAIL_HAS_EPOLL || AF_DETAIL_HAS_KQUEUE || AF_DETAIL_HAS_SELECT
-#define AF_DETAIL_HAS_NATIVE_IO_WAIT 1
+#define AF_DETAIL_HAS_REACTOR_BACKEND 1
 #else
-#define AF_DETAIL_HAS_NATIVE_IO_WAIT 0
+#define AF_DETAIL_HAS_REACTOR_BACKEND 0
 #endif
 #endif
 
@@ -81,7 +81,7 @@ inline constexpr bool platform_posix = true;
 inline constexpr bool supports_epoll = AF_DETAIL_HAS_EPOLL != 0;
 inline constexpr bool supports_kqueue = AF_DETAIL_HAS_KQUEUE != 0;
 inline constexpr bool supports_select = AF_DETAIL_HAS_SELECT != 0;
-inline constexpr bool supports_native_io_wait = AF_DETAIL_HAS_NATIVE_IO_WAIT != 0;
+inline constexpr bool supports_reactor_backend = AF_DETAIL_HAS_REACTOR_BACKEND != 0;
 inline constexpr bool supports_thread_affinity = platform_linux;
 inline constexpr bool supports_thread_priority = platform_linux;
 

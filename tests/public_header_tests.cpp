@@ -645,6 +645,23 @@ TEST(PublicHeaderTests, PublicHeadersDoNotExposeLegacyRuntimeTemplateThreadHelpe
     }
 }
 
+TEST(PublicHeaderTests, PlatformHeadersDoNotExposeLegacyAsyncIoFacadeNames) {
+    constexpr std::array forbidden{
+        forbidden_source_snippet{"include/af/platform.hpp", "supports_native_io_wait"},
+        forbidden_source_snippet{"include/af/detail/config.hpp", "supports_native_io_wait"},
+        forbidden_source_snippet{"include/af/detail/config.hpp", "AF_DETAIL_HAS_NATIVE_IO_WAIT"},
+        forbidden_source_snippet{"include/af/reactor/detail/select_reactor.hpp",
+                                 "AF_DETAIL_HAS_NATIVE_IO_WAIT"},
+    };
+
+    for (const forbidden_source_snippet item : forbidden) {
+        const std::string content = read_source_file(item.relative_path);
+        ASSERT_FALSE(content.empty()) << item.relative_path;
+        EXPECT_EQ(content.find(item.snippet), std::string::npos)
+            << item.relative_path << " still contains " << item.snippet;
+    }
+}
+
 TEST(PublicHeaderTests, LogPublicHeadersDoNotExposeCamelCaseTypeAliases) {
     constexpr std::array forbidden{
         forbidden_source_snippet{"include/af/detail/log/async_log_config.hpp",
