@@ -231,7 +231,6 @@ public:
     [[nodiscard]] bool remove_listener(
         tcp_listener_handle handle,
         remove_listener_policy policy = remove_listener_policy::stop_accept_only) noexcept {
-        static_cast<void>(policy);
         if (!on_owner_io_thread()) {
             return false;
         }
@@ -239,10 +238,14 @@ public:
         if (entry == nullptr) {
             return false;
         }
+        const listener_id id = entry->id;
         if (entry->state == listener_state::active && entry->listener != nullptr) {
             if (!entry->listener->stop()) {
                 return false;
             }
+        }
+        if (policy == remove_listener_policy::close_existing_connections) {
+            close_connections_for_listener(id);
         }
         release_listener_slot(handle.slot());
         return true;
@@ -312,6 +315,7 @@ private:
 
     struct connection_entry {
         tcp_server_shard *server{nullptr};
+        listener_id listener{};
         std::unique_ptr<tcp_connection> connection;
         std::uint32_t slot{0};
         std::uint32_t generation{0};
@@ -587,6 +591,7 @@ private:
         try {
             entry = acquire_connection_slot();
             entry->server = this;
+            entry->listener = listener.id;
             const tcp_endpoint peer_endpoint =
                 af::detail::endpoint_from_socket_address(peer, peer_size);
             tcp_connection_lifecycle lifecycle;
@@ -895,6 +900,21 @@ private:
         free_connection_slots_.clear();
         retired_connection_slots_.clear();
         connection_count_ = 0;
+    }
+
+    void close_connections_for_listener(listener_id listener) noexcept {
+        for (std::size_t index = 0; index < connections_.size(); ++index) {
+            connection_entry *entry = connections_[index].get();
+            if (entry == nullptr || !entry->occupied || entry->retired ||
+                entry->listener != listener || entry->connection == nullptr) {
+                continue;
+            }
+            const std::uint32_t slot = entry->slot;
+            const std::uint32_t generation = entry->generation;
+            entry->connection->close(close_reason::local);
+            retire_connection_slot(slot, generation);
+        }
+        reap_retired_connections_if_safe();
     }
 
     static void on_connection_inactive(void *owner, tcp_connection &connection) noexcept {
