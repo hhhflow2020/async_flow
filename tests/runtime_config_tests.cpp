@@ -701,7 +701,6 @@ void expect_idle_wait_strategy_runs_delayed_task(af::idle_wait_strategy strategy
     const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
     auto task = af::make_task<DelayedRuntimeTask>(runtime, counter, observed_thread, elapsed_ns);
     ASSERT_TRUE(task->do_it(cpu_thread, std::chrono::milliseconds(5)));
-    task.reset();
 
     ASSERT_TRUE(wait_for_counter(counter, 1));
     EXPECT_EQ(observed_thread.load(std::memory_order_acquire), cpu_thread);
@@ -781,6 +780,10 @@ public:
         }
     }
 
+    [[nodiscard]] bool do_it(af::thread_ref thread) noexcept {
+        return schedule_to(thread);
+    }
+
 private:
     af::task_result run_task() noexcept override {
         return done();
@@ -791,6 +794,10 @@ class PoolOnlyRuntimeTask final : public af::runtime_task {
 public:
     PoolOnlyRuntimeTask(af::runtime_task::factory_token token, af::runtime &owner)
         : af::runtime_task(token, owner) {}
+
+    [[nodiscard]] bool do_it(af::thread_ref thread) noexcept {
+        return schedule_to(thread);
+    }
 
 private:
     af::task_result run_task() noexcept override {
@@ -1794,10 +1801,6 @@ TEST(RuntimeConfigTests, RuntimeTimerDrainBudgetLetsServiceTasksRunBetweenDueTim
     ASSERT_TRUE(task1->do_it(cpu_thread));
     ASSERT_TRUE(task2->do_it(cpu_thread));
     ASSERT_TRUE(task3->do_it(cpu_thread));
-    task0.reset();
-    task1.reset();
-    task2.reset();
-    task3.reset();
 
     ASSERT_TRUE(wait_for_counter_at_least(service_counter, 1));
     EXPECT_EQ(observed_timer_count.load(std::memory_order_acquire), 1);
@@ -1858,30 +1861,38 @@ TEST(RuntimeConfigTests, RuntimeTaskPoolConfigAllowsSmallInitialSlabsToExpand) {
 
     af::runtime runtime(config);
     EXPECT_EQ(runtime.config().task_pool.local_cache_size, 4U);
-    std::array<af::runtime_task_handle<PoolOnlyRuntimeTask>, 8> tasks;
+    ASSERT_TRUE(runtime.start());
+    const af::thread_ref cpu_thread = runtime.cpu_threads().front();
+    std::array<PoolOnlyRuntimeTask *, 8> tasks{};
     for (auto &task : tasks) {
         task = af::make_task<PoolOnlyRuntimeTask>(runtime);
-        EXPECT_TRUE(task);
+        ASSERT_NE(task, nullptr);
         EXPECT_NE(task->task_id(), af::runtime_invalid_task_id);
+        EXPECT_TRUE(task->do_it(cpu_thread));
     }
+    runtime.stop();
 }
 
-TEST(RuntimeConfigTests, RuntimeTryMakeTaskReturnsEmptyHandleWhenConstructorThrows) {
+TEST(RuntimeConfigTests, RuntimeTryMakeTaskReturnsNullWhenConstructorThrows) {
     af::runtime_config config;
     config.threads = {af::cpu_threads("logic", 1)};
     config.task_pool.slab_object_count = 1;
     config.task_pool.oom = af::oom_policy::throw_exception;
 
     af::runtime runtime(config);
+    ASSERT_TRUE(runtime.start());
+    const af::thread_ref cpu_thread = runtime.cpu_threads().front();
 
     auto failed = af::try_make_task<ThrowingRuntimeTask>(runtime, true);
-    EXPECT_FALSE(failed);
+    EXPECT_EQ(failed, nullptr);
     EXPECT_THROW(static_cast<void>(af::make_task<ThrowingRuntimeTask>(runtime, true)),
                  std::runtime_error);
 
     auto task = af::make_task<ThrowingRuntimeTask>(runtime, false);
-    EXPECT_TRUE(task);
+    ASSERT_NE(task, nullptr);
     EXPECT_NE(task->task_id(), af::runtime_invalid_task_id);
+    EXPECT_TRUE(task->do_it(cpu_thread));
+    runtime.stop();
 }
 
 TEST(RuntimeConfigTests, RuntimeMakeTaskSchedulesAndTracksTaskId) {
@@ -1908,7 +1919,6 @@ TEST(RuntimeConfigTests, RuntimeMakeTaskSchedulesAndTracksTaskId) {
 
     const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
     ASSERT_TRUE(task->do_it(cpu_thread));
-    task.reset();
 
     ASSERT_TRUE(wait_for_counter(counter, 1));
     EXPECT_EQ(observed_task_id.load(std::memory_order_acquire), task_id);
@@ -1938,7 +1948,6 @@ TEST(RuntimeConfigTests, RuntimeCanDisableTaskIdTracking) {
                                                    observed_current_task_id, observed_thread);
     EXPECT_EQ(task->task_id(), af::runtime_invalid_task_id);
     ASSERT_TRUE(task->do_it(cpu_thread));
-    task.reset();
 
     ASSERT_TRUE(wait_for_counter(counter, 1));
     EXPECT_EQ(observed_task_id.load(std::memory_order_acquire), af::runtime_invalid_task_id);
@@ -1971,7 +1980,6 @@ TEST(RuntimeConfigTests, RuntimeTaskDefersRunningScheduleUntilRunReturns) {
     auto task = af::make_task<TwoHopRuntimeTask>(runtime, cpu1, counter, first_thread,
                                                  second_thread, next_schedule_ok);
     ASSERT_TRUE(task->do_it(cpu0));
-    task.reset();
 
     ASSERT_TRUE(wait_for_counter(counter, 1));
     EXPECT_TRUE(next_schedule_ok.load(std::memory_order_acquire));
@@ -2001,7 +2009,6 @@ TEST(RuntimeConfigTests, RuntimeTaskRescheduleRunsAgainOnCurrentThread) {
     auto task =
         af::make_task<RescheduleRuntimeTask>(runtime, run_count, first_thread, second_thread);
     ASSERT_TRUE(task->do_it(cpu_thread));
-    task.reset();
 
     ASSERT_TRUE(wait_for_counter(run_count, 2));
     EXPECT_EQ(first_thread.load(std::memory_order_acquire), cpu_thread);
@@ -2029,7 +2036,6 @@ TEST(RuntimeConfigTests, RuntimeTaskScheduleAfterRunsOnTargetThread) {
     const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
     auto task = af::make_task<DelayedRuntimeTask>(runtime, counter, observed_thread, elapsed_ns);
     ASSERT_TRUE(task->do_it(cpu_thread, std::chrono::milliseconds(20)));
-    task.reset();
 
     ASSERT_TRUE(wait_for_counter(counter, 1));
     EXPECT_EQ(observed_thread.load(std::memory_order_acquire), cpu_thread);
@@ -2073,7 +2079,6 @@ TEST(RuntimeConfigTests, RuntimeHierarchicalWheelRunsDelayedTasks) {
         auto task =
             af::make_task<DelayedRuntimeTask>(runtime, counter, observed_threads[i], elapsed_ns[i]);
         ASSERT_TRUE(task->do_it(cpu_thread, delays[i]));
-        task.reset();
     }
 
     ASSERT_TRUE(wait_for_counter(counter, static_cast<int>(delays.size())));
@@ -2112,7 +2117,6 @@ TEST(RuntimeConfigTests, RuntimeTaskCanRequestDelayedNextHopWhileRunning) {
     auto task = af::make_task<DelayedTwoHopRuntimeTask>(runtime, cpu1, counter, first_thread,
                                                         second_thread, next_schedule_ok);
     ASSERT_TRUE(task->do_it(cpu0));
-    task.reset();
 
     ASSERT_TRUE(wait_for_counter(counter, 1));
     EXPECT_TRUE(next_schedule_ok.load(std::memory_order_acquire));
@@ -2139,7 +2143,6 @@ TEST(RuntimeConfigTests, RuntimeStopCancelsPendingDelayedTask) {
     const auto cpu_thread = runtime.select_thread(af::thread_selector::cpu(0));
     auto task = af::make_task<CancelledDelayedRuntimeTask>(runtime, destroyed);
     ASSERT_TRUE(task->do_it(cpu_thread));
-    task.reset();
 
     runtime.stop();
     EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
@@ -2170,7 +2173,6 @@ void run_reactor_readiness_test(af::reactor_backend backend) {
     const auto io_thread = runtime.select_thread(af::thread_selector::io(0));
     auto task = af::make_task<ReactorReadinessTask>(runtime, state);
     ASSERT_TRUE(task->do_it(io_thread));
-    task.reset();
 
     ASSERT_TRUE(wait_for_counter(counter, 1));
     EXPECT_EQ(observed_thread.load(std::memory_order_acquire), io_thread);

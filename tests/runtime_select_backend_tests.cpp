@@ -125,7 +125,6 @@ TEST(SelectBackendTests, AutoBackendFallsBackToSelectAndDispatchesReadiness) {
     ASSERT_EQ(io_threads.size(), 1U);
     auto task = af::make_task<SelectReadinessArmTask>(runtime, state);
     ASSERT_TRUE(task->do_it(io_threads.front()));
-    task.reset();
     ASSERT_TRUE(wait_until_at_least(state.armed, 1));
 
     const char byte = 'x';

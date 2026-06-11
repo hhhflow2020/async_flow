@@ -158,7 +158,6 @@ TEST(RuntimeInstanceOrderedBatchTests, RunsEveryShardAndAcceptsContiguousBatches
 
     auto first = af::make_task<InstanceOrderedBatchTask>(runtime);
     ASSERT_TRUE(first->do_group(logic_threads, 1U, completed, &shard_hits, &batch_seen));
-    first.reset();
     ASSERT_TRUE(wait_for_counter(completed, 1));
     for (std::uint16_t i = 0; i < 4; ++i) {
         EXPECT_EQ(shard_hits[i].load(), 1);
@@ -167,7 +166,6 @@ TEST(RuntimeInstanceOrderedBatchTests, RunsEveryShardAndAcceptsContiguousBatches
 
     auto second = af::make_task<InstanceOrderedBatchTask>(runtime);
     ASSERT_TRUE(second->do_group(logic_threads, 2U, completed, &shard_hits, &batch_seen));
-    second.reset();
     ASSERT_TRUE(wait_for_counter(completed, 2));
 
     for (std::uint16_t i = 0; i < 4; ++i) {
@@ -189,7 +187,6 @@ TEST(RuntimeInstanceOrderedBatchTests, ThreadBeginOverloadRunsAllShards) {
 
     auto task = af::make_task<InstanceOrderedBatchTask>(runtime);
     ASSERT_TRUE(task->do_begin(logic_threads.front(), 1U, completed, &shard_hits, nullptr));
-    task.reset();
 
     ASSERT_TRUE(wait_for_counter(completed, 1));
 
@@ -211,7 +208,6 @@ TEST(RuntimeInstanceOrderedBatchTests, FailureDoesNotAdvanceFailedShard) {
 
     auto task = af::make_task<InstanceOrderedBatchTask>(runtime);
     ASSERT_TRUE(task->do_group(logic_threads, 1U, completed, nullptr, nullptr, &failures, 1U));
-    task.reset();
 
     ASSERT_TRUE(wait_for_counter(completed, 1));
 
@@ -234,7 +230,6 @@ TEST(RuntimeInstanceOrderedBatchTests, RetryableBatchSkipsAlreadyAppliedShards) 
     auto failed = af::make_task<InstanceOrderedBatchTask>(runtime);
     ASSERT_TRUE(failed->do_group(logic_threads, 1U, failed_completed, nullptr, nullptr,
                                  &failed_failures, 1U));
-    failed.reset();
     ASSERT_TRUE(wait_for_counter(failed_completed, 1));
     ASSERT_EQ(failed_failures.load(std::memory_order_acquire), 1U);
 
@@ -245,7 +240,6 @@ TEST(RuntimeInstanceOrderedBatchTests, RetryableBatchSkipsAlreadyAppliedShards) 
     ASSERT_TRUE(retry->do_group(logic_threads, 1U, retry_completed, &shard_hits, nullptr,
                                 &retry_failures, InstanceOrderedBatchTask::no_fail_shard,
                                 af::retryable_ordered_batch_options));
-    retry.reset();
 
     ASSERT_TRUE(wait_for_counter(retry_completed, 1));
 

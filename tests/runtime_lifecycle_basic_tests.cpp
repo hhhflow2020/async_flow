@@ -64,7 +64,6 @@ protected:
         if (!task->do_it(std::forward<Args>(args)...)) {
             return false;
         }
-        task.reset();
         return true;
     }
 
@@ -176,6 +175,10 @@ public:
 
     ~UnscheduledTask() override {
         destroyed_->fetch_add(1, std::memory_order_release);
+    }
+
+    [[nodiscard]] bool do_it(af::thread_ref target) noexcept {
+        return schedule_to(target);
     }
 
 private:
@@ -512,7 +515,7 @@ TEST_F(RuntimeFixture, MakeTaskSupportsCustomStartFunction) {
     ASSERT_TRUE(wait_until_at_least(completed, 1));
 }
 
-TEST_F(RuntimeFixture, TryMakeTaskReturnsEmptyHandleWhenConstructorThrows) {
+TEST_F(RuntimeFixture, TryMakeTaskReturnsNullWhenConstructorThrows) {
     auto failed = af::try_make_task<TryMakeTask>(runtime_, true);
     EXPECT_FALSE(failed);
 }
@@ -590,29 +593,26 @@ TEST_F(RuntimeFixture, ServiceTaskRunsWhenExecutorIsWoken) {
     EXPECT_EQ(service.consumed(), consumed_after_unregister);
 }
 
-TEST_F(RuntimeFixture, UnscheduledCreatedTaskIsDestroyedByHandle) {
+TEST_F(RuntimeFixture, CreatedTaskIsDestroyedWhenInitialScheduleFails) {
     std::atomic<int> destroyed{0};
 
-    {
-        auto task = af::make_task<UnscheduledTask>(runtime_, destroyed);
-        ASSERT_TRUE(task);
-    }
+    auto *task = af::make_task<UnscheduledTask>(runtime_, destroyed);
+    ASSERT_NE(task, nullptr);
+    EXPECT_FALSE(task->do_it(af::thread_ref{}));
 
     EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
 }
 
-TEST_F(RuntimeFixture, CreatedHandleKeepsCompletedTaskAliveUntilReset) {
+TEST_F(RuntimeFixture, CompletedTaskIsDestroyedAfterRun) {
     std::atomic<int> completed{0};
     std::atomic<int> destroyed{0};
 
-    {
-        auto task = af::make_task<TrackedDoneTask>(runtime_, destroyed);
-        ASSERT_TRUE(task->do_it(logic(0), completed));
-        ASSERT_TRUE(wait_until_at_least(completed, 1));
-        EXPECT_EQ(destroyed.load(std::memory_order_acquire), 0);
-    }
+    auto *task = af::make_task<TrackedDoneTask>(runtime_, destroyed);
+    ASSERT_NE(task, nullptr);
+    ASSERT_TRUE(task->do_it(logic(0), completed));
+    ASSERT_TRUE(wait_until_at_least(completed, 1));
 
-    EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
+    EXPECT_TRUE(wait_until_at_least(destroyed, 1));
 }
 
 TEST_F(RuntimeFixture, FailedTaskIsReleased) {

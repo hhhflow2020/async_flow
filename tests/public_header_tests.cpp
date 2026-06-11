@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 
 #include <gtest/gtest.h>
 
@@ -136,6 +137,12 @@ TEST(PublicHeaderTests, RuntimeTaskExposesOnlyExplicitScheduleNames) {
     static_assert(runtime_task_legacy_schedule_probe::has_reschedule_helper());
     static_assert(runtime_task_legacy_schedule_probe::has_cancel_helper());
     static_assert(!runtime_task_legacy_schedule_probe::has_cancelled_helper());
+    static_assert(std::is_same_v<decltype(af::make_task<runtime_task_legacy_schedule_probe>(
+                                     std::declval<af::runtime &>())),
+                                 runtime_task_legacy_schedule_probe *>);
+    static_assert(std::is_same_v<decltype(af::try_make_task<runtime_task_legacy_schedule_probe>(
+                                     std::declval<af::runtime &>())),
+                                 runtime_task_legacy_schedule_probe *>);
 }
 
 TEST(PublicHeaderTests, TaskPublicHeadersDoNotExposeCamelCaseTypeAliases) {

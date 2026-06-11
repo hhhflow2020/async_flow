@@ -250,7 +250,6 @@ TEST(RuntimeInstanceParallelShardTests, NonEmptyOnlySkipsEmptyShards) {
     auto task = af::make_task<InstanceParallelShardTask>(runtime);
     ASSERT_TRUE(
         task->do_it(logic_threads, af::parallel_mode::non_empty_only, completed, shard_hits, sum));
-    task.reset();
 
     EXPECT_TRUE(wait_for_counter(completed, 1));
     runtime.stop();
@@ -275,7 +274,6 @@ TEST(RuntimeInstanceParallelShardTests, AllShardsRunsNoopShards) {
     auto task = af::make_task<InstanceParallelShardTask>(runtime);
     ASSERT_TRUE(
         task->do_it(logic_threads, af::parallel_mode::all_shards, completed, shard_hits, sum));
-    task.reset();
 
     EXPECT_TRUE(wait_for_counter(completed, 1));
     runtime.stop();
@@ -297,7 +295,6 @@ TEST(RuntimeInstanceParallelShardTests, FailuresAreVisibleToOwner) {
 
     auto task = af::make_task<InstanceParallelFailureTask>(runtime);
     ASSERT_TRUE(task->do_it(logic_threads, completed, failures));
-    task.reset();
 
     EXPECT_TRUE(wait_for_counter(completed, 1));
     runtime.stop();
@@ -316,7 +313,6 @@ TEST(RuntimeInstanceParallelShardTests, EmptyNonEmptyParallelResumesOwner) {
 
     auto task = af::make_task<InstanceEmptyParallelTask>(runtime);
     ASSERT_TRUE(task->do_it(logic_threads, completed, unexpected_handler_runs));
-    task.reset();
 
     EXPECT_TRUE(wait_for_counter(completed, 1));
     runtime.stop();
@@ -335,7 +331,6 @@ TEST(RuntimeInstanceParallelShardTests, ThreadBeginOverloadUsesAdjacentThreads) 
 
     auto task = af::make_task<InstanceParallelBeginTask>(runtime);
     ASSERT_TRUE(task->do_it(logic_threads.front(), completed, ran_on));
-    task.reset();
 
     EXPECT_TRUE(wait_for_counter(completed, 1));
     runtime.stop();

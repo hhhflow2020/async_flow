@@ -36,7 +36,6 @@ template <typename TaskT, typename... Args>
     if (!task->do_it(std::forward<Args>(args)...)) {
         return false;
     }
-    task.reset();
     return true;
 }
 

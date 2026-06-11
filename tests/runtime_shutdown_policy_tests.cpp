@@ -53,7 +53,6 @@ template <typename TaskT, typename... Args>
     if (!task->do_it(std::forward<Args>(args)...)) {
         return false;
     }
-    task.reset();
     return true;
 }
 
@@ -227,7 +226,7 @@ TEST(RuntimeShutdownTests, StartTaskFailsAndDestroysTaskWhenRuntimeIsNotStarted)
     EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
 }
 
-TEST(RuntimeShutdownTests, MakeTaskHandleDestroysTaskWhenScheduleFailsBeforeStart) {
+TEST(RuntimeShutdownTests, MakeTaskDestroysRawTaskWhenScheduleFailsBeforeStart) {
     af::runtime runtime(make_shutdown_runtime_config());
     const af::thread_ref logic_thread = runtime.thread_group("shutdown-logic").front();
     ASSERT_TRUE(logic_thread);

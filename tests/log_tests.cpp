@@ -564,7 +564,6 @@ template <typename TaskT, typename... Args>
     if (!task->do_it(std::forward<Args>(args)...)) {
         return false;
     }
-    task.reset();
     return true;
 }
 
@@ -1187,7 +1186,6 @@ TEST(LogTests, RuntimeInstanceTaskIdDiagnosticsCanDisableLogTag) {
     auto task = af::make_task<RuntimeInstanceTaskIdLogTask>(runtime, completed);
     EXPECT_EQ(task->task_id(), af::runtime_invalid_task_id);
     ASSERT_TRUE(task->do_it(cpu_thread));
-    task.reset();
 
     ASSERT_TRUE(wait_until_at_least(completed, 1));
     ASSERT_TRUE(runtime.flush_logger(std::chrono::seconds(2)));

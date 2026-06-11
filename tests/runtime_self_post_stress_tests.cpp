@@ -119,7 +119,6 @@ private:
                     af::detail::atomic_notify_one(*remaining_);
                 }
             }
-            child.reset();
         }
 
         root_completed_->store(1, std::memory_order_release);
@@ -200,7 +199,6 @@ TEST(RuntimeStressTests, SameThreadFanoutUsesUnifiedInboxAndPreservesFifo) {
             runtime.stop();
             return;
         }
-        task.reset();
 
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         if (!wait_zero_until(remaining, deadline)) {
@@ -246,7 +244,6 @@ TEST(RuntimeStressTests, SameThreadAgainUsesUnifiedInboxWithoutCrossThreadHints)
             runtime.stop();
             return;
         }
-        task.reset();
     }
 
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);

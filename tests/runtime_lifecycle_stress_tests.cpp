@@ -120,7 +120,6 @@ TEST(RuntimeStressTests, ConcurrentInitShutdownAndStartTask) {
                 auto task = af::make_task<lifecycle_stress_task>(runtime);
                 if (task->do_it(seed, threads, counters)) {
                     counters.accepted.fetch_add(1, std::memory_order_release);
-                    task.reset();
                 } else {
                     counters.rejected.fetch_add(1, std::memory_order_release);
                 }

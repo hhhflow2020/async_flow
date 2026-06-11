@@ -38,7 +38,7 @@ class async_log_record_pool {
     struct alignas(hardware_cache_line_size) slot : async_log_record_pool_slot {
         std::atomic<std::uint32_t> next{null_slot};
         log_record record;
-        slab *slab{nullptr};
+        slab *owning_slab{nullptr};
         std::uint32_t index{0};
     };
 
@@ -54,7 +54,7 @@ class async_log_record_pool {
                 slot &entry = slots[i];
                 entry.owner = pool;
                 entry.kind = async_log_record_pool_kind::shared;
-                entry.slab = this;
+                entry.owning_slab = this;
                 entry.index = static_cast<std::uint32_t>(i);
                 entry.next.store(i + 1U < this->capacity ? static_cast<std::uint32_t>(i + 1U)
                                                          : null_slot,
@@ -119,7 +119,7 @@ public:
 
     static void release_slot(async_log_record_pool_slot *header) noexcept {
         auto *entry = static_cast<slot *>(header);
-        AF_ASSERT(entry != nullptr && entry->owner != nullptr && entry->slab != nullptr);
+        AF_ASSERT(entry != nullptr && entry->owner != nullptr && entry->owning_slab != nullptr);
         static_cast<async_log_record_pool *>(entry->owner)->release(entry);
     }
 
@@ -127,14 +127,15 @@ public:
         std::size_t begin = 0;
         while (begin < records.size()) {
             auto *first = static_cast<slot *>(records[begin]->pool_slot());
-            AF_ASSERT(first != nullptr && first->owner == this && first->slab != nullptr);
-            slab *const current_slab = first->slab;
+            AF_ASSERT(first != nullptr && first->owner == this && first->owning_slab != nullptr);
+            slab *const current_slab = first->owning_slab;
 
             std::size_t end = begin + 1U;
             while (end < records.size()) {
                 auto *entry = static_cast<slot *>(records[end]->pool_slot());
-                AF_ASSERT(entry != nullptr && entry->owner == this && entry->slab != nullptr);
-                if (entry->slab != current_slab) {
+                AF_ASSERT(entry != nullptr && entry->owner == this &&
+                          entry->owning_slab != nullptr);
+                if (entry->owning_slab != current_slab) {
                     break;
                 }
                 ++end;
@@ -440,14 +441,15 @@ private:
         std::size_t begin = 0;
         while (begin < count) {
             slot *first = slots[begin];
-            AF_ASSERT(first != nullptr && first->owner == this && first->slab != nullptr);
-            slab *const current_slab = first->slab;
+            AF_ASSERT(first != nullptr && first->owner == this && first->owning_slab != nullptr);
+            slab *const current_slab = first->owning_slab;
 
             std::size_t end = begin + 1U;
             while (end < count) {
                 slot *entry = slots[end];
-                AF_ASSERT(entry != nullptr && entry->owner == this && entry->slab != nullptr);
-                if (entry->slab != current_slab) {
+                AF_ASSERT(entry != nullptr && entry->owner == this &&
+                          entry->owning_slab != nullptr);
+                if (entry->owning_slab != current_slab) {
                     break;
                 }
                 ++end;
@@ -459,8 +461,8 @@ private:
     }
 
     void release(slot *entry) noexcept {
-        AF_ASSERT(entry != nullptr && entry->slab != nullptr);
-        slab &current_slab = *entry->slab;
+        AF_ASSERT(entry != nullptr && entry->owning_slab != nullptr);
+        slab &current_slab = *entry->owning_slab;
         const std::uint32_t index = entry->index;
         std::uint64_t head = current_slab.free_head.load(std::memory_order_relaxed);
         for (;;) {
@@ -483,11 +485,12 @@ private:
         }
 
         slot *first = slots[0];
-        AF_ASSERT(first != nullptr && first->owner == this && first->slab == &current_slab);
+        AF_ASSERT(first != nullptr && first->owner == this && first->owning_slab == &current_slab);
         slot *previous = first;
         for (std::size_t i = 1; i < count; ++i) {
             slot *entry = slots[i];
-            AF_ASSERT(entry != nullptr && entry->owner == this && entry->slab == &current_slab);
+            AF_ASSERT(entry != nullptr && entry->owner == this &&
+                      entry->owning_slab == &current_slab);
             previous->next.store(entry->index, std::memory_order_relaxed);
             previous = entry;
         }
@@ -514,11 +517,12 @@ private:
         }
 
         slot *first = static_cast<slot *>(records.front()->pool_slot());
-        AF_ASSERT(first != nullptr && first->owner == this && first->slab == &current_slab);
+        AF_ASSERT(first != nullptr && first->owner == this && first->owning_slab == &current_slab);
         slot *previous = first;
         for (std::size_t i = 1; i < records.size(); ++i) {
             auto *entry = static_cast<slot *>(records[i]->pool_slot());
-            AF_ASSERT(entry != nullptr && entry->owner == this && entry->slab == &current_slab);
+            AF_ASSERT(entry != nullptr && entry->owner == this &&
+                      entry->owning_slab == &current_slab);
             previous->next.store(entry->index, std::memory_order_relaxed);
             previous = entry;
         }

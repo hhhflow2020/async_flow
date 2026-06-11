@@ -28,13 +28,11 @@ struct runtime_task_access;
 using runtime_task_id = std::uint64_t;
 inline constexpr runtime_task_id runtime_invalid_task_id = 0;
 
-template <typename TaskT> class runtime_task_handle;
+template <typename TaskT, typename... Args>
+[[nodiscard]] TaskT *make_task(runtime &owner, Args &&...args);
 
 template <typename TaskT, typename... Args>
-[[nodiscard]] runtime_task_handle<TaskT> make_task(runtime &owner, Args &&...args);
-
-template <typename TaskT, typename... Args>
-[[nodiscard]] runtime_task_handle<TaskT> try_make_task(runtime &owner, Args &&...args) noexcept;
+[[nodiscard]] TaskT *try_make_task(runtime &owner, Args &&...args) noexcept;
 
 class runtime_task : public runtime_work {
 public:
@@ -51,10 +49,10 @@ public:
         constexpr factory_token() noexcept = default;
 
         template <typename TaskT, typename... Args>
-        friend runtime_task_handle<TaskT> make_task(runtime &owner, Args &&...args);
+        friend TaskT *make_task(runtime &owner, Args &&...args);
 
         template <typename TaskT, typename... Args>
-        friend runtime_task_handle<TaskT> try_make_task(runtime &owner, Args &&...args) noexcept;
+        friend TaskT *try_make_task(runtime &owner, Args &&...args) noexcept;
     };
 
     runtime_task() = delete;
@@ -193,10 +191,6 @@ private:
         destroy_ = destroy;
     }
 
-    void release_handle() noexcept {
-        release_lifetime_ref();
-    }
-
     void add_lifetime_ref() noexcept {
         lifetime_refs_.fetch_add(1, std::memory_order_relaxed);
     }
@@ -220,6 +214,7 @@ private:
     [[nodiscard]] bool enqueue_next_from_running(std::uint16_t thread) noexcept;
     [[nodiscard]] bool enqueue_timer_next_from_running(std::uint16_t thread,
                                                        std::int64_t deadline_ns) noexcept;
+    [[nodiscard]] bool fail_created_schedule_request() noexcept;
     [[nodiscard]] bool mark_timer_pending() noexcept;
     [[nodiscard]] bool mark_timer_ready() noexcept;
     void cancel_timer() noexcept;
@@ -288,13 +283,11 @@ private:
     destroy_fn destroy_{nullptr};
     std::uint32_t last_parallel_failures_{0};
 
-    template <typename TaskT> friend class runtime_task_handle;
+    template <typename TaskT, typename... Args>
+    friend TaskT *make_task(runtime &owner, Args &&...args);
 
     template <typename TaskT, typename... Args>
-    friend runtime_task_handle<TaskT> make_task(runtime &owner, Args &&...args);
-
-    template <typename TaskT, typename... Args>
-    friend runtime_task_handle<TaskT> try_make_task(runtime &owner, Args &&...args) noexcept;
+    friend TaskT *try_make_task(runtime &owner, Args &&...args) noexcept;
 
     friend class runtime;
     friend struct detail::runtime_task_access;
@@ -346,71 +339,18 @@ struct runtime_task_access {
 
 } // namespace detail
 
-template <typename TaskT> class [[nodiscard]] runtime_task_handle {
-public:
-    runtime_task_handle() noexcept = default;
-    explicit runtime_task_handle(TaskT *task) noexcept : task_(task) {}
-
-    runtime_task_handle(const runtime_task_handle &) = delete;
-    runtime_task_handle &operator=(const runtime_task_handle &) = delete;
-
-    runtime_task_handle(runtime_task_handle &&other) noexcept
-        : task_(std::exchange(other.task_, nullptr)) {}
-
-    runtime_task_handle &operator=(runtime_task_handle &&other) noexcept {
-        if (this != &other) {
-            reset();
-            task_ = std::exchange(other.task_, nullptr);
-        }
-        return *this;
-    }
-
-    ~runtime_task_handle() {
-        reset();
-    }
-
-    [[nodiscard]] TaskT *get() const noexcept {
-        return task_;
-    }
-
-    [[nodiscard]] TaskT &operator*() const noexcept {
-        AF_ASSERT(task_ != nullptr);
-        return *task_;
-    }
-
-    [[nodiscard]] TaskT *operator->() const noexcept {
-        AF_ASSERT(task_ != nullptr);
-        return task_;
-    }
-
-    [[nodiscard]] explicit operator bool() const noexcept {
-        return task_ != nullptr;
-    }
-
-    void reset() noexcept {
-        if (task_ != nullptr) {
-            task_->release_handle();
-            task_ = nullptr;
-        }
-    }
-
-private:
-    TaskT *task_{nullptr};
-};
-
 } // namespace af
 
 #include "af/runtime/detail/task_pool.hpp"
 
 namespace af {
 
-template <typename TaskT, typename... Args>
-runtime_task_handle<TaskT> make_task(runtime &owner, Args &&...args) {
+template <typename TaskT, typename... Args> TaskT *make_task(runtime &owner, Args &&...args) {
     static_assert(std::is_base_of_v<runtime_task, TaskT>,
                   "TaskT must derive from af::runtime_task");
     const task_pool_config &pool_config = detail::runtime_task_pool_config(owner);
     return detail::visit_runtime_task_pool_holder<TaskT>(
-        pool_config.local_cache_size, [&](auto &holder) -> runtime_task_handle<TaskT> {
+        pool_config.local_cache_size, [&](auto &holder) -> TaskT * {
             try {
                 holder.reserve_at_least(pool_config.slab_object_count);
             } catch (const std::bad_alloc &) {
@@ -422,28 +362,28 @@ runtime_task_handle<TaskT> make_task(runtime &owner, Args &&...args) {
                 runtime_task::factory_token{}, owner, std::forward<Args>(args)...);
             task->set_destroy_fn(&detail::destroy_runtime_task<
                                  TaskT, std::decay_t<decltype(holder)>::local_cache_capacity>);
-            return runtime_task_handle<TaskT>(task);
+            return task;
         });
 }
 
 template <typename TaskT, typename... Args>
-runtime_task_handle<TaskT> try_make_task(runtime &owner, Args &&...args) noexcept {
+TaskT *try_make_task(runtime &owner, Args &&...args) noexcept {
     static_assert(std::is_base_of_v<runtime_task, TaskT>,
                   "TaskT must derive from af::runtime_task");
     const task_pool_config &pool_config = detail::runtime_task_pool_config(owner);
     return detail::visit_runtime_task_pool_holder<TaskT>(
-        pool_config.local_cache_size, [&](auto &holder) -> runtime_task_handle<TaskT> {
+        pool_config.local_cache_size, [&](auto &holder) -> TaskT * {
             if (!holder.try_reserve_at_least(pool_config.slab_object_count)) {
-                return runtime_task_handle<TaskT>();
+                return nullptr;
             }
             auto *task = holder.pool.try_create(runtime_task::factory_token{}, owner,
                                                 std::forward<Args>(args)...);
             if (task == nullptr) {
-                return runtime_task_handle<TaskT>();
+                return nullptr;
             }
             task->set_destroy_fn(&detail::destroy_runtime_task<
                                  TaskT, std::decay_t<decltype(holder)>::local_cache_capacity>);
-            return runtime_task_handle<TaskT>(task);
+            return task;
         });
 }
 

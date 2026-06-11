@@ -172,7 +172,6 @@ TEST(RuntimeStressTests, ParallelShardOwnerResumesUnderBursts) {
                 runtime.stop();
                 return;
             }
-            task.reset();
         }
 
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);

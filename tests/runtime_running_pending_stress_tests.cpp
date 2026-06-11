@@ -149,7 +149,6 @@ private:
             complete();
             return failed();
         }
-        waker.reset();
 
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         if (!wait_non_zero_until(*wake_flag_, deadline)) {
@@ -271,7 +270,6 @@ private:
             complete();
             return failed();
         }
-        waker.reset();
 
         if (!wait_for_wake()) {
             failures_->fetch_add(1, std::memory_order_relaxed);
@@ -354,7 +352,6 @@ void run_terminal_wake_case(RunningWakeTerminalMode mode) {
                 runtime.stop();
                 return;
             }
-            task.reset();
         }
 
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -413,7 +410,6 @@ TEST(RuntimeStressTests, RunningToPendingWakeDoesNotStrandOwner) {
                 runtime.stop();
                 return;
             }
-            task.reset();
         }
 
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);

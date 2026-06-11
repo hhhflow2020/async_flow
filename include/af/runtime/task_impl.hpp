@@ -28,7 +28,7 @@ inline runtime_task::runtime_task(factory_token, runtime &owner) noexcept
 
 inline bool runtime_task::schedule_to(std::uint16_t thread) noexcept {
     if (owner_ == nullptr || !owner_->valid_thread(thread)) {
-        return false;
+        return fail_created_schedule_request();
     }
 
     for (;;) {
@@ -61,7 +61,7 @@ inline bool runtime_task::schedule_to(std::uint16_t thread) noexcept {
 inline bool runtime_task::schedule_after_ns(std::uint16_t thread,
                                             std::chrono::nanoseconds delay) noexcept {
     if (owner_ == nullptr || !owner_->valid_thread(thread)) {
-        return false;
+        return fail_created_schedule_request();
     }
 
     const std::int64_t deadline_ns = timer_deadline_after(delay);
@@ -100,12 +100,19 @@ runtime_task::enqueue_from_state(task_state previous, std::uint16_t thread) noex
         return enqueue_result::retry;
     }
 
+    const bool release_created_ref = previous == task_state::created;
     add_lifetime_ref();
     if (owner_->post(thread, this)) {
+        if (release_created_ref) {
+            release_lifetime_ref();
+        }
         return enqueue_result::queued;
     }
 
-    state_.store(previous, std::memory_order_release);
+    state_.store(release_created_ref ? task_state::done : previous, std::memory_order_release);
+    if (release_created_ref) {
+        release_lifetime_ref();
+    }
     release_lifetime_ref();
     return enqueue_result::failed;
 }
@@ -121,13 +128,20 @@ runtime_task::enqueue_timer_from_state(task_state previous, std::uint16_t thread
         return enqueue_result::retry;
     }
 
+    const bool release_created_ref = previous == task_state::created;
     add_lifetime_ref();
     if (owner_->post(thread, this)) {
+        if (release_created_ref) {
+            release_lifetime_ref();
+        }
         return enqueue_result::queued;
     }
 
     timer_deadline_ns_ = no_timer_deadline_ns;
-    state_.store(previous, std::memory_order_release);
+    state_.store(release_created_ref ? task_state::done : previous, std::memory_order_release);
+    if (release_created_ref) {
+        release_lifetime_ref();
+    }
     release_lifetime_ref();
     return enqueue_result::failed;
 }
@@ -208,6 +222,15 @@ inline bool runtime_task::enqueue_timer_next_from_running(std::uint16_t thread,
     timer_deadline_ns_ = no_timer_deadline_ns;
     state_.store(task_state::done, std::memory_order_release);
     release_lifetime_ref();
+    return false;
+}
+
+inline bool runtime_task::fail_created_schedule_request() noexcept {
+    task_state expected = task_state::created;
+    if (state_.compare_exchange_strong(expected, task_state::done, std::memory_order_acq_rel,
+                                       std::memory_order_acquire)) {
+        release_lifetime_ref();
+    }
     return false;
 }
 

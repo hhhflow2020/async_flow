@@ -28,7 +28,7 @@
 - runtime reactor 和网络连接生命周期分离；默认公共入口只暴露 runtime-native reactor/net。
 - 网络连接生命周期不依赖普通 task pending/resume 热路径。
 - 日志 consumer 通过通用 service task 绑定 runtime 线程，不再使用长期 runtime task 驱动消费；注册/注销仍通过短 control task 在 owner executor 上完成。
-- `make_task<T>()` 和 `try_make_task<T>()` 共享 task pool 生命周期管理；可恢复创建失败路径不影响普通调度热路径。
+- `make_task<T>()` 返回非空原始 task 指针，`try_make_task<T>()` 在可恢复创建失败时返回 `nullptr`；首次 `do_it`/调度会消费 created 生命周期引用，旧 RAII task handle 兼容层已移除。
 - service task 注册/注销要求在 owner runtime 线程执行，列表不加锁；跨线程唤醒不修改列表。
 
 ## 后续拆分建议
