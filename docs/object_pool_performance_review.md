@@ -18,6 +18,13 @@
 - 扩容通过 `atomic_flag` 串行化，只在 slab 耗尽时进入冷路径；正常日志热路径不加锁。
 - `log_record` 按 cache line 对齐，默认 1024 字节 inline message，普通日志不会触发 heap 分配。
 
+## IO buffer pool
+
+- `buffer::copy` 的 1-16KiB payload 走线程本地固定 16KiB 物理块池，避免短消息反复分配。
+- 16KiB-256KiB payload 走 32/64/128/256KiB 线程本地 raw aligned size-class 池，释放时回到最后释放线程的本地 LIFO cache。
+- `buffer(size)`、`with_capacity()` 和超过 256KiB 的 copy payload 走 exact raw aligned heap storage，不再使用会整块 value-initialize 的 `std::vector<std::byte>`。
+- public `capacity()` 和 `tailroom()` 保持逻辑容量语义，池化只影响物理容量和复用路径。
+
 ## 性能判断
 
 优点：

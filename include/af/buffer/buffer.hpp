@@ -6,10 +6,10 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <new>
 #include "af/span.hpp"
 #include <string_view>
 #include <utility>
-#include <vector>
 
 #include "absl/container/inlined_vector.h"
 
@@ -19,9 +19,46 @@ namespace detail {
 
 inline constexpr std::size_t io_buffer_pool_block_size = 16U * 1024U;
 inline constexpr std::size_t io_buffer_pool_local_cache_capacity = 256U;
+inline constexpr std::array<std::size_t, 4> io_buffer_pool_large_size_classes{
+    32U * 1024U,
+    64U * 1024U,
+    128U * 1024U,
+    256U * 1024U,
+};
+inline constexpr std::size_t io_buffer_pool_large_cache_capacity = 16U;
 inline constexpr std::size_t buffer_chain_inline_capacity = 4U;
 
+[[nodiscard]] inline std::byte *allocate_aligned_bytes(std::size_t capacity) {
+    if (capacity == 0U) {
+        return nullptr;
+    }
+    return static_cast<std::byte *>(::operator new[](capacity, std::align_val_t(64)));
+}
+
+inline void release_aligned_bytes(std::byte *data) noexcept {
+    if (data != nullptr) {
+        ::operator delete[](data, std::align_val_t(64));
+    }
+}
+
+[[nodiscard]] inline std::size_t large_buffer_size_class_index(std::size_t size) noexcept {
+    for (std::size_t i = 0; i < io_buffer_pool_large_size_classes.size(); ++i) {
+        if (size <= io_buffer_pool_large_size_classes[i]) {
+            return i;
+        }
+    }
+    return io_buffer_pool_large_size_classes.size();
+}
+
 struct buffer_storage {
+    buffer_storage() = default;
+
+    buffer_storage(const buffer_storage &) = delete;
+    buffer_storage &operator=(const buffer_storage &) = delete;
+
+    buffer_storage(buffer_storage &&) = delete;
+    buffer_storage &operator=(buffer_storage &&) = delete;
+
     [[nodiscard]] std::byte *data() noexcept {
         return data_;
     }
@@ -49,13 +86,17 @@ protected:
 };
 
 struct heap_buffer_storage final : buffer_storage {
-    explicit heap_buffer_storage(std::size_t capacity) : bytes(capacity) {
-        data_ = bytes.data();
-        capacity_ = bytes.size();
-        physical_capacity_ = bytes.size();
+    explicit heap_buffer_storage(std::size_t capacity) : bytes(allocate_aligned_bytes(capacity)) {
+        data_ = bytes;
+        capacity_ = capacity;
+        physical_capacity_ = capacity;
     }
 
-    std::vector<std::byte> bytes;
+    ~heap_buffer_storage() {
+        release_aligned_bytes(bytes);
+    }
+
+    std::byte *bytes{nullptr};
 };
 
 struct pooled_buffer_storage final : buffer_storage {
@@ -66,6 +107,21 @@ struct pooled_buffer_storage final : buffer_storage {
     }
 
     alignas(64) std::array<std::byte, io_buffer_pool_block_size> bytes;
+};
+
+struct large_pooled_buffer_storage final : buffer_storage {
+    explicit large_pooled_buffer_storage(std::size_t capacity)
+        : bytes(allocate_aligned_bytes(capacity)) {
+        data_ = bytes;
+        capacity_ = capacity;
+        physical_capacity_ = capacity;
+    }
+
+    ~large_pooled_buffer_storage() {
+        release_aligned_bytes(bytes);
+    }
+
+    std::byte *bytes{nullptr};
 };
 
 class io_buffer_pool_cache {
@@ -107,8 +163,60 @@ private:
     std::size_t size_{0};
 };
 
+class io_large_buffer_pool_cache {
+public:
+    io_large_buffer_pool_cache() = default;
+
+    io_large_buffer_pool_cache(const io_large_buffer_pool_cache &) = delete;
+    io_large_buffer_pool_cache &operator=(const io_large_buffer_pool_cache &) = delete;
+
+    ~io_large_buffer_pool_cache() {
+        for (std::size_t index = 0; index < slots_.size(); ++index) {
+            while (sizes_[index] != 0U) {
+                delete slots_[index][--sizes_[index]];
+                slots_[index][sizes_[index]] = nullptr;
+            }
+        }
+    }
+
+    [[nodiscard]] large_pooled_buffer_storage *acquire(std::size_t index) {
+        if (index >= io_buffer_pool_large_size_classes.size()) {
+            return nullptr;
+        }
+        if (sizes_[index] != 0U) [[likely]] {
+            large_pooled_buffer_storage *storage = slots_[index][--sizes_[index]];
+            slots_[index][sizes_[index]] = nullptr;
+            return storage;
+        }
+        return new large_pooled_buffer_storage(io_buffer_pool_large_size_classes[index]);
+    }
+
+    void release(std::size_t index, large_pooled_buffer_storage *storage) noexcept {
+        if (storage == nullptr) {
+            return;
+        }
+        if (index < slots_.size() && sizes_[index] < slots_[index].size()) [[likely]] {
+            slots_[index][sizes_[index]++] = storage;
+            return;
+        }
+        delete storage;
+    }
+
+private:
+    using slot_list =
+        std::array<large_pooled_buffer_storage *, io_buffer_pool_large_cache_capacity>;
+
+    std::array<slot_list, io_buffer_pool_large_size_classes.size()> slots_{};
+    std::array<std::size_t, io_buffer_pool_large_size_classes.size()> sizes_{};
+};
+
 [[nodiscard]] inline io_buffer_pool_cache &thread_io_buffer_pool() noexcept {
     thread_local io_buffer_pool_cache cache;
+    return cache;
+}
+
+[[nodiscard]] inline io_large_buffer_pool_cache &thread_large_io_buffer_pool() noexcept {
+    thread_local io_large_buffer_pool_cache cache;
     return cache;
 }
 
@@ -126,11 +234,28 @@ make_pooled_buffer_storage(std::size_t capacity) {
     });
 }
 
+[[nodiscard]] inline std::shared_ptr<buffer_storage>
+make_large_pooled_buffer_storage(std::size_t capacity) {
+    const std::size_t index = large_buffer_size_class_index(capacity);
+    if (index >= io_buffer_pool_large_size_classes.size()) {
+        return make_exact_buffer_storage(capacity);
+    }
+    large_pooled_buffer_storage *storage = thread_large_io_buffer_pool().acquire(index);
+    storage->set_capacity(capacity);
+    return std::shared_ptr<buffer_storage>(storage, [index](buffer_storage *raw) noexcept {
+        thread_large_io_buffer_pool().release(index,
+                                              static_cast<large_pooled_buffer_storage *>(raw));
+    });
+}
+
 [[nodiscard]] inline std::shared_ptr<buffer_storage> make_copy_buffer_storage(std::size_t size) {
-    if (size != 0U && size <= io_buffer_pool_block_size) [[likely]] {
+    if (size == 0U) {
+        return make_exact_buffer_storage(size);
+    }
+    if (size <= io_buffer_pool_block_size) [[likely]] {
         return make_pooled_buffer_storage(size);
     }
-    return make_exact_buffer_storage(size);
+    return make_large_pooled_buffer_storage(size);
 }
 
 } // namespace detail

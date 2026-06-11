@@ -37,9 +37,17 @@ TEST(NetBufferTests, CopyStorageUsesFixedBlocksForSmallPayloads) {
     EXPECT_EQ(small->capacity(), 4U);
     EXPECT_EQ(small->physical_capacity(), af::detail::io_buffer_pool_block_size);
     EXPECT_EQ(large->capacity(), af::detail::io_buffer_pool_block_size + 1U);
-    EXPECT_EQ(large->physical_capacity(), af::detail::io_buffer_pool_block_size + 1U);
     EXPECT_EQ(empty->capacity(), 0U);
     EXPECT_EQ(empty->physical_capacity(), 0U);
+}
+
+TEST(NetBufferTests, LargeCopyStorageUsesSizeClassPool) {
+    const std::size_t payload_size = af::detail::io_buffer_pool_block_size + 1U;
+    auto storage = af::detail::make_copy_buffer_storage(payload_size);
+
+    EXPECT_EQ(storage->capacity(), payload_size);
+    EXPECT_GT(storage->physical_capacity(), storage->capacity());
+    EXPECT_EQ(storage->physical_capacity(), af::detail::io_buffer_pool_large_size_classes[0]);
 }
 
 TEST(NetBufferTests, BufferWithCapacityTracksHeadroomAndTailroom) {
