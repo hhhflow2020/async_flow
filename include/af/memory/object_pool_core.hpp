@@ -28,6 +28,7 @@ public:
     object_pool_core &operator=(const object_pool_core &) = delete;
 
     ~object_pool_core() {
+        lifetime_.reset();
         tls_caches().discard_if_owner(this);
         block_type *block = blocks_.load(std::memory_order_relaxed);
         while (block != nullptr) {
@@ -35,6 +36,14 @@ public:
             delete block;
             block = next;
         }
+    }
+
+    [[nodiscard]] std::uint64_t cache_token() const noexcept {
+        return cache_token_;
+    }
+
+    [[nodiscard]] const std::shared_ptr<void> &cache_lifetime() const noexcept {
+        return lifetime_;
     }
 
     template <typename... Args> [[nodiscard]] T *create(Args &&...args) {
@@ -309,6 +318,9 @@ private:
         return block;
     }
 
+    inline static std::atomic<std::uint64_t> next_cache_token_{1U};
+    const std::uint64_t cache_token_{next_cache_token_.fetch_add(1U, std::memory_order_relaxed)};
+    std::shared_ptr<void> lifetime_{std::make_shared<std::uint8_t>(0)};
     alignas(hardware_cache_line_size) std::atomic<block_type *> blocks_{nullptr};
     alignas(hardware_cache_line_size) std::atomic<block_type *> hot_block_{nullptr};
     alignas(hardware_cache_line_size) std::atomic<std::size_t> block_count_{0};

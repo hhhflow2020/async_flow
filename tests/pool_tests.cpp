@@ -1,6 +1,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <new>
 #include <stdexcept>
 #include <thread>
@@ -478,6 +479,35 @@ TEST(PoolTests, ObjectPoolRemoteReleaseBatchFlushesOnThreadExit) {
     for (Payload *object : reused) {
         pool.destroy(object);
     }
+}
+
+TEST(PoolTests, ObjectPoolRemoteReleaseCacheDiscardsAfterPoolDestruction) {
+    struct Payload {
+        explicit Payload(std::uint64_t value) : value(value) {}
+        std::uint64_t value{0};
+    };
+
+    using Pool = af::detail::object_pool<Payload, 4, 8>;
+    auto pool = std::make_unique<Pool>();
+    Payload *object = pool->create(7);
+
+    std::atomic<bool> destroyed{false};
+    std::atomic<bool> finish{false};
+    std::thread destroyer([&] {
+        pool->destroy(object);
+        destroyed.store(true, std::memory_order_release);
+        while (!finish.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+    });
+
+    while (!destroyed.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
+
+    pool.reset();
+    finish.store(true, std::memory_order_release);
+    destroyer.join();
 }
 
 TEST(PoolTests, ObjectPoolCachedSlotIndexRemoteReleaseBatchFlushesAtThreshold) {

@@ -2,6 +2,8 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
+#include <memory>
 
 #include "af/detail/config.hpp"
 
@@ -11,6 +13,8 @@ template <typename pool_type, typename slot_type, std::size_t local_cache_capaci
           std::size_t remote_release_batch_size_value>
 struct object_pool_local_cache {
     pool_type *owner{nullptr};
+    std::uint64_t owner_token{0};
+    std::weak_ptr<void> owner_lifetime;
     slot_type *slots[local_cache_capacity_value]{};
     std::size_t size{0};
     bool locally_acquired{false};
@@ -20,25 +24,40 @@ struct object_pool_local_cache {
     }
 
     void reset_for(pool_type *pool) noexcept {
-        if (owner == pool) {
+        if (owns(pool)) {
             return;
         }
-        flush();
+        if (owner == pool) {
+            discard();
+        } else {
+            flush();
+        }
         owner = pool;
+        owner_token = pool->cache_token();
+        owner_lifetime = pool->cache_lifetime();
     }
 
     void discard_if_owner(const pool_type *pool) noexcept {
         if (owner == pool) {
-            size = 0;
-            locally_acquired = false;
-            owner = nullptr;
+            discard();
         }
     }
 
     void flush() noexcept {
-        flush_some(size);
+        if (size != 0U) {
+            if (auto alive = owner_lifetime.lock(); alive && owner != nullptr) {
+                flush_some(size);
+            }
+        }
+        discard();
+    }
+
+    void discard() noexcept {
+        size = 0;
         locally_acquired = false;
         owner = nullptr;
+        owner_token = 0;
+        owner_lifetime.reset();
     }
 
     void flush_some(std::size_t count) noexcept {
@@ -81,6 +100,10 @@ struct object_pool_local_cache {
 
     [[nodiscard]] bool caches_releases() const noexcept {
         return locally_acquired;
+    }
+
+    [[nodiscard]] bool owns(pool_type *pool) const noexcept {
+        return owner == pool && pool != nullptr && owner_token == pool->cache_token();
     }
 };
 
@@ -144,14 +167,14 @@ struct object_pool_single_local_cache_set {
     local_cache_type primary{};
 
     [[nodiscard]] local_cache_type &get(pool_type *pool) noexcept {
-        if (primary.owner == pool) [[likely]] {
+        if (primary.owns(pool)) [[likely]] {
             return primary;
         }
         return get_slow(pool);
     }
 
     [[nodiscard]] local_cache_type *find_release_cache(pool_type *pool) noexcept {
-        if (primary.owner == pool) [[likely]] {
+        if (primary.owns(pool)) [[likely]] {
             return &primary;
         }
         if (direct_release_contains(pool)) {
@@ -221,10 +244,10 @@ struct object_pool_multi_local_cache_set {
     std::size_t next_victim{0};
 
     [[nodiscard]] local_cache_type &get(pool_type *pool) noexcept {
-        if (primary.owner == pool) [[likely]] {
+        if (primary.owns(pool)) [[likely]] {
             return primary;
         }
-        if (active_overflow->owner == pool) {
+        if (active_overflow->owns(pool)) {
             return *active_overflow;
         }
         if (local_cache_type *hinted = next_overflow_hint(pool)) {
@@ -234,10 +257,10 @@ struct object_pool_multi_local_cache_set {
     }
 
     [[nodiscard]] local_cache_type *find_release_cache(pool_type *pool) noexcept {
-        if (primary.owner == pool) [[likely]] {
+        if (primary.owns(pool)) [[likely]] {
             return &primary;
         }
-        if (active_overflow->owner == pool) {
+        if (active_overflow->owns(pool)) {
             return active_overflow;
         }
         if (direct_release_contains(pool)) {
@@ -260,8 +283,14 @@ struct object_pool_multi_local_cache_set {
     [[nodiscard]] AF_DETAIL_NOINLINE local_cache_type &get_slow(pool_type *pool) noexcept {
         direct_release_erase(pool);
 
+        if (primary.owner == pool) {
+            primary.reset_for(pool);
+            return primary;
+        }
+
         for (std::size_t i = 0; i < overflow_cache_count; ++i) {
-            if (overflow[i].owner == pool) {
+            if (overflow[i].owns(pool) || overflow[i].owner == pool) {
+                overflow[i].reset_for(pool);
                 set_active_overflow(i);
                 return overflow[i];
             }
@@ -293,8 +322,13 @@ struct object_pool_multi_local_cache_set {
 
     [[nodiscard]] AF_DETAIL_NOINLINE local_cache_type *
     find_release_cache_slow(pool_type *pool) noexcept {
+        if (primary.owner == pool) {
+            primary.reset_for(pool);
+            return &primary;
+        }
         for (std::size_t i = 0; i < overflow_cache_count; ++i) {
-            if (overflow[i].owner == pool) {
+            if (overflow[i].owns(pool) || overflow[i].owner == pool) {
+                overflow[i].reset_for(pool);
                 set_active_overflow(i);
                 return &overflow[i];
             }
@@ -332,7 +366,7 @@ struct object_pool_multi_local_cache_set {
         if (next == overflow_cache_count) {
             next = 0;
         }
-        if (next != active_overflow_index && overflow[next].owner == pool) {
+        if (next != active_overflow_index && overflow[next].owns(pool)) {
             set_active_overflow(next);
             return &overflow[next];
         }
