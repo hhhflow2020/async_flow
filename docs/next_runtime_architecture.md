@@ -658,7 +658,8 @@ include/af/
     cache_line.hpp
   timer/
     timer_backend.hpp
-    timer_wheel.hpp
+    timer_entry.hpp
+    timer_heap.hpp
     hierarchical_timer_wheel.hpp
   reactor/
     reactor.hpp
