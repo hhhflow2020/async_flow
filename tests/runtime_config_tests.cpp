@@ -42,6 +42,10 @@ static_assert(af::supports_thread_priority == af::platform_linux);
 static_assert(af::platform_posix != af::platform_windows);
 static_assert(std::is_same_v<af::TaskResult, af::task_result>);
 static_assert(std::is_same_v<af::detail::runtime_service_task, af::detail::RuntimeServiceTask>);
+static_assert(std::is_same_v<af::detail::runtime_timer_entry, af::detail::RuntimeTimerEntry>);
+static_assert(std::is_same_v<af::detail::runtime_timer_heap, af::detail::RuntimeTimerHeap>);
+static_assert(std::is_same_v<af::detail::runtime_hierarchical_timer_wheel,
+                             af::detail::RuntimeHierarchicalTimerWheel>);
 static_assert(std::is_same_v<af::ShutdownPolicy, af::shutdown_policy>);
 static_assert(std::is_same_v<af::TaskState, af::task_state>);
 static_assert(std::is_same_v<af::parallel_mode, af::ParallelMode>);

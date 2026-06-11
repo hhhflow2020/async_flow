@@ -70,8 +70,8 @@ inline void runtime_executor::arm_timer(runtime_task *task) noexcept {
         return;
     }
     try {
-        RuntimeTimerEntry entry{runtime_task_access::timer_deadline_ns(task),
-                                next_timer_sequence_++, task};
+        runtime_timer_entry entry{runtime_task_access::timer_deadline_ns(task),
+                                  next_timer_sequence_++, task};
         if (timer_kind_ == timer_kind::min_heap) {
             timer_heap_.push(entry);
         } else {

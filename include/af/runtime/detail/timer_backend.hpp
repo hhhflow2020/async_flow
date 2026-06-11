@@ -16,22 +16,22 @@ class runtime;
 
 namespace detail {
 
-struct RuntimeTimerEntry {
+struct runtime_timer_entry {
     std::int64_t deadline_ns{0};
     std::uint64_t sequence{0};
     runtime_task *task{nullptr};
 };
 
-[[nodiscard]] inline bool runtime_timer_entry_after(const RuntimeTimerEntry &left,
-                                                    const RuntimeTimerEntry &right) noexcept {
+[[nodiscard]] inline bool runtime_timer_entry_after(const runtime_timer_entry &left,
+                                                    const runtime_timer_entry &right) noexcept {
     if (left.deadline_ns != right.deadline_ns) {
         return left.deadline_ns > right.deadline_ns;
     }
     return left.sequence > right.sequence;
 }
 
-[[nodiscard]] inline bool runtime_timer_entry_before(const RuntimeTimerEntry &left,
-                                                     const RuntimeTimerEntry &right) noexcept {
+[[nodiscard]] inline bool runtime_timer_entry_before(const runtime_timer_entry &left,
+                                                     const runtime_timer_entry &right) noexcept {
     if (left.deadline_ns != right.deadline_ns) {
         return left.deadline_ns < right.deadline_ns;
     }
@@ -44,13 +44,13 @@ struct RuntimeTimerEntry {
         .count();
 }
 
-class RuntimeTimerHeap {
+class runtime_timer_heap {
 public:
     void reserve(std::size_t capacity) {
         entries_.reserve(capacity);
     }
 
-    void push(RuntimeTimerEntry entry) {
+    void push(runtime_timer_entry entry) {
         entries_.push_back(entry);
         std::push_heap(entries_.begin(), entries_.end(), runtime_timer_entry_after);
     }
@@ -76,7 +76,7 @@ public:
             }
 
             std::pop_heap(entries_.begin(), entries_.end(), runtime_timer_entry_after);
-            RuntimeTimerEntry entry = entries_.back();
+            runtime_timer_entry entry = entries_.back();
             entries_.pop_back();
             ++drained;
 
@@ -92,19 +92,19 @@ public:
     }
 
     void cancel_all() noexcept {
-        for (RuntimeTimerEntry &entry : entries_) {
+        for (runtime_timer_entry &entry : entries_) {
             runtime_task_access::cancel_timer(entry.task);
         }
         entries_.clear();
     }
 
 private:
-    std::vector<RuntimeTimerEntry> entries_;
+    std::vector<runtime_timer_entry> entries_;
 };
 
-class RuntimeHierarchicalTimerWheel {
+class runtime_hierarchical_timer_wheel {
 public:
-    RuntimeHierarchicalTimerWheel() = default;
+    runtime_hierarchical_timer_wheel() = default;
 
     void configure(const timer_config &config, std::size_t drain_budget) {
         tick_ns_ = std::chrono::duration_cast<std::chrono::nanoseconds>(config.tick).count();
@@ -120,7 +120,7 @@ public:
         due_buffer_.reserve(drain_budget);
     }
 
-    void push(RuntimeTimerEntry entry, std::int64_t now_ns) {
+    void push(runtime_timer_entry entry, std::int64_t now_ns) {
         refresh_current_tick(now_ns);
         const std::uint64_t deadline_tick = tick_for(entry.deadline_ns);
         const std::uint64_t distance =
@@ -180,7 +180,7 @@ public:
         }
         pending_count_ -= due_buffer_.size();
         bool did_work = false;
-        for (RuntimeTimerEntry &entry : due_buffer_) {
+        for (runtime_timer_entry &entry : due_buffer_) {
             runtime_task *task = entry.task;
             if (task == nullptr || !runtime_task_access::mark_timer_ready(task)) {
                 continue;
@@ -246,15 +246,15 @@ private:
         }
     }
 
-    static void collect_due_from_bucket(std::vector<RuntimeTimerEntry> &bucket, std::int64_t now_ns,
-                                        std::size_t budget,
-                                        std::vector<RuntimeTimerEntry> &out) noexcept {
+    static void collect_due_from_bucket(std::vector<runtime_timer_entry> &bucket,
+                                        std::int64_t now_ns, std::size_t budget,
+                                        std::vector<runtime_timer_entry> &out) noexcept {
         if (bucket.empty() || out.size() >= budget) {
             return;
         }
         std::size_t write = 0;
         for (std::size_t read = 0; read < bucket.size(); ++read) {
-            RuntimeTimerEntry &entry = bucket[read];
+            runtime_timer_entry &entry = bucket[read];
             if (entry.deadline_ns <= now_ns && out.size() < budget) {
                 out.push_back(entry);
                 continue;
@@ -267,14 +267,14 @@ private:
         bucket.resize(write);
     }
 
-    static void cancel_bucket(const std::vector<RuntimeTimerEntry> &bucket) noexcept {
-        for (const RuntimeTimerEntry &entry : bucket) {
+    static void cancel_bucket(const std::vector<runtime_timer_entry> &bucket) noexcept {
+        for (const runtime_timer_entry &entry : bucket) {
             runtime_task_access::cancel_timer(entry.task);
         }
     }
 
     void collect_due_from_overflow(std::int64_t now_ns, std::size_t budget,
-                                   std::vector<RuntimeTimerEntry> &out) noexcept {
+                                   std::vector<runtime_timer_entry> &out) noexcept {
         while (out.size() < budget && !overflow_.empty() &&
                overflow_.front().deadline_ns <= now_ns) {
             std::pop_heap(overflow_.begin(), overflow_.end(), runtime_timer_entry_after);
@@ -284,7 +284,7 @@ private:
     }
 
     void collect_due_from_all(std::int64_t now_ns, std::size_t budget,
-                              std::vector<RuntimeTimerEntry> &out) noexcept {
+                              std::vector<runtime_timer_entry> &out) noexcept {
         for (auto &bucket : level0_) {
             collect_due_from_bucket(bucket, now_ns, budget, out);
             if (out.size() >= budget) {
@@ -303,20 +303,20 @@ private:
     void rebuild_next_deadline() noexcept {
         std::int64_t next = std::numeric_limits<std::int64_t>::max();
         for (const auto &bucket : level0_) {
-            for (const RuntimeTimerEntry &entry : bucket) {
+            for (const runtime_timer_entry &entry : bucket) {
                 if (entry.deadline_ns < next) {
                     next = entry.deadline_ns;
                 }
             }
         }
         for (const auto &bucket : level1_) {
-            for (const RuntimeTimerEntry &entry : bucket) {
+            for (const runtime_timer_entry &entry : bucket) {
                 if (entry.deadline_ns < next) {
                     next = entry.deadline_ns;
                 }
             }
         }
-        for (const RuntimeTimerEntry &entry : overflow_) {
+        for (const runtime_timer_entry &entry : overflow_) {
             if (entry.deadline_ns < next) {
                 next = entry.deadline_ns;
             }
@@ -332,11 +332,15 @@ private:
     bool initialized_{false};
     std::size_t pending_count_{0};
     std::int64_t next_deadline_ns_{std::numeric_limits<std::int64_t>::max()};
-    std::vector<std::vector<RuntimeTimerEntry>> level0_;
-    std::vector<std::vector<RuntimeTimerEntry>> level1_;
-    std::vector<RuntimeTimerEntry> overflow_;
-    std::vector<RuntimeTimerEntry> due_buffer_;
+    std::vector<std::vector<runtime_timer_entry>> level0_;
+    std::vector<std::vector<runtime_timer_entry>> level1_;
+    std::vector<runtime_timer_entry> overflow_;
+    std::vector<runtime_timer_entry> due_buffer_;
 };
+
+using RuntimeTimerEntry = runtime_timer_entry;
+using RuntimeTimerHeap = runtime_timer_heap;
+using RuntimeHierarchicalTimerWheel = runtime_hierarchical_timer_wheel;
 
 } // namespace detail
 } // namespace af

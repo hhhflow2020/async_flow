@@ -67,8 +67,8 @@ private:
     runtime &owner_;
     runtime_thread_info thread_;
     IntrusiveMpscQueue<runtime_work> inbox_;
-    RuntimeTimerHeap timer_heap_;
-    RuntimeHierarchicalTimerWheel timer_wheel_;
+    runtime_timer_heap timer_heap_;
+    runtime_hierarchical_timer_wheel timer_wheel_;
     std::vector<runtime_service_task *> service_tasks_;
     std::unique_ptr<reactor> reactor_;
     std::size_t task_drain_budget_{256};
