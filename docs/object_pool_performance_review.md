@@ -47,6 +47,33 @@
 ./asyncflow_runtime_benchmarks --benchmark_filter='ObjectPool|AsyncLogRecordPool' --benchmark_min_time=0.1s
 ```
 
+## 2026-06-11 远端复核
+
+环境：
+
+- 机器：`root@192.168.31.192` 的 `/data/async_flow-next-runtime-architecture`
+- 容器：`ghcr.io/hhhflow2020/cpp-dev-gcc:bookworm-v2.0.3`
+- 构建：`build-gcc/build/Release`
+- 命令参数：`--benchmark_min_time=0.1s --benchmark_repetitions=3 --benchmark_report_aggregates_only=true`
+
+结果摘要：
+
+- `BM_ObjectPoolCreateDestroy/1024_mean`：约 `414.9M items/s`，CV `1.92%`。
+- `BM_ObjectPoolBatchCreateDestroy/1024_mean`：约 `132.9M items/s`，CV `0.65%`。
+- `BM_ObjectPoolRemoteBatchCrossThreadDestroyBatch/1024_mean`：约 `52.3M items/s`，CV `5.14%`。
+- `BM_AsyncLogRecordPoolAcquireRelease/256_mean`：约 `78.3M items/s`，CV `0.11%`。
+- `BM_AsyncLogRecordPoolAcquireRelease/1024_mean`：约 `63.9M items/s`，CV `0.16%`。
+- `BM_AsyncLogRecordPoolBatchAcquireRelease/64/256_mean`：约 `121.6M items/s`，CV `0.35%`。
+- `BM_AsyncLogRecordPoolBatchAcquireRelease/1024/1024_mean`：约 `55.9M items/s`，CV `0.31%`。
+- `BM_AsyncLogRecordPoolCrossThreadReleaseBatch/64/256/real_time_mean`：约 `20.9M items/s`，CV `0.21%`。
+- `BM_AsyncLogRecordPoolCrossThreadReleaseBatch/1024/1024/real_time_mean`：约 `22.4M items/s`，CV `0.38%`。
+
+判断：
+
+- 本地缓存命中和批量路径稳定，CV 多数低于 `1%`，说明 cache-line 对齐、TLS local cache 和批量 slab release 的热路径没有明显抖动。
+- 跨线程对象池 remote batch 路径吞吐低于本线程路径，符合跨线程原子写入和缓存一致性开销预期；后续如继续优化，应优先比较 remote batch size、direct release set size 和线程 fan-in 模式，而不是引入锁。
+- 日志 record pool 的跨线程批量释放在 `64/256` 与 `1024/1024` 配置下吞吐接近，说明按 slab 分组批量归还能降低大批量释放时的 CAS 次数。
+
 ## 建议
 
 - 对高频 task 设置合理的 `task_pool_chunk_size`。
