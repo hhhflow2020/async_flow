@@ -14,6 +14,7 @@
 
 - `async_log_record_pool` 使用固定数组 TLS local cache，命中时 acquire/release 不进入全局锁，也不需要在线程首次绑定 pool 时为 cache 做动态分配。
 - 每个 slab 有独立的带版本号 free-list；批量 release 会按 slab 分组，只对同一 slab 做一次链表拼接和 CAS。
+- local cache refill 会跨已有 slab 尽量填满缓存，避免某个 slab 只剩少量 slot 时频繁重复进入全局 free-list。
 - 扩容通过 `atomic_flag` 串行化，只在 slab 耗尽时进入冷路径；正常日志热路径不加锁。
 - `log_record` 按 cache line 对齐，默认 1024 字节 inline message，普通日志不会触发 heap 分配。
 
@@ -73,6 +74,7 @@
 - 本地缓存命中和批量路径稳定，CV 多数低于 `1%`，说明 cache-line 对齐、TLS local cache 和批量 slab release 的热路径没有明显抖动。
 - 跨线程对象池 remote batch 路径吞吐低于本线程路径，符合跨线程原子写入和缓存一致性开销预期；后续如继续优化，应优先比较 remote batch size、direct release set size 和线程 fan-in 模式，而不是引入锁。
 - 日志 record pool 的跨线程批量释放在 `64/256` 与 `1024/1024` 配置下吞吐接近，说明按 slab 分组批量归还能降低大批量释放时的 CAS 次数。
+- 本轮补充 `RecordPoolLocalCacheRefillFillsAcrossExistingSlabs` 回归测试，固定 local cache refill 跨已有 slab 补满缓存的行为。远端单次 benchmark 冒烟中，`BM_AsyncLogRecordPoolAcquireRelease/256` 约 `74.2M items/s`，`BM_AsyncLogRecordPoolBatchAcquireRelease/64/256` 约 `117.9M items/s`，日志池热路径能稳定出数。
 
 ## 建议
 

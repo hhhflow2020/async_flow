@@ -301,6 +301,42 @@ TEST(LogTests, RecordPoolLocalCacheIgnoresStaleSlotsWhenPoolAddressIsReused) {
     pool->~Pool();
 }
 
+TEST(LogTests, RecordPoolLocalCacheRefillFillsAcrossExistingSlabs) {
+    af::detail::async_log_record_pool pool(2, 4);
+    std::array<af::detail::log_record *, 6> records{};
+    for (std::size_t i = 0; i < records.size(); ++i) {
+        records[i] = pool.try_acquire("allocated");
+        ASSERT_NE(records[i], nullptr);
+    }
+
+    af::detail::log_record *newer_slab_record = records[2];
+    af::detail::log_record *older_slab_first = records[0];
+    af::detail::log_record *older_slab_second = records[1];
+
+    af::detail::release_async_log_record(newer_slab_record);
+    af::detail::release_async_log_record(older_slab_first);
+    af::detail::release_async_log_record(older_slab_second);
+
+    af::detail::log_record *first = pool.try_acquire("first");
+    af::detail::log_record *second = pool.try_acquire("second");
+    af::detail::log_record *third = pool.try_acquire("third");
+
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    ASSERT_NE(third, nullptr);
+    EXPECT_TRUE(first == older_slab_first || first == older_slab_second)
+        << "local cache refill stopped after the first non-empty slab";
+    EXPECT_TRUE(second == older_slab_first || second == older_slab_second);
+    EXPECT_EQ(third, newer_slab_record);
+
+    af::detail::release_async_log_record(first);
+    af::detail::release_async_log_record(second);
+    af::detail::release_async_log_record(third);
+    af::detail::release_async_log_record(records[3]);
+    af::detail::release_async_log_record(records[4]);
+    af::detail::release_async_log_record(records[5]);
+}
+
 class BlockingLogBackend final : public af::log_backend {
 public:
     void write_batch(af::span<af::detail::log_record *const> records) noexcept override {

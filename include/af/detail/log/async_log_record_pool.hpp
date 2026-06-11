@@ -389,9 +389,6 @@ private:
         Slab *slab = slab_head_.load(std::memory_order_acquire);
         while (slab != nullptr && count < max_count) {
             count += try_pop_many(*slab, out + count, max_count - count);
-            if (count != 0U) {
-                return count;
-            }
             slab = slab->next.load(std::memory_order_acquire);
         }
         return count;
