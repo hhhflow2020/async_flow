@@ -44,6 +44,8 @@ static_assert(sizeof(af::detail::cache_line_atomic<std::uint64_t>) >=
               af::detail::hardware_cache_line_size);
 
 TEST(LogTests, LogDetailTypesExposeLowerCasePrimaryNames) {
+    static_assert(std::is_same_v<af::runtime_instance_absl_async_log_sink,
+                                 af::RuntimeInstanceAbslAsyncLogSink>);
     static_assert(std::is_same_v<af::detail::log_record, af::detail::LogRecord>);
     static_assert(
         std::is_same_v<af::detail::async_log_drain_waiter, af::detail::AsyncLogDrainWaiter>);

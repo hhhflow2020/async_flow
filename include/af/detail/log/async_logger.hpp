@@ -19,7 +19,8 @@
 
 namespace af {
 
-class RuntimeInstanceAbslAsyncLogSink;
+class runtime_instance_absl_async_log_sink;
+using RuntimeInstanceAbslAsyncLogSink = runtime_instance_absl_async_log_sink;
 
 class async_logger {
 public:
@@ -37,7 +38,7 @@ public:
 
 private:
     friend class detail::runtime_instance_async_log_consumer_controller;
-    friend class RuntimeInstanceAbslAsyncLogSink;
+    friend class runtime_instance_absl_async_log_sink;
 
     [[nodiscard]] bool try_log_from_runtime_thread(std::uint16_t thread_index,
                                                    std::string_view message) noexcept;

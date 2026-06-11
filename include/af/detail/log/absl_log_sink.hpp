@@ -290,9 +290,9 @@ default_async_log_consumer_thread(runtime &owner) noexcept {
     return owner.valid_thread(0U) ? 0U : owner.invalid_thread_index();
 }
 
-class RuntimeInstanceAbslAsyncLogSink final : public absl::LogSink {
+class runtime_instance_absl_async_log_sink final : public absl::LogSink {
 public:
-    RuntimeInstanceAbslAsyncLogSink(runtime &owner, std::shared_ptr<async_logger> logger)
+    runtime_instance_absl_async_log_sink(runtime &owner, std::shared_ptr<async_logger> logger)
         : owner_(owner), logger_(std::move(logger)) {}
 
     void Send(const absl::LogEntry &entry) override {
@@ -439,7 +439,7 @@ start_runtime_logging(runtime &owner, async_log_config config,
     initialize_absl_log_once();
 
     auto handle = std::make_unique<async_log_handle>(
-        logger, std::make_unique<RuntimeInstanceAbslAsyncLogSink>(owner, logger),
+        logger, std::make_unique<runtime_instance_absl_async_log_sink>(owner, logger),
         std::move(consumer_controller));
     handle->register_sink();
     return handle;
