@@ -13,7 +13,7 @@
 #include "af/detail/runtime/runtime_service_task.hpp"
 #include "af/runtime/config_resolution.hpp"
 #include "af/runtime/detail/timer_backend.hpp"
-#include "af/runtime/reactor.hpp"
+#include "af/reactor/reactor.hpp"
 #include "af/runtime/work.hpp"
 
 namespace af {

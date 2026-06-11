@@ -9,7 +9,7 @@
 #include <benchmark/benchmark.h>
 
 #include "af/platform.hpp"
-#include "af/runtime/reactor.hpp"
+#include "af/reactor.hpp"
 
 #include <fcntl.h>
 #include <unistd.h>

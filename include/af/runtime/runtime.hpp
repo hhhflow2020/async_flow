@@ -23,7 +23,7 @@
 #include "af/runtime/detail/function_task.hpp"
 #include "af/runtime/detail/function_work.hpp"
 #include "af/runtime/detail/pooled_object.hpp"
-#include "af/runtime/reactor.hpp"
+#include "af/reactor/reactor.hpp"
 #include "af/runtime/task.hpp"
 
 namespace af {

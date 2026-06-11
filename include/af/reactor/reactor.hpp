@@ -65,9 +65,9 @@ namespace detail {
 
 } // namespace af
 
-#include "af/runtime/detail/epoll_reactor.hpp"
-#include "af/runtime/detail/kqueue_reactor.hpp"
-#include "af/runtime/detail/select_reactor.hpp"
+#include "af/reactor/detail/epoll_reactor.hpp"
+#include "af/reactor/detail/kqueue_reactor.hpp"
+#include "af/reactor/detail/select_reactor.hpp"
 
 namespace af {
 

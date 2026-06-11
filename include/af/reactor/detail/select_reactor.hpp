@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "af/detail/config.hpp"
-#include "af/runtime/reactor.hpp"
+#include "af/reactor/reactor.hpp"
 
 #if AF_DETAIL_HAS_NATIVE_IO_WAIT
 #include <fcntl.h>

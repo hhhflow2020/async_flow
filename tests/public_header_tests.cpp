@@ -130,6 +130,42 @@
 #error "memory headers must be installed under af/memory"
 #endif
 
+#if __has_include("af/runtime/reactor.hpp")
+#error "reactor headers must live under af/reactor, not af/runtime"
+#endif
+
+#if __has_include("af/runtime/detail/epoll_reactor.hpp")
+#error "reactor backend headers must live under af/reactor/detail, not af/runtime/detail"
+#endif
+
+#if __has_include("af/runtime/detail/kqueue_reactor.hpp")
+#error "reactor backend headers must live under af/reactor/detail, not af/runtime/detail"
+#endif
+
+#if __has_include("af/runtime/detail/select_reactor.hpp")
+#error "reactor backend headers must live under af/reactor/detail, not af/runtime/detail"
+#endif
+
+#if !__has_include("af/reactor.hpp")
+#error "reactor umbrella header must be installed"
+#endif
+
+#if !__has_include("af/reactor/reactor.hpp")
+#error "reactor public header must be installed under af/reactor"
+#endif
+
+#if !__has_include("af/reactor/detail/epoll_reactor.hpp")
+#error "epoll reactor backend header must be installed under af/reactor/detail"
+#endif
+
+#if !__has_include("af/reactor/detail/kqueue_reactor.hpp")
+#error "kqueue reactor backend header must be installed under af/reactor/detail"
+#endif
+
+#if !__has_include("af/reactor/detail/select_reactor.hpp")
+#error "select reactor backend header must be installed under af/reactor/detail"
+#endif
+
 #if __has_include("af/detail/thread/hardware_threads.hpp")
 #error "platform thread headers must live under af/platform, not af/detail/thread"
 #endif
@@ -673,7 +709,7 @@ TEST(PublicHeaderTests, ReactorBenchmarksCoverPollBatchSizes) {
 }
 
 TEST(PublicHeaderTests, EpollReactorBatchesReadySourcesBeforeDispatch) {
-    const std::string content = read_source_file("include/af/runtime/detail/epoll_reactor.hpp");
+    const std::string content = read_source_file("include/af/reactor/detail/epoll_reactor.hpp");
     ASSERT_FALSE(content.empty());
     EXPECT_NE(content.find("ready_sources_"), std::string::npos);
     EXPECT_NE(content.find("ready_events_"), std::string::npos);
