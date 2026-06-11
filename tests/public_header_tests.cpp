@@ -240,6 +240,22 @@ TEST(PublicHeaderTests, ThreadLayoutPublicHeaderDoesNotExposeCamelCaseTypeAliase
     }
 }
 
+TEST(PublicHeaderTests, PublicHeadersDoNotExposeLegacyRuntimeTemplateThreadHelpers) {
+    constexpr std::array forbidden{
+        forbidden_source_snippet{"include/af/platform.hpp", "RuntimeT::Thread"},
+        forbidden_source_snippet{"include/af/platform.hpp", "runtime_io_backend_name("},
+        forbidden_source_snippet{"include/af/net/thread_list.hpp", "typename Runtime::Thread"},
+        forbidden_source_snippet{"include/af/net/thread_list.hpp", "template <typename Runtime"},
+    };
+
+    for (const forbidden_source_snippet item : forbidden) {
+        const std::string content = read_source_file(item.relative_path);
+        ASSERT_FALSE(content.empty()) << item.relative_path;
+        EXPECT_EQ(content.find(item.snippet), std::string::npos)
+            << item.relative_path << " still contains " << item.snippet;
+    }
+}
+
 TEST(PublicHeaderTests, LogPublicHeadersDoNotExposeCamelCaseTypeAliases) {
     constexpr std::array forbidden{
         forbidden_source_snippet{"include/af/detail/log/async_log_config.hpp",

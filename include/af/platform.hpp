@@ -22,17 +22,4 @@ inline constexpr bool supports_sendfile = platform_linux;
 inline constexpr bool supports_splice = platform_linux;
 inline constexpr bool supports_zero_copy_send = platform_linux;
 
-template <typename RuntimeT>
-[[nodiscard]] const char *runtime_io_backend_name(typename RuntimeT::Thread thread) noexcept {
-    static_cast<void>(thread);
-
-    if constexpr (supports_epoll) {
-        return "epoll";
-    } else if constexpr (supports_kqueue) {
-        return "kqueue";
-    } else {
-        return "native-readiness";
-    }
-}
-
 } // namespace af
