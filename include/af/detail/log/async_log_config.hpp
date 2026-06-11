@@ -93,9 +93,4 @@ struct async_log_stats {
     std::uint64_t dropped{0};
 };
 
-using LogOverflowPolicy = log_overflow_policy;
-using LogOrdering = log_ordering;
-using AsyncLogConfig = async_log_config;
-using AsyncLogStats = async_log_stats;
-
 } // namespace af

@@ -183,8 +183,8 @@ static_assert(af::ordered_batch_replay_policy::skip_already_applied ==
               af::ordered_batch_replay_policy::skip_already_applied);
 static_assert(!has_strict_value<af::ordered_batch_replay_policy>::value);
 static_assert(!has_skip_already_applied_value<af::ordered_batch_replay_policy>::value);
-static_assert(std::is_same_v<af::log_ordering, af::LogOrdering>);
-static_assert(std::is_same_v<af::log_overflow_policy, af::LogOverflowPolicy>);
+static_assert(std::is_enum_v<af::log_ordering>);
+static_assert(std::is_enum_v<af::log_overflow_policy>);
 static_assert(std::is_same_v<af::detail::runtime_pooled_object_pool_type<int, 8>,
                              af::detail::RuntimePooledObjectPool<int, 8>>);
 static_assert(std::is_same_v<af::detail::runtime_pooled_object_pool_holder_type<int, 8>,

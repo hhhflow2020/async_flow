@@ -388,11 +388,6 @@ private:
     std::array<iovec, max_iov_count> iovecs_{};
 };
 
-using UdpLogBackendConfig = udp_log_backend_options;
-using TcpLogBackendConfig = tcp_log_backend_options;
-using UdpLogBackend = udp_log_backend;
-using TcpLogBackend = tcp_log_backend;
-
 [[nodiscard]] inline std::unique_ptr<log_backend>
 make_udp_log_backend(udp_log_backend_options config) {
     return std::make_unique<udp_log_backend>(std::move(config));

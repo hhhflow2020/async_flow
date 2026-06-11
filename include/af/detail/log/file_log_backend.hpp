@@ -133,9 +133,6 @@ private:
     std::vector<iovec> iovecs_;
 };
 
-using FileLogBackendConfig = file_log_backend_options;
-using FileLogBackend = file_log_backend;
-
 [[nodiscard]] inline std::unique_ptr<log_backend>
 make_file_log_backend(file_log_backend_options config) {
     return std::make_unique<file_log_backend>(std::move(config));

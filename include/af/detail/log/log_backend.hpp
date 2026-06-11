@@ -26,6 +26,4 @@ public:
     }
 };
 
-using LogBackend = log_backend;
-
 } // namespace af

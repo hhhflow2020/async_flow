@@ -55,8 +55,7 @@ AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_unregister_value, Unregister);
 #undef AF_TEST_DEFINE_ENUM_VALUE_DETECTOR
 
 TEST(LogTests, LogDetailTypesExposeLowerCasePrimaryNames) {
-    static_assert(std::is_same_v<af::runtime_instance_absl_async_log_sink,
-                                 af::RuntimeInstanceAbslAsyncLogSink>);
+    static_assert(std::is_class_v<af::runtime_instance_absl_async_log_sink>);
     static_assert(std::is_same_v<af::detail::log_record, af::detail::LogRecord>);
     static_assert(
         std::is_same_v<af::detail::async_log_drain_waiter, af::detail::AsyncLogDrainWaiter>);
@@ -107,12 +106,12 @@ TEST(LogTests, LogDetailTypesExposeLowerCasePrimaryNames) {
                   af::detail::runtime_instance_async_log_consumer_control_operation>::value);
     static_assert(!has_unregister_value<
                   af::detail::runtime_instance_async_log_consumer_control_operation>::value);
-    static_assert(std::is_same_v<af::file_log_backend_options, af::FileLogBackendConfig>);
-    static_assert(std::is_same_v<af::file_log_backend, af::FileLogBackend>);
-    static_assert(std::is_same_v<af::udp_log_backend_options, af::UdpLogBackendConfig>);
-    static_assert(std::is_same_v<af::udp_log_backend, af::UdpLogBackend>);
-    static_assert(std::is_same_v<af::tcp_log_backend_options, af::TcpLogBackendConfig>);
-    static_assert(std::is_same_v<af::tcp_log_backend, af::TcpLogBackend>);
+    static_assert(std::is_class_v<af::file_log_backend_options>);
+    static_assert(std::is_class_v<af::file_log_backend>);
+    static_assert(std::is_class_v<af::udp_log_backend_options>);
+    static_assert(std::is_class_v<af::udp_log_backend>);
+    static_assert(std::is_class_v<af::tcp_log_backend_options>);
+    static_assert(std::is_class_v<af::tcp_log_backend>);
 #if defined(__linux__)
     static_assert(std::is_same_v<af::detail::log_mmsg_header, af::detail::LogMmsgHeader>);
 #endif

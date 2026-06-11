@@ -217,14 +217,52 @@ TEST(PublicHeaderTests, UtilityPublicHeadersDoNotExposeCamelCaseTypeAliases) {
     }
 }
 
+TEST(PublicHeaderTests, LogPublicHeadersDoNotExposeCamelCaseTypeAliases) {
+    constexpr std::array forbidden{
+        forbidden_source_snippet{"include/af/detail/log/async_log_config.hpp",
+                                 "using LogOverflowPolicy ="},
+        forbidden_source_snippet{"include/af/detail/log/async_log_config.hpp",
+                                 "using LogOrdering ="},
+        forbidden_source_snippet{"include/af/detail/log/async_log_config.hpp",
+                                 "using AsyncLogConfig ="},
+        forbidden_source_snippet{"include/af/detail/log/async_log_config.hpp",
+                                 "using AsyncLogStats ="},
+        forbidden_source_snippet{"include/af/detail/log/async_logger.hpp",
+                                 "using RuntimeInstanceAbslAsyncLogSink ="},
+        forbidden_source_snippet{"include/af/detail/log/async_logger.hpp", "using AsyncLogger ="},
+        forbidden_source_snippet{"include/af/detail/log/absl_log_sink.hpp",
+                                 "using AsyncLogHandle ="},
+        forbidden_source_snippet{"include/af/detail/log/file_log_backend.hpp",
+                                 "using FileLogBackendConfig ="},
+        forbidden_source_snippet{"include/af/detail/log/file_log_backend.hpp",
+                                 "using FileLogBackend ="},
+        forbidden_source_snippet{"include/af/detail/log/log_backend.hpp", "using LogBackend ="},
+        forbidden_source_snippet{"include/af/detail/log/network_log_backend.hpp",
+                                 "using UdpLogBackendConfig ="},
+        forbidden_source_snippet{"include/af/detail/log/network_log_backend.hpp",
+                                 "using TcpLogBackendConfig ="},
+        forbidden_source_snippet{"include/af/detail/log/network_log_backend.hpp",
+                                 "using UdpLogBackend ="},
+        forbidden_source_snippet{"include/af/detail/log/network_log_backend.hpp",
+                                 "using TcpLogBackend ="},
+    };
+
+    for (const forbidden_source_snippet item : forbidden) {
+        const std::string content = read_source_file(item.relative_path);
+        ASSERT_FALSE(content.empty()) << item.relative_path;
+        EXPECT_EQ(content.find(item.snippet), std::string::npos)
+            << item.relative_path << " still contains " << item.snippet;
+    }
+}
+
 TEST(PublicHeaderTests, LogUmbrellaExposesLowerCaseNames) {
-    static_assert(std::is_same_v<af::LogOverflowPolicy, af::log_overflow_policy>);
-    static_assert(std::is_same_v<af::LogOrdering, af::log_ordering>);
-    static_assert(std::is_same_v<af::AsyncLogConfig, af::async_log_config>);
-    static_assert(std::is_same_v<af::AsyncLogStats, af::async_log_stats>);
-    static_assert(std::is_same_v<af::AsyncLogger, af::async_logger>);
-    static_assert(std::is_same_v<af::LogBackend, af::log_backend>);
-    static_assert(std::is_same_v<af::AsyncLogHandle, af::async_log_handle>);
+    static_assert(std::is_enum_v<af::log_overflow_policy>);
+    static_assert(std::is_enum_v<af::log_ordering>);
+    static_assert(std::is_class_v<af::async_log_config>);
+    static_assert(std::is_class_v<af::async_log_stats>);
+    static_assert(std::is_class_v<af::async_logger>);
+    static_assert(std::is_class_v<af::log_backend>);
+    static_assert(std::is_class_v<af::async_log_handle>);
     af::async_log_config config = af::async_log_config::ordered();
     EXPECT_EQ(config.ordering, af::log_ordering::ordered);
 }

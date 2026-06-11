@@ -20,7 +20,6 @@
 namespace af {
 
 class runtime_instance_absl_async_log_sink;
-using RuntimeInstanceAbslAsyncLogSink = runtime_instance_absl_async_log_sink;
 
 class async_logger {
 public:
@@ -179,8 +178,6 @@ private:
     bool prefer_runtime_drain_{true};
     detail::async_log_drain_waiter drain_waiter_;
 };
-
-using AsyncLogger = async_logger;
 
 } // namespace af
 
