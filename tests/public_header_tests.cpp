@@ -217,6 +217,29 @@ TEST(PublicHeaderTests, UtilityPublicHeadersDoNotExposeCamelCaseTypeAliases) {
     }
 }
 
+TEST(PublicHeaderTests, ThreadLayoutPublicHeaderDoesNotExposeCamelCaseTypeAliases) {
+    constexpr std::array forbidden{
+        forbidden_source_snippet{"include/af/thread_layout.hpp", "using Layout ="},
+        forbidden_source_snippet{"include/af/thread_layout.hpp", "using ThreadId ="},
+        forbidden_source_snippet{"include/af/thread_layout.hpp", "using Thread ="},
+        forbidden_source_snippet{"include/af/thread_layout.hpp", "using ThreadGroup ="},
+        forbidden_source_snippet{"include/af/thread_layout.hpp", "using Tag ="},
+        forbidden_source_snippet{"include/af/thread_layout.hpp", "using ThreadGroupSpec ="},
+        forbidden_source_snippet{"include/af/thread_layout.hpp", "using ThreadGroupShape ="},
+        forbidden_source_snippet{"include/af/thread_layout.hpp", "using ThreadLayoutShape ="},
+        forbidden_source_snippet{"include/af/thread_layout.hpp", "using ThreadLayoutEntry ="},
+        forbidden_source_snippet{"include/af/thread_layout.hpp", "using ThreadShape ="},
+        forbidden_source_snippet{"include/af/thread_layout.hpp", "using ThreadLayout ="},
+    };
+
+    for (const forbidden_source_snippet item : forbidden) {
+        const std::string content = read_source_file(item.relative_path);
+        ASSERT_FALSE(content.empty()) << item.relative_path;
+        EXPECT_EQ(content.find(item.snippet), std::string::npos)
+            << item.relative_path << " still contains " << item.snippet;
+    }
+}
+
 TEST(PublicHeaderTests, LogPublicHeadersDoNotExposeCamelCaseTypeAliases) {
     constexpr std::array forbidden{
         forbidden_source_snippet{"include/af/detail/log/async_log_config.hpp",

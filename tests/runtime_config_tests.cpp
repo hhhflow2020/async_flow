@@ -985,17 +985,15 @@ TEST(RuntimeConfigTests, CompileTimeThreadLayoutUsesLowerCaseTypeNames) {
     using io_spec = af::thread_group_spec<layout_io_tag, 2, af::thread_kind::io>;
     using lower_layout = af::static_thread_layout<logic_spec, io_spec>;
 
-    static_assert(
-        std::is_same_v<logic_spec, af::ThreadGroupSpec<layout_logic_tag, 3, af::thread_kind::cpu>>);
-    static_assert(std::is_same_v<lower_layout, af::ThreadLayout<logic_spec, io_spec>>);
-    static_assert(std::is_same_v<typename lower_layout::thread, typename lower_layout::Thread>);
+    static_assert(std::is_class_v<logic_spec>);
+    static_assert(std::is_class_v<lower_layout>);
+    static_assert(std::is_class_v<typename lower_layout::thread>);
 
     const auto layout = af::thread_layout(logic_spec{"logic"}, io_spec{"io"});
     using layout_type = decltype(layout);
     using thread = typename layout_type::thread;
     static_assert(std::is_same_v<af::thread_id<typename layout_type::thread_shape>, thread>);
-    static_assert(
-        std::is_same_v<af::static_thread_group<thread, 3, 2>, af::ThreadGroup<thread, 3, 2>>);
+    static_assert(std::is_class_v<af::static_thread_group<thread, 3, 2>>);
 
     const auto logic = layout_type::template group<layout_logic_tag>();
     const auto io = layout_type::template group<layout_io_tag>();
