@@ -14,6 +14,54 @@
 #error "legacy task IO facade must not be installed"
 #endif
 
+#if __has_include("af/detail/queue/bounded_mpmc_queue.hpp")
+#error "queue headers must live under af/queue, not af/detail/queue"
+#endif
+
+#if __has_include("af/detail/queue/bounded_mpsc_queue.hpp")
+#error "queue headers must live under af/queue, not af/detail/queue"
+#endif
+
+#if __has_include("af/detail/queue/bounded_queue_common.hpp")
+#error "queue headers must live under af/queue, not af/detail/queue"
+#endif
+
+#if __has_include("af/detail/queue/bounded_queues.hpp")
+#error "queue headers must live under af/queue, not af/detail/queue"
+#endif
+
+#if __has_include("af/detail/queue/intrusive_mpsc_queue.hpp")
+#error "queue headers must live under af/queue, not af/detail/queue"
+#endif
+
+#if __has_include("af/detail/queue/queue_backoff.hpp")
+#error "queue headers must live under af/queue, not af/detail/queue"
+#endif
+
+#if !__has_include("af/queue/bounded_mpmc_queue.hpp")
+#error "queue headers must be installed under af/queue"
+#endif
+
+#if !__has_include("af/queue/bounded_mpsc_queue.hpp")
+#error "queue headers must be installed under af/queue"
+#endif
+
+#if !__has_include("af/queue/bounded_queue_common.hpp")
+#error "queue headers must be installed under af/queue"
+#endif
+
+#if !__has_include("af/queue/bounded_queues.hpp")
+#error "queue headers must be installed under af/queue"
+#endif
+
+#if !__has_include("af/queue/intrusive_mpsc_queue.hpp")
+#error "queue headers must be installed under af/queue"
+#endif
+
+#if !__has_include("af/queue/queue_backoff.hpp")
+#error "queue headers must be installed under af/queue"
+#endif
+
 namespace {
 
 struct forbidden_source_snippet {
@@ -232,16 +280,15 @@ TEST(PublicHeaderTests, InfrastructureDetailHeadersDoNotExposeCamelCaseTypeAlias
                                  "using ContiguousObjectStorage ="},
         forbidden_source_snippet{"include/af/detail/net/socket_address.hpp",
                                  "using SocketAddress ="},
-        forbidden_source_snippet{"include/af/detail/queue/bounded_mpsc_queue.hpp",
+        forbidden_source_snippet{"include/af/queue/bounded_mpsc_queue.hpp",
                                  "using BoundedMpscQueue ="},
-        forbidden_source_snippet{"include/af/detail/queue/bounded_mpmc_queue.hpp",
+        forbidden_source_snippet{"include/af/queue/bounded_mpmc_queue.hpp",
                                  "using BoundedMpmcQueue ="},
-        forbidden_source_snippet{"include/af/detail/queue/intrusive_mpsc_queue.hpp",
+        forbidden_source_snippet{"include/af/queue/intrusive_mpsc_queue.hpp",
                                  "using IntrusiveMpscNode ="},
-        forbidden_source_snippet{"include/af/detail/queue/intrusive_mpsc_queue.hpp",
+        forbidden_source_snippet{"include/af/queue/intrusive_mpsc_queue.hpp",
                                  "using IntrusiveMpscQueue ="},
-        forbidden_source_snippet{"include/af/detail/queue/queue_backoff.hpp",
-                                 "using QueueFullBackoff ="},
+        forbidden_source_snippet{"include/af/queue/queue_backoff.hpp", "using QueueFullBackoff ="},
         forbidden_source_snippet{"include/af/detail/runtime/runtime_common_state.hpp",
                                  "using CacheLineAtomic ="},
         forbidden_source_snippet{"include/af/detail/runtime/runtime_common_state.hpp",

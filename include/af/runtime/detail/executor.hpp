@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "af/detail/config.hpp"
-#include "af/detail/queue/intrusive_mpsc_queue.hpp"
+#include "af/queue/intrusive_mpsc_queue.hpp"
 #include "af/detail/runtime/runtime_common_state.hpp"
 #include "af/detail/runtime/runtime_service_task.hpp"
 #include "af/runtime/config_resolution.hpp"

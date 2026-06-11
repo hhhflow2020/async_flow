@@ -14,7 +14,7 @@
 #include "af/detail/log/async_log_drain_waiter.hpp"
 #include "af/detail/log/async_log_lanes.hpp"
 #include "af/detail/log/async_log_record_pool.hpp"
-#include "af/detail/queue/queue_backoff.hpp"
+#include "af/queue/queue_backoff.hpp"
 #include "af/detail/runtime/runtime_common_state.hpp"
 #include "af/detail/thread/hardware_threads.hpp"
 

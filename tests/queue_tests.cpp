@@ -8,8 +8,8 @@
 
 #include <gtest/gtest.h>
 
-#include "af/detail/queue/bounded_queues.hpp"
-#include "af/detail/queue/intrusive_mpsc_queue.hpp"
+#include "af/queue/bounded_queues.hpp"
+#include "af/queue/intrusive_mpsc_queue.hpp"
 
 namespace {
 

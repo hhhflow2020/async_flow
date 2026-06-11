@@ -14,7 +14,7 @@
 #include "af/detail/config.hpp"
 #include "af/detail/log/log_backend.hpp"
 #include "af/detail/memory/contiguous_object_storage.hpp"
-#include "af/detail/queue/bounded_mpsc_queue.hpp"
+#include "af/queue/bounded_mpsc_queue.hpp"
 #include "af/detail/runtime/runtime_common_state.hpp"
 #include "af/detail/runtime/runtime_service_task.hpp"
 #include "af/detail/runtime/timed_atomic_wait.hpp"

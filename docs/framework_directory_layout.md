@@ -6,7 +6,7 @@
 
 - `include/af/runtime/`：runtime 配置、实例生命周期、executor、task、reactor 和 timer backend。
 - `include/af/detail/runtime/`：atomic wait、cpu relax、service task 等跨模块底层组件。
-- `include/af/detail/queue/`：intrusive MPSC、bounded MPSC/MPMC 队列和 backoff。
+- `include/af/queue/`：intrusive MPSC、bounded MPSC/MPMC 队列和 backoff。
 - `include/af/detail/memory/`：对象池和连续对象存储。
 - `include/af/detail/net/`：网络 reactor 内部 channel、socket address 等基础结构。
 - `include/af/net/`：网络层公开 API。

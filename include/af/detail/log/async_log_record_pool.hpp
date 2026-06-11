@@ -13,7 +13,7 @@
 #include "af/detail/config.hpp"
 #include "af/detail/log/async_log_config.hpp"
 #include "af/detail/log/log_record.hpp"
-#include "af/detail/queue/queue_backoff.hpp"
+#include "af/queue/queue_backoff.hpp"
 #include "af/span.hpp"
 
 namespace af::detail {

@@ -9,7 +9,7 @@
 
 #include <benchmark/benchmark.h>
 
-#include "af/detail/queue/bounded_queues.hpp"
+#include "af/queue/bounded_queues.hpp"
 #include "af/detail/memory/object_pool.hpp"
 
 namespace {

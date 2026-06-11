@@ -8,7 +8,7 @@
 #include "af/detail/log/async_log_record_pool.hpp"
 #include "af/detail/log/log_record.hpp"
 #include "af/detail/memory/contiguous_object_storage.hpp"
-#include "af/detail/queue/bounded_mpsc_queue.hpp"
+#include "af/queue/bounded_mpsc_queue.hpp"
 
 namespace af::detail {
 

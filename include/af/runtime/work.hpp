@@ -1,6 +1,6 @@
 #pragma once
 
-#include "af/detail/queue/intrusive_mpsc_queue.hpp"
+#include "af/queue/intrusive_mpsc_queue.hpp"
 
 namespace af {
 
