@@ -480,6 +480,19 @@ TEST(PublicHeaderTests, LogBenchmarksCoverHighConcurrencyOrderedProducerRegressi
     EXPECT_NE(ordered_block.find("->Args({32, 2048})"), std::string::npos);
 }
 
+TEST(PublicHeaderTests, ReactorBenchmarksCoverPollBatchSizes) {
+    const std::string cmake = read_source_file("CMakeLists.txt");
+    ASSERT_FALSE(cmake.empty());
+    EXPECT_NE(cmake.find("benchmarks/reactor_benchmarks.cpp"), std::string::npos);
+
+    const std::string content = read_source_file("benchmarks/reactor_benchmarks.cpp");
+    ASSERT_FALSE(content.empty());
+    EXPECT_NE(content.find("BM_ReactorSelectReadyBatchDispatch"), std::string::npos);
+    EXPECT_NE(content.find("BM_ReactorAutoReadyBatchDispatch"), std::string::npos);
+    EXPECT_NE(content.find("BM_ReactorEpollReadyBatchDispatch"), std::string::npos);
+    EXPECT_NE(content.find("BM_ReactorKqueueReadyBatchDispatch"), std::string::npos);
+}
+
 TEST(PublicHeaderTests, LogUmbrellaExposesLowerCaseNames) {
     static_assert(std::is_enum_v<af::log_overflow_policy>);
     static_assert(std::is_enum_v<af::log_ordering>);

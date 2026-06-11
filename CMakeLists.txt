@@ -228,6 +228,7 @@ if(ASYNCFLOW_BUILD_BENCHMARKS)
         benchmarks/benchmark_main.cpp
         benchmarks/log_benchmarks.cpp
         benchmarks/queue_benchmarks.cpp
+        benchmarks/reactor_benchmarks.cpp
         benchmarks/runtime_external_start_benchmarks.cpp
         benchmarks/runtime_hop_benchmarks.cpp
         benchmarks/runtime_parallel_benchmarks.cpp

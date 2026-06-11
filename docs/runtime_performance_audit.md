@@ -27,10 +27,10 @@
 
 - ordered/relaxed logger 外部 producer benchmark 覆盖 1/4/8/16/32 producer；16/32 producer 用较小的单 producer record 数保持总日志量接近，同时覆盖 ordered logging 单 MPSC 队列高并发竞争。
 - 远端 Linux Release 单次冒烟中，ordered `16/4096` 约 `7.86M logs/s`，ordered `32/2048` 约 `8.01M logs/s`；relaxed `16/4096` 约 `18.39M logs/s`，relaxed `32/2048` 约 `16.19M logs/s`。
+- reactor ready batch benchmark 覆盖 select/auto/epoll/kqueue 后端的 `64/256` source 和 `16/64/256` event budget 组合；unsupported 后端在对应平台自动 skip。
 
 ## 仍可提升
 
 - 为 TCP reactor 增加连接读写预算和批量 ready 队列。
 - 为 IO buffer 增加按线程固定大小池。
 - 持续记录 `async_log_record_pool` 单线程、批量和跨线程 release benchmark 结果，避免日志池优化退化。
-- 对 epoll/kqueue poll batch 大小做 benchmark。
