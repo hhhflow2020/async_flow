@@ -12,7 +12,7 @@
 
 ## 本次收敛结果
 
-旧 `AsyncRuntime<Traits>` 静态模板 runtime、旧 executor backend、旧 task registry 以及依赖 `Runtime::Thread` 的模板 helper 已移除。当前公开 runtime 只保留实例化 `af::runtime` 路径，线程布局由结构化 `runtime_config` 解析得到。
+旧 `AsyncRuntime<Traits>` 静态模板 runtime、旧 executor backend、旧 task registry、依赖 `Runtime::Thread` 的模板 helper 以及 runtime parallel group 的 CamelCase 兼容 alias 已移除。当前公开 runtime 只保留实例化 `af::runtime` 路径，线程布局由结构化 `runtime_config` 解析得到。
 
 旧模板 TCP/UDP server/client 及其 detail 实现已移除，`af/net.hpp` 只导出 runtime-native TCP/UDP/Unix API。TCP connection handle 的跨线程操作通过 runtime task/post 调度到 owner reactor thread，不再依赖旧 control thread 状态。
 

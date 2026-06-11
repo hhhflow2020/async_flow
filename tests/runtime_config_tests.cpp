@@ -194,10 +194,8 @@ static_assert(std::is_same_v<af::detail::runtime_task_pool_type<int, 8>,
 static_assert(std::is_same_v<af::detail::runtime_task_pool_holder_type<int, 8>,
                              af::detail::RuntimeTaskPoolHolder<int, 8>>);
 static_assert(std::is_same_v<af::detail::ordered_batch_state, af::detail::OrderedBatchState>);
-static_assert(std::is_same_v<af::detail::runtime_instance_parallel_group,
-                             af::detail::RuntimeInstanceParallelGroup>);
-static_assert(std::is_same_v<af::detail::runtime_instance_parallel_group_pool_type,
-                             af::detail::RuntimeInstanceParallelGroupPool>);
+static_assert(std::is_class_v<af::detail::runtime_instance_parallel_group>);
+static_assert(std::is_class_v<af::detail::runtime_instance_parallel_group_pool_type>);
 static_assert(af::log_ordering::ordered == af::log_ordering::ordered);
 static_assert(af::log_ordering::relaxed == af::log_ordering::relaxed);
 static_assert(!has_ordered_value<af::log_ordering>::value);

@@ -50,12 +50,8 @@ struct runtime_instance_parallel_group {
     }
 };
 
-using RuntimeInstanceParallelGroup = runtime_instance_parallel_group;
-
 using runtime_instance_parallel_group_pool_type =
     object_pool<runtime_instance_parallel_group, 4096, 64, false, 1, 4, 256>;
-
-using RuntimeInstanceParallelGroupPool = runtime_instance_parallel_group_pool_type;
 
 [[nodiscard]] inline runtime_instance_parallel_group_pool_type &
 runtime_instance_parallel_group_pool() {
