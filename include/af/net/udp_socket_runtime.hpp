@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "af/buffer/buffer.hpp"
-#include "af/detail/net/socket_address.hpp"
+#include "af/net/detail/socket_address.hpp"
 #include "af/net/endpoint.hpp"
 #include "af/net/udp_types.hpp"
 #include "af/runtime.hpp"

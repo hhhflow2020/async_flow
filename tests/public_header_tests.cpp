@@ -138,6 +138,14 @@
 #error "cache-line utilities must be installed under af/memory"
 #endif
 
+#if __has_include("af/detail/net/socket_address.hpp")
+#error "network detail headers must live under af/net/detail"
+#endif
+
+#if !__has_include("af/net/detail/socket_address.hpp")
+#error "network detail socket address header must be installed under af/net/detail"
+#endif
+
 #if __has_include("af/runtime/reactor.hpp")
 #error "reactor headers must live under af/reactor, not af/runtime"
 #endif
@@ -443,7 +451,7 @@ TEST(PublicHeaderTests, InfrastructureDetailHeadersDoNotExposeCamelCaseTypeAlias
     constexpr std::array forbidden{
         forbidden_source_snippet{"include/af/memory/contiguous_object_storage.hpp",
                                  "using ContiguousObjectStorage ="},
-        forbidden_source_snippet{"include/af/detail/net/socket_address.hpp",
+        forbidden_source_snippet{"include/af/net/detail/socket_address.hpp",
                                  "using SocketAddress ="},
         forbidden_source_snippet{"include/af/queue/bounded_mpsc_queue.hpp",
                                  "using BoundedMpscQueue ="},

@@ -5,7 +5,7 @@
 
 #include <gtest/gtest.h>
 
-#include "af/detail/net/socket_address.hpp"
+#include "af/net/detail/socket_address.hpp"
 #include "af/net.hpp"
 #include "af/net/endpoint.hpp"
 #include "af/net/thread_list.hpp"

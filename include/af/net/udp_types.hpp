@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <cstring>
 
-#include "af/detail/net/socket_address.hpp"
+#include "af/net/detail/socket_address.hpp"
 #include "af/net/endpoint.hpp"
 
 #include <sys/socket.h>
