@@ -252,9 +252,9 @@ private:
     runtime::thread_index thread_;
     std::size_t max_batches_per_run_;
     std::vector<log_record *> batch_;
-    CacheLineAtomic<bool> registered_{false};
-    CacheLineAtomic<bool> shutdown_started_{false};
-    CacheLineAtomic<bool> finished_{false};
+    cache_line_atomic<bool> registered_{false};
+    cache_line_atomic<bool> shutdown_started_{false};
+    cache_line_atomic<bool> finished_{false};
 };
 
 inline bool runtime_instance_async_log_consumer_control_task::do_it(

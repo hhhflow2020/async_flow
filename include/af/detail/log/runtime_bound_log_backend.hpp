@@ -447,17 +447,17 @@ private:
     std::unique_ptr<log_record[]> scratch_records_;
     std::vector<log_record *> scratch_record_ptrs_;
     Batch *producer_spare_batch_{nullptr};
-    CacheLineAtomic<std::uint64_t> queued_records_{0};
-    CacheLineAtomic<std::uint64_t> written_records_{0};
-    CacheLineAtomic<std::uint64_t> dropped_records_{0};
-    CacheLineAtomic<std::uint64_t> flushes_{0};
-    CacheLineAtomic<std::size_t> pending_batches_{0};
-    CacheLineAtomic<std::uint64_t> flush_requests_{0};
-    CacheLineAtomic<std::uint64_t> completed_flushes_{0};
-    CacheLineAtomic<bool> registered_{false};
-    CacheLineAtomic<bool> stopping_{false};
-    CacheLineAtomic<bool> shutdown_started_{false};
-    CacheLineAtomic<bool> finished_{false};
+    cache_line_atomic<std::uint64_t> queued_records_{0};
+    cache_line_atomic<std::uint64_t> written_records_{0};
+    cache_line_atomic<std::uint64_t> dropped_records_{0};
+    cache_line_atomic<std::uint64_t> flushes_{0};
+    cache_line_atomic<std::size_t> pending_batches_{0};
+    cache_line_atomic<std::uint64_t> flush_requests_{0};
+    cache_line_atomic<std::uint64_t> completed_flushes_{0};
+    cache_line_atomic<bool> registered_{false};
+    cache_line_atomic<bool> stopping_{false};
+    cache_line_atomic<bool> shutdown_started_{false};
+    cache_line_atomic<bool> finished_{false};
 };
 
 using RuntimeBoundLogBatch = runtime_bound_log_batch;

@@ -15,14 +15,14 @@ enum class RuntimeStatus : std::uint8_t {
     Stopping,
 };
 
-template <typename T> struct alignas(hardware_cache_line_size) CacheLineAtomic {
+template <typename T> struct alignas(hardware_cache_line_size) cache_line_atomic {
     std::atomic<T> value;
 
-    constexpr CacheLineAtomic() noexcept = default;
-    constexpr explicit CacheLineAtomic(T initial) noexcept : value(initial) {}
+    constexpr cache_line_atomic() noexcept = default;
+    constexpr explicit cache_line_atomic(T initial) noexcept : value(initial) {}
 
-    CacheLineAtomic(const CacheLineAtomic &) = delete;
-    CacheLineAtomic &operator=(const CacheLineAtomic &) = delete;
+    cache_line_atomic(const cache_line_atomic &) = delete;
+    cache_line_atomic &operator=(const cache_line_atomic &) = delete;
 
     [[nodiscard]] T load(std::memory_order order) const noexcept {
         return value.load(order);
@@ -71,12 +71,14 @@ template <typename T> struct alignas(hardware_cache_line_size) CacheLineAtomic {
     }
 };
 
+template <typename T> using CacheLineAtomic = cache_line_atomic<T>;
+
 struct alignas(hardware_cache_line_size) OrderedBatchState {
     std::uint64_t last_applied_batch_id{0};
 };
 
 struct ExternalPostCounter {
-    CacheLineAtomic<std::uint32_t> value{0};
+    cache_line_atomic<std::uint32_t> value{0};
 };
 
 template <typename RuntimeT> struct RuntimeParallelGroup {

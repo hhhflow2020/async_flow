@@ -34,11 +34,13 @@
 
 namespace {
 
-static_assert(alignof(af::detail::CacheLineAtomic<bool>) == af::detail::hardware_cache_line_size);
-static_assert(sizeof(af::detail::CacheLineAtomic<bool>) >= af::detail::hardware_cache_line_size);
-static_assert(alignof(af::detail::CacheLineAtomic<std::uint64_t>) ==
+static_assert(
+    std::is_same_v<af::detail::cache_line_atomic<bool>, af::detail::CacheLineAtomic<bool>>);
+static_assert(alignof(af::detail::cache_line_atomic<bool>) == af::detail::hardware_cache_line_size);
+static_assert(sizeof(af::detail::cache_line_atomic<bool>) >= af::detail::hardware_cache_line_size);
+static_assert(alignof(af::detail::cache_line_atomic<std::uint64_t>) ==
               af::detail::hardware_cache_line_size);
-static_assert(sizeof(af::detail::CacheLineAtomic<std::uint64_t>) >=
+static_assert(sizeof(af::detail::cache_line_atomic<std::uint64_t>) >=
               af::detail::hardware_cache_line_size);
 
 TEST(LogTests, LogDetailTypesExposeLowerCasePrimaryNames) {
