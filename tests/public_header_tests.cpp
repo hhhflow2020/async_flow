@@ -102,6 +102,30 @@
 #error "memory headers must be installed under af/memory"
 #endif
 
+#if __has_include("af/detail/thread/hardware_threads.hpp")
+#error "platform thread headers must live under af/platform, not af/detail/thread"
+#endif
+
+#if __has_include("af/detail/thread/thread_attributes.hpp")
+#error "platform thread headers must live under af/platform, not af/detail/thread"
+#endif
+
+#if __has_include("af/detail/thread/thread_name.hpp")
+#error "platform thread headers must live under af/platform, not af/detail/thread"
+#endif
+
+#if !__has_include("af/platform/hardware_threads.hpp")
+#error "platform thread headers must be installed under af/platform"
+#endif
+
+#if !__has_include("af/platform/affinity.hpp")
+#error "platform thread headers must be installed under af/platform"
+#endif
+
+#if !__has_include("af/platform/thread_name.hpp")
+#error "platform thread headers must be installed under af/platform"
+#endif
+
 namespace {
 
 struct forbidden_source_snippet {

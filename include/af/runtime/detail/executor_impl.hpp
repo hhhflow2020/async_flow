@@ -6,8 +6,8 @@
 
 #include "af/detail/runtime/atomic_wait.hpp"
 #include "af/detail/runtime/cpu_relax.hpp"
-#include "af/detail/thread/thread_attributes.hpp"
-#include "af/detail/thread/thread_name.hpp"
+#include "af/platform/affinity.hpp"
+#include "af/platform/thread_name.hpp"
 #include "af/runtime/detail/executor.hpp"
 
 namespace af::detail {

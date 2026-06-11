@@ -687,6 +687,7 @@ include/af/
     udp_backend.hpp
     tcp_backend.hpp
   platform/
+    hardware_threads.hpp
     thread_name.hpp
     affinity.hpp
     futex.hpp

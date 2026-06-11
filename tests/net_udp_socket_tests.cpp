@@ -59,20 +59,23 @@ private:
     int fd_{-1};
 };
 
-[[nodiscard]] std::uint16_t reserve_udp_loopback_port() {
-    UniqueFd fd(::socket(AF_INET, SOCK_DGRAM, 0));
-    EXPECT_GE(fd.get(), 0);
+[[nodiscard]] bool bind_udp_loopback_socket(int fd, std::uint16_t &port) noexcept {
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     address.sin_port = 0;
-    EXPECT_EQ(::bind(fd.get(), reinterpret_cast<const sockaddr *>(&address), sizeof(address)), 0);
+    if (::bind(fd, reinterpret_cast<const sockaddr *>(&address), sizeof(address)) != 0) {
+        return false;
+    }
     socklen_t size = sizeof(address);
-    EXPECT_EQ(::getsockname(fd.get(), reinterpret_cast<sockaddr *>(&address), &size), 0);
-    return ntohs(address.sin_port);
+    if (::getsockname(fd, reinterpret_cast<sockaddr *>(&address), &size) != 0) {
+        return false;
+    }
+    port = ntohs(address.sin_port);
+    return port != 0;
 }
 
-[[nodiscard]] bool reserve_udp_loopback_v6_port(std::uint16_t &port) {
+[[nodiscard]] bool ipv6_loopback_available() {
     UniqueFd fd(::socket(AF_INET6, SOCK_DGRAM, 0));
     if (fd.get() < 0) {
         return false;
@@ -84,11 +87,6 @@ private:
     if (::bind(fd.get(), reinterpret_cast<const sockaddr *>(&address), sizeof(address)) != 0) {
         return false;
     }
-    socklen_t size = sizeof(address);
-    if (::getsockname(fd.get(), reinterpret_cast<sockaddr *>(&address), &size) != 0) {
-        return false;
-    }
-    port = ntohs(address.sin6_port);
     return true;
 }
 
@@ -517,18 +515,11 @@ TEST(NetUdpSocketTests, RuntimeUdpConnectedClientSendsThroughHandle) {
 }
 
 TEST(NetUdpSocketTests, RuntimeUdpConnectedClientUsesMultipleIoShards) {
-    const std::uint16_t port = reserve_udp_loopback_port();
-
     UniqueFd sink(::socket(AF_INET, SOCK_DGRAM, 0));
     ASSERT_GE(sink.get(), 0);
     set_recv_timeout(sink.get());
-    sockaddr_in sink_address{};
-    sink_address.sin_family = AF_INET;
-    sink_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    sink_address.sin_port = htons(port);
-    ASSERT_EQ(
-        ::bind(sink.get(), reinterpret_cast<const sockaddr *>(&sink_address), sizeof(sink_address)),
-        0);
+    std::uint16_t port = 0;
+    ASSERT_TRUE(bind_udp_loopback_socket(sink.get(), port));
 
     af::runtime_config config;
     config.threads = {af::io_threads("net-rt-io", 2)};
@@ -597,8 +588,6 @@ TEST(NetUdpSocketTests, RuntimeUdpConnectedClientUsesMultipleIoShards) {
 }
 
 TEST(NetUdpSocketTests, EchoesDatagramToRawClient) {
-    const std::uint16_t port = reserve_udp_loopback_port();
-
     af::runtime runtime(make_udp_runtime_config());
     RuntimeUdpState state;
     ASSERT_TRUE(runtime.start());
@@ -608,11 +597,13 @@ TEST(NetUdpSocketTests, EchoesDatagramToRawClient) {
     af::net::udp_socket server(runtime);
     af::net::udp_socket_config socket_config;
     socket_config.name = "udp-echo";
-    socket_config.local_endpoint = af::net::udp_endpoint::loopback_v4(port);
+    socket_config.local_endpoint = af::net::udp_endpoint::loopback_v4(0);
     socket_config.threads = {io_thread};
     socket_config.options.reuse_port = false;
     ASSERT_TRUE(start_udp_socket(runtime, io_thread, server, std::move(socket_config), state,
                                  &runtime_udp_echo_datagram));
+    const std::uint16_t port = state.port.load(std::memory_order_acquire);
+    ASSERT_GT(port, 0U);
 
     UniqueFd client(::socket(AF_INET, SOCK_DGRAM, 0));
     ASSERT_GE(client.get(), 0);
@@ -636,8 +627,6 @@ TEST(NetUdpSocketTests, EchoesDatagramToRawClient) {
 }
 
 TEST(NetUdpSocketTests, EchoesDatagramUsingCachedPeerAddress) {
-    const std::uint16_t port = reserve_udp_loopback_port();
-
     af::runtime runtime(make_udp_runtime_config());
     RuntimeUdpState state;
     ASSERT_TRUE(runtime.start());
@@ -647,11 +636,13 @@ TEST(NetUdpSocketTests, EchoesDatagramUsingCachedPeerAddress) {
     af::net::udp_socket server(runtime);
     af::net::udp_socket_config socket_config;
     socket_config.name = "udp-peer-echo";
-    socket_config.local_endpoint = af::net::udp_endpoint::loopback_v4(port);
+    socket_config.local_endpoint = af::net::udp_endpoint::loopback_v4(0);
     socket_config.threads = {io_thread};
     socket_config.options.reuse_port = false;
     ASSERT_TRUE(start_udp_socket(runtime, io_thread, server, std::move(socket_config), state,
                                  &runtime_udp_peer_echo_datagram));
+    const std::uint16_t port = state.port.load(std::memory_order_acquire);
+    ASSERT_GT(port, 0U);
 
     UniqueFd client(::socket(AF_INET, SOCK_DGRAM, 0));
     ASSERT_GE(client.get(), 0);
@@ -688,8 +679,6 @@ TEST(NetUdpSocketTests, EchoesDatagramUsingCachedPeerAddress) {
 }
 
 TEST(NetUdpSocketTests, OwnerHandleSendsBufferViewWithoutQueueing) {
-    const std::uint16_t port = reserve_udp_loopback_port();
-
     af::runtime runtime(make_udp_runtime_config());
     RuntimeUdpState state;
     ASSERT_TRUE(runtime.start());
@@ -699,11 +688,13 @@ TEST(NetUdpSocketTests, OwnerHandleSendsBufferViewWithoutQueueing) {
     af::net::udp_socket server(runtime);
     af::net::udp_socket_config socket_config;
     socket_config.name = "udp-owner-handle-echo";
-    socket_config.local_endpoint = af::net::udp_endpoint::loopback_v4(port);
+    socket_config.local_endpoint = af::net::udp_endpoint::loopback_v4(0);
     socket_config.threads = {io_thread};
     socket_config.options.reuse_port = false;
     ASSERT_TRUE(start_udp_socket(runtime, io_thread, server, std::move(socket_config), state,
                                  &runtime_udp_owner_handle_echo));
+    const std::uint16_t port = state.port.load(std::memory_order_acquire);
+    ASSERT_GT(port, 0U);
 
     UniqueFd client(::socket(AF_INET, SOCK_DGRAM, 0));
     ASSERT_GE(client.get(), 0);
@@ -729,8 +720,7 @@ TEST(NetUdpSocketTests, OwnerHandleSendsBufferViewWithoutQueueing) {
 }
 
 TEST(NetUdpSocketTests, EchoesIpv6DatagramToRawClient) {
-    std::uint16_t port = 0;
-    if (!reserve_udp_loopback_v6_port(port)) {
+    if (!ipv6_loopback_available()) {
         GTEST_SKIP() << "IPv6 loopback is not available";
     }
 
@@ -743,11 +733,13 @@ TEST(NetUdpSocketTests, EchoesIpv6DatagramToRawClient) {
     af::net::udp_socket server(runtime);
     af::net::udp_socket_config socket_config;
     socket_config.name = "udp-v6-echo";
-    socket_config.local_endpoint = af::net::udp_endpoint::loopback_v6(port);
+    socket_config.local_endpoint = af::net::udp_endpoint::loopback_v6(0);
     socket_config.threads = {io_thread};
     socket_config.options.reuse_port = false;
     ASSERT_TRUE(start_udp_socket(runtime, io_thread, server, std::move(socket_config), state,
                                  &runtime_udp_echo_datagram));
+    const std::uint16_t port = state.port.load(std::memory_order_acquire);
+    ASSERT_GT(port, 0U);
 
     UniqueFd client(::socket(AF_INET6, SOCK_DGRAM, 0));
     if (client.get() < 0) {
@@ -775,8 +767,6 @@ TEST(NetUdpSocketTests, EchoesIpv6DatagramToRawClient) {
 }
 
 TEST(NetUdpSocketTests, ReceiveBufferGrowsToMaxDatagramSize) {
-    const std::uint16_t port = reserve_udp_loopback_port();
-
     af::runtime runtime(make_udp_runtime_config());
     RuntimeUdpState state;
     ASSERT_TRUE(runtime.start());
@@ -786,13 +776,15 @@ TEST(NetUdpSocketTests, ReceiveBufferGrowsToMaxDatagramSize) {
     af::net::udp_socket server(runtime);
     af::net::udp_socket_config socket_config;
     socket_config.name = "udp-small-buffer-large-datagram";
-    socket_config.local_endpoint = af::net::udp_endpoint::loopback_v4(port);
+    socket_config.local_endpoint = af::net::udp_endpoint::loopback_v4(0);
     socket_config.threads = {io_thread};
     socket_config.options.receive_buffer_size = 4;
     socket_config.options.max_datagram_size = 8;
     socket_config.options.reuse_port = false;
     ASSERT_TRUE(start_udp_socket(runtime, io_thread, server, std::move(socket_config), state,
                                  &runtime_udp_echo_datagram));
+    const std::uint16_t port = state.port.load(std::memory_order_acquire);
+    ASSERT_GT(port, 0U);
 
     UniqueFd client(::socket(AF_INET, SOCK_DGRAM, 0));
     ASSERT_GE(client.get(), 0);
@@ -816,8 +808,6 @@ TEST(NetUdpSocketTests, ReceiveBufferGrowsToMaxDatagramSize) {
 }
 
 TEST(NetUdpSocketTests, OversizedDatagramReportsMessageSizeAndDropsPacket) {
-    const std::uint16_t port = reserve_udp_loopback_port();
-
     af::runtime runtime(make_udp_runtime_config());
     RuntimeUdpState state;
     ASSERT_TRUE(runtime.start());
@@ -827,13 +817,15 @@ TEST(NetUdpSocketTests, OversizedDatagramReportsMessageSizeAndDropsPacket) {
     af::net::udp_socket server(runtime);
     af::net::udp_socket_config socket_config;
     socket_config.name = "udp-oversize-drop";
-    socket_config.local_endpoint = af::net::udp_endpoint::loopback_v4(port);
+    socket_config.local_endpoint = af::net::udp_endpoint::loopback_v4(0);
     socket_config.threads = {io_thread};
     socket_config.options.receive_buffer_size = 8;
     socket_config.options.max_datagram_size = 4;
     socket_config.options.reuse_port = false;
     ASSERT_TRUE(start_udp_socket(runtime, io_thread, server, std::move(socket_config), state,
                                  &runtime_udp_counting_echo_datagram));
+    const std::uint16_t port = state.port.load(std::memory_order_acquire);
+    ASSERT_GT(port, 0U);
 
     UniqueFd client(::socket(AF_INET, SOCK_DGRAM, 0));
     ASSERT_GE(client.get(), 0);
@@ -859,18 +851,11 @@ TEST(NetUdpSocketTests, OversizedDatagramReportsMessageSizeAndDropsPacket) {
 }
 
 TEST(NetUdpSocketTests, HandlesExposeBoundShardsAndDefaultHandleRoundRobins) {
-    const std::uint16_t port = reserve_udp_loopback_port();
-
     UniqueFd sink(::socket(AF_INET, SOCK_DGRAM, 0));
     ASSERT_GE(sink.get(), 0);
     set_recv_timeout(sink.get());
-    sockaddr_in sink_address{};
-    sink_address.sin_family = AF_INET;
-    sink_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    sink_address.sin_port = htons(port);
-    ASSERT_EQ(
-        ::bind(sink.get(), reinterpret_cast<const sockaddr *>(&sink_address), sizeof(sink_address)),
-        0);
+    std::uint16_t port = 0;
+    ASSERT_TRUE(bind_udp_loopback_socket(sink.get(), port));
 
     af::runtime runtime(make_udp_runtime_config(2));
     RuntimeUdpState state;
@@ -924,7 +909,6 @@ TEST(NetUdpSocketTests, HandlesExposeBoundShardsAndDefaultHandleRoundRobins) {
 }
 
 TEST(NetUdpSocketTests, ConnectedClientSendsThroughRuntimeTask) {
-    const std::uint16_t port = reserve_udp_loopback_port();
     af::runtime runtime(make_udp_runtime_config());
     RuntimeUdpState server_state;
     RuntimeUdpState client_state;
@@ -935,11 +919,13 @@ TEST(NetUdpSocketTests, ConnectedClientSendsThroughRuntimeTask) {
     af::net::udp_socket server(runtime);
     af::net::udp_socket_config server_config;
     server_config.name = "udp-echo-server";
-    server_config.local_endpoint = af::net::udp_endpoint::loopback_v4(port);
+    server_config.local_endpoint = af::net::udp_endpoint::loopback_v4(0);
     server_config.threads = {io_thread};
     server_config.options.reuse_port = false;
     ASSERT_TRUE(start_udp_socket(runtime, io_thread, server, std::move(server_config), server_state,
                                  &runtime_udp_echo_datagram));
+    const std::uint16_t port = server_state.port.load(std::memory_order_acquire);
+    ASSERT_GT(port, 0U);
 
     af::net::udp_socket client(runtime);
     af::net::udp_socket_config client_config;
@@ -966,7 +952,6 @@ TEST(NetUdpSocketTests, ConnectedClientSendsThroughRuntimeTask) {
 }
 
 TEST(NetUdpSocketTests, ConnectedClientAcceptsInferredIpv4RemoteFamily) {
-    const std::uint16_t port = reserve_udp_loopback_port();
     af::runtime runtime(make_udp_runtime_config());
     RuntimeUdpState server_state;
     RuntimeUdpState client_state;
@@ -977,11 +962,13 @@ TEST(NetUdpSocketTests, ConnectedClientAcceptsInferredIpv4RemoteFamily) {
     af::net::udp_socket server(runtime);
     af::net::udp_socket_config server_config;
     server_config.name = "udp-inferred-family-echo-server";
-    server_config.local_endpoint = af::net::udp_endpoint::loopback_v4(port);
+    server_config.local_endpoint = af::net::udp_endpoint::loopback_v4(0);
     server_config.threads = {io_thread};
     server_config.options.reuse_port = false;
     ASSERT_TRUE(start_udp_socket(runtime, io_thread, server, std::move(server_config), server_state,
                                  &runtime_udp_echo_datagram));
+    const std::uint16_t port = server_state.port.load(std::memory_order_acquire);
+    ASSERT_GT(port, 0U);
 
     af::net::udp_socket client(runtime);
     af::net::udp_socket_config client_config;
@@ -1051,7 +1038,10 @@ TEST(NetUdpSocketTests, RejectsConnectedIpRemotePortZeroSynchronously) {
 }
 
 TEST(NetUdpSocketTests, StoppedSocketHandlesReportClosedForSends) {
-    const std::uint16_t port = reserve_udp_loopback_port();
+    UniqueFd sink(::socket(AF_INET, SOCK_DGRAM, 0));
+    ASSERT_GE(sink.get(), 0);
+    std::uint16_t port = 0;
+    ASSERT_TRUE(bind_udp_loopback_socket(sink.get(), port));
 
     af::runtime runtime(make_udp_runtime_config());
     RuntimeUdpState state;
@@ -1087,7 +1077,10 @@ TEST(NetUdpSocketTests, StoppedSocketHandlesReportClosedForSends) {
 }
 
 TEST(NetUdpSocketTests, StopPublishesClosedStateBeforeOwnerStops) {
-    const std::uint16_t port = reserve_udp_loopback_port();
+    UniqueFd sink(::socket(AF_INET, SOCK_DGRAM, 0));
+    ASSERT_GE(sink.get(), 0);
+    std::uint16_t port = 0;
+    ASSERT_TRUE(bind_udp_loopback_socket(sink.get(), port));
 
     af::runtime runtime(make_udp_runtime_config());
     RuntimeUdpState state;
@@ -1115,7 +1108,10 @@ TEST(NetUdpSocketTests, StopPublishesClosedStateBeforeOwnerStops) {
 }
 
 TEST(NetUdpSocketTests, OldHandleReportsClosedAfterSocketRestart) {
-    const std::uint16_t port = reserve_udp_loopback_port();
+    UniqueFd sink(::socket(AF_INET, SOCK_DGRAM, 0));
+    ASSERT_GE(sink.get(), 0);
+    std::uint16_t port = 0;
+    ASSERT_TRUE(bind_udp_loopback_socket(sink.get(), port));
 
     af::runtime runtime(make_udp_runtime_config());
     RuntimeUdpState state;
@@ -1159,7 +1155,10 @@ TEST(NetUdpSocketTests, OldHandleReportsClosedAfterSocketRestart) {
 }
 
 TEST(NetUdpSocketTests, StoppedSocketHandleReportsClosedOnOwnerThread) {
-    const std::uint16_t port = reserve_udp_loopback_port();
+    UniqueFd sink(::socket(AF_INET, SOCK_DGRAM, 0));
+    ASSERT_GE(sink.get(), 0);
+    std::uint16_t port = 0;
+    ASSERT_TRUE(bind_udp_loopback_socket(sink.get(), port));
     af::runtime runtime(make_udp_runtime_config());
     RuntimeUdpState state;
     ASSERT_TRUE(runtime.start());
@@ -1202,7 +1201,10 @@ TEST(NetUdpSocketTests, StoppedSocketHandleReportsClosedOnOwnerThread) {
 }
 
 TEST(NetUdpSocketTests, RejectsStartWhileAlreadyRunning) {
-    const std::uint16_t port = reserve_udp_loopback_port();
+    UniqueFd sink(::socket(AF_INET, SOCK_DGRAM, 0));
+    ASSERT_GE(sink.get(), 0);
+    std::uint16_t port = 0;
+    ASSERT_TRUE(bind_udp_loopback_socket(sink.get(), port));
 
     af::runtime runtime(make_udp_runtime_config());
     RuntimeUdpState state;
