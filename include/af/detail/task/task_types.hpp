@@ -1,44 +1,46 @@
 #pragma once
 
-enum class TaskResult : std::uint8_t {
-    Done,
-    Pending,
-    Again,
-    Failed,
-    Cancelled,
-    done = Done,
-    pending = Pending,
-    again = Again,
-    failed = Failed,
-    cancelled = Cancelled,
+#include <cstdint>
+
+enum class task_result : std::uint8_t {
+    done,
+    pending,
+    again,
+    failed,
+    cancelled,
+    Done = done,
+    Pending = pending,
+    Again = again,
+    Failed = failed,
+    Cancelled = cancelled,
 };
 
-enum class ShutdownPolicy : std::uint8_t {
-    WaitForTasks,
-    StopImmediately,
-    wait_for_tasks = WaitForTasks,
-    stop_immediately = StopImmediately,
+enum class shutdown_policy : std::uint8_t {
+    wait_for_tasks,
+    stop_immediately,
+    WaitForTasks = wait_for_tasks,
+    StopImmediately = stop_immediately,
 };
 
-enum class TaskState : std::uint8_t {
-    Created,
-    Queued,
-    TimerArming,
-    TimerPending,
-    Starting,
-    Running,
-    Pending,
-    Done,
-    created = Created,
-    queued = Queued,
-    timer_arming = TimerArming,
-    timer_pending = TimerPending,
-    starting = Starting,
-    running = Running,
-    pending = Pending,
-    done = Done,
+enum class task_state : std::uint8_t {
+    created,
+    queued,
+    timer_arming,
+    timer_pending,
+    starting,
+    running,
+    pending,
+    done,
+    Created = created,
+    Queued = queued,
+    TimerArming = timer_arming,
+    TimerPending = timer_pending,
+    Starting = starting,
+    Running = running,
+    Pending = pending,
+    Done = done,
 };
 
-using task_result = TaskResult;
-using shutdown_policy = ShutdownPolicy;
-using task_state = TaskState;
+using TaskResult = task_result;
+using ShutdownPolicy = shutdown_policy;
+using TaskState = task_state;

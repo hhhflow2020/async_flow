@@ -81,9 +81,9 @@ signal_remaining_timeout(std::chrono::steady_clock::time_point deadline) noexcep
     return true;
 }
 
-class SignalSetImpl {
+class signal_set_impl {
 public:
-    explicit SignalSetImpl(std::initializer_list<int> signals) noexcept {
+    explicit signal_set_impl(std::initializer_list<int> signals) noexcept {
         if (signals.size() == 0U) {
             error_ = EINVAL;
             return;
@@ -111,10 +111,10 @@ public:
         blocked_ = true;
     }
 
-    SignalSetImpl(const SignalSetImpl &) = delete;
-    SignalSetImpl &operator=(const SignalSetImpl &) = delete;
+    signal_set_impl(const signal_set_impl &) = delete;
+    signal_set_impl &operator=(const signal_set_impl &) = delete;
 
-    ~SignalSetImpl() {
+    ~signal_set_impl() {
         if (blocked_) {
             static_cast<void>(::pthread_sigmask(SIG_SETMASK, &previous_set_, nullptr));
         }
@@ -128,9 +128,9 @@ public:
         return error_;
     }
 
-    [[nodiscard]] SignalWaitResult wait_for(std::chrono::nanoseconds timeout) noexcept {
+    [[nodiscard]] signal_wait_result wait_for(std::chrono::nanoseconds timeout) noexcept {
         if (!valid()) {
-            return SignalWaitResult{0, error_ == 0 ? EINVAL : error_};
+            return signal_wait_result{0, error_ == 0 ? EINVAL : error_};
         }
 
         const auto deadline = std::chrono::steady_clock::now() + timeout;
@@ -141,14 +141,14 @@ public:
             timespec timespec_timeout = signal_timespec_from_nanoseconds(remaining);
             const int signal = ::sigtimedwait(&set_, &info, &timespec_timeout);
             if (signal >= 0) {
-                return SignalWaitResult{signal, 0};
+                return signal_wait_result{signal, 0};
             }
             if (errno != EINTR) {
                 const int error = errno == 0 ? EINVAL : errno;
-                return SignalWaitResult{0, error};
+                return signal_wait_result{0, error};
             }
             if (remaining.count() == 0) {
-                return SignalWaitResult{0, EAGAIN};
+                return signal_wait_result{0, EAGAIN};
             }
         }
 #else
@@ -159,10 +159,10 @@ public:
                 return wait();
             }
             if (error != 0) {
-                return SignalWaitResult{0, error};
+                return signal_wait_result{0, error};
             }
             if (std::chrono::steady_clock::now() >= deadline) {
-                return SignalWaitResult{0, EAGAIN};
+                return signal_wait_result{0, EAGAIN};
             }
 
             const auto remaining = signal_remaining_timeout(deadline);
@@ -178,9 +178,9 @@ public:
 #endif
     }
 
-    [[nodiscard]] SignalWaitResult wait() noexcept {
+    [[nodiscard]] signal_wait_result wait() noexcept {
         if (!valid()) {
-            return SignalWaitResult{0, error_ == 0 ? EINVAL : error_};
+            return signal_wait_result{0, error_ == 0 ? EINVAL : error_};
         }
 
         int signal = 0;
@@ -190,9 +190,9 @@ public:
         } while (error == EINTR);
 
         if (error != 0) {
-            return SignalWaitResult{0, error};
+            return signal_wait_result{0, error};
         }
-        return SignalWaitResult{signal, 0};
+        return signal_wait_result{signal, 0};
     }
 
 private:

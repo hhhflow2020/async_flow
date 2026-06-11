@@ -6,7 +6,7 @@
 
 namespace af {
 
-struct SignalWaitResult {
+struct signal_wait_result {
     int signal{0};
     int error{0};
 
@@ -21,14 +21,14 @@ struct SignalWaitResult {
 
 namespace af {
 
-class SignalSet {
+class signal_set {
 public:
-    explicit SignalSet(std::initializer_list<int> signals) noexcept : impl_(signals) {}
+    explicit signal_set(std::initializer_list<int> signals) noexcept : impl_(signals) {}
 
-    SignalSet(const SignalSet &) = delete;
-    SignalSet &operator=(const SignalSet &) = delete;
+    signal_set(const signal_set &) = delete;
+    signal_set &operator=(const signal_set &) = delete;
 
-    ~SignalSet() = default;
+    ~signal_set() = default;
 
     [[nodiscard]] bool valid() const noexcept {
         return impl_.valid();
@@ -38,38 +38,38 @@ public:
         return impl_.error();
     }
 
-    [[nodiscard]] SignalWaitResult try_wait() noexcept {
+    [[nodiscard]] signal_wait_result try_wait() noexcept {
         return wait_for(std::chrono::nanoseconds(0));
     }
 
     template <typename Rep, typename Period>
-    [[nodiscard]] SignalWaitResult wait_for(std::chrono::duration<Rep, Period> timeout) noexcept {
+    [[nodiscard]] signal_wait_result wait_for(std::chrono::duration<Rep, Period> timeout) noexcept {
         return impl_.wait_for(std::chrono::duration_cast<std::chrono::nanoseconds>(timeout));
     }
 
     template <typename Clock, typename Duration>
-    [[nodiscard]] SignalWaitResult
+    [[nodiscard]] signal_wait_result
     wait_until(std::chrono::time_point<Clock, Duration> deadline) noexcept {
         return wait_for(deadline - Clock::now());
     }
 
-    [[nodiscard]] SignalWaitResult wait() noexcept {
+    [[nodiscard]] signal_wait_result wait() noexcept {
         return impl_.wait();
     }
 
 private:
-    detail::SignalSetImpl impl_;
+    detail::signal_set_impl impl_;
 };
 
-[[nodiscard]] inline SignalSet make_termination_signal_set() noexcept {
-    return SignalSet({SIGINT, SIGTERM});
+[[nodiscard]] inline signal_set make_termination_signal_set() noexcept {
+    return signal_set({SIGINT, SIGTERM});
 }
 
 [[nodiscard]] inline bool ignore_process_signal(int signal) noexcept {
     return detail::ignore_process_signal_impl(signal);
 }
 
-using signal_wait_result = SignalWaitResult;
-using signal_set = SignalSet;
+using SignalWaitResult = signal_wait_result;
+using SignalSet = signal_set;
 
 } // namespace af

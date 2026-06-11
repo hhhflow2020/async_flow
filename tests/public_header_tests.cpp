@@ -64,6 +64,6 @@ TEST(PublicHeaderTests, UtilityUmbrellaExposesLowerCaseNames) {
     static_assert(af::op_type::delete_op == af::OpType::Delete);
     static_assert(std::is_same_v<af::crud_op<int, int>, af::CrudOp<int, int>>);
     static_assert(std::is_same_v<af::change_batch<int, int>, af::ChangeBatch<int, int>>);
-    static_assert(std::is_same_v<af::signal_wait_result, af::SignalWaitResult>);
-    static_assert(std::is_same_v<af::signal_set, af::SignalSet>);
+    static_assert(std::is_same_v<af::SignalWaitResult, af::signal_wait_result>);
+    static_assert(std::is_same_v<af::SignalSet, af::signal_set>);
 }

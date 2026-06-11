@@ -31,10 +31,10 @@
 - eventfd/user event 唤醒需要合并，避免每次投递都写内核对象。
 - IO 线程阻塞前必须先 drain 可运行 task。
 - 网络 reactor 的连接对象、buffer 和写队列按 IO 线程局部分配。
-- 包解析路径优先使用 `Buffer::slice()`/`BufferChain::remove_prefix()` 这类共享块和消费视图，避免把 header/content 拆包时反复复制。
+- 包解析路径优先使用 `buffer::slice()`/`buffer_chain::remove_prefix()` 这类共享块和消费视图，避免把 header/content 拆包时反复复制。
 
 ## 后续建议
 
 - 为 epoll LT reactor 增加连接级读写预算，避免单连接长时间占用 IO 线程。
 - 继续补充 TCP/UDP/Unix stream/Unix datagram socket 抽象的跨平台压力测试和异常路径测试。
-- 继续把 `Buffer`/`BufferChain` 演进到显式 reserve、scatter/gather view 和池化块复用，减少 packet encode/decode 的分配和复制。
+- 继续把 `buffer`/`buffer_chain` 演进到显式 reserve、scatter/gather view 和池化块复用，减少 packet encode/decode 的分配和复制。

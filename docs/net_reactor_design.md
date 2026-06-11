@@ -118,11 +118,11 @@ runtime.post(io_thread, [&] {
 ```cpp
 void client_on_connect(void *owner, af::net::tcp_connection_ref conn) noexcept {
     static_cast<void>(owner);
-    static_cast<void>(conn.send(af::Buffer::copy("hello", 5)));
+    static_cast<void>(conn.send(af::buffer::copy("hello", 5)));
 }
 
 void client_on_read(void *owner, af::net::tcp_connection_ref conn,
-                    af::BufferView bytes) noexcept {
+                    af::buffer_view bytes) noexcept {
     static_cast<void>(owner);
     static_cast<void>(conn);
     static_cast<void>(bytes);
@@ -220,7 +220,7 @@ runtime.post(io_thread, [&] {
     client.connect(std::move(config), callbacks);
 });
 
-client.handle().send(af::Buffer::copy("ping", 4));
+client.handle().send(af::buffer::copy("ping", 4));
 ```
 
 Unix datagram 默认在 bind 前 unlink 已存在 path，并在 stop/close 后 unlink 绑定 path；可通过 `udp_socket_options::unlink_existing_unix_path` 和 `unlink_unix_path_on_close` 调整。Unix datagram 只允许单个 IO shard 绑定一个 local path；如果需要多线程扩展，应显式创建多个不同 path 或在业务层做分片。
@@ -252,7 +252,7 @@ runtime.post(io_thread, [&] {
 
 ```cpp
 void udp_echo_on_datagram(void *owner, af::net::udp_socket_ref socket,
-                          af::BufferView bytes,
+                          af::buffer_view bytes,
                           const af::net::udp_peer &peer) noexcept {
     static_cast<void>(owner);
     static_cast<void>(socket.send_to(bytes, peer));
@@ -276,7 +276,7 @@ runtime.post(io_thread, [&] {
     client.start(std::move(config), callbacks);
 });
 
-client.handle().send(af::Buffer::copy("ping", 4));
+client.handle().send(af::buffer::copy("ping", 4));
 ```
 
 `udp_socket::handle()` 在每个调用线程本地轮询 active shard，避免外部生产者默认全部集中到第一个 IO 线程，同时避免所有生产者争用一个全局原子计数器。业务需要固定亲和性时，可以启动后缓存 `handles()`，或用 `handle_for_thread()` 按业务 hash 选择目标 IO 线程。`udp_socket_ref::send_to()` 在 IO 线程同线程发送，走直接 syscall。`udp_socket_handle::send()` / `send_to()` 从业务线程调用时会把发送操作调度到 socket 所属 IO shard。`udp_send_result::queued` 表示发送操作已提交；真正的非阻塞 send 在 IO 线程执行。
@@ -317,9 +317,9 @@ UDP 无连接状态。业务层如果需要会话语义，可以维护 `peer end
 - Unix stream 复用 TCP stream connection 热路径，只有地址族、path unlink 和 accept 策略是 Unix 专属逻辑。
 - Unix datagram 使用独立 API，但复用 datagram shard 热路径；单 path 只绑定一个 IO shard，避免多线程重复 bind 同一路径。
 - UDP 跨线程发送使用 runtime task 显式调度到 owner IO shard；默认 handle 轮询分散外部生产者，热路径建议业务缓存 shard handle 并按会话固定亲和性。
-- `Buffer` 已支持共享底层存储的零拷贝 `slice()`、前后缀消费和 head/tail room 查询；`BufferChain` 已缓存总长度并支持跨 buffer 前缀消费。后续可继续演进为更接近 folly IOBuf 的块链、引用计数块和 prepend/append reserve 设计。
+- `buffer` 已支持共享底层存储的零拷贝 `slice()`、前后缀消费和 head/tail room 查询；`buffer_chain` 已缓存总长度并支持跨 buffer 前缀消费。后续可继续演进为更接近 folly IOBuf 的块链、引用计数块和 prepend/append reserve 设计。
 - TCP stream server/client、UDP socket、Unix stream/datagram socket 控制面属于单 reactor 线程，不使用 mutex、condition variable 或同步 barrier；accept/connect/read/write 热路径不使用全局锁。
 
 ## 后续
 
-- 将 `Buffer`/`BufferChain` 继续演进为更适合网络包解析的分片块链，增加显式 prepend/append reserve、scatter/gather 视图和池化块复用。
+- 将 `buffer`/`buffer_chain` 继续演进为更适合网络包解析的分片块链，增加显式 prepend/append reserve、scatter/gather 视图和池化块复用。
