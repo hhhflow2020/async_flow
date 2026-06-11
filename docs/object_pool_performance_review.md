@@ -76,6 +76,29 @@
 - 日志 record pool 的跨线程批量释放在 `64/256` 与 `1024/1024` 配置下吞吐接近，说明按 slab 分组批量归还能降低大批量释放时的 CAS 次数。
 - 本轮补充 `RecordPoolLocalCacheRefillFillsAcrossExistingSlabs` 回归测试，固定 local cache refill 跨已有 slab 补满缓存的行为。远端单次 benchmark 冒烟中，`BM_AsyncLogRecordPoolAcquireRelease/256` 约 `74.2M items/s`，`BM_AsyncLogRecordPoolBatchAcquireRelease/64/256` 约 `117.9M items/s`，日志池热路径能稳定出数。
 
+## 补充远端复核
+
+远端容器输出时间：`2026-06-12T04:23Z`。命令参数：
+`--benchmark_min_time=0.05s --benchmark_repetitions=3 --benchmark_report_aggregates_only=true`。
+
+结果摘要：
+
+- `BM_ObjectPoolCreateDestroy/1024_mean`：约 `418.2M items/s`，CV `0.33%`。
+- `BM_ObjectPoolBatchCreateDestroy/1024_mean`：约 `141.3M items/s`，CV `0.84%`。
+- `BM_ObjectPoolRemoteBatchCrossThreadDestroyBatch/1024_mean`：约 `52.4M items/s`，CV `4.08%`。
+- `BM_AsyncLogRecordPoolAcquireRelease/256_mean`：约 `75.7M items/s`，CV `2.49%`。
+- `BM_AsyncLogRecordPoolAcquireRelease/1024_mean`：约 `65.5M items/s`，CV `0.61%`。
+- `BM_AsyncLogRecordPoolBatchAcquireRelease/64/256_mean`：约 `116.6M items/s`，CV `0.62%`。
+- `BM_AsyncLogRecordPoolBatchAcquireRelease/1024/1024_mean`：约 `56.5M items/s`，CV `0.93%`。
+- `BM_AsyncLogRecordPoolCrossThreadReleaseBatch/64/256/real_time_mean`：约 `20.3M items/s`，CV `0.57%`。
+- `BM_AsyncLogRecordPoolCrossThreadReleaseBatch/1024/1024/real_time_mean`：约 `21.1M items/s`，CV `5.48%`。
+
+判断：
+
+- 对象池本线程 create/destroy 与批量路径相对前次复核没有退化，批量 create/destroy 略高。
+- 对象池跨线程 remote batch 仍稳定在约 `52M items/s`，主要成本仍是跨线程同步和缓存一致性流量。
+- 日志 record pool 本线程、批量、跨线程 release 三类关键路径均能稳定出数；`1024/1024` 跨线程项 CV 偏高，后续若做 release batch 调参，应继续用该项观察尾部抖动。
+
 ## 建议
 
 - 对高频 task 设置合理的 `task_pool_chunk_size`。
