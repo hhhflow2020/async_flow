@@ -102,6 +102,8 @@ TEST(LogTests, LogDetailTypesExposeLowerCasePrimaryNames) {
 #endif
     static_assert(
         std::is_same_v<af::detail::runtime_bound_log_batch, af::detail::RuntimeBoundLogBatch>);
+    static_assert(std::is_same_v<af::detail::runtime_bound_log_backend::batch,
+                                 af::detail::runtime_bound_log_backend::Batch>);
     static_assert(std::is_same_v<af::detail::runtime_bound_log_backend_config,
                                  af::detail::RuntimeBoundLogBackendConfig>);
     static_assert(std::is_same_v<af::detail::runtime_bound_log_backend_stats,

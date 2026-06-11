@@ -58,7 +58,7 @@ inline bool async_logger::try_log_on_lane(Lane &lane, std::string_view message) 
 }
 
 inline detail::async_log_producer_shard &async_logger::ordered_producer_shard() noexcept {
-    thread_local OrderedProducerShardCache cache;
+    thread_local ordered_producer_shard_cache cache;
     if (cache.logger != this || cache.token != cache_token_) [[unlikely]] {
         const std::size_t shard_index =
             next_ordered_producer_shard_.fetch_add(1U, std::memory_order_relaxed) &
@@ -72,7 +72,7 @@ inline detail::async_log_producer_shard &async_logger::ordered_producer_shard() 
 }
 
 inline detail::async_log_queue_shard &async_logger::producer_shard() noexcept {
-    thread_local ProducerShardCache cache;
+    thread_local producer_shard_cache cache;
     if (cache.logger != this || cache.token != cache_token_) [[unlikely]] {
         const std::size_t shard_index =
             next_producer_shard_.fetch_add(1U, std::memory_order_relaxed) & queue_shard_mask_;

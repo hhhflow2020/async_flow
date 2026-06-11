@@ -72,7 +72,8 @@ struct runtime_bound_log_backend_stats {
 
 class runtime_bound_log_backend final : public log_backend, public runtime_service_task {
 public:
-    using Batch = runtime_bound_log_batch;
+    using batch = runtime_bound_log_batch;
+    using Batch = batch;
 
     explicit runtime_bound_log_backend(runtime_bound_log_backend_config config)
         : owner_(config.owner), thread_(config.thread), backend_(std::move(config.backend)),
@@ -139,12 +140,12 @@ public:
         std::size_t drained_batches = 0;
         const std::size_t effective_budget = effective_batch_budget(budget);
         while (drained_batches < effective_budget) {
-            Batch *batch = ready_batches_.try_pop();
-            if (batch == nullptr) {
+            batch *item = ready_batches_.try_pop();
+            if (item == nullptr) {
                 break;
             }
-            write_batch_on_owner(*batch);
-            recycle_batch(batch);
+            write_batch_on_owner(*item);
+            recycle_batch(item);
             complete_pending_batch();
             ++drained_batches;
             did_work = true;
@@ -183,15 +184,21 @@ public:
     }
 
 private:
-    enum class ControlOperation : std::uint8_t {
-        Register,
-        Unregister,
+    enum class control_operation : std::uint8_t {
+        register_service,
+        unregister_service,
+        Register = register_service,
+        Unregister = unregister_service,
     };
 
-    struct ControlCompletion {
+    using ControlOperation = control_operation;
+
+    struct control_completion {
         std::atomic<bool> done{false};
         std::atomic<bool> ok{false};
     };
+
+    using ControlCompletion = control_completion;
 
     [[nodiscard]] static std::size_t normalize_max_batch_records(std::size_t requested) noexcept {
         constexpr std::size_t max_supported_records = 1024;
@@ -209,8 +216,8 @@ private:
     void reserve_batches(std::size_t capacity) {
         storage_.reserve_exact(capacity);
         for (std::size_t i = 0; i < capacity; ++i) {
-            Batch *batch = &storage_.emplace_back(max_batch_records_);
-            const bool ok = free_batches_.try_push(batch);
+            batch *item = &storage_.emplace_back(max_batch_records_);
+            const bool ok = free_batches_.try_push(item);
             AF_ASSERT(ok);
             static_cast<void>(ok);
         }
@@ -232,14 +239,14 @@ private:
                 return enqueued_any;
             }
 
-            Batch *batch = acquire_batch();
-            if (batch == nullptr) {
+            batch *item = acquire_batch();
+            if (item == nullptr) {
                 dropped_records_.fetch_add(count_non_empty_records(records.subspan(index)),
                                            std::memory_order_relaxed);
                 return enqueued_any;
             }
 
-            batch->reset();
+            item->reset();
             const std::size_t begin = index;
             while (index < records.size()) {
                 log_record *record = records[index];
@@ -249,29 +256,29 @@ private:
                     ++index;
                     continue;
                 }
-                if (!batch->append(message, max_batch_records_)) {
+                if (!item->append(message, max_batch_records_)) {
                     break;
                 }
                 ++index;
-                if (batch->record_count >= max_batch_records_) {
+                if (item->record_count >= max_batch_records_) {
                     break;
                 }
             }
 
-            if (batch->empty()) {
-                stash_batch(batch);
+            if (item->empty()) {
+                stash_batch(item);
                 if (index == begin) {
                     ++index;
                 }
                 continue;
             }
 
-            const std::uint32_t queued_count = batch->record_count;
+            const std::uint32_t queued_count = item->record_count;
             pending_batches_.fetch_add(1U, std::memory_order_relaxed);
-            if (!ready_batches_.try_push(batch)) [[unlikely]] {
+            if (!ready_batches_.try_push(item)) [[unlikely]] {
                 complete_pending_batch();
                 dropped_records_.fetch_add(queued_count, std::memory_order_relaxed);
-                stash_batch(batch);
+                stash_batch(item);
                 return enqueued_any;
             }
             queued_records_.fetch_add(queued_count, std::memory_order_relaxed);
@@ -284,23 +291,23 @@ private:
         return enqueued_any;
     }
 
-    [[nodiscard]] Batch *acquire_batch() noexcept {
+    [[nodiscard]] batch *acquire_batch() noexcept {
         if (producer_spare_batch_ != nullptr) {
-            Batch *batch = producer_spare_batch_;
+            batch *item = producer_spare_batch_;
             producer_spare_batch_ = nullptr;
-            return batch;
+            return item;
         }
         return free_batches_.try_pop();
     }
 
-    void stash_batch(Batch *batch) noexcept {
+    void stash_batch(batch *item) noexcept {
         AF_ASSERT(producer_spare_batch_ == nullptr);
-        producer_spare_batch_ = batch;
+        producer_spare_batch_ = item;
     }
 
-    void recycle_batch(Batch *batch) noexcept {
-        batch->reset();
-        const bool ok = free_batches_.try_push(batch);
+    void recycle_batch(batch *item) noexcept {
+        item->reset();
+        const bool ok = free_batches_.try_push(item);
         AF_ASSERT(ok);
         static_cast<void>(ok);
     }
@@ -322,10 +329,10 @@ private:
         return count;
     }
 
-    void write_batch_on_owner(const Batch &batch) noexcept {
+    void write_batch_on_owner(const batch &item) noexcept {
         scratch_record_ptrs_.clear();
-        for (std::size_t i = 0; i < batch.messages.size(); ++i) {
-            scratch_records_[i].reset(batch.messages[i]);
+        for (std::size_t i = 0; i < item.messages.size(); ++i) {
+            scratch_records_[i].reset(item.messages[i]);
             scratch_record_ptrs_.push_back(&scratch_records_[i]);
         }
         if (scratch_record_ptrs_.empty()) {
@@ -388,23 +395,23 @@ private:
     }
 
     [[nodiscard]] bool register_on_owner_thread() noexcept {
-        return run_control_and_wait(ControlOperation::Register);
+        return run_control_and_wait(control_operation::register_service);
     }
 
     [[nodiscard]] bool unregister_on_owner_thread() noexcept {
-        return run_control_and_wait(ControlOperation::Unregister);
+        return run_control_and_wait(control_operation::unregister_service);
     }
 
-    [[nodiscard]] bool run_control(ControlOperation operation) noexcept {
+    [[nodiscard]] bool run_control(control_operation operation) noexcept {
         switch (operation) {
-        case ControlOperation::Register: {
+        case control_operation::register_service: {
             const bool ok = owner_->register_service_task(thread_, this);
             if (ok) {
                 registered_.store(true, std::memory_order_release);
             }
             return ok;
         }
-        case ControlOperation::Unregister: {
+        case control_operation::unregister_service: {
             const bool ok = owner_->unregister_service_task(thread_, this);
             if (ok) {
                 registered_.store(false, std::memory_order_release);
@@ -415,12 +422,12 @@ private:
         return false;
     }
 
-    [[nodiscard]] bool run_control_and_wait(ControlOperation operation) noexcept {
+    [[nodiscard]] bool run_control_and_wait(control_operation operation) noexcept {
         if (is_owner_runtime_thread()) {
             return run_control(operation);
         }
 
-        ControlCompletion completion;
+        control_completion completion;
         if (!owner_->post(thread_, [this, operation, &completion](runtime &) noexcept {
                 const bool ok = run_control(operation);
                 completion.ok.store(ok, std::memory_order_release);
@@ -441,12 +448,12 @@ private:
     std::unique_ptr<log_backend> backend_;
     const std::size_t max_batch_records_;
     const std::size_t max_batches_per_run_;
-    bounded_mpsc_queue<Batch> ready_batches_;
-    bounded_mpsc_queue<Batch> free_batches_;
-    contiguous_object_storage<Batch> storage_;
+    bounded_mpsc_queue<batch> ready_batches_;
+    bounded_mpsc_queue<batch> free_batches_;
+    contiguous_object_storage<batch> storage_;
     std::unique_ptr<log_record[]> scratch_records_;
     std::vector<log_record *> scratch_record_ptrs_;
-    Batch *producer_spare_batch_{nullptr};
+    batch *producer_spare_batch_{nullptr};
     cache_line_atomic<std::uint64_t> queued_records_{0};
     cache_line_atomic<std::uint64_t> written_records_{0};
     cache_line_atomic<std::uint64_t> dropped_records_{0};

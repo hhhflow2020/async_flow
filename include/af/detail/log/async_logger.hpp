@@ -55,13 +55,13 @@ private:
     [[nodiscard]] std::size_t ready_record_count() const noexcept;
     [[nodiscard]] std::size_t max_batch_size() const noexcept;
 
-    struct ProducerShardCache {
+    struct producer_shard_cache {
         const async_logger *logger{nullptr};
         std::uint64_t token{0};
         detail::async_log_queue_shard *shard{nullptr};
     };
 
-    struct OrderedProducerShardCache {
+    struct ordered_producer_shard_cache {
         const async_logger *logger{nullptr};
         std::uint64_t token{0};
         detail::async_log_producer_shard *shard{nullptr};
