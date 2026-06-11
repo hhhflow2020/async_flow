@@ -300,8 +300,4 @@ private:
     mutable bool total_dirty_{false};
 };
 
-using BufferView = buffer_view;
-using Buffer = buffer;
-using BufferChain = buffer_chain;
-
 } // namespace af

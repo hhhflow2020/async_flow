@@ -140,10 +140,10 @@ static_assert(std::is_same_v<af::detail::runtime_hierarchical_timer_wheel,
                              af::detail::RuntimeHierarchicalTimerWheel>);
 static_assert(std::is_same_v<af::ShutdownPolicy, af::shutdown_policy>);
 static_assert(std::is_same_v<af::TaskState, af::task_state>);
-static_assert(std::is_same_v<af::parallel_mode, af::ParallelMode>);
-static_assert(std::is_same_v<af::ordered_batch_replay_policy, af::OrderedBatchReplayPolicy>);
-static_assert(std::is_same_v<af::ordered_batch_options, af::OrderedBatchOptions>);
-static_assert(std::is_same_v<af::sharded_ops<int>, af::ShardedOps<int>>);
+static_assert(std::is_enum_v<af::parallel_mode>);
+static_assert(std::is_enum_v<af::ordered_batch_replay_policy>);
+static_assert(std::is_class_v<af::ordered_batch_options>);
+static_assert(std::is_class_v<af::sharded_ops<int>>);
 static_assert(af::task_result::done == af::task_result::done);
 static_assert(af::task_result::pending == af::task_result::pending);
 static_assert(af::task_result::again == af::task_result::again);

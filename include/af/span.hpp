@@ -73,6 +73,4 @@ private:
     std::size_t size_{0};
 };
 
-template <typename T> using Span = span<T>;
-
 } // namespace af

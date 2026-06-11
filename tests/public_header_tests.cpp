@@ -182,6 +182,41 @@ TEST(PublicHeaderTests, NetPublicHeadersDoNotExposeCamelCaseTypeAliases) {
     }
 }
 
+TEST(PublicHeaderTests, UtilityPublicHeadersDoNotExposeCamelCaseTypeAliases) {
+    constexpr std::array forbidden{
+        forbidden_source_snippet{"include/af/buffer/buffer.hpp", "using BufferView ="},
+        forbidden_source_snippet{"include/af/buffer/buffer.hpp", "using Buffer ="},
+        forbidden_source_snippet{"include/af/buffer/buffer.hpp", "using BufferChain ="},
+        forbidden_source_snippet{"include/af/span.hpp", "using Span ="},
+        forbidden_source_snippet{"include/af/signal.hpp", "using SignalWaitResult ="},
+        forbidden_source_snippet{"include/af/signal.hpp", "using SignalSet ="},
+        forbidden_source_snippet{"include/af/parallel.hpp", "using ParallelMode ="},
+        forbidden_source_snippet{"include/af/parallel.hpp", "using OrderedBatchReplayPolicy ="},
+        forbidden_source_snippet{"include/af/parallel.hpp", "using OrderedBatchOptions ="},
+        forbidden_source_snippet{"include/af/parallel.hpp", "using ShardedOps ="},
+        forbidden_source_snippet{"include/af/batch_sequencer.hpp", "using BatchSubmitStatus ="},
+        forbidden_source_snippet{"include/af/batch_sequencer.hpp",
+                                 "using OrderedBatchFailureAction ="},
+        forbidden_source_snippet{"include/af/batch_sequencer.hpp",
+                                 "using OrderedBatchRetrySkipOptions ="},
+        forbidden_source_snippet{"include/af/batch_sequencer.hpp",
+                                 "using OrderedBatchFailureDecision ="},
+        forbidden_source_snippet{"include/af/batch_sequencer.hpp",
+                                 "using OrderedBatchRetrySkipPolicy ="},
+        forbidden_source_snippet{"include/af/batch_sequencer.hpp", "using BatchSequencer ="},
+        forbidden_source_snippet{"include/af/crud_batch.hpp", "using OpType ="},
+        forbidden_source_snippet{"include/af/crud_batch.hpp", "using CrudOp ="},
+        forbidden_source_snippet{"include/af/crud_batch.hpp", "using ChangeBatch ="},
+    };
+
+    for (const forbidden_source_snippet item : forbidden) {
+        const std::string content = read_source_file(item.relative_path);
+        ASSERT_FALSE(content.empty()) << item.relative_path;
+        EXPECT_EQ(content.find(item.snippet), std::string::npos)
+            << item.relative_path << " still contains " << item.snippet;
+    }
+}
+
 TEST(PublicHeaderTests, LogUmbrellaExposesLowerCaseNames) {
     static_assert(std::is_same_v<af::LogOverflowPolicy, af::log_overflow_policy>);
     static_assert(std::is_same_v<af::LogOrdering, af::log_ordering>);
@@ -195,22 +230,22 @@ TEST(PublicHeaderTests, LogUmbrellaExposesLowerCaseNames) {
 }
 
 TEST(PublicHeaderTests, UtilityUmbrellaExposesLowerCaseNames) {
-    static_assert(std::is_same_v<af::Span<int>, af::span<int>>);
-    static_assert(std::is_same_v<af::BufferView, af::buffer_view>);
-    static_assert(std::is_same_v<af::Buffer, af::buffer>);
-    static_assert(std::is_same_v<af::BufferChain, af::buffer_chain>);
+    static_assert(std::is_class_v<af::span<int>>);
+    static_assert(std::is_class_v<af::buffer_view>);
+    static_assert(std::is_class_v<af::buffer>);
+    static_assert(std::is_class_v<af::buffer_chain>);
     af::buffer buffer = af::buffer::copy("ok", 2);
     af::buffer_chain chain;
     chain.push_back(buffer.slice(0));
     EXPECT_EQ(chain.size(), 2U);
-    static_assert(std::is_same_v<af::batch_submit_status, af::BatchSubmitStatus>);
+    static_assert(std::is_enum_v<af::batch_submit_status>);
     static_assert(af::batch_submit_status::submitted == af::batch_submit_status::submitted);
     static_assert(af::batch_submit_status::buffered == af::batch_submit_status::buffered);
     static_assert(af::batch_submit_status::duplicate == af::batch_submit_status::duplicate);
     static_assert(!has_submitted_value<af::batch_submit_status>::value);
     static_assert(!has_buffered_value<af::batch_submit_status>::value);
     static_assert(!has_duplicate_value<af::batch_submit_status>::value);
-    static_assert(std::is_same_v<af::ordered_batch_failure_action, af::OrderedBatchFailureAction>);
+    static_assert(std::is_enum_v<af::ordered_batch_failure_action>);
     static_assert(af::ordered_batch_failure_action::retry ==
                   af::ordered_batch_failure_action::retry);
     static_assert(af::ordered_batch_failure_action::skip == af::ordered_batch_failure_action::skip);
@@ -218,22 +253,19 @@ TEST(PublicHeaderTests, UtilityUmbrellaExposesLowerCaseNames) {
     static_assert(!has_retry_value<af::ordered_batch_failure_action>::value);
     static_assert(!has_skip_value<af::ordered_batch_failure_action>::value);
     static_assert(!has_stop_value<af::ordered_batch_failure_action>::value);
-    static_assert(
-        std::is_same_v<af::ordered_batch_retry_skip_options, af::OrderedBatchRetrySkipOptions>);
-    static_assert(
-        std::is_same_v<af::ordered_batch_failure_decision, af::OrderedBatchFailureDecision>);
-    static_assert(std::is_same_v<af::ordered_batch_retry_skip_policy<std::uint64_t>,
-                                 af::OrderedBatchRetrySkipPolicy<std::uint64_t>>);
-    static_assert(std::is_same_v<af::batch_sequencer<int>, af::BatchSequencer<int>>);
-    static_assert(std::is_same_v<af::op_type, af::OpType>);
+    static_assert(std::is_class_v<af::ordered_batch_retry_skip_options>);
+    static_assert(std::is_class_v<af::ordered_batch_failure_decision>);
+    static_assert(std::is_class_v<af::ordered_batch_retry_skip_policy<std::uint64_t>>);
+    static_assert(std::is_class_v<af::batch_sequencer<int>>);
+    static_assert(std::is_enum_v<af::op_type>);
     static_assert(af::op_type::add == af::op_type::add);
     static_assert(af::op_type::update == af::op_type::update);
     static_assert(af::op_type::delete_op == af::op_type::delete_op);
     static_assert(!has_add_value<af::op_type>::value);
     static_assert(!has_update_value<af::op_type>::value);
     static_assert(!has_delete_value<af::op_type>::value);
-    static_assert(std::is_same_v<af::crud_op<int, int>, af::CrudOp<int, int>>);
-    static_assert(std::is_same_v<af::change_batch<int, int>, af::ChangeBatch<int, int>>);
-    static_assert(std::is_same_v<af::SignalWaitResult, af::signal_wait_result>);
-    static_assert(std::is_same_v<af::SignalSet, af::signal_set>);
+    static_assert(std::is_class_v<af::crud_op<int, int>>);
+    static_assert(std::is_class_v<af::change_batch<int, int>>);
+    static_assert(std::is_class_v<af::signal_wait_result>);
+    static_assert(std::is_class_v<af::signal_set>);
 }

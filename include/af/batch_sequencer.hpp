@@ -41,11 +41,6 @@ struct ordered_batch_failure_decision {
     }
 };
 
-using BatchSubmitStatus = batch_submit_status;
-using OrderedBatchFailureAction = ordered_batch_failure_action;
-using OrderedBatchRetrySkipOptions = ordered_batch_retry_skip_options;
-using OrderedBatchFailureDecision = ordered_batch_failure_decision;
-
 template <typename BatchId = std::uint64_t> class ordered_batch_retry_skip_policy {
 public:
     explicit ordered_batch_retry_skip_policy(ordered_batch_retry_skip_options options = {})
@@ -83,9 +78,6 @@ private:
     ordered_batch_retry_skip_options options_;
     absl::flat_hash_map<BatchId, std::uint32_t> failures_;
 };
-
-template <typename BatchId = std::uint64_t>
-using OrderedBatchRetrySkipPolicy = ordered_batch_retry_skip_policy<BatchId>;
 
 template <typename Batch> class batch_sequencer {
 public:
@@ -136,7 +128,5 @@ private:
     std::uint64_t next_batch_id_;
     absl::flat_hash_map<std::uint64_t, Batch> pending_;
 };
-
-template <typename Batch> using BatchSequencer = batch_sequencer<Batch>;
 
 } // namespace af

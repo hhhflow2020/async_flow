@@ -69,7 +69,4 @@ private:
     return detail::ignore_process_signal_impl(signal);
 }
 
-using SignalWaitResult = signal_wait_result;
-using SignalSet = signal_set;
-
 } // namespace af

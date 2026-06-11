@@ -186,7 +186,7 @@ public:
         threads_ = threads;
         remaining_ = remaining;
         sum_ = sum;
-        ops_ = af::ShardedOps<std::uint64_t>(4);
+        ops_ = af::sharded_ops<std::uint64_t>(4);
         for (std::uint64_t i = 0; i < 1024; ++i) {
             ops_.shards[i & 3U].push_back(i);
         }
@@ -225,7 +225,7 @@ private:
 
     bench_threads threads_;
     state state_{state::split};
-    af::ShardedOps<std::uint64_t> ops_{4};
+    af::sharded_ops<std::uint64_t> ops_{4};
     std::atomic<int> *remaining_{nullptr};
     std::atomic<std::uint64_t> *sum_{nullptr};
 };

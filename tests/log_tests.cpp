@@ -325,7 +325,7 @@ TEST(LogTests, RecordPoolLocalCacheIgnoresStaleSlotsWhenPoolAddressIsReused) {
 
 class BlockingLogBackend final : public af::log_backend {
 public:
-    void write_batch(af::Span<af::detail::log_record *const> records) noexcept override {
+    void write_batch(af::span<af::detail::log_record *const> records) noexcept override {
         static_cast<void>(records);
         std::unique_lock lock(mutex_);
         entered_ = true;
@@ -354,7 +354,7 @@ private:
 
 class CountingLogBackend final : public af::log_backend {
 public:
-    void write_batch(af::Span<af::detail::log_record *const> records) noexcept override {
+    void write_batch(af::span<af::detail::log_record *const> records) noexcept override {
         record_count_.fetch_add(records.size(), std::memory_order_relaxed);
     }
 
@@ -368,7 +368,7 @@ private:
 
 class CapturingLogBackend final : public af::log_backend {
 public:
-    void write_batch(af::Span<af::detail::log_record *const> records) noexcept override {
+    void write_batch(af::span<af::detail::log_record *const> records) noexcept override {
         std::lock_guard lock(mutex_);
         for (af::detail::log_record *record : records) {
             messages_.emplace_back(record->message());
@@ -391,7 +391,7 @@ public:
                                              af::runtime::thread_index expected_thread)
         : owner_(owner), expected_thread_index_(expected_thread) {}
 
-    void write_batch(af::Span<af::detail::log_record *const> records) noexcept override {
+    void write_batch(af::span<af::detail::log_record *const> records) noexcept override {
         record_count_.fetch_add(records.size(), std::memory_order_relaxed);
         const bool on_runtime_thread = af::runtime::current() == &owner_;
         ran_on_runtime_thread_.store(on_runtime_thread, std::memory_order_release);
@@ -455,7 +455,7 @@ template <typename T> bool wait_until_at_least(std::atomic<T> &value, T expected
 #if defined(__linux__) || defined(__APPLE__)
 class ThreadNameLogBackend final : public af::log_backend {
 public:
-    void write_batch(af::Span<af::detail::log_record *const> records) noexcept override {
+    void write_batch(af::span<af::detail::log_record *const> records) noexcept override {
         static_cast<void>(records);
         std::array<char, 16> name{};
         if (::pthread_getname_np(::pthread_self(), name.data(), name.size()) != 0) {
@@ -1391,7 +1391,7 @@ TEST(LogTests, SharedRecordPoolExpandsAndBatchReleaseReusesSlots) {
     }
 
     af::detail::release_async_log_records(
-        af::Span<af::detail::log_record *const>(records.data(), records.size()));
+        af::span<af::detail::log_record *const>(records.data(), records.size()));
 
     for (std::size_t i = 0; i < records.size(); ++i) {
         records[i] = pool.try_acquire("shared batch release reused log record\n");
@@ -1399,7 +1399,7 @@ TEST(LogTests, SharedRecordPoolExpandsAndBatchReleaseReusesSlots) {
     }
 
     af::detail::release_async_log_records(
-        af::Span<af::detail::log_record *const>(records.data(), records.size()));
+        af::span<af::detail::log_record *const>(records.data(), records.size()));
 }
 
 TEST(LogTests, RuntimeAwareSinkTagsFirstUserLogFieldWithRuntimeTaskId) {
@@ -1907,7 +1907,7 @@ TEST(LogTests, TcpBackendWritesBatchedRecordsToLoopbackStream) {
     for (int attempt = 0; attempt < 250 && !server_done.load(std::memory_order_acquire);
          ++attempt) {
         backend.write_batch(
-            af::Span<af::detail::log_record *const>(record_ptrs.data(), record_ptrs.size()));
+            af::span<af::detail::log_record *const>(record_ptrs.data(), record_ptrs.size()));
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
 
@@ -1942,7 +1942,7 @@ TEST(LogTests, UdpBackendWritesBatchedRecordsToLoopbackDatagrams) {
     };
 
     backend.write_batch(
-        af::Span<af::detail::log_record *const>(record_ptrs.data(), record_ptrs.size()));
+        af::span<af::detail::log_record *const>(record_ptrs.data(), record_ptrs.size()));
 
     std::array<std::string, 4> received{};
     const std::size_t received_count = recv_datagrams_until(

@@ -19,10 +19,6 @@ struct ordered_batch_options {
     ordered_batch_replay_policy replay_policy{ordered_batch_replay_policy::strict};
 };
 
-using ParallelMode = parallel_mode;
-using OrderedBatchReplayPolicy = ordered_batch_replay_policy;
-using OrderedBatchOptions = ordered_batch_options;
-
 inline constexpr ordered_batch_options retryable_ordered_batch_options{
     ordered_batch_replay_policy::skip_already_applied};
 
@@ -35,7 +31,5 @@ template <typename Op> struct sharded_ops {
         return static_cast<std::uint16_t>(shards.size());
     }
 };
-
-template <typename Op> using ShardedOps = sharded_ops<Op>;
 
 } // namespace af

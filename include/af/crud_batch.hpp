@@ -26,11 +26,6 @@ template <typename Key, typename Value> struct change_batch {
     std::vector<crud_op<Key, Value>> ops;
 };
 
-using OpType = op_type;
-
-template <typename Key, typename Value> using CrudOp = crud_op<Key, Value>;
-template <typename Key, typename Value> using ChangeBatch = change_batch<Key, Value>;
-
 template <typename Key, typename Value, typename ShardFn>
 [[nodiscard]] sharded_ops<crud_op<Key, Value>>
 split_crud_ops(std::vector<crud_op<Key, Value>> &&ops, std::uint16_t shard_count,
