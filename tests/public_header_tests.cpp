@@ -678,6 +678,16 @@ TEST(PublicHeaderTests, LogDetailHeadersDoNotExposeCamelCaseTypeAliases) {
     }
 }
 
+TEST(PublicHeaderTests, LogRecordPoolExpansionAvoidsAtomicFlagWriteSpin) {
+    const std::string content = read_source_file("include/af/detail/log/async_log_record_pool.hpp");
+    ASSERT_FALSE(content.empty());
+
+    EXPECT_EQ(content.find("std::atomic_flag expanding_"), std::string::npos);
+    EXPECT_EQ(content.find("test_and_set"), std::string::npos);
+    EXPECT_NE(content.find("std::atomic<bool> expanding_"), std::string::npos);
+    EXPECT_NE(content.find("compare_exchange_strong"), std::string::npos);
+}
+
 TEST(PublicHeaderTests, LogBenchmarksCoverHighConcurrencyOrderedProducerRegression) {
     const std::string content = read_source_file("benchmarks/log_benchmarks.cpp");
     ASSERT_FALSE(content.empty());

@@ -409,9 +409,21 @@ private:
     }
 
     [[nodiscard]] slab *grow() noexcept {
+        if (slab *existing = find_slab_with_free_slot(); existing != nullptr) {
+            return existing;
+        }
+
         queue_full_backoff backoff(64U);
-        while (expanding_.test_and_set(std::memory_order_acquire)) {
-            backoff.wait();
+        bool expected = false;
+        while (!expanding_.compare_exchange_strong(expected, true, std::memory_order_acquire,
+                                                   std::memory_order_acquire)) {
+            do {
+                backoff.wait();
+                if (slab *existing = find_slab_with_free_slot(); existing != nullptr) {
+                    return existing;
+                }
+            } while (expanding_.load(std::memory_order_acquire));
+            expected = false;
         }
 
         slab *published = nullptr;
@@ -433,7 +445,7 @@ private:
             published = nullptr;
         }
 
-        expanding_.clear(std::memory_order_release);
+        expanding_.store(false, std::memory_order_release);
         return published;
     }
 
@@ -546,7 +558,7 @@ private:
     std::size_t next_slab_capacity_;
     std::vector<std::unique_ptr<slab>> slabs_;
     alignas(hardware_cache_line_size) std::atomic<slab *> slab_head_{nullptr};
-    alignas(hardware_cache_line_size) std::atomic_flag expanding_ = ATOMIC_FLAG_INIT;
+    alignas(hardware_cache_line_size) std::atomic<bool> expanding_{false};
 };
 
 inline void release_async_log_record(log_record *record) noexcept {

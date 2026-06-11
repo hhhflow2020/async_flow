@@ -1476,6 +1476,61 @@ TEST(LogTests, SharedRecordPoolExpandsAndBatchReleaseReusesSlots) {
         af::span<af::detail::log_record *const>(records.data(), records.size()));
 }
 
+TEST(LogTests, SharedRecordPoolExpandsUnderConcurrentAcquirePressure) {
+    constexpr int producer_count = 8;
+    constexpr int records_per_producer = 64;
+    constexpr int expected_records = producer_count * records_per_producer;
+
+    af::detail::async_log_record_pool pool(1, 0);
+    std::array<std::array<af::detail::log_record *, records_per_producer>, producer_count>
+        records{};
+    std::array<std::thread, producer_count> producers;
+    std::atomic<int> ready{0};
+    std::atomic<bool> start{false};
+    std::atomic<int> failures{0};
+
+    for (int producer = 0; producer < producer_count; ++producer) {
+        producers[static_cast<std::size_t>(producer)] = std::thread([&, producer] {
+            ready.fetch_add(1, std::memory_order_release);
+            while (!start.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+
+            for (int index = 0; index < records_per_producer; ++index) {
+                af::detail::log_record *record = pool.try_acquire("concurrent pool expansion\n");
+                records[static_cast<std::size_t>(producer)][static_cast<std::size_t>(index)] =
+                    record;
+                if (record == nullptr) {
+                    failures.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        });
+    }
+
+    while (ready.load(std::memory_order_acquire) != producer_count) {
+        std::this_thread::yield();
+    }
+    start.store(true, std::memory_order_release);
+    for (std::thread &producer : producers) {
+        producer.join();
+    }
+
+    EXPECT_EQ(failures.load(std::memory_order_acquire), 0);
+
+    std::array<af::detail::log_record *, expected_records> acquired{};
+    std::size_t acquired_count = 0;
+    for (const auto &producer_records : records) {
+        for (af::detail::log_record *record : producer_records) {
+            if (record != nullptr) {
+                acquired[acquired_count++] = record;
+            }
+        }
+    }
+    EXPECT_EQ(acquired_count, static_cast<std::size_t>(expected_records));
+    af::detail::release_async_log_records(
+        af::span<af::detail::log_record *const>(acquired.data(), acquired_count));
+}
+
 TEST(LogTests, RuntimeAwareSinkTagsFirstUserLogFieldWithRuntimeTaskId) {
     const auto path = std::filesystem::temp_directory_path() / "async_flow_task_id_log.txt";
     std::filesystem::remove(path);

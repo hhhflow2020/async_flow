@@ -18,7 +18,7 @@
 - TLS local cache 同样使用 pool token 和 weak lifetime，pool 地址复用或 pool 已析构时只丢弃 stale cache，不触碰已释放 slab。
 - 每个 slab 有独立的带版本号 free-list；批量 release 会按 slab 分组，只对同一 slab 做一次链表拼接和 CAS。
 - local cache refill 会跨已有 slab 尽量填满缓存，避免某个 slab 只剩少量 slot 时频繁重复进入全局 free-list。
-- 扩容通过 `atomic_flag` 串行化，只在 slab 耗尽时进入冷路径；正常日志热路径不加锁。
+- 扩容通过 cache-line 隔离的 `atomic<bool>` CAS 门闩串行化。抢不到扩容权的生产者只读观察门闩并优先复用已发布 slab，避免 `test_and_set` 写自旋造成扩容冷路径上的 cache line 来回失效；正常日志热路径不加锁。
 - `log_record` 按 cache line 对齐，默认 1024 字节 inline message，普通日志不会触发 heap 分配。
 
 ## IO buffer pool
@@ -44,6 +44,7 @@
 - 过小的 remote batch 会增加跨线程回收开销。
 - `async_log_record_pool` 的 TLS cache 容量上限为 4096 条 record 指针；这是每线程缓存上限，不是 pool 总容量上限。pool 仍会按 slab 持续扩展到 OOM。
 - 日志 record pool 的 slab 列表扩容仍是全局冷路径，高峰前应通过 `record_pool.slab_object_count` 配置足够初始容量。
+- 并发突发耗尽所有 slab 时，只有一个生产者真正分配新 slab，其他生产者在只读等待后复用已发布空闲 slot；该路径仍是冷路径，不应该替代容量预热。
 
 ## 复核覆盖
 
@@ -126,6 +127,26 @@
 
 - 对象池新增 token 校验后，本线程 create/destroy 和跨线程 batch destroy 仍能稳定出数。
 - weak lifetime 只在 cache reset/flush/线程退出等冷路径触碰；热路径保持 local cache + free-list CAS，不引入锁。
+
+## 2026-06-12 日志池扩容门闩复核
+
+本轮补充 `SharedRecordPoolExpandsUnderConcurrentAcquirePressure` 和 `LogRecordPoolExpansionAvoidsAtomicFlagWriteSpin`，固定日志 record pool 在极小初始 slab 下的并发扩容正确性，并禁止扩容冷路径恢复为 `atomic_flag::test_and_set` 写自旋。
+
+远端容器输出时间：`2026-06-12T08:53Z`。命令参数：
+`--benchmark_filter=AsyncLogRecordPool --benchmark_min_time=0.05s --benchmark_repetitions=3 --benchmark_report_aggregates_only=true`。
+
+结果摘要：
+
+- `BM_AsyncLogRecordPoolAcquireRelease/256_mean`：约 `79.3M items/s`，CV `0.17%`。
+- `BM_AsyncLogRecordPoolBatchAcquireRelease/64/256_mean`：约 `118.0M items/s`，CV `0.23%`。
+- `BM_AsyncLogRecordPoolBatchAcquireRelease/1024/1024_mean`：约 `54.4M items/s`，CV `0.02%`。
+- `BM_AsyncLogRecordPoolCrossThreadReleaseBatch/64/256/real_time_mean`：约 `20.5M items/s`，CV `0.71%`。
+- `BM_AsyncLogRecordPoolCrossThreadReleaseBatch/1024/1024/real_time_mean`：约 `22.3M items/s`，CV `1.32%`。
+
+判断：
+
+- 扩容门闩从 `atomic_flag` 改为 `atomic<bool>` CAS 后，热路径 benchmark 与前次复核同量级，没有观察到本线程、批量或跨线程 release 路径退化。
+- 扩容等待者只读观察门闩并优先复用已发布 slab，可以减少突发扩容时的 producer cache line 写争用；该收益主要体现在冷路径争用行为，热路径 benchmark 用于确认没有引入额外成本。
 
 ## 建议
 
