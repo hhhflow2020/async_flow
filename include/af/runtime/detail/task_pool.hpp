@@ -8,18 +8,25 @@
 namespace af::detail {
 
 template <typename TaskT, std::size_t LocalCacheCapacity>
-using RuntimeTaskPool = RuntimePooledObjectPool<TaskT, LocalCacheCapacity>;
+using runtime_task_pool_type = runtime_pooled_object_pool_type<TaskT, LocalCacheCapacity>;
 
 template <typename TaskT, std::size_t LocalCacheCapacity>
-using RuntimeTaskPoolHolder = RuntimePooledObjectPoolHolder<TaskT, LocalCacheCapacity>;
+using runtime_task_pool_holder_type =
+    runtime_pooled_object_pool_holder_type<TaskT, LocalCacheCapacity>;
 
 template <typename TaskT, std::size_t LocalCacheCapacity>
-[[nodiscard]] RuntimeTaskPoolHolder<TaskT, LocalCacheCapacity> &runtime_task_pool_holder() {
+using RuntimeTaskPool = runtime_task_pool_type<TaskT, LocalCacheCapacity>;
+
+template <typename TaskT, std::size_t LocalCacheCapacity>
+using RuntimeTaskPoolHolder = runtime_task_pool_holder_type<TaskT, LocalCacheCapacity>;
+
+template <typename TaskT, std::size_t LocalCacheCapacity>
+[[nodiscard]] runtime_task_pool_holder_type<TaskT, LocalCacheCapacity> &runtime_task_pool_holder() {
     return runtime_pooled_object_pool_holder<TaskT, LocalCacheCapacity>();
 }
 
 template <typename TaskT, std::size_t LocalCacheCapacity>
-[[nodiscard]] RuntimeTaskPool<TaskT, LocalCacheCapacity> &runtime_task_pool() {
+[[nodiscard]] runtime_task_pool_type<TaskT, LocalCacheCapacity> &runtime_task_pool() {
     return runtime_pooled_object_pool<TaskT, LocalCacheCapacity>();
 }
 

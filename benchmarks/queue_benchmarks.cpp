@@ -154,7 +154,7 @@ void BM_ObjectPoolCreateDestroy(benchmark::State &state) {
         std::uint64_t values[8]{};
     };
 
-    af::detail::ObjectPool<Payload> pool;
+    af::detail::object_pool<Payload> pool;
 
     for (auto _ : state) {
         for (int i = 0; i < state.range(0); ++i) {
@@ -173,7 +173,7 @@ void BM_ObjectPoolTunedChunkCreateDestroy(benchmark::State &state) {
         std::uint64_t values[8]{};
     };
 
-    af::detail::ObjectPool<Payload, ChunkSize> pool;
+    af::detail::object_pool<Payload, ChunkSize> pool;
 
     for (auto _ : state) {
         for (int i = 0; i < state.range(0); ++i) {
@@ -192,7 +192,7 @@ void BM_ObjectPoolTunedCacheSetCreateDestroy(benchmark::State &state) {
         std::uint64_t values[8]{};
     };
 
-    using Pool = af::detail::ObjectPool<Payload, 256, 1, false, LocalCacheSetSize>;
+    using Pool = af::detail::object_pool<Payload, 256, 1, false, LocalCacheSetSize>;
     Pool pool;
 
     for (auto _ : state) {
@@ -211,7 +211,7 @@ void BM_ObjectPoolBatchCreateDestroy(benchmark::State &state) {
         std::uint64_t values[8]{};
     };
 
-    af::detail::ObjectPool<Payload> pool;
+    af::detail::object_pool<Payload> pool;
     std::vector<Payload *> objects(static_cast<std::size_t>(state.range(0)));
 
     for (auto _ : state) {
@@ -233,7 +233,7 @@ void BM_ObjectPoolTunedChunkBatchCreateDestroy(benchmark::State &state) {
         std::uint64_t values[8]{};
     };
 
-    af::detail::ObjectPool<Payload, ChunkSize> pool;
+    af::detail::object_pool<Payload, ChunkSize> pool;
     std::vector<Payload *> objects(static_cast<std::size_t>(state.range(0)));
 
     for (auto _ : state) {
@@ -255,7 +255,7 @@ void BM_ObjectPoolTunedCacheCapacityBatchCreateDestroy(benchmark::State &state) 
         std::uint64_t values[8]{};
     };
 
-    using Pool = af::detail::ObjectPool<Payload, 256, 1, false, 8, 4, LocalCacheCapacity>;
+    using Pool = af::detail::object_pool<Payload, 256, 1, false, 8, 4, LocalCacheCapacity>;
     Pool pool;
     std::vector<Payload *> objects(static_cast<std::size_t>(state.range(0)));
 
@@ -282,7 +282,7 @@ template <bool Reserve> void BM_ObjectPoolColdBurstCreateDestroy(benchmark::Stat
 
     for (auto _ : state) {
         state.PauseTiming();
-        auto pool = std::make_unique<af::detail::ObjectPool<Payload>>();
+        auto pool = std::make_unique<af::detail::object_pool<Payload>>();
         if constexpr (Reserve) {
             pool->reserve_slots(object_count);
         }
@@ -518,7 +518,7 @@ void BM_ObjectPoolCrossThreadDestroyBatch(benchmark::State &state) {
         std::uint64_t values[8]{};
     };
 
-    RunObjectPoolCrossThreadDestroyBatch<Payload, af::detail::ObjectPool<Payload>>(state);
+    RunObjectPoolCrossThreadDestroyBatch<Payload, af::detail::object_pool<Payload>>(state);
 }
 
 void BM_ObjectPoolFanInCrossThreadDestroyBatch(benchmark::State &state) {
@@ -526,7 +526,7 @@ void BM_ObjectPoolFanInCrossThreadDestroyBatch(benchmark::State &state) {
         std::uint64_t values[8]{};
     };
 
-    RunObjectPoolFanInDestroyBatch<Payload, af::detail::ObjectPool<Payload>>(state);
+    RunObjectPoolFanInDestroyBatch<Payload, af::detail::object_pool<Payload>>(state);
 }
 
 template <std::size_t PoolCount>
@@ -535,7 +535,7 @@ void BM_ObjectPoolRoundRobinCrossThreadDestroyBatch(benchmark::State &state) {
         std::uint64_t values[8]{};
     };
 
-    RunObjectPoolRoundRobinCrossThreadDestroyBatch<Payload, af::detail::ObjectPool<Payload>,
+    RunObjectPoolRoundRobinCrossThreadDestroyBatch<Payload, af::detail::object_pool<Payload>,
                                                    PoolCount>(state);
 }
 
@@ -545,7 +545,7 @@ void BM_ObjectPoolTunedDirectSetRoundRobinCrossThreadDestroyBatch(benchmark::Sta
         std::uint64_t values[8]{};
     };
 
-    using Pool = af::detail::ObjectPool<Payload, 256, 1, false, 8, DirectReleaseSetSize>;
+    using Pool = af::detail::object_pool<Payload, 256, 1, false, 8, DirectReleaseSetSize>;
     RunObjectPoolRoundRobinCrossThreadDestroyBatch<Payload, Pool, PoolCount>(state);
 }
 
@@ -554,7 +554,7 @@ void BM_ObjectPoolRemoteBatchCrossThreadDestroyBatch(benchmark::State &state) {
         std::uint64_t values[8]{};
     };
 
-    RunObjectPoolCrossThreadDestroyBatch<Payload, af::detail::ObjectPool<Payload, 256, 64>>(state);
+    RunObjectPoolCrossThreadDestroyBatch<Payload, af::detail::object_pool<Payload, 256, 64>>(state);
 }
 
 template <std::size_t ChunkSize>
@@ -563,7 +563,7 @@ void BM_ObjectPoolTunedChunkCrossThreadDestroyBatch(benchmark::State &state) {
         std::uint64_t values[8]{};
     };
 
-    RunObjectPoolCrossThreadDestroyBatch<Payload, af::detail::ObjectPool<Payload, ChunkSize>>(
+    RunObjectPoolCrossThreadDestroyBatch<Payload, af::detail::object_pool<Payload, ChunkSize>>(
         state);
 }
 
@@ -573,7 +573,7 @@ void BM_ObjectPoolTunedChunkRemoteBatchCrossThreadDestroyBatch(benchmark::State 
         std::uint64_t values[8]{};
     };
 
-    RunObjectPoolCrossThreadDestroyBatch<Payload, af::detail::ObjectPool<Payload, ChunkSize, 64>>(
+    RunObjectPoolCrossThreadDestroyBatch<Payload, af::detail::object_pool<Payload, ChunkSize, 64>>(
         state);
 }
 
@@ -584,7 +584,7 @@ void BM_ObjectPoolTunedChunkRemoteBatchShuffledCrossThreadDestroyBatch(benchmark
     };
 
     RunObjectPoolShuffledCrossThreadDestroyBatch<Payload,
-                                                 af::detail::ObjectPool<Payload, ChunkSize, 64>>(
+                                                 af::detail::object_pool<Payload, ChunkSize, 64>>(
         state);
 }
 
@@ -593,7 +593,7 @@ void BM_ObjectPoolCachedIndexRemoteBatchCrossThreadDestroyBatch(benchmark::State
         std::uint64_t values[8]{};
     };
 
-    RunObjectPoolCrossThreadDestroyBatch<Payload, af::detail::ObjectPool<Payload, 256, 64, true>>(
+    RunObjectPoolCrossThreadDestroyBatch<Payload, af::detail::object_pool<Payload, 256, 64, true>>(
         state);
 }
 
@@ -602,7 +602,7 @@ void BM_ObjectPoolRemoteBatchFanInCrossThreadDestroyBatch(benchmark::State &stat
         std::uint64_t values[8]{};
     };
 
-    RunObjectPoolFanInDestroyBatch<Payload, af::detail::ObjectPool<Payload, 256, 64>>(state);
+    RunObjectPoolFanInDestroyBatch<Payload, af::detail::object_pool<Payload, 256, 64>>(state);
 }
 
 template <std::size_t RemoteBatchSize>
@@ -612,7 +612,7 @@ void BM_ObjectPoolRemoteBatchSizeCrossThreadDestroyBatch(benchmark::State &state
     };
 
     RunObjectPoolCrossThreadDestroyBatch<Payload,
-                                         af::detail::ObjectPool<Payload, 256, RemoteBatchSize>>(
+                                         af::detail::object_pool<Payload, 256, RemoteBatchSize>>(
         state);
 }
 
@@ -623,7 +623,7 @@ void BM_ObjectPoolRemoteBatchCapacityCrossThreadDestroyBatch(benchmark::State &s
     };
 
     using Pool =
-        af::detail::ObjectPool<Payload, 256, RemoteBatchSize, false, 8, 4, LocalCacheCapacity>;
+        af::detail::object_pool<Payload, 256, RemoteBatchSize, false, 8, 4, LocalCacheCapacity>;
     RunObjectPoolCrossThreadDestroyBatch<Payload, Pool>(state);
 }
 
@@ -634,7 +634,7 @@ void BM_ObjectPoolRemoteBatchCapacityFanInCrossThreadDestroyBatch(benchmark::Sta
     };
 
     using Pool =
-        af::detail::ObjectPool<Payload, 256, RemoteBatchSize, false, 8, 4, LocalCacheCapacity>;
+        af::detail::object_pool<Payload, 256, RemoteBatchSize, false, 8, 4, LocalCacheCapacity>;
     RunObjectPoolFanInDestroyBatch<Payload, Pool>(state);
 }
 
@@ -643,7 +643,7 @@ void BM_ObjectPoolTinyCreateDestroy(benchmark::State &state) {
         std::uint64_t value{0};
     };
 
-    af::detail::ObjectPool<Payload> pool;
+    af::detail::object_pool<Payload> pool;
 
     for (auto _ : state) {
         for (int i = 0; i < state.range(0); ++i) {
@@ -661,7 +661,7 @@ void BM_ObjectPoolTinyBatchCreateDestroy(benchmark::State &state) {
         std::uint64_t value{0};
     };
 
-    af::detail::ObjectPool<Payload> pool;
+    af::detail::object_pool<Payload> pool;
     std::vector<Payload *> objects(static_cast<std::size_t>(state.range(0)));
 
     for (auto _ : state) {
@@ -682,7 +682,7 @@ void BM_ObjectPoolTinyCrossThreadDestroyBatch(benchmark::State &state) {
         std::uint64_t value{0};
     };
 
-    RunObjectPoolCrossThreadDestroyBatch<Payload, af::detail::ObjectPool<Payload>>(state);
+    RunObjectPoolCrossThreadDestroyBatch<Payload, af::detail::object_pool<Payload>>(state);
 }
 
 void BM_ObjectPoolTinyRemoteBatchCrossThreadDestroyBatch(benchmark::State &state) {
@@ -690,7 +690,7 @@ void BM_ObjectPoolTinyRemoteBatchCrossThreadDestroyBatch(benchmark::State &state
         std::uint64_t value{0};
     };
 
-    RunObjectPoolCrossThreadDestroyBatch<Payload, af::detail::ObjectPool<Payload, 256, 64>>(state);
+    RunObjectPoolCrossThreadDestroyBatch<Payload, af::detail::object_pool<Payload, 256, 64>>(state);
 }
 
 template <std::size_t RemoteBatchSize>
@@ -700,7 +700,7 @@ void BM_ObjectPoolTinyRemoteBatchSizeCrossThreadDestroyBatch(benchmark::State &s
     };
 
     RunObjectPoolCrossThreadDestroyBatch<Payload,
-                                         af::detail::ObjectPool<Payload, 256, RemoteBatchSize>>(
+                                         af::detail::object_pool<Payload, 256, RemoteBatchSize>>(
         state);
 }
 
@@ -711,7 +711,7 @@ void BM_ObjectPoolTinyRemoteBatchCapacityCrossThreadDestroyBatch(benchmark::Stat
     };
 
     using Pool =
-        af::detail::ObjectPool<Payload, 256, RemoteBatchSize, false, 8, 4, LocalCacheCapacity>;
+        af::detail::object_pool<Payload, 256, RemoteBatchSize, false, 8, 4, LocalCacheCapacity>;
     RunObjectPoolCrossThreadDestroyBatch<Payload, Pool>(state);
 }
 
@@ -720,8 +720,8 @@ void BM_ObjectPoolAlternatingPools(benchmark::State &state) {
         std::uint64_t values[8]{};
     };
 
-    af::detail::ObjectPool<Payload> first_pool;
-    af::detail::ObjectPool<Payload> second_pool;
+    af::detail::object_pool<Payload> first_pool;
+    af::detail::object_pool<Payload> second_pool;
 
     for (auto _ : state) {
         for (int i = 0; i < state.range(0); ++i) {
@@ -743,7 +743,7 @@ template <std::size_t PoolCount> void BM_ObjectPoolAlternatingPoolSet(benchmark:
         std::uint64_t values[8]{};
     };
 
-    std::array<af::detail::ObjectPool<Payload>, PoolCount> pools;
+    std::array<af::detail::object_pool<Payload>, PoolCount> pools;
 
     for (auto _ : state) {
         for (int i = 0; i < state.range(0); ++i) {
@@ -765,7 +765,7 @@ void BM_ObjectPoolTunedCacheSetAlternatingPoolSet(benchmark::State &state) {
         std::uint64_t values[8]{};
     };
 
-    using Pool = af::detail::ObjectPool<Payload, 256, 1, false, LocalCacheSetSize>;
+    using Pool = af::detail::object_pool<Payload, 256, 1, false, LocalCacheSetSize>;
     std::array<Pool, PoolCount> pools;
 
     for (auto _ : state) {
@@ -788,7 +788,7 @@ void BM_ObjectPoolReverseAlternatingPoolSet(benchmark::State &state) {
         std::uint64_t values[8]{};
     };
 
-    std::array<af::detail::ObjectPool<Payload>, PoolCount> pools;
+    std::array<af::detail::object_pool<Payload>, PoolCount> pools;
 
     for (auto _ : state) {
         for (int i = 0; i < state.range(0); ++i) {

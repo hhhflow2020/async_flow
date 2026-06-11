@@ -13,14 +13,15 @@ inline constexpr std::size_t runtime_pooled_object_remote_release_batch_size =
     LocalCacheCapacity < 64U ? LocalCacheCapacity : 64U;
 
 template <typename ObjectT, std::size_t LocalCacheCapacity>
-using RuntimePooledObjectPool =
+using runtime_pooled_object_pool_type =
     object_pool<ObjectT, 4096, runtime_pooled_object_remote_release_batch_size<LocalCacheCapacity>,
                 false, 1, 4, LocalCacheCapacity>;
 
-template <typename ObjectT, std::size_t LocalCacheCapacity> struct RuntimePooledObjectPoolHolder {
+template <typename ObjectT, std::size_t LocalCacheCapacity>
+struct runtime_pooled_object_pool_holder_type {
     static constexpr std::size_t local_cache_capacity = LocalCacheCapacity;
 
-    RuntimePooledObjectPool<ObjectT, LocalCacheCapacity> pool;
+    runtime_pooled_object_pool_type<ObjectT, LocalCacheCapacity> pool;
     std::atomic<std::size_t> reserved_slots{0};
 
     void reserve_at_least(std::size_t slot_count) {
@@ -45,14 +46,22 @@ template <typename ObjectT, std::size_t LocalCacheCapacity> struct RuntimePooled
 };
 
 template <typename ObjectT, std::size_t LocalCacheCapacity>
-[[nodiscard]] RuntimePooledObjectPoolHolder<ObjectT, LocalCacheCapacity> &
+using RuntimePooledObjectPool = runtime_pooled_object_pool_type<ObjectT, LocalCacheCapacity>;
+
+template <typename ObjectT, std::size_t LocalCacheCapacity>
+using RuntimePooledObjectPoolHolder =
+    runtime_pooled_object_pool_holder_type<ObjectT, LocalCacheCapacity>;
+
+template <typename ObjectT, std::size_t LocalCacheCapacity>
+[[nodiscard]] runtime_pooled_object_pool_holder_type<ObjectT, LocalCacheCapacity> &
 runtime_pooled_object_pool_holder() {
-    static RuntimePooledObjectPoolHolder<ObjectT, LocalCacheCapacity> holder;
+    static runtime_pooled_object_pool_holder_type<ObjectT, LocalCacheCapacity> holder;
     return holder;
 }
 
 template <typename ObjectT, std::size_t LocalCacheCapacity>
-[[nodiscard]] RuntimePooledObjectPool<ObjectT, LocalCacheCapacity> &runtime_pooled_object_pool() {
+[[nodiscard]] runtime_pooled_object_pool_type<ObjectT, LocalCacheCapacity> &
+runtime_pooled_object_pool() {
     return runtime_pooled_object_pool_holder<ObjectT, LocalCacheCapacity>().pool;
 }
 

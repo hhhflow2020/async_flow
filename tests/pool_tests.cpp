@@ -55,7 +55,7 @@ TEST(PoolTests, ObjectPoolReturnsSlotAfterConstructorThrows) {
         }
     };
 
-    af::detail::ObjectPool<Payload, 1> pool;
+    af::detail::object_pool<Payload, 1> pool;
     void *attempted = nullptr;
 
     EXPECT_THROW(static_cast<void>(pool.create(true, &attempted)), std::runtime_error);
@@ -75,7 +75,7 @@ TEST(PoolTests, ObjectPoolOomHandlerDoesNotHandleConstructorBadAlloc) {
         }
     };
 
-    af::detail::ObjectPool<Payload, 1> pool;
+    af::detail::object_pool<Payload, 1> pool;
     bool oom_handler_called = false;
 
     EXPECT_THROW(
@@ -100,7 +100,7 @@ TEST(PoolTests, ObjectPoolUncachedReturnsSlotAfterConstructorThrows) {
         }
     };
 
-    af::detail::ObjectPool<Payload, 1> pool;
+    af::detail::object_pool<Payload, 1> pool;
     void *attempted = nullptr;
 
     EXPECT_THROW(static_cast<void>(pool.create_uncached(true, &attempted)), std::runtime_error);
@@ -123,7 +123,7 @@ TEST(PoolTests, ObjectPoolTryCreateReturnsNullAndReusesSlotAfterConstructorThrow
         }
     };
 
-    af::detail::ObjectPool<Payload, 1> pool;
+    af::detail::object_pool<Payload, 1> pool;
     void *attempted = nullptr;
 
     EXPECT_EQ(pool.try_create(true, &attempted), nullptr);
@@ -147,7 +147,7 @@ TEST(PoolTests, ObjectPoolTryCreateUncachedReturnsNullAndReusesSlotAfterConstruc
         }
     };
 
-    af::detail::ObjectPool<Payload, 1> pool;
+    af::detail::object_pool<Payload, 1> pool;
     void *attempted = nullptr;
 
     EXPECT_EQ(pool.try_create_uncached(true, &attempted), nullptr);
@@ -165,7 +165,7 @@ TEST(PoolTests, ObjectPoolSupportsCrossThreadDestroy) {
         std::uint64_t value{0};
     };
 
-    af::detail::ObjectPool<Payload, 1> pool;
+    af::detail::object_pool<Payload, 1> pool;
     Payload *object = pool.create(7);
     ASSERT_EQ(object->value, 7U);
 
@@ -184,7 +184,7 @@ TEST(PoolTests, ObjectPoolDefaultRemoteDestroyReturnsBeforeThreadExit) {
         std::uint64_t value{0};
     };
 
-    af::detail::ObjectPool<Payload, 1> pool;
+    af::detail::object_pool<Payload, 1> pool;
     Payload *object = pool.create(7);
     std::atomic<bool> destroyed{false};
     std::atomic<bool> finish{false};
@@ -216,8 +216,8 @@ TEST(PoolTests, ObjectPoolDefaultRemoteDestroyHandlesAlternatingPoolsBeforeThrea
         std::uint64_t value{0};
     };
 
-    af::detail::ObjectPool<Payload, 4> first_pool;
-    af::detail::ObjectPool<Payload, 4> second_pool;
+    af::detail::object_pool<Payload, 4> first_pool;
+    af::detail::object_pool<Payload, 4> second_pool;
     std::array<Payload *, 4> first_objects{};
     std::array<Payload *, 4> second_objects{};
 
@@ -268,7 +268,7 @@ TEST(PoolTests, ObjectPoolSupportsCustomLocalCacheSetSize) {
         std::uint64_t value{0};
     };
 
-    using Pool = af::detail::ObjectPool<Payload, 2, 1, false, 4>;
+    using Pool = af::detail::object_pool<Payload, 2, 1, false, 4>;
     std::array<Pool, 4> pools;
     std::array<Payload *, 4> objects{};
 
@@ -287,7 +287,7 @@ TEST(PoolTests, ObjectPoolSupportsSingleLocalCacheEntry) {
         std::uint64_t value{0};
     };
 
-    using Pool = af::detail::ObjectPool<Payload, 2, 1, false, 1>;
+    using Pool = af::detail::object_pool<Payload, 2, 1, false, 1>;
     Pool first_pool;
     Pool second_pool;
 
@@ -310,7 +310,7 @@ TEST(PoolTests, ObjectPoolSupportsCustomDirectReleaseSetSize) {
         std::uint64_t value{0};
     };
 
-    using Pool = af::detail::ObjectPool<Payload, 2, 1, false, 4, 4>;
+    using Pool = af::detail::object_pool<Payload, 2, 1, false, 4, 4>;
     std::array<Pool, 4> pools;
     std::array<std::array<Payload *, 2>, 4> objects{};
 
@@ -346,7 +346,7 @@ TEST(PoolTests, ObjectPoolSupportsCustomLocalCacheCapacity) {
         std::uint64_t value{0};
     };
 
-    using Pool = af::detail::ObjectPool<Payload, 2, 1, false, 4, 4, 4>;
+    using Pool = af::detail::object_pool<Payload, 2, 1, false, 4, 4, 4>;
     Pool pool;
     std::array<Payload *, 4> objects{};
 
@@ -369,7 +369,7 @@ TEST(PoolTests, ObjectPoolRemoteReleaseBatchFlushesAtThreshold) {
         std::uint64_t value{0};
     };
 
-    af::detail::ObjectPool<Payload, 4, 4> pool;
+    af::detail::object_pool<Payload, 4, 4> pool;
     std::array<Payload *, 4> objects{};
     for (std::size_t i = 0; i < objects.size(); ++i) {
         objects[i] = pool.create(static_cast<std::uint64_t>(i));
@@ -414,7 +414,7 @@ TEST(PoolTests, ObjectPoolSingleLocalCacheEntryBatchesRemoteRelease) {
         std::uint64_t value{0};
     };
 
-    using Pool = af::detail::ObjectPool<Payload, 4, 4, false, 1>;
+    using Pool = af::detail::object_pool<Payload, 4, 4, false, 1>;
     Pool pool;
     std::array<Payload *, 4> objects{};
     for (std::size_t i = 0; i < objects.size(); ++i) {
@@ -460,7 +460,7 @@ TEST(PoolTests, ObjectPoolRemoteReleaseBatchFlushesOnThreadExit) {
         std::uint64_t value{0};
     };
 
-    af::detail::ObjectPool<Payload, 4, 8> pool;
+    af::detail::object_pool<Payload, 4, 8> pool;
     std::array<Payload *, 4> objects{};
     for (std::size_t i = 0; i < objects.size(); ++i) {
         objects[i] = pool.create(static_cast<std::uint64_t>(i));
@@ -493,7 +493,7 @@ TEST(PoolTests, ObjectPoolCachedSlotIndexRemoteReleaseBatchFlushesAtThreshold) {
         std::uint64_t value{0};
     };
 
-    af::detail::ObjectPool<Payload, 4, 4, true> pool;
+    af::detail::object_pool<Payload, 4, 4, true> pool;
     std::array<Payload *, 4> objects{};
     for (std::size_t i = 0; i < objects.size(); ++i) {
         objects[i] = pool.create(static_cast<std::uint64_t>(i));
@@ -526,8 +526,8 @@ TEST(PoolTests, ObjectPoolKeepsSameTypePoolCachesSeparate) {
         std::uint64_t value{0};
     };
 
-    af::detail::ObjectPool<Payload, 1> first_pool;
-    af::detail::ObjectPool<Payload, 1> second_pool;
+    af::detail::object_pool<Payload, 1> first_pool;
+    af::detail::object_pool<Payload, 1> second_pool;
 
     Payload *first = first_pool.create(1);
     first_pool.destroy(first);
@@ -547,7 +547,7 @@ TEST(PoolTests, ObjectPoolSupportsReserveSlots) {
         std::uint64_t value{0};
     };
 
-    af::detail::ObjectPool<Payload, 2> pool;
+    af::detail::object_pool<Payload, 2> pool;
     pool.reserve_slots(0);
     pool.reserve_slots(5);
 
@@ -567,7 +567,7 @@ TEST(PoolTests, ObjectPoolSupportsOverAlignedPayload) {
         std::uint64_t value{0};
     };
 
-    af::detail::ObjectPool<Payload, 2> pool;
+    af::detail::object_pool<Payload, 2> pool;
     std::array<Payload *, 3> objects{};
 
     for (std::size_t i = 0; i < objects.size(); ++i) {
@@ -586,7 +586,7 @@ TEST(PoolTests, ObjectPoolSupportsReserveBlocks) {
         std::uint64_t value{0};
     };
 
-    af::detail::ObjectPool<Payload, 2> pool;
+    af::detail::object_pool<Payload, 2> pool;
     pool.reserve_blocks(3);
 
     std::array<Payload *, 6> objects{};
@@ -611,7 +611,7 @@ TEST(PoolTests, ObjectPoolSupportsRepeatedCrossThreadBatchDestroy) {
     constexpr std::size_t batch_size = 512;
     constexpr std::uint64_t rounds = 256;
 
-    af::detail::ObjectPool<Payload, 16> pool;
+    af::detail::object_pool<Payload, 16> pool;
     std::array<Payload *, batch_size> objects{};
     std::atomic<std::uint64_t> published_round{0};
     std::atomic<std::uint64_t> consumed_round{0};
@@ -664,7 +664,7 @@ TEST(PoolTests, ObjectPoolSupportsConcurrentCreateDestroy) {
     constexpr int thread_count = 8;
     constexpr int iterations = 4096;
 
-    af::detail::ObjectPool<Payload, 8> pool;
+    af::detail::object_pool<Payload, 8> pool;
     std::atomic<int> ready{0};
     std::atomic<bool> start{false};
     std::atomic<int> failures{0};
@@ -722,7 +722,7 @@ TEST(PoolTests, ObjectPoolUncachedSupportsConcurrentCreateDestroy) {
     constexpr int thread_count = 8;
     constexpr int iterations = 4096;
 
-    af::detail::ObjectPool<Payload, 8> pool;
+    af::detail::object_pool<Payload, 8> pool;
     std::atomic<int> ready{0};
     std::atomic<bool> start{false};
     std::atomic<int> failures{0};

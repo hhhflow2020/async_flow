@@ -25,6 +25,8 @@
 
 #include "af/platform.hpp"
 #include "af/runtime.hpp"
+#include "af/runtime/detail/pooled_object.hpp"
+#include "af/runtime/detail/task_pool.hpp"
 #include "af/runtime_config.hpp"
 #include "af/thread_layout.hpp"
 
@@ -74,6 +76,16 @@ static_assert(af::ordered_batch_replay_policy::skip_already_applied ==
               af::OrderedBatchReplayPolicy::SkipAlreadyApplied);
 static_assert(std::is_same_v<af::log_ordering, af::LogOrdering>);
 static_assert(std::is_same_v<af::log_overflow_policy, af::LogOverflowPolicy>);
+static_assert(std::is_same_v<af::detail::runtime_pooled_object_pool_type<int, 8>,
+                             af::detail::RuntimePooledObjectPool<int, 8>>);
+static_assert(std::is_same_v<af::detail::runtime_pooled_object_pool_holder_type<int, 8>,
+                             af::detail::RuntimePooledObjectPoolHolder<int, 8>>);
+static_assert(std::is_same_v<af::detail::runtime_task_pool_type<int, 8>,
+                             af::detail::RuntimeTaskPool<int, 8>>);
+static_assert(std::is_same_v<af::detail::runtime_task_pool_holder_type<int, 8>,
+                             af::detail::RuntimeTaskPoolHolder<int, 8>>);
+static_assert(std::is_same_v<af::detail::runtime_instance_parallel_group_pool_type,
+                             af::detail::RuntimeInstanceParallelGroupPool>);
 static_assert(af::log_ordering::ordered == af::LogOrdering::Ordered);
 static_assert(af::log_ordering::relaxed == af::LogOrdering::Relaxed);
 static_assert(af::log_overflow_policy::drop_newest == af::LogOverflowPolicy::DropNewest);
