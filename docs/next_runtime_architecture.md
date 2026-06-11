@@ -652,7 +652,11 @@ include/af/
       select_reactor.hpp
   queue/
     intrusive_mpsc_queue.hpp
-    bounded_mpsc_ring.hpp
+    bounded_mpsc_queue.hpp
+    bounded_mpmc_queue.hpp
+    bounded_queue_common.hpp
+    bounded_queues.hpp
+    queue_backoff.hpp
   memory/
     slab_pool.hpp
     cache_line.hpp
