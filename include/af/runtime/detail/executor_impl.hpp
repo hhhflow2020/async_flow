@@ -50,7 +50,7 @@ inline void runtime_executor::notify() noexcept {
     if (reactor_ != nullptr) {
         reactor_->wake();
     }
-    atomic_notify_all(wake_epoch_);
+    wake_epoch_.notify_all();
 }
 
 inline void runtime_executor::enqueue(runtime_work *work) noexcept {
@@ -283,11 +283,10 @@ inline void runtime_executor::wait_for_wake_or_timer(std::uint32_t observed) noe
         return;
     }
     if (timeout == std::chrono::nanoseconds::max()) {
-        atomic_wait_value(wake_epoch_, observed, std::memory_order_acquire);
+        wake_epoch_.wait(observed, std::memory_order_acquire);
         return;
     }
-    static_cast<void>(
-        atomic_wait_value_for(wake_epoch_, observed, timeout, std::memory_order_acquire));
+    static_cast<void>(wake_epoch_.wait_for(observed, timeout, std::memory_order_acquire));
 }
 
 inline bool runtime_executor::wake_observed(std::uint32_t observed) const noexcept {

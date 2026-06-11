@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 
 #include "af/detail/config.hpp"
@@ -53,6 +54,12 @@ template <typename T> struct alignas(hardware_cache_line_size) cache_line_atomic
 
     void wait(T old, std::memory_order order) const noexcept {
         atomic_wait_value(value, old, order);
+    }
+
+    template <typename Rep, typename Period>
+    bool wait_for(T old, std::chrono::duration<Rep, Period> timeout,
+                  std::memory_order order) const noexcept {
+        return atomic_wait_value_for(value, old, timeout, order);
     }
 
     void notify_one() noexcept {

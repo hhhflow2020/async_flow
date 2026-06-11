@@ -15,6 +15,7 @@
 #include "af/detail/log/async_log_lanes.hpp"
 #include "af/detail/log/async_log_record_pool.hpp"
 #include "af/detail/queue/queue_backoff.hpp"
+#include "af/detail/runtime/runtime_common_state.hpp"
 #include "af/detail/thread/hardware_threads.hpp"
 
 namespace af {
@@ -162,16 +163,15 @@ private:
     const std::chrono::milliseconds fatal_flush_timeout_;
     std::vector<std::unique_ptr<log_backend>> backends_;
 
-    alignas(detail::hardware_cache_line_size) std::atomic<bool> started_{false};
-    alignas(detail::hardware_cache_line_size) std::atomic<bool> accepting_{false};
-    alignas(detail::hardware_cache_line_size) std::atomic<bool> stopping_{false};
-    alignas(detail::hardware_cache_line_size)
-        std::atomic<detail::async_log_consumer_wake_target *> consumer_wake_target_{nullptr};
-    alignas(detail::hardware_cache_line_size) std::atomic<std::size_t> next_ordered_producer_shard_{
-        0};
-    alignas(detail::hardware_cache_line_size) std::atomic<std::size_t> next_producer_shard_{0};
-    alignas(detail::hardware_cache_line_size) std::atomic<std::size_t> pending_{0};
-    alignas(detail::hardware_cache_line_size) std::atomic<std::size_t> ready_{0};
+    detail::cache_line_atomic<bool> started_{false};
+    detail::cache_line_atomic<bool> accepting_{false};
+    detail::cache_line_atomic<bool> stopping_{false};
+    detail::cache_line_atomic<detail::async_log_consumer_wake_target *> consumer_wake_target_{
+        nullptr};
+    detail::cache_line_atomic<std::size_t> next_ordered_producer_shard_{0};
+    detail::cache_line_atomic<std::size_t> next_producer_shard_{0};
+    detail::cache_line_atomic<std::size_t> pending_{0};
+    detail::cache_line_atomic<std::size_t> ready_{0};
 
     std::size_t next_drain_shard_{0};
     std::size_t next_runtime_drain_thread_{0};

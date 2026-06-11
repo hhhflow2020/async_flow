@@ -501,6 +501,55 @@ TEST(PublicHeaderTests, EpollReactorBatchesReadySourcesBeforeDispatch) {
     EXPECT_NE(content.find("append_ready"), std::string::npos);
 }
 
+TEST(PublicHeaderTests, HotRuntimeAtomicsUseCacheLineWrappers) {
+    constexpr std::array wrapped{
+        forbidden_source_snippet{"include/af/runtime/detail/executor.hpp",
+                                 "cache_line_atomic<std::size_t> queued_work_count_"},
+        forbidden_source_snippet{"include/af/runtime/detail/executor.hpp",
+                                 "cache_line_atomic<std::uint32_t> wake_epoch_"},
+        forbidden_source_snippet{"include/af/runtime/detail/executor.hpp",
+                                 "cache_line_atomic<bool> stop_requested_"},
+        forbidden_source_snippet{"include/af/detail/log/async_logger.hpp",
+                                 "cache_line_atomic<bool> started_"},
+        forbidden_source_snippet{"include/af/detail/log/async_logger.hpp",
+                                 "cache_line_atomic<bool> accepting_"},
+        forbidden_source_snippet{"include/af/detail/log/async_logger.hpp",
+                                 "cache_line_atomic<bool> stopping_"},
+        forbidden_source_snippet{
+            "include/af/detail/log/async_logger.hpp",
+            "cache_line_atomic<detail::async_log_consumer_wake_target *> consumer_wake_target_"},
+        forbidden_source_snippet{"include/af/detail/log/async_logger.hpp",
+                                 "cache_line_atomic<std::size_t> next_ordered_producer_shard_"},
+        forbidden_source_snippet{"include/af/detail/log/async_logger.hpp",
+                                 "cache_line_atomic<std::size_t> next_producer_shard_"},
+        forbidden_source_snippet{"include/af/detail/log/async_logger.hpp",
+                                 "cache_line_atomic<std::size_t> pending_"},
+        forbidden_source_snippet{"include/af/detail/log/async_logger.hpp",
+                                 "cache_line_atomic<std::size_t> ready_"},
+    };
+
+    for (const forbidden_source_snippet item : wrapped) {
+        const std::string content = read_source_file(item.relative_path);
+        ASSERT_FALSE(content.empty()) << item.relative_path;
+        EXPECT_NE(content.find(item.snippet), std::string::npos)
+            << item.relative_path << " should contain " << item.snippet;
+    }
+
+    constexpr std::array forbidden{
+        forbidden_source_snippet{"include/af/runtime/detail/executor.hpp",
+                                 "alignas(hardware_cache_line_size) std::atomic"},
+        forbidden_source_snippet{"include/af/detail/log/async_logger.hpp",
+                                 "alignas(detail::hardware_cache_line_size) std::atomic"},
+    };
+
+    for (const forbidden_source_snippet item : forbidden) {
+        const std::string content = read_source_file(item.relative_path);
+        ASSERT_FALSE(content.empty()) << item.relative_path;
+        EXPECT_EQ(content.find(item.snippet), std::string::npos)
+            << item.relative_path << " still contains " << item.snippet;
+    }
+}
+
 TEST(PublicHeaderTests, TcpBenchmarksCoverEchoRoundTrip) {
     const std::string cmake = read_source_file("CMakeLists.txt");
     ASSERT_FALSE(cmake.empty());

@@ -13,11 +13,10 @@ public:
     async_log_drain_waiter(const async_log_drain_waiter &) = delete;
     async_log_drain_waiter &operator=(const async_log_drain_waiter &) = delete;
 
-    template <typename WakeFn>
-    [[nodiscard]] bool wait_until_drained(std::atomic<std::size_t> &pending,
-                                          std::chrono::steady_clock::time_point deadline,
-                                          std::chrono::milliseconds retry_interval,
-                                          WakeFn &&wake_consumer) noexcept {
+    template <typename PendingCounter, typename WakeFn>
+    [[nodiscard]] bool
+    wait_until_drained(PendingCounter &pending, std::chrono::steady_clock::time_point deadline,
+                       std::chrono::milliseconds retry_interval, WakeFn &&wake_consumer) noexcept {
         if (pending.load(std::memory_order_acquire) == 0U) {
             return true;
         }

@@ -9,6 +9,7 @@
 
 #include "af/detail/config.hpp"
 #include "af/detail/queue/intrusive_mpsc_queue.hpp"
+#include "af/detail/runtime/runtime_common_state.hpp"
 #include "af/detail/runtime/runtime_service_task.hpp"
 #include "af/runtime/config_resolution.hpp"
 #include "af/runtime/detail/timer_backend.hpp"
@@ -80,9 +81,9 @@ private:
     std::uint64_t next_timer_sequence_{0};
     idle_wait_strategy idle_wait_{idle_wait_strategy::futex};
     wake_policy wake_policy_{wake_policy::empty_to_non_empty};
-    alignas(hardware_cache_line_size) std::atomic<std::size_t> queued_work_count_{0};
-    alignas(hardware_cache_line_size) std::atomic<std::uint32_t> wake_epoch_{0};
-    std::atomic<bool> stop_requested_{false};
+    cache_line_atomic<std::size_t> queued_work_count_{0};
+    cache_line_atomic<std::uint32_t> wake_epoch_{0};
+    cache_line_atomic<bool> stop_requested_{false};
     std::thread worker_;
 };
 
