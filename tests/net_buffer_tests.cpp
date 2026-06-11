@@ -15,6 +15,33 @@ TEST(NetBufferTests, BufferCopyKeepsPayload) {
     EXPECT_EQ(std::memcmp(buffer.data(), input.data(), input.size()), 0);
 }
 
+TEST(NetBufferTests, BufferCopyDoesNotExposePooledBlockTailroom) {
+    af::buffer one = af::buffer::copy("a", 1);
+    af::buffer four = af::buffer::copy("data", 4);
+
+    ASSERT_EQ(one.size(), 1U);
+    ASSERT_EQ(four.size(), 4U);
+    EXPECT_EQ(one.view().string_view(), "a");
+    EXPECT_EQ(four.view().string_view(), "data");
+    EXPECT_EQ(one.capacity(), one.size());
+    EXPECT_EQ(four.capacity(), four.size());
+    EXPECT_EQ(one.tailroom(), 0U);
+    EXPECT_FALSE(one.try_append("b", 1));
+}
+
+TEST(NetBufferTests, CopyStorageUsesFixedBlocksForSmallPayloads) {
+    auto small = af::detail::make_copy_buffer_storage(4);
+    auto large = af::detail::make_copy_buffer_storage(af::detail::io_buffer_pool_block_size + 1U);
+    auto empty = af::detail::make_copy_buffer_storage(0);
+
+    EXPECT_EQ(small->capacity(), 4U);
+    EXPECT_EQ(small->physical_capacity(), af::detail::io_buffer_pool_block_size);
+    EXPECT_EQ(large->capacity(), af::detail::io_buffer_pool_block_size + 1U);
+    EXPECT_EQ(large->physical_capacity(), af::detail::io_buffer_pool_block_size + 1U);
+    EXPECT_EQ(empty->capacity(), 0U);
+    EXPECT_EQ(empty->physical_capacity(), 0U);
+}
+
 TEST(NetBufferTests, BufferWithCapacityTracksHeadroomAndTailroom) {
     af::buffer buffer = af::buffer::with_capacity(16, 4);
 

@@ -1240,7 +1240,7 @@ TEST(NetTcpServerTests, RuntimeTcpServerStopClosesBufferedConnectionsAfterConfig
     auto state = std::make_shared<StopTimeoutState>();
 
     af::net::tcp_server_config server_config;
-    server_config.connection.write_budget_bytes = 16U * 1024U;
+    server_config.connection.write_budget_bytes = 1U;
     server_config.connection.output_high_watermark = 64U * 1024U;
     server_config.connection_close_timeout = std::chrono::milliseconds(20);
 

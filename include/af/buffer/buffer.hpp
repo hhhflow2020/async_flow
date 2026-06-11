@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -11,6 +12,125 @@
 #include <vector>
 
 namespace af {
+
+namespace detail {
+
+inline constexpr std::size_t io_buffer_pool_block_size = 16U * 1024U;
+inline constexpr std::size_t io_buffer_pool_local_cache_capacity = 256U;
+
+struct buffer_storage {
+    [[nodiscard]] std::byte *data() noexcept {
+        return data_;
+    }
+
+    [[nodiscard]] const std::byte *data() const noexcept {
+        return data_;
+    }
+
+    [[nodiscard]] std::size_t capacity() const noexcept {
+        return capacity_;
+    }
+
+    [[nodiscard]] std::size_t physical_capacity() const noexcept {
+        return physical_capacity_;
+    }
+
+    void set_capacity(std::size_t capacity) noexcept {
+        capacity_ = capacity;
+    }
+
+protected:
+    std::byte *data_{nullptr};
+    std::size_t capacity_{0};
+    std::size_t physical_capacity_{0};
+};
+
+struct heap_buffer_storage final : buffer_storage {
+    explicit heap_buffer_storage(std::size_t capacity) : bytes(capacity) {
+        data_ = bytes.data();
+        capacity_ = bytes.size();
+        physical_capacity_ = bytes.size();
+    }
+
+    std::vector<std::byte> bytes;
+};
+
+struct pooled_buffer_storage final : buffer_storage {
+    pooled_buffer_storage() noexcept {
+        data_ = bytes.data();
+        capacity_ = bytes.size();
+        physical_capacity_ = bytes.size();
+    }
+
+    alignas(64) std::array<std::byte, io_buffer_pool_block_size> bytes;
+};
+
+class io_buffer_pool_cache {
+public:
+    io_buffer_pool_cache() = default;
+
+    io_buffer_pool_cache(const io_buffer_pool_cache &) = delete;
+    io_buffer_pool_cache &operator=(const io_buffer_pool_cache &) = delete;
+
+    ~io_buffer_pool_cache() {
+        while (size_ != 0U) {
+            delete slots_[--size_];
+            slots_[size_] = nullptr;
+        }
+    }
+
+    [[nodiscard]] pooled_buffer_storage *acquire() {
+        if (size_ != 0U) [[likely]] {
+            pooled_buffer_storage *storage = slots_[--size_];
+            slots_[size_] = nullptr;
+            return storage;
+        }
+        return new pooled_buffer_storage();
+    }
+
+    void release(pooled_buffer_storage *storage) noexcept {
+        if (storage == nullptr) {
+            return;
+        }
+        if (size_ < slots_.size()) [[likely]] {
+            slots_[size_++] = storage;
+            return;
+        }
+        delete storage;
+    }
+
+private:
+    std::array<pooled_buffer_storage *, io_buffer_pool_local_cache_capacity> slots_{};
+    std::size_t size_{0};
+};
+
+[[nodiscard]] inline io_buffer_pool_cache &thread_io_buffer_pool() noexcept {
+    thread_local io_buffer_pool_cache cache;
+    return cache;
+}
+
+[[nodiscard]] inline std::shared_ptr<buffer_storage>
+make_exact_buffer_storage(std::size_t capacity) {
+    return std::make_shared<heap_buffer_storage>(capacity);
+}
+
+[[nodiscard]] inline std::shared_ptr<buffer_storage>
+make_pooled_buffer_storage(std::size_t capacity) {
+    pooled_buffer_storage *storage = thread_io_buffer_pool().acquire();
+    storage->set_capacity(capacity);
+    return std::shared_ptr<buffer_storage>(storage, [](buffer_storage *raw) noexcept {
+        thread_io_buffer_pool().release(static_cast<pooled_buffer_storage *>(raw));
+    });
+}
+
+[[nodiscard]] inline std::shared_ptr<buffer_storage> make_copy_buffer_storage(std::size_t size) {
+    if (size != 0U && size <= io_buffer_pool_block_size) [[likely]] {
+        return make_pooled_buffer_storage(size);
+    }
+    return make_exact_buffer_storage(size);
+}
+
+} // namespace detail
 
 class buffer_view {
 public:
@@ -51,17 +171,17 @@ public:
     buffer() = default;
 
     explicit buffer(std::size_t size)
-        : storage_(std::make_shared<std::vector<std::byte>>(size)), size_(size) {}
+        : storage_(detail::make_exact_buffer_storage(size)), size_(size) {}
 
     [[nodiscard]] static buffer with_capacity(std::size_t capacity, std::size_t headroom = 0U) {
         if (headroom > capacity) {
             headroom = capacity;
         }
-        return buffer(std::make_shared<std::vector<std::byte>>(capacity), headroom, 0U);
+        return buffer(detail::make_exact_buffer_storage(capacity), headroom, 0U);
     }
 
     [[nodiscard]] static buffer copy(buffer_view view) {
-        buffer result(view.size());
+        buffer result(detail::make_copy_buffer_storage(view.size()), 0U, view.size());
         if (!view.empty()) {
             std::memcpy(result.mutable_data(), view.data(), view.size());
         }
@@ -101,7 +221,7 @@ public:
     }
 
     [[nodiscard]] std::size_t capacity() const noexcept {
-        return storage_ == nullptr ? 0U : storage_->size();
+        return storage_ == nullptr ? 0U : storage_->capacity();
     }
 
     [[nodiscard]] std::size_t headroom() const noexcept {
@@ -113,7 +233,7 @@ public:
             return 0U;
         }
         const std::size_t end = offset_ + size_;
-        return end >= storage_->size() ? 0U : storage_->size() - end;
+        return end >= storage_->capacity() ? 0U : storage_->capacity() - end;
     }
 
     [[nodiscard]] bool try_append_uninitialized(std::size_t count) noexcept {
@@ -172,11 +292,11 @@ public:
     }
 
 private:
-    buffer(std::shared_ptr<std::vector<std::byte>> storage, std::size_t offset,
+    buffer(std::shared_ptr<detail::buffer_storage> storage, std::size_t offset,
            std::size_t size) noexcept
         : storage_(std::move(storage)), offset_(offset), size_(size) {}
 
-    std::shared_ptr<std::vector<std::byte>> storage_;
+    std::shared_ptr<detail::buffer_storage> storage_;
     std::size_t offset_{0};
     std::size_t size_{0};
 };
