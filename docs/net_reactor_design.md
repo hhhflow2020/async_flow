@@ -70,7 +70,7 @@ runtime.post(io_thread, [&] {
 
 运行中可以动态增加或移除 listener。TCP server 控制面是 reactor-only：`add_listener()`、`remove_listener()`、`start()`、`stop()` 应由调用方显式调度到涉及对象所属的 owner IO 线程执行；外部线程应先投递一个 runtime task 到目标 reactor。`tcp_server` facade 不维护固定 control thread 状态，只保存逻辑 listener 表和 shard 列表；真正的 listener fd、connection table、retire/reap 和回调深度都在对应 IO shard 内部，shard 只由自己的 reactor 线程访问，因此不需要 mutex。
 
-`listener.threads` 可以绑定一个或多个 IO 线程；未填写时默认展开为 `runtime.io_threads()`。多 IO 监听同一 TCP 端口时，当前实现支持 `reuse_port=true` 且端口非 0 的高性能路径：每个目标 IO shard 创建自己的 nonblocking listen fd，内核把连接分配到不同 shard。Unix domain listener 仍然归一到单个 owner IO 线程。`reuse_port=false` 的“单 acceptor 后再分发 accepted fd”路径尚未实现，避免为了次优路径引入隐藏 command queue 或跨 reactor fd 迁移复杂度。
+`listener.threads` 可以绑定一个或多个 IO 线程；未填写时默认展开为 `runtime.io_threads()`。多 IO 监听同一 TCP 端口时，`reuse_port=true` 且端口非 0 会走高性能路径：每个目标 IO shard 创建自己的 nonblocking listen fd，内核把连接分配到不同 shard。`reuse_port=false` 的 `auto_select` / `single_acceptor` 会归一到首个目标 IO 线程，只创建一个 listener fd；Unix domain listener 也归一到单个 owner IO 线程。当前不做 accepted fd 跨 shard 分发，避免为了次优路径引入隐藏 command queue 或跨 reactor fd 迁移复杂度。
 
 `start()` / 动态 `add_listener()` 表示控制任务已成功提交；真正的 `bind/listen/register channel` 在目标 IO shard 上异步完成。监听 fd 打开失败会通过 handler 的 `on_error(listener, error)` 或 `on_listener_error(listener, error)` 回调报告。这样控制面不需要 mutex、condition variable 或跨线程 barrier，也不会在 IO 线程上等待自身任务。
 
@@ -293,9 +293,9 @@ UDP socket 控制面同样是 reactor-only：`start()`、`stop()` 应由 reactor
 
 ## Accept 策略
 
-- `tcp_accept_strategy::auto_select`：默认策略。`reuse_port=true` 时每个目标 IO 线程各自创建 listener fd；`reuse_port=false` 时只在首个 IO 线程监听，保证不会重复 bind。
+- `tcp_accept_strategy::auto_select`：默认策略。`reuse_port=true` 时每个目标 IO 线程各自创建 listener fd；`reuse_port=false` 时只在首个目标 IO 线程监听，保证不会重复 bind。
 - `tcp_accept_strategy::reuse_port_per_io_thread`：强制每个目标 IO 线程创建 listener fd，要求 `reuse_port=true`。
-- `tcp_accept_strategy::single_acceptor`：只在首个目标 IO 线程 accept，适合不希望或不能使用 `SO_REUSEPORT` 的场景。accepted fd 会通过 runtime task 分发到绑定的 IO 线程，并在目标 IO 线程创建 `tcp_connection`。
+- `tcp_accept_strategy::single_acceptor`：只在首个目标 IO 线程 accept，适合不希望或不能使用 `SO_REUSEPORT` 的场景。连接也归属该 IO 线程；后续如需 accepted fd 跨 shard 分发，应作为显式能力设计，不能通过隐藏 command queue 偷偷完成。
 
 `reuse_port=true` 是 TCP/UDP 多 IO 线程绑定同一端口的最高性能路径：内核把新连接或 datagram 分配给各 IO 线程自己的 fd，后续处理保持本地化。
 

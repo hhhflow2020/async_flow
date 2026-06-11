@@ -367,10 +367,19 @@ private:
 
         if (threads.size() > 1U) {
             if (config.endpoint.family == address_family::unix_domain) {
-                return EOPNOTSUPP;
+                if (config.accept_strategy == tcp_accept_strategy::reuse_port_per_io_thread) {
+                    return EOPNOTSUPP;
+                }
+                threads.resize(1U);
+                return 0;
             }
-            if (!config.options.reuse_port ||
-                config.accept_strategy == tcp_accept_strategy::single_acceptor) {
+            if (config.accept_strategy == tcp_accept_strategy::single_acceptor ||
+                (config.accept_strategy == tcp_accept_strategy::auto_select &&
+                 !config.options.reuse_port)) {
+                threads.resize(1U);
+                return 0;
+            }
+            if (!config.options.reuse_port) {
                 return EOPNOTSUPP;
             }
             if (config.endpoint.port == 0U) {

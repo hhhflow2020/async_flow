@@ -805,6 +805,65 @@ TEST(NetTcpServerTests, RuntimeTcpServerReusePortListenerStartsOnMultipleIoThrea
     runtime.stop();
 }
 
+TEST(NetTcpServerTests, RuntimeTcpServerAutoSelectWithoutReusePortUsesSingleAcceptor) {
+    af::runtime_config config;
+    config.threads = {af::io_threads("net-rt-io", 2)};
+    config.logger.consumer_thread = af::thread_selector::io(0);
+
+    af::runtime runtime(config);
+    RuntimeTcpListenerState state;
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_until([&] { return runtime.active_thread_count() == 2; }));
+
+    const std::uint16_t port = reserve_loopback_port();
+    const af::thread_ref io_0 = runtime.select_thread_ref(af::thread_selector::io(0));
+    const af::thread_ref io_1 = runtime.select_thread_ref(af::thread_selector::io(1));
+    af::net::tcp_server server(runtime);
+    af::net::tcp_listener_handle listener;
+    std::atomic<int> listener_error{0};
+
+    ASSERT_TRUE(runtime.post(io_0, [&] {
+        af::net::tcp_connection_callbacks callbacks;
+        callbacks.owner = &state;
+        callbacks.on_accept = &runtime_tcp_connection_record_accept;
+        callbacks.on_read = &runtime_tcp_connection_record_read;
+        callbacks.on_close = &runtime_tcp_connection_close;
+
+        af::net::tcp_listener_config listener_config;
+        listener_config.name = "runtime-server-auto-single-acceptor";
+        listener_config.endpoint = af::net::tcp_endpoint::loopback_v4(port);
+        listener_config.threads = {io_0, io_1};
+        listener_config.options.reuse_port = false;
+
+        const af::net::listener_result result =
+            server.add_listener(std::move(listener_config), callbacks);
+        listener = result.listener;
+        listener_error.store(result.error, std::memory_order_release);
+        const bool ok = result.ok() && server.start();
+        state.start_ok.store(ok, std::memory_order_release);
+        state.started.store(true, std::memory_order_release);
+    }));
+
+    ASSERT_TRUE(wait_until([&] { return state.started.load(std::memory_order_acquire); }));
+    EXPECT_TRUE(state.start_ok.load(std::memory_order_acquire));
+    EXPECT_EQ(listener_error.load(std::memory_order_acquire), 0);
+    ASSERT_TRUE(listener.valid());
+
+    EXPECT_EQ(roundtrip(port, "single-acceptor"), "single-acceptor");
+    ASSERT_TRUE(wait_until([&] { return state.accepted.load(std::memory_order_acquire) >= 1; }));
+    EXPECT_EQ(state.runtime_thread_mask.load(std::memory_order_acquire), 1ULL << io_0.index);
+
+    ASSERT_TRUE(runtime.post(io_0, [&] {
+        state.stop_ok.store(server.stop(), std::memory_order_release);
+        state.stopped.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return state.stopped.load(std::memory_order_acquire); }));
+    EXPECT_TRUE(state.stop_ok.load(std::memory_order_acquire));
+
+    runtime.stop();
+}
+
 TEST(NetTcpServerTests, RuntimeTcpServerStartsListenerAddedWhileRunning) {
     af::runtime_config config;
     config.threads = {af::io_threads("net-rt-io", 1)};
