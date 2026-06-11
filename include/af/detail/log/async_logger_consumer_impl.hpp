@@ -162,7 +162,7 @@ inline void async_logger::collect_shard_batch(std::vector<detail::log_record *> 
     std::array<detail::log_record *, max_queue_drain_count> drained;
     std::size_t empty_visits = 0;
     while (batch.size() < max_records && empty_visits < queue_shard_count_) {
-        detail::AsyncLogQueueShard &shard = *queue_shards_[next_drain_shard_];
+        detail::async_log_queue_shard &shard = *queue_shards_[next_drain_shard_];
         next_drain_shard_ = (next_drain_shard_ + 1U) & queue_shard_mask_;
 
         const std::size_t count = shard.queue.try_pop_many(
@@ -187,7 +187,7 @@ inline void async_logger::collect_runtime_batch(std::vector<detail::log_record *
     std::array<detail::log_record *, max_queue_drain_count> drained;
     std::size_t empty_visits = 0;
     while (batch.size() < max_records && empty_visits < runtime_thread_count_) {
-        detail::AsyncLogRuntimeLane &lane = *runtime_lanes_[next_runtime_drain_thread_];
+        detail::async_log_runtime_lane &lane = *runtime_lanes_[next_runtime_drain_thread_];
         ++next_runtime_drain_thread_;
         if (next_runtime_drain_thread_ == runtime_thread_count_) {
             next_runtime_drain_thread_ = 0U;

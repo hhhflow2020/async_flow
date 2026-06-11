@@ -10,7 +10,7 @@ inline bool async_logger::try_log(std::string_view message) noexcept {
         return try_log_ordered(message);
     }
 
-    detail::AsyncLogQueueShard &shard = producer_shard();
+    detail::async_log_queue_shard &shard = producer_shard();
     return try_log_on_lane(shard, message);
 }
 
@@ -24,7 +24,7 @@ inline bool async_logger::try_log_from_runtime_thread(std::uint16_t thread_index
         return try_log(message);
     }
 
-    detail::AsyncLogRuntimeLane &lane = *runtime_lanes_[thread_index];
+    detail::async_log_runtime_lane &lane = *runtime_lanes_[thread_index];
     return try_log_on_lane(lane, message);
 }
 
@@ -57,7 +57,7 @@ inline bool async_logger::try_log_on_lane(Lane &lane, std::string_view message) 
     return true;
 }
 
-inline detail::AsyncLogProducerShard &async_logger::ordered_producer_shard() noexcept {
+inline detail::async_log_producer_shard &async_logger::ordered_producer_shard() noexcept {
     thread_local OrderedProducerShardCache cache;
     if (cache.logger != this || cache.token != cache_token_) [[unlikely]] {
         const std::size_t shard_index =
@@ -71,7 +71,7 @@ inline detail::AsyncLogProducerShard &async_logger::ordered_producer_shard() noe
     return *cache.shard;
 }
 
-inline detail::AsyncLogQueueShard &async_logger::producer_shard() noexcept {
+inline detail::async_log_queue_shard &async_logger::producer_shard() noexcept {
     thread_local ProducerShardCache cache;
     if (cache.logger != this || cache.token != cache_token_) [[unlikely]] {
         const std::size_t shard_index =
@@ -85,7 +85,7 @@ inline detail::AsyncLogQueueShard &async_logger::producer_shard() noexcept {
 }
 
 inline bool async_logger::try_log_ordered(std::string_view message) noexcept {
-    detail::AsyncLogProducerShard &producer = ordered_producer_shard();
+    detail::async_log_producer_shard &producer = ordered_producer_shard();
     if (!accepting_.load(std::memory_order_acquire)) {
         record_dropped(producer);
         return false;
@@ -174,17 +174,17 @@ inline void async_logger::release_record(detail::log_record *record) noexcept {
     detail::release_async_log_record(record);
 }
 
-inline void async_logger::release_unpublished_record(detail::AsyncLogQueueShard &,
+inline void async_logger::release_unpublished_record(detail::async_log_queue_shard &,
                                                      detail::log_record *record) noexcept {
     release_record(record);
 }
 
-inline void async_logger::release_unpublished_record(detail::AsyncLogProducerShard &,
+inline void async_logger::release_unpublished_record(detail::async_log_producer_shard &,
                                                      detail::log_record *record) noexcept {
     release_record(record);
 }
 
-inline void async_logger::release_unpublished_record(detail::AsyncLogRuntimeLane &lane,
+inline void async_logger::release_unpublished_record(detail::async_log_runtime_lane &lane,
                                                      detail::log_record *record) noexcept {
     static_cast<void>(lane);
     release_record(record);

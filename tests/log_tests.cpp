@@ -51,6 +51,22 @@ TEST(LogTests, LogDetailTypesExposeLowerCasePrimaryNames) {
         std::is_same_v<af::detail::async_log_record_pool_kind, af::detail::AsyncLogRecordPoolKind>);
     static_assert(af::detail::async_log_record_pool_kind::shared ==
                   af::detail::AsyncLogRecordPoolKind::Shared);
+    static_assert(
+        std::is_same_v<af::detail::async_log_stat_counter, af::detail::AsyncLogStatCounter>);
+    static_assert(
+        std::is_same_v<af::detail::async_log_queue_shard, af::detail::AsyncLogQueueShard>);
+    static_assert(
+        std::is_same_v<af::detail::async_log_ordered_queue, af::detail::AsyncLogOrderedQueue>);
+    static_assert(
+        std::is_same_v<af::detail::async_log_producer_shard, af::detail::AsyncLogProducerShard>);
+    static_assert(
+        std::is_same_v<af::detail::async_log_runtime_lane, af::detail::AsyncLogRuntimeLane>);
+    static_assert(std::is_same_v<af::detail::async_log_queue_shard_storage,
+                                 af::detail::AsyncLogQueueShardStorage>);
+    static_assert(std::is_same_v<af::detail::async_log_producer_shard_storage,
+                                 af::detail::AsyncLogProducerShardStorage>);
+    static_assert(std::is_same_v<af::detail::async_log_runtime_lane_storage,
+                                 af::detail::AsyncLogRuntimeLaneStorage>);
 }
 
 [[nodiscard]] std::string read_file(const std::filesystem::path &path) {

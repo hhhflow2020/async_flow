@@ -56,13 +56,13 @@ private:
     struct ProducerShardCache {
         const async_logger *logger{nullptr};
         std::uint64_t token{0};
-        detail::AsyncLogQueueShard *shard{nullptr};
+        detail::async_log_queue_shard *shard{nullptr};
     };
 
     struct OrderedProducerShardCache {
         const async_logger *logger{nullptr};
         std::uint64_t token{0};
-        detail::AsyncLogProducerShard *shard{nullptr};
+        detail::async_log_producer_shard *shard{nullptr};
     };
 
     [[nodiscard]] static log_ordering validate_ordering(log_ordering ordering);
@@ -87,23 +87,23 @@ private:
                                                std::size_t max_batch_size);
     [[nodiscard]] static std::size_t record_pool_slab_capacity(std::size_t requested,
                                                                std::size_t fallback);
-    [[nodiscard]] static std::unique_ptr<detail::AsyncLogOrderedQueue>
+    [[nodiscard]] static std::unique_ptr<detail::async_log_ordered_queue>
     make_ordered_queue(log_ordering ordering, std::size_t queue_capacity);
-    [[nodiscard]] static detail::AsyncLogProducerShardStorage
+    [[nodiscard]] static detail::async_log_producer_shard_storage
     make_ordered_producer_shards(std::size_t shard_count, std::size_t record_capacity,
                                  std::size_t record_pool_slab_object_count,
                                  std::size_t record_pool_local_cache_size);
-    [[nodiscard]] static detail::AsyncLogQueueShardStorage
+    [[nodiscard]] static detail::async_log_queue_shard_storage
     make_queue_shards(std::size_t shard_count, std::size_t capacity_per_shard,
                       std::size_t max_batch_size, std::size_t record_pool_slab_object_count,
                       std::size_t record_pool_local_cache_size);
-    [[nodiscard]] static detail::AsyncLogRuntimeLaneStorage
+    [[nodiscard]] static detail::async_log_runtime_lane_storage
     make_runtime_lanes(std::size_t thread_count, std::size_t capacity_per_thread,
                        std::size_t max_batch_size, std::size_t record_pool_slab_object_count,
                        std::size_t record_pool_local_cache_size);
 
-    [[nodiscard]] detail::AsyncLogProducerShard &ordered_producer_shard() noexcept;
-    [[nodiscard]] detail::AsyncLogQueueShard &producer_shard() noexcept;
+    [[nodiscard]] detail::async_log_producer_shard &ordered_producer_shard() noexcept;
+    [[nodiscard]] detail::async_log_queue_shard &producer_shard() noexcept;
     [[nodiscard]] bool try_log_ordered(std::string_view message) noexcept;
 
     template <typename Lane> static void record_accepted(Lane &lane) noexcept;
@@ -117,11 +117,11 @@ private:
 
     [[nodiscard]] bool push_ordered_record(detail::log_record *record) noexcept;
     static void release_record(detail::log_record *record) noexcept;
-    static void release_unpublished_record(detail::AsyncLogQueueShard &,
+    static void release_unpublished_record(detail::async_log_queue_shard &,
                                            detail::log_record *record) noexcept;
-    static void release_unpublished_record(detail::AsyncLogProducerShard &,
+    static void release_unpublished_record(detail::async_log_producer_shard &,
                                            detail::log_record *record) noexcept;
-    static void release_unpublished_record(detail::AsyncLogRuntimeLane &lane,
+    static void release_unpublished_record(detail::async_log_runtime_lane &lane,
                                            detail::log_record *record) noexcept;
 
     void shutdown() noexcept;
@@ -150,10 +150,10 @@ private:
     const std::size_t ordered_producer_shard_count_;
     const std::size_t ordered_producer_shard_mask_;
     const std::size_t runtime_thread_count_;
-    std::unique_ptr<detail::AsyncLogOrderedQueue> ordered_queue_;
-    detail::AsyncLogProducerShardStorage ordered_producer_shards_;
-    detail::AsyncLogQueueShardStorage queue_shards_;
-    detail::AsyncLogRuntimeLaneStorage runtime_lanes_;
+    std::unique_ptr<detail::async_log_ordered_queue> ordered_queue_;
+    detail::async_log_producer_shard_storage ordered_producer_shards_;
+    detail::async_log_queue_shard_storage queue_shards_;
+    detail::async_log_runtime_lane_storage runtime_lanes_;
     const std::size_t max_batch_size_;
     const std::size_t overflow_spin_count_;
     const log_overflow_policy overflow_policy_;
