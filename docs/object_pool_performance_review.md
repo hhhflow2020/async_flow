@@ -7,6 +7,7 @@
 - 本线程释放优先进入 local cache。
 - 跨线程释放进入 remote batch，批量归还。
 - pool 支持预留 block 和 slot，降低启动后扩容抖动。
+- task pool holder 的预热状态使用 cache-line 原子隔离，避免任务创建热路径与 pool 热字段 false sharing。
 - slot 按 cache line 对齐，避免不同对象共享同一 cache line 造成 false sharing。
 - block free-list 使用带版本号的 64-bit CAS，不使用 mutex。
 

@@ -1,10 +1,10 @@
 #pragma once
 
-#include <atomic>
 #include <cstddef>
 #include <utility>
 
 #include "af/detail/memory/object_pool.hpp"
+#include "af/detail/runtime/runtime_common_state.hpp"
 
 namespace af::detail {
 
@@ -22,7 +22,7 @@ struct runtime_pooled_object_pool_holder_type {
     static constexpr std::size_t local_cache_capacity = LocalCacheCapacity;
 
     runtime_pooled_object_pool_type<ObjectT, LocalCacheCapacity> pool;
-    std::atomic<std::size_t> reserved_slots{0};
+    cache_line_atomic<std::size_t> reserved_slots{0};
 
     void reserve_at_least(std::size_t slot_count) {
         std::size_t observed = reserved_slots.load(std::memory_order_acquire);

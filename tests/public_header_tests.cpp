@@ -526,6 +526,8 @@ TEST(PublicHeaderTests, HotRuntimeAtomicsUseCacheLineWrappers) {
                                  "cache_line_atomic<std::size_t> pending_"},
         forbidden_source_snippet{"include/af/detail/log/async_logger.hpp",
                                  "cache_line_atomic<std::size_t> ready_"},
+        forbidden_source_snippet{"include/af/runtime/detail/pooled_object.hpp",
+                                 "cache_line_atomic<std::size_t> reserved_slots"},
     };
 
     for (const forbidden_source_snippet item : wrapped) {
