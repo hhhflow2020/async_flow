@@ -85,6 +85,4 @@ private:
     alignas(hardware_cache_line_size) std::atomic<std::size_t> dequeue_pos_{0};
 };
 
-template <typename T> using BoundedMpmcQueue = bounded_mpmc_queue<T>;
-
 } // namespace af::detail

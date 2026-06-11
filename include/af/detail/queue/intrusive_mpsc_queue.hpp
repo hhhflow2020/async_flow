@@ -107,7 +107,4 @@ private:
     Node stub_{};
 };
 
-template <typename T> using IntrusiveMpscNode = intrusive_mpsc_node<T>;
-template <typename T> using IntrusiveMpscQueue = intrusive_mpsc_queue<T>;
-
 } // namespace af::detail

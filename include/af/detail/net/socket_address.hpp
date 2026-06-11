@@ -20,8 +20,6 @@ struct socket_address {
     int family{AF_UNSPEC};
 };
 
-using SocketAddress = socket_address;
-
 [[nodiscard]] inline bool socket_address_from_endpoint(const af::net::tcp_endpoint &endpoint,
                                                        socket_address &address,
                                                        int &error) noexcept {

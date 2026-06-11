@@ -34,6 +34,4 @@ private:
     std::size_t spins_{0};
 };
 
-using QueueFullBackoff = queue_full_backoff;
-
 } // namespace af::detail

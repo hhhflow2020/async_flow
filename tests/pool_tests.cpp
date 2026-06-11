@@ -11,8 +11,7 @@
 #include "af/detail/memory/contiguous_object_storage.hpp"
 #include "af/detail/memory/object_pool.hpp"
 
-static_assert(std::is_same_v<af::detail::contiguous_object_storage<int>,
-                             af::detail::ContiguousObjectStorage<int>>);
+static_assert(std::is_class_v<af::detail::contiguous_object_storage<int>>);
 static_assert(std::is_class_v<af::detail::object_pool_core<int>>);
 static_assert(std::is_class_v<af::detail::object_pool<int>>);
 static_assert(std::is_class_v<af::detail::object_pool_block_layout<int, 4, false, 4>>);

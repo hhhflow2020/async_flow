@@ -196,6 +196,52 @@ TEST(PublicHeaderTests, ObjectPoolDetailHeadersDoNotExposeCamelCaseTypeAliases) 
     }
 }
 
+TEST(PublicHeaderTests, InfrastructureDetailHeadersDoNotExposeCamelCaseTypeAliases) {
+    constexpr std::array forbidden{
+        forbidden_source_snippet{"include/af/detail/memory/contiguous_object_storage.hpp",
+                                 "using ContiguousObjectStorage ="},
+        forbidden_source_snippet{"include/af/detail/net/socket_address.hpp",
+                                 "using SocketAddress ="},
+        forbidden_source_snippet{"include/af/detail/queue/bounded_mpsc_queue.hpp",
+                                 "using BoundedMpscQueue ="},
+        forbidden_source_snippet{"include/af/detail/queue/bounded_mpmc_queue.hpp",
+                                 "using BoundedMpmcQueue ="},
+        forbidden_source_snippet{"include/af/detail/queue/intrusive_mpsc_queue.hpp",
+                                 "using IntrusiveMpscNode ="},
+        forbidden_source_snippet{"include/af/detail/queue/intrusive_mpsc_queue.hpp",
+                                 "using IntrusiveMpscQueue ="},
+        forbidden_source_snippet{"include/af/detail/queue/queue_backoff.hpp",
+                                 "using QueueFullBackoff ="},
+        forbidden_source_snippet{"include/af/detail/runtime/runtime_common_state.hpp",
+                                 "using CacheLineAtomic ="},
+        forbidden_source_snippet{"include/af/detail/runtime/runtime_common_state.hpp",
+                                 "using OrderedBatchState ="},
+        forbidden_source_snippet{"include/af/detail/runtime/runtime_service_task.hpp",
+                                 "using RuntimeServiceTask ="},
+        forbidden_source_snippet{"include/af/runtime/detail/pooled_object.hpp",
+                                 "using RuntimePooledObjectPool ="},
+        forbidden_source_snippet{"include/af/runtime/detail/pooled_object.hpp",
+                                 "using RuntimePooledObjectPoolHolder ="},
+        forbidden_source_snippet{"include/af/runtime/detail/task_pool.hpp",
+                                 "using RuntimeTaskPool ="},
+        forbidden_source_snippet{"include/af/runtime/detail/task_pool.hpp",
+                                 "using RuntimeTaskPoolHolder ="},
+        forbidden_source_snippet{"include/af/runtime/detail/timer_backend.hpp",
+                                 "using RuntimeTimerEntry ="},
+        forbidden_source_snippet{"include/af/runtime/detail/timer_backend.hpp",
+                                 "using RuntimeTimerHeap ="},
+        forbidden_source_snippet{"include/af/runtime/detail/timer_backend.hpp",
+                                 "using RuntimeHierarchicalTimerWheel ="},
+    };
+
+    for (const forbidden_source_snippet item : forbidden) {
+        const std::string content = read_source_file(item.relative_path);
+        ASSERT_FALSE(content.empty()) << item.relative_path;
+        EXPECT_EQ(content.find(item.snippet), std::string::npos)
+            << item.relative_path << " still contains " << item.snippet;
+    }
+}
+
 TEST(PublicHeaderTests, NetUmbrellaExposesRuntimeNativeApi) {
     static_assert(std::is_class_v<af::net::tcp_server>);
     static_assert(std::is_class_v<af::net::tcp_client>);

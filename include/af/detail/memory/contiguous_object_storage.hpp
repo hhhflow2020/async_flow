@@ -119,6 +119,4 @@ private:
     std::size_t capacity_{0};
 };
 
-template <typename T> using ContiguousObjectStorage = contiguous_object_storage<T>;
-
 } // namespace af::detail

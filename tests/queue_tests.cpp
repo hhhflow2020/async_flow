@@ -13,15 +13,11 @@
 
 namespace {
 
-static_assert(
-    std::is_same_v<af::detail::bounded_mpsc_queue<int>, af::detail::BoundedMpscQueue<int>>);
-static_assert(
-    std::is_same_v<af::detail::bounded_mpmc_queue<int>, af::detail::BoundedMpmcQueue<int>>);
-static_assert(
-    std::is_same_v<af::detail::intrusive_mpsc_node<int>, af::detail::IntrusiveMpscNode<int>>);
-static_assert(
-    std::is_same_v<af::detail::intrusive_mpsc_queue<int>, af::detail::IntrusiveMpscQueue<int>>);
-static_assert(std::is_same_v<af::detail::queue_full_backoff, af::detail::QueueFullBackoff>);
+static_assert(std::is_class_v<af::detail::bounded_mpsc_queue<int>>);
+static_assert(std::is_class_v<af::detail::bounded_mpmc_queue<int>>);
+static_assert(std::is_class_v<af::detail::intrusive_mpsc_node<int>>);
+static_assert(std::is_class_v<af::detail::intrusive_mpsc_queue<int>>);
+static_assert(std::is_class_v<af::detail::queue_full_backoff>);
 
 struct IntrusiveQueueValue {
     int producer{0};

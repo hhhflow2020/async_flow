@@ -52,7 +52,7 @@ AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_close_existing_connections_value, CloseEx
 } // namespace
 
 TEST(NetSocketAddressTests, LowerCaseNetAliasesMatchPublicTypes) {
-    static_assert(std::is_same_v<af::detail::socket_address, af::detail::SocketAddress>);
+    static_assert(std::is_class_v<af::detail::socket_address>);
 
     static_assert(std::is_enum_v<af::net::address_family>);
     static_assert(std::is_same_v<af::net::ip_endpoint, af::net::tcp_endpoint>);

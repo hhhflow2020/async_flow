@@ -46,13 +46,6 @@ struct runtime_pooled_object_pool_holder_type {
 };
 
 template <typename ObjectT, std::size_t LocalCacheCapacity>
-using RuntimePooledObjectPool = runtime_pooled_object_pool_type<ObjectT, LocalCacheCapacity>;
-
-template <typename ObjectT, std::size_t LocalCacheCapacity>
-using RuntimePooledObjectPoolHolder =
-    runtime_pooled_object_pool_holder_type<ObjectT, LocalCacheCapacity>;
-
-template <typename ObjectT, std::size_t LocalCacheCapacity>
 [[nodiscard]] runtime_pooled_object_pool_holder_type<ObjectT, LocalCacheCapacity> &
 runtime_pooled_object_pool_holder() {
     static runtime_pooled_object_pool_holder_type<ObjectT, LocalCacheCapacity> holder;

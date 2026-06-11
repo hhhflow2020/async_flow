@@ -14,6 +14,4 @@ public:
     [[nodiscard]] virtual bool run_service(std::size_t budget) noexcept = 0;
 };
 
-using RuntimeServiceTask = runtime_service_task;
-
 } // namespace af::detail

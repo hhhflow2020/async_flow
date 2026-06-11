@@ -133,11 +133,10 @@ static_assert(af::supports_thread_affinity == af::platform_linux);
 static_assert(af::supports_thread_priority == af::platform_linux);
 static_assert(af::platform_posix != af::platform_windows);
 static_assert(std::is_enum_v<af::task_result>);
-static_assert(std::is_same_v<af::detail::runtime_service_task, af::detail::RuntimeServiceTask>);
-static_assert(std::is_same_v<af::detail::runtime_timer_entry, af::detail::RuntimeTimerEntry>);
-static_assert(std::is_same_v<af::detail::runtime_timer_heap, af::detail::RuntimeTimerHeap>);
-static_assert(std::is_same_v<af::detail::runtime_hierarchical_timer_wheel,
-                             af::detail::RuntimeHierarchicalTimerWheel>);
+static_assert(std::is_class_v<af::detail::runtime_service_task>);
+static_assert(std::is_class_v<af::detail::runtime_timer_entry>);
+static_assert(std::is_class_v<af::detail::runtime_timer_heap>);
+static_assert(std::is_class_v<af::detail::runtime_hierarchical_timer_wheel>);
 static_assert(std::is_enum_v<af::shutdown_policy>);
 static_assert(std::is_enum_v<af::task_state>);
 static_assert(std::is_enum_v<af::parallel_mode>);
@@ -185,15 +184,11 @@ static_assert(!has_strict_value<af::ordered_batch_replay_policy>::value);
 static_assert(!has_skip_already_applied_value<af::ordered_batch_replay_policy>::value);
 static_assert(std::is_enum_v<af::log_ordering>);
 static_assert(std::is_enum_v<af::log_overflow_policy>);
-static_assert(std::is_same_v<af::detail::runtime_pooled_object_pool_type<int, 8>,
-                             af::detail::RuntimePooledObjectPool<int, 8>>);
-static_assert(std::is_same_v<af::detail::runtime_pooled_object_pool_holder_type<int, 8>,
-                             af::detail::RuntimePooledObjectPoolHolder<int, 8>>);
-static_assert(std::is_same_v<af::detail::runtime_task_pool_type<int, 8>,
-                             af::detail::RuntimeTaskPool<int, 8>>);
-static_assert(std::is_same_v<af::detail::runtime_task_pool_holder_type<int, 8>,
-                             af::detail::RuntimeTaskPoolHolder<int, 8>>);
-static_assert(std::is_same_v<af::detail::ordered_batch_state, af::detail::OrderedBatchState>);
+static_assert(std::is_class_v<af::detail::runtime_pooled_object_pool_type<int, 8>>);
+static_assert(std::is_class_v<af::detail::runtime_pooled_object_pool_holder_type<int, 8>>);
+static_assert(std::is_class_v<af::detail::runtime_task_pool_type<int, 8>>);
+static_assert(std::is_class_v<af::detail::runtime_task_pool_holder_type<int, 8>>);
+static_assert(std::is_class_v<af::detail::ordered_batch_state>);
 static_assert(std::is_class_v<af::detail::runtime_instance_parallel_group>);
 static_assert(std::is_class_v<af::detail::runtime_instance_parallel_group_pool_type>);
 static_assert(af::log_ordering::ordered == af::log_ordering::ordered);

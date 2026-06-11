@@ -338,9 +338,5 @@ private:
     std::vector<runtime_timer_entry> due_buffer_;
 };
 
-using RuntimeTimerEntry = runtime_timer_entry;
-using RuntimeTimerHeap = runtime_timer_heap;
-using RuntimeHierarchicalTimerWheel = runtime_hierarchical_timer_wheel;
-
 } // namespace detail
 } // namespace af

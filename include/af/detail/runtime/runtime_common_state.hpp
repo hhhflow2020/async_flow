@@ -64,12 +64,8 @@ template <typename T> struct alignas(hardware_cache_line_size) cache_line_atomic
     }
 };
 
-template <typename T> using CacheLineAtomic = cache_line_atomic<T>;
-
 struct alignas(hardware_cache_line_size) ordered_batch_state {
     std::uint64_t last_applied_batch_id{0};
 };
-
-using OrderedBatchState = ordered_batch_state;
 
 } // namespace af::detail
