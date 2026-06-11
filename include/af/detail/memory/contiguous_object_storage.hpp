@@ -8,17 +8,17 @@
 
 namespace af::detail {
 
-template <typename T> class ContiguousObjectStorage {
+template <typename T> class contiguous_object_storage {
 public:
-    ContiguousObjectStorage() noexcept = default;
-    ContiguousObjectStorage(const ContiguousObjectStorage &) = delete;
-    ContiguousObjectStorage &operator=(const ContiguousObjectStorage &) = delete;
+    contiguous_object_storage() noexcept = default;
+    contiguous_object_storage(const contiguous_object_storage &) = delete;
+    contiguous_object_storage &operator=(const contiguous_object_storage &) = delete;
 
-    ContiguousObjectStorage(ContiguousObjectStorage &&other) noexcept {
+    contiguous_object_storage(contiguous_object_storage &&other) noexcept {
         move_from(other);
     }
 
-    ContiguousObjectStorage &operator=(ContiguousObjectStorage &&other) noexcept {
+    contiguous_object_storage &operator=(contiguous_object_storage &&other) noexcept {
         if (this == &other) {
             return *this;
         }
@@ -29,7 +29,7 @@ public:
         return *this;
     }
 
-    ~ContiguousObjectStorage() {
+    ~contiguous_object_storage() {
         clear();
         release_storage();
     }
@@ -104,7 +104,7 @@ private:
         capacity_ = 0;
     }
 
-    void move_from(ContiguousObjectStorage &other) noexcept {
+    void move_from(contiguous_object_storage &other) noexcept {
         data_ = other.data_;
         size_ = other.size_;
         capacity_ = other.capacity_;
@@ -118,5 +118,7 @@ private:
     std::size_t size_{0};
     std::size_t capacity_{0};
 };
+
+template <typename T> using ContiguousObjectStorage = contiguous_object_storage<T>;
 
 } // namespace af::detail

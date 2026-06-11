@@ -62,9 +62,9 @@ struct alignas(hardware_cache_line_size) async_log_runtime_lane {
     async_log_record_pool records;
 };
 
-using async_log_queue_shard_storage = ContiguousObjectStorage<async_log_queue_shard>;
-using async_log_producer_shard_storage = ContiguousObjectStorage<async_log_producer_shard>;
-using async_log_runtime_lane_storage = ContiguousObjectStorage<async_log_runtime_lane>;
+using async_log_queue_shard_storage = contiguous_object_storage<async_log_queue_shard>;
+using async_log_producer_shard_storage = contiguous_object_storage<async_log_producer_shard>;
+using async_log_runtime_lane_storage = contiguous_object_storage<async_log_runtime_lane>;
 
 using AsyncLogStatCounter = async_log_stat_counter;
 using AsyncLogQueueShard = async_log_queue_shard;

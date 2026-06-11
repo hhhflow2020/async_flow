@@ -443,7 +443,7 @@ private:
     const std::size_t max_batches_per_run_;
     bounded_mpsc_queue<Batch> ready_batches_;
     bounded_mpsc_queue<Batch> free_batches_;
-    ContiguousObjectStorage<Batch> storage_;
+    contiguous_object_storage<Batch> storage_;
     std::unique_ptr<log_record[]> scratch_records_;
     std::vector<log_record *> scratch_record_ptrs_;
     Batch *producer_spare_batch_{nullptr};
