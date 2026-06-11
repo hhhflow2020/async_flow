@@ -188,9 +188,4 @@ struct object_pool_block_layout {
     };
 };
 
-template <typename T, std::size_t ChunkSize, bool CacheAllocatedSlotIndex,
-          std::size_t LocalCacheCapacity>
-using ObjectPoolBlockLayout =
-    object_pool_block_layout<T, ChunkSize, CacheAllocatedSlotIndex, LocalCacheCapacity>;
-
 } // namespace af::detail

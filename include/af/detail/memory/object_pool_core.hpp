@@ -312,11 +312,4 @@ private:
     alignas(hardware_cache_line_size) std::atomic<std::size_t> block_count_{0};
 };
 
-template <typename T, std::size_t ChunkSize = 512, std::size_t RemoteReleaseBatchSize = 1,
-          bool CacheAllocatedSlotIndex = false, std::size_t LocalCacheSetSize = 8,
-          std::size_t DirectReleaseSetSize = 4, std::size_t LocalCacheCapacity = 64>
-using ObjectPoolCore =
-    object_pool_core<T, ChunkSize, RemoteReleaseBatchSize, CacheAllocatedSlotIndex,
-                     LocalCacheSetSize, DirectReleaseSetSize, LocalCacheCapacity>;
-
 } // namespace af::detail

@@ -169,6 +169,33 @@ TEST(PublicHeaderTests, RuntimeParallelPublicHeaderDoesNotExposeCamelCaseTypeAli
     }
 }
 
+TEST(PublicHeaderTests, ObjectPoolDetailHeadersDoNotExposeCamelCaseTypeAliases) {
+    constexpr std::array forbidden{
+        forbidden_source_snippet{"include/af/detail/memory/object_pool.hpp", "using ObjectPool ="},
+        forbidden_source_snippet{"include/af/detail/memory/object_pool_core.hpp",
+                                 "using ObjectPoolCore ="},
+        forbidden_source_snippet{"include/af/detail/memory/object_pool_block.hpp",
+                                 "using ObjectPoolBlockLayout ="},
+        forbidden_source_snippet{"include/af/detail/memory/object_pool_local_cache.hpp",
+                                 "using ObjectPoolLocalCache ="},
+        forbidden_source_snippet{"include/af/detail/memory/object_pool_local_cache.hpp",
+                                 "using ObjectPoolDirectReleaseSet ="},
+        forbidden_source_snippet{"include/af/detail/memory/object_pool_local_cache.hpp",
+                                 "using ObjectPoolSingleLocalCacheSet ="},
+        forbidden_source_snippet{"include/af/detail/memory/object_pool_local_cache.hpp",
+                                 "using ObjectPoolMultiLocalCacheSet ="},
+        forbidden_source_snippet{"include/af/detail/memory/object_pool_local_cache.hpp",
+                                 "using ObjectPoolLocalCacheSet ="},
+    };
+
+    for (const forbidden_source_snippet item : forbidden) {
+        const std::string content = read_source_file(item.relative_path);
+        ASSERT_FALSE(content.empty()) << item.relative_path;
+        EXPECT_EQ(content.find(item.snippet), std::string::npos)
+            << item.relative_path << " still contains " << item.snippet;
+    }
+}
+
 TEST(PublicHeaderTests, NetUmbrellaExposesRuntimeNativeApi) {
     static_assert(std::is_class_v<af::net::tcp_server>);
     static_assert(std::is_class_v<af::net::tcp_client>);

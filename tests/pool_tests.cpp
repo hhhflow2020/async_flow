@@ -13,20 +13,14 @@
 
 static_assert(std::is_same_v<af::detail::contiguous_object_storage<int>,
                              af::detail::ContiguousObjectStorage<int>>);
-static_assert(std::is_same_v<af::detail::object_pool_core<int>, af::detail::ObjectPoolCore<int>>);
-static_assert(std::is_same_v<af::detail::object_pool<int>, af::detail::ObjectPool<int>>);
-static_assert(std::is_same_v<af::detail::object_pool_block_layout<int, 4, false, 4>,
-                             af::detail::ObjectPoolBlockLayout<int, 4, false, 4>>);
-static_assert(std::is_same_v<af::detail::object_pool_local_cache<int, int, 4, 1>,
-                             af::detail::ObjectPoolLocalCache<int, int, 4, 1>>);
-static_assert(std::is_same_v<af::detail::object_pool_direct_release_set<int, 4>,
-                             af::detail::ObjectPoolDirectReleaseSet<int, 4>>);
-static_assert(std::is_same_v<af::detail::object_pool_single_local_cache_set<int, int, 4, 1, 4>,
-                             af::detail::ObjectPoolSingleLocalCacheSet<int, int, 4, 1, 4>>);
-static_assert(std::is_same_v<af::detail::object_pool_multi_local_cache_set<int, int, 4, 1, 4, 4>,
-                             af::detail::ObjectPoolMultiLocalCacheSet<int, int, 4, 1, 4, 4>>);
-static_assert(std::is_same_v<af::detail::object_pool_local_cache_set<int, int, 4, 1, 1, 4>,
-                             af::detail::ObjectPoolLocalCacheSet<int, int, 4, 1, 1, 4>>);
+static_assert(std::is_class_v<af::detail::object_pool_core<int>>);
+static_assert(std::is_class_v<af::detail::object_pool<int>>);
+static_assert(std::is_class_v<af::detail::object_pool_block_layout<int, 4, false, 4>>);
+static_assert(std::is_class_v<af::detail::object_pool_local_cache<int, int, 4, 1>>);
+static_assert(std::is_class_v<af::detail::object_pool_direct_release_set<int, 4>>);
+static_assert(std::is_class_v<af::detail::object_pool_single_local_cache_set<int, int, 4, 1, 4>>);
+static_assert(std::is_class_v<af::detail::object_pool_multi_local_cache_set<int, int, 4, 1, 4, 4>>);
+static_assert(std::is_class_v<af::detail::object_pool_local_cache_set<int, int, 4, 1, 1, 4>>);
 
 TEST(PoolTests, ObjectPoolReusesReleasedStorage) {
     struct Payload {
