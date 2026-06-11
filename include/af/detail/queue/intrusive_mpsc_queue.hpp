@@ -18,7 +18,7 @@ template <typename T> struct intrusive_mpsc_node {
 
 template <typename T> class intrusive_mpsc_queue {
 public:
-    using Node = intrusive_mpsc_node<T>;
+    using node_type = intrusive_mpsc_node<T>;
 
     intrusive_mpsc_queue() noexcept {
         head_.store(&stub_, std::memory_order_relaxed);
@@ -36,8 +36,8 @@ public:
     [[nodiscard]] T *try_pop() noexcept {
         queue_full_backoff inconsistent_backoff(inconsistent_spin_count);
         for (;;) {
-            Node *tail = tail_;
-            Node *next = tail->next.load(std::memory_order_acquire);
+            node_type *tail = tail_;
+            node_type *next = tail->next.load(std::memory_order_acquire);
             if (next != nullptr) {
                 T *value = consume_linked(tail, next);
                 if (value == nullptr) {
@@ -75,7 +75,7 @@ public:
     }
 
     [[nodiscard]] bool empty() const noexcept {
-        Node *tail = tail_;
+        node_type *tail = tail_;
         return tail == &stub_ && tail->next.load(std::memory_order_acquire) == nullptr &&
                tail == head_.load(std::memory_order_acquire);
     }
@@ -83,11 +83,11 @@ public:
 private:
     static constexpr std::size_t inconsistent_spin_count = 64;
 
-    [[nodiscard]] static Node &node(T &value) noexcept {
+    [[nodiscard]] static node_type &node(T &value) noexcept {
         return value.intrusive_mpsc_node_;
     }
 
-    T *consume_linked(Node *tail, Node *next) noexcept {
+    T *consume_linked(node_type *tail, node_type *next) noexcept {
         tail_ = next;
         tail->next.store(nullptr, std::memory_order_relaxed);
         if (tail == &stub_) {
@@ -96,15 +96,15 @@ private:
         return tail->owner;
     }
 
-    void push_node(Node *node) noexcept {
+    void push_node(node_type *node) noexcept {
         node->next.store(nullptr, std::memory_order_relaxed);
-        Node *previous = head_.exchange(node, std::memory_order_acq_rel);
+        node_type *previous = head_.exchange(node, std::memory_order_acq_rel);
         previous->next.store(node, std::memory_order_release);
     }
 
-    alignas(hardware_cache_line_size) std::atomic<Node *> head_{nullptr};
-    alignas(hardware_cache_line_size) Node *tail_{nullptr};
-    Node stub_{};
+    alignas(hardware_cache_line_size) std::atomic<node_type *> head_{nullptr};
+    alignas(hardware_cache_line_size) node_type *tail_{nullptr};
+    node_type stub_{};
 };
 
 } // namespace af::detail

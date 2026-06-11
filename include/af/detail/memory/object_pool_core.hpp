@@ -29,9 +29,9 @@ public:
 
     ~object_pool_core() {
         tls_caches().discard_if_owner(this);
-        Block *block = blocks_.load(std::memory_order_relaxed);
+        block_type *block = blocks_.load(std::memory_order_relaxed);
         while (block != nullptr) {
-            Block *next = block->next;
+            block_type *next = block->next;
             delete block;
             block = next;
         }
@@ -170,19 +170,20 @@ private:
                   "ObjectPool tagged free stack requires lock-free 64-bit atomics");
     static_assert(std::atomic<void *>::is_always_lock_free,
                   "ObjectPool block list requires lock-free pointer atomics");
-    using BlockLayout =
+    using block_layout =
         object_pool_block_layout<T, ChunkSize, CacheAllocatedSlotIndex, LocalCacheCapacity>;
-    using Slot = typename BlockLayout::Slot;
-    using Block = typename BlockLayout::Block;
-    using LocalCache =
-        object_pool_local_cache<object_pool_core, Slot, LocalCacheCapacity, RemoteReleaseBatchSize>;
-    using LocalCacheSet = object_pool_local_cache_set<object_pool_core, Slot, LocalCacheCapacity,
-                                                      RemoteReleaseBatchSize, LocalCacheSetSize,
-                                                      DirectReleaseSetSize>;
+    using slot_type = typename block_layout::slot;
+    using block_type = typename block_layout::block;
+    using local_cache_type = object_pool_local_cache<object_pool_core, slot_type,
+                                                     LocalCacheCapacity, RemoteReleaseBatchSize>;
+    using local_cache_set_type =
+        object_pool_local_cache_set<object_pool_core, slot_type, LocalCacheCapacity,
+                                    RemoteReleaseBatchSize, LocalCacheSetSize,
+                                    DirectReleaseSetSize>;
 
     [[nodiscard]] void *acquire_slot() {
-        LocalCache &cache = local_cache();
-        if (Slot *slot = cache.pop()) {
+        local_cache_type &cache = local_cache();
+        if (slot_type *slot = cache.pop()) {
             if (!cache.caches_releases()) [[unlikely]] {
                 cache.mark_locally_acquired();
             }
@@ -192,27 +193,27 @@ private:
         return acquire_slot_slow(cache);
     }
 
-    [[nodiscard]] AF_DETAIL_NOINLINE void *acquire_slot_slow(LocalCache &cache) {
+    [[nodiscard]] AF_DETAIL_NOINLINE void *acquire_slot_slow(local_cache_type &cache) {
         for (;;) {
-            if (Block *block = hot_block_.load(std::memory_order_acquire)) {
+            if (block_type *block = hot_block_.load(std::memory_order_acquire)) {
                 refill_cache_from_block(cache, *block);
-                if (Slot *slot = cache.pop()) {
+                if (slot_type *slot = cache.pop()) {
                     return slot->storage;
                 }
             }
 
-            for (Block *block = blocks_.load(std::memory_order_acquire); block != nullptr;
+            for (block_type *block = blocks_.load(std::memory_order_acquire); block != nullptr;
                  block = block->next) {
                 refill_cache_from_block(cache, *block);
-                if (Slot *slot = cache.pop()) {
+                if (slot_type *slot = cache.pop()) {
                     hot_block_.store(block, std::memory_order_release);
                     return slot->storage;
                 }
             }
 
-            Block *block = add_block();
+            block_type *block = add_block();
             refill_cache_from_block(cache, *block);
-            if (Slot *slot = cache.pop()) {
+            if (slot_type *slot = cache.pop()) {
                 return slot->storage;
             }
         }
@@ -220,14 +221,14 @@ private:
 
     [[nodiscard]] void *acquire_slot_uncached() {
         for (;;) {
-            Slot *slot = nullptr;
-            if (Block *block = hot_block_.load(std::memory_order_acquire)) {
+            slot_type *slot = nullptr;
+            if (block_type *block = hot_block_.load(std::memory_order_acquire)) {
                 if (block->try_pop_many(&slot, 1U) != 0U) {
                     return slot->storage;
                 }
             }
 
-            for (Block *block = blocks_.load(std::memory_order_acquire); block != nullptr;
+            for (block_type *block = blocks_.load(std::memory_order_acquire); block != nullptr;
                  block = block->next) {
                 if (block->try_pop_many(&slot, 1U) != 0U) {
                     hot_block_.store(block, std::memory_order_release);
@@ -235,7 +236,7 @@ private:
                 }
             }
 
-            Block *block = add_block();
+            block_type *block = add_block();
             if (block->try_pop_many(&slot, 1U) != 0U) {
                 return slot->storage;
             }
@@ -243,9 +244,9 @@ private:
     }
 
     void release_slot(void *memory) noexcept {
-        Slot *slot = slot_from_memory(memory);
+        slot_type *slot = slot_from_memory(memory);
         if constexpr (remote_release_batch_size == 1U) {
-            if (LocalCache *cache = tls_caches().find_release_cache(this);
+            if (local_cache_type *cache = tls_caches().find_release_cache(this);
                 cache != nullptr && cache->caches_releases()) [[likely]] {
                 if (cache->full()) [[unlikely]] {
                     flush_full_cache(*cache);
@@ -255,7 +256,7 @@ private:
                 slot->owner->push(slot);
             }
         } else {
-            LocalCache &cache = local_cache();
+            local_cache_type &cache = local_cache();
             if (!cache.caches_releases()) [[unlikely]] {
                 cache.push_remote_release(slot);
                 return;
@@ -268,36 +269,36 @@ private:
     }
 
     void release_slot_uncached(void *memory) noexcept {
-        Slot *slot = slot_from_memory(memory);
+        slot_type *slot = slot_from_memory(memory);
         slot->owner->push(slot);
     }
 
-    [[nodiscard]] static Slot *slot_from_memory(void *memory) noexcept {
+    [[nodiscard]] static slot_type *slot_from_memory(void *memory) noexcept {
         auto *bytes = static_cast<std::byte *>(memory);
-        return reinterpret_cast<Slot *>(bytes - offsetof(Slot, storage));
+        return reinterpret_cast<slot_type *>(bytes - offsetof(slot_type, storage));
     }
 
-    [[nodiscard]] LocalCache &local_cache() noexcept {
+    [[nodiscard]] local_cache_type &local_cache() noexcept {
         return tls_caches().get(this);
     }
 
-    [[nodiscard]] static LocalCacheSet &tls_caches() noexcept {
-        thread_local LocalCacheSet caches;
+    [[nodiscard]] static local_cache_set_type &tls_caches() noexcept {
+        thread_local local_cache_set_type caches;
         return caches;
     }
 
-    static void refill_cache_from_block(LocalCache &cache, Block &block) noexcept {
+    static void refill_cache_from_block(local_cache_type &cache, block_type &block) noexcept {
         const std::size_t available = local_cache_capacity - cache.size;
         cache.size += block.try_pop_many(cache.slots + cache.size, available);
     }
 
-    AF_DETAIL_NOINLINE void flush_full_cache(LocalCache &cache) noexcept {
+    AF_DETAIL_NOINLINE void flush_full_cache(local_cache_type &cache) noexcept {
         cache.flush_some(local_cache_flush_count);
     }
 
-    [[nodiscard]] Block *add_block() {
-        auto *block = new Block;
-        Block *head = blocks_.load(std::memory_order_relaxed);
+    [[nodiscard]] block_type *add_block() {
+        auto *block = new block_type;
+        block_type *head = blocks_.load(std::memory_order_relaxed);
         do {
             block->next = head;
         } while (!blocks_.compare_exchange_weak(head, block, std::memory_order_release,
@@ -307,8 +308,8 @@ private:
         return block;
     }
 
-    alignas(hardware_cache_line_size) std::atomic<Block *> blocks_{nullptr};
-    alignas(hardware_cache_line_size) std::atomic<Block *> hot_block_{nullptr};
+    alignas(hardware_cache_line_size) std::atomic<block_type *> blocks_{nullptr};
+    alignas(hardware_cache_line_size) std::atomic<block_type *> hot_block_{nullptr};
     alignas(hardware_cache_line_size) std::atomic<std::size_t> block_count_{0};
 };
 

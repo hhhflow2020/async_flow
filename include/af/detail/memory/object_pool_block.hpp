@@ -51,36 +51,36 @@ struct object_pool_block_layout {
     static constexpr std::size_t slot_size = align_up(slot_payload_size, slot_align);
     static constexpr std::size_t storage_size = slot_size - storage_offset;
 
-    struct Block;
+    struct block;
 
-    struct alignas(slot_align) Slot {
-        Block *owner{nullptr};
+    struct alignas(slot_align) slot {
+        block *owner{nullptr};
         std::atomic<slot_index_type> next_free{null_slot_index};
         alignas(storage_align) std::byte storage[storage_size];
     };
 
-    static_assert(std::is_standard_layout_v<Slot>,
+    static_assert(std::is_standard_layout_v<slot>,
                   "ObjectPool slot lookup requires standard-layout slots");
-    static_assert(offsetof(Slot, storage) == storage_offset,
+    static_assert(offsetof(slot, storage) == storage_offset,
                   "ObjectPool slot storage offset must match computed layout");
-    static_assert(offsetof(Slot, storage) % alignof(T) == 0U,
+    static_assert(offsetof(slot, storage) % alignof(T) == 0U,
                   "ObjectPool slot storage must satisfy T alignment");
-    static_assert(sizeof(Slot) % hardware_cache_line_size == 0U,
+    static_assert(sizeof(slot) % hardware_cache_line_size == 0U,
                   "ObjectPool slots must not share cache lines");
 
-    struct Block {
-        explicit Block() {
+    struct block {
+        explicit block() {
             for (std::size_t i = 0; i < ChunkSize; ++i) {
-                Slot &slot = slots[i];
-                slot.owner = this;
+                auto &entry = slots[i];
+                entry.owner = this;
                 const auto next =
                     i + 1U < ChunkSize ? static_cast<slot_index_type>(i + 1U) : null_slot_index;
-                slot.next_free.store(next, std::memory_order_relaxed);
+                entry.next_free.store(next, std::memory_order_relaxed);
             }
             free_head.store(pack_free_head(0U, 0U), std::memory_order_relaxed);
         }
 
-        [[nodiscard]] std::size_t try_pop_many(Slot **out, std::size_t max_count) noexcept {
+        [[nodiscard]] std::size_t try_pop_many(slot **out, std::size_t max_count) noexcept {
             if (max_count == 0U) {
                 return 0;
             }
@@ -95,13 +95,13 @@ struct object_pool_block_layout {
 
                 std::size_t count = 0;
                 while (count < max_count && index != null_slot_index) {
-                    Slot &slot = slots[index];
-                    out[count] = &slot;
+                    slot &entry = slots[index];
+                    out[count] = &entry;
                     if constexpr (cache_allocated_slot_index) {
                         popped_indices[count] = index;
                     }
                     ++count;
-                    index = slot.next_free.load(std::memory_order_relaxed);
+                    index = entry.next_free.load(std::memory_order_relaxed);
                 }
 
                 const std::uint64_t desired = pack_free_head(index, free_head_version(head) + 1U);
@@ -117,11 +117,11 @@ struct object_pool_block_layout {
             }
         }
 
-        void push(Slot *slot) noexcept {
-            const slot_index_type index = released_slot_index(slot);
+        void push(slot *entry) noexcept {
+            const slot_index_type index = released_slot_index(entry);
             std::uint64_t head = free_head.load(std::memory_order_relaxed);
             for (;;) {
-                slot->next_free.store(free_head_index(head), std::memory_order_relaxed);
+                entry->next_free.store(free_head_index(head), std::memory_order_relaxed);
                 const std::uint64_t desired = pack_free_head(index, free_head_version(head) + 1U);
                 if (free_head.compare_exchange_weak(head, desired, std::memory_order_release,
                                                     std::memory_order_relaxed)) {
@@ -130,7 +130,7 @@ struct object_pool_block_layout {
             }
         }
 
-        void push_many(Slot **pushed_slots, std::size_t count) noexcept {
+        void push_many(slot **pushed_slots, std::size_t count) noexcept {
             AF_ASSERT(count != 0U);
             const slot_index_type first = released_slot_index(pushed_slots[0]);
             for (std::size_t i = 1; i < count; ++i) {
@@ -138,7 +138,7 @@ struct object_pool_block_layout {
                                                      std::memory_order_relaxed);
             }
 
-            Slot *last = pushed_slots[count - 1U];
+            slot *last = pushed_slots[count - 1U];
             std::uint64_t head = free_head.load(std::memory_order_relaxed);
             for (;;) {
                 last->next_free.store(free_head_index(head), std::memory_order_relaxed);
@@ -150,10 +150,10 @@ struct object_pool_block_layout {
             }
         }
 
-        Block *next{nullptr};
+        block *next{nullptr};
         alignas(hardware_cache_line_size) std::atomic<std::uint64_t> free_head{
             pack_free_head(null_slot_index, 0U)};
-        Slot slots[ChunkSize];
+        slot slots[ChunkSize];
 
     private:
         [[nodiscard]] static constexpr std::uint64_t
@@ -171,19 +171,19 @@ struct object_pool_block_layout {
             return head >> slot_index_bits;
         }
 
-        [[nodiscard]] slot_index_type slot_index(const Slot *slot) const noexcept {
-            const auto index = static_cast<std::size_t>(slot - slots);
+        [[nodiscard]] slot_index_type slot_index(const slot *entry) const noexcept {
+            const auto index = static_cast<std::size_t>(entry - slots);
             AF_ASSERT(index < ChunkSize);
             return static_cast<slot_index_type>(index);
         }
 
-        [[nodiscard]] slot_index_type released_slot_index(const Slot *slot) const noexcept {
+        [[nodiscard]] slot_index_type released_slot_index(const slot *entry) const noexcept {
             if constexpr (cache_allocated_slot_index) {
-                const slot_index_type index = slot->next_free.load(std::memory_order_relaxed);
+                const slot_index_type index = entry->next_free.load(std::memory_order_relaxed);
                 AF_ASSERT(index != null_slot_index);
                 return index;
             }
-            return slot_index(slot);
+            return slot_index(entry);
         }
     };
 };

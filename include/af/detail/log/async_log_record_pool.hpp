@@ -33,40 +33,40 @@ class async_log_record_pool {
     static constexpr std::uint64_t slot_index_mask = (std::uint64_t{1} << slot_index_bits) - 1U;
     inline static std::atomic<std::uint64_t> next_cache_token_{1U};
 
-    struct Slab;
+    struct slab;
 
-    struct alignas(hardware_cache_line_size) Slot : async_log_record_pool_slot {
+    struct alignas(hardware_cache_line_size) slot : async_log_record_pool_slot {
         std::atomic<std::uint32_t> next{null_slot};
         log_record record;
-        Slab *slab{nullptr};
+        slab *slab{nullptr};
         std::uint32_t index{0};
     };
 
-    static_assert(alignof(Slot) >= hardware_cache_line_size,
+    static_assert(alignof(slot) >= hardware_cache_line_size,
                   "async log record pool slots must be cache-line aligned");
-    static_assert(sizeof(Slot) % hardware_cache_line_size == 0U,
+    static_assert(sizeof(slot) % hardware_cache_line_size == 0U,
                   "async log record pool slots must not share cache lines");
 
-    struct alignas(hardware_cache_line_size) Slab {
-        Slab(async_log_record_pool *pool, std::size_t capacity)
-            : capacity(validate_capacity(capacity)), slots(new Slot[this->capacity]) {
+    struct alignas(hardware_cache_line_size) slab {
+        slab(async_log_record_pool *pool, std::size_t capacity)
+            : capacity(validate_capacity(capacity)), slots(new slot[this->capacity]) {
             for (std::size_t i = 0; i < this->capacity; ++i) {
-                Slot &slot = slots[i];
-                slot.owner = pool;
-                slot.kind = async_log_record_pool_kind::shared;
-                slot.slab = this;
-                slot.index = static_cast<std::uint32_t>(i);
-                slot.next.store(i + 1U < this->capacity ? static_cast<std::uint32_t>(i + 1U)
-                                                        : null_slot,
-                                std::memory_order_relaxed);
-                slot.record.set_pool_slot(static_cast<async_log_record_pool_slot *>(&slot));
+                slot &entry = slots[i];
+                entry.owner = pool;
+                entry.kind = async_log_record_pool_kind::shared;
+                entry.slab = this;
+                entry.index = static_cast<std::uint32_t>(i);
+                entry.next.store(i + 1U < this->capacity ? static_cast<std::uint32_t>(i + 1U)
+                                                         : null_slot,
+                                 std::memory_order_relaxed);
+                entry.record.set_pool_slot(static_cast<async_log_record_pool_slot *>(&entry));
             }
             free_head.store(pack_head(0U, 0U), std::memory_order_relaxed);
         }
 
         const std::size_t capacity;
-        std::unique_ptr<Slot[]> slots;
-        std::atomic<Slab *> next{nullptr};
+        std::unique_ptr<slot[]> slots;
+        std::atomic<slab *> next{nullptr};
         alignas(hardware_cache_line_size) std::atomic<std::uint64_t> free_head{
             pack_head(null_slot, 0U)};
     };
@@ -105,12 +105,12 @@ public:
                 return record;
             }
 
-            Slab *slab = grow();
-            if (slab == nullptr) {
+            slab *slab_ptr = grow();
+            if (slab_ptr == nullptr) {
                 return nullptr;
             }
             reset_failed = false;
-            if (log_record *record = try_acquire_from_slab(*slab, message, reset_failed);
+            if (log_record *record = try_acquire_from_slab(*slab_ptr, message, reset_failed);
                 record != nullptr || reset_failed) {
                 return record;
             }
@@ -118,43 +118,43 @@ public:
     }
 
     static void release_slot(async_log_record_pool_slot *header) noexcept {
-        auto *slot = static_cast<Slot *>(header);
-        AF_ASSERT(slot != nullptr && slot->owner != nullptr && slot->slab != nullptr);
-        static_cast<async_log_record_pool *>(slot->owner)->release(slot);
+        auto *entry = static_cast<slot *>(header);
+        AF_ASSERT(entry != nullptr && entry->owner != nullptr && entry->slab != nullptr);
+        static_cast<async_log_record_pool *>(entry->owner)->release(entry);
     }
 
     void release_records(af::span<log_record *const> records) noexcept {
         std::size_t begin = 0;
         while (begin < records.size()) {
-            auto *first = static_cast<Slot *>(records[begin]->pool_slot());
+            auto *first = static_cast<slot *>(records[begin]->pool_slot());
             AF_ASSERT(first != nullptr && first->owner == this && first->slab != nullptr);
-            Slab *const slab = first->slab;
+            slab *const current_slab = first->slab;
 
             std::size_t end = begin + 1U;
             while (end < records.size()) {
-                auto *slot = static_cast<Slot *>(records[end]->pool_slot());
-                AF_ASSERT(slot != nullptr && slot->owner == this && slot->slab != nullptr);
-                if (slot->slab != slab) {
+                auto *entry = static_cast<slot *>(records[end]->pool_slot());
+                AF_ASSERT(entry != nullptr && entry->owner == this && entry->slab != nullptr);
+                if (entry->slab != current_slab) {
                     break;
                 }
                 ++end;
             }
 
-            release_records_to_slab(*slab, records.subspan(begin, end - begin));
+            release_records_to_slab(*current_slab, records.subspan(begin, end - begin));
             begin = end;
         }
     }
 
 private:
-    struct alignas(hardware_cache_line_size) LocalCache {
+    struct alignas(hardware_cache_line_size) local_cache {
         async_log_record_pool *owner{nullptr};
         std::uint64_t owner_token{0};
         std::weak_ptr<void> owner_lifetime;
-        std::array<Slot *, async_log_record_pool_max_local_cache_size> slots{};
+        std::array<slot *, async_log_record_pool_max_local_cache_size> slots{};
         std::size_t capacity{0};
         std::size_t size{0};
 
-        ~LocalCache() {
+        ~local_cache() {
             flush();
         }
 
@@ -178,14 +178,14 @@ private:
             return true;
         }
 
-        [[nodiscard]] Slot *pop() noexcept {
+        [[nodiscard]] slot *pop() noexcept {
             if (size == 0U) [[unlikely]] {
                 return nullptr;
             }
             return slots[--size];
         }
 
-        [[nodiscard]] Slot **append_begin() noexcept {
+        [[nodiscard]] slot **append_begin() noexcept {
             return slots.data() + size;
         }
 
@@ -255,18 +255,18 @@ private:
         return doubled < current ? max_growth : (doubled > max_growth ? max_growth : doubled);
     }
 
-    [[nodiscard]] static LocalCache &local_cache() noexcept {
-        thread_local LocalCache cache;
+    [[nodiscard]] static local_cache &thread_local_cache() noexcept {
+        thread_local local_cache cache;
         return cache;
     }
 
     [[nodiscard]] log_record *try_acquire_cached(std::string_view message) noexcept {
-        LocalCache &cache = local_cache();
+        local_cache &cache = thread_local_cache();
         if (!cache.reset_for(this)) [[unlikely]] {
             return nullptr;
         }
 
-        Slot *slot = cache.pop();
+        slot *slot = cache.pop();
         if (slot == nullptr) {
             refill_cache(cache);
             slot = cache.pop();
@@ -279,7 +279,7 @@ private:
         return prepare_record(*slot, message, reset_failed);
     }
 
-    void refill_cache(LocalCache &cache) noexcept {
+    void refill_cache(local_cache &cache) noexcept {
         const std::size_t available = cache.available();
         if (available == 0U) {
             return;
@@ -287,80 +287,81 @@ private:
 
         std::size_t count = try_pop_many_from_existing(cache.append_begin(), available);
         if (count == 0U) {
-            if (Slab *slab = grow(); slab != nullptr) {
-                count = try_pop_many(*slab, cache.append_begin(), available);
+            if (slab *new_slab = grow(); new_slab != nullptr) {
+                count = try_pop_many(*new_slab, cache.append_begin(), available);
             }
         }
         cache.append_commit(count);
     }
 
     void add_initial_slab() {
-        auto slab = std::make_unique<Slab>(this, initial_slab_capacity_);
-        Slab *const raw = slab.get();
-        slabs_.push_back(std::move(slab));
+        auto new_slab = std::make_unique<slab>(this, initial_slab_capacity_);
+        slab *const raw = new_slab.get();
+        slabs_.push_back(std::move(new_slab));
         slab_head_.store(raw, std::memory_order_release);
         next_slab_capacity_ = next_growth_capacity(initial_slab_capacity_);
     }
 
     [[nodiscard]] log_record *try_acquire_from_existing(std::string_view message,
                                                         bool &reset_failed) noexcept {
-        Slab *slab = slab_head_.load(std::memory_order_acquire);
-        while (slab != nullptr) {
-            if (log_record *record = try_acquire_from_slab(*slab, message, reset_failed);
+        slab *current = slab_head_.load(std::memory_order_acquire);
+        while (current != nullptr) {
+            if (log_record *record = try_acquire_from_slab(*current, message, reset_failed);
                 record != nullptr || reset_failed) {
                 return record;
             }
-            slab = slab->next.load(std::memory_order_acquire);
+            current = current->next.load(std::memory_order_acquire);
         }
         return nullptr;
     }
 
-    [[nodiscard]] log_record *try_acquire_from_slab(Slab &slab, std::string_view message,
+    [[nodiscard]] log_record *try_acquire_from_slab(slab &current_slab, std::string_view message,
                                                     bool &reset_failed) noexcept {
-        Slot *slot = try_pop(slab);
-        if (slot == nullptr) {
+        slot *entry = try_pop(current_slab);
+        if (entry == nullptr) {
             return nullptr;
         }
 
-        return prepare_record(*slot, message, reset_failed);
+        return prepare_record(*entry, message, reset_failed);
     }
 
-    [[nodiscard]] log_record *prepare_record(Slot &slot, std::string_view message,
+    [[nodiscard]] log_record *prepare_record(slot &entry, std::string_view message,
                                              bool &reset_failed) noexcept {
         try {
-            slot.record.reset(message);
+            entry.record.reset(message);
         } catch (...) {
-            release(&slot);
+            release(&entry);
             reset_failed = true;
             return nullptr;
         }
-        return &slot.record;
+        return &entry.record;
     }
 
-    [[nodiscard]] Slot *try_pop(Slab &slab) noexcept {
-        std::uint64_t head = slab.free_head.load(std::memory_order_acquire);
+    [[nodiscard]] slot *try_pop(slab &current_slab) noexcept {
+        std::uint64_t head = current_slab.free_head.load(std::memory_order_acquire);
         for (;;) {
             const std::uint32_t index = head_index(head);
             if (index == null_slot) {
                 return nullptr;
             }
 
-            Slot &slot = slab.slots[index];
-            const std::uint32_t next = slot.next.load(std::memory_order_relaxed);
+            slot &entry = current_slab.slots[index];
+            const std::uint32_t next = entry.next.load(std::memory_order_relaxed);
             const std::uint64_t desired = pack_head(next, head_version(head) + 1U);
-            if (slab.free_head.compare_exchange_weak(head, desired, std::memory_order_acquire,
-                                                     std::memory_order_acquire)) {
-                return &slot;
+            if (current_slab.free_head.compare_exchange_weak(
+                    head, desired, std::memory_order_acquire, std::memory_order_acquire)) {
+                return &entry;
             }
         }
     }
 
-    [[nodiscard]] std::size_t try_pop_many(Slab &slab, Slot **out, std::size_t max_count) noexcept {
+    [[nodiscard]] std::size_t try_pop_many(slab &current_slab, slot **out,
+                                           std::size_t max_count) noexcept {
         if (max_count == 0U) {
             return 0;
         }
 
-        std::uint64_t head = slab.free_head.load(std::memory_order_acquire);
+        std::uint64_t head = current_slab.free_head.load(std::memory_order_acquire);
         for (;;) {
             std::uint32_t index = head_index(head);
             if (index == null_slot) {
@@ -369,58 +370,58 @@ private:
 
             std::size_t count = 0;
             while (count < max_count && index != null_slot) {
-                Slot &slot = slab.slots[index];
-                out[count] = &slot;
+                slot &entry = current_slab.slots[index];
+                out[count] = &entry;
                 ++count;
-                index = slot.next.load(std::memory_order_relaxed);
+                index = entry.next.load(std::memory_order_relaxed);
             }
 
             const std::uint64_t desired = pack_head(index, head_version(head) + 1U);
-            if (slab.free_head.compare_exchange_weak(head, desired, std::memory_order_acquire,
-                                                     std::memory_order_acquire)) {
+            if (current_slab.free_head.compare_exchange_weak(
+                    head, desired, std::memory_order_acquire, std::memory_order_acquire)) {
                 return count;
             }
         }
     }
 
-    [[nodiscard]] std::size_t try_pop_many_from_existing(Slot **out,
+    [[nodiscard]] std::size_t try_pop_many_from_existing(slot **out,
                                                          std::size_t max_count) noexcept {
         std::size_t count = 0;
-        Slab *slab = slab_head_.load(std::memory_order_acquire);
-        while (slab != nullptr && count < max_count) {
-            count += try_pop_many(*slab, out + count, max_count - count);
-            slab = slab->next.load(std::memory_order_acquire);
+        slab *current = slab_head_.load(std::memory_order_acquire);
+        while (current != nullptr && count < max_count) {
+            count += try_pop_many(*current, out + count, max_count - count);
+            current = current->next.load(std::memory_order_acquire);
         }
         return count;
     }
 
-    [[nodiscard]] Slab *find_slab_with_free_slot() noexcept {
-        Slab *slab = slab_head_.load(std::memory_order_acquire);
-        while (slab != nullptr) {
-            const std::uint64_t head = slab->free_head.load(std::memory_order_acquire);
+    [[nodiscard]] slab *find_slab_with_free_slot() noexcept {
+        slab *current = slab_head_.load(std::memory_order_acquire);
+        while (current != nullptr) {
+            const std::uint64_t head = current->free_head.load(std::memory_order_acquire);
             if (head_index(head) != null_slot) {
-                return slab;
+                return current;
             }
-            slab = slab->next.load(std::memory_order_acquire);
+            current = current->next.load(std::memory_order_acquire);
         }
         return nullptr;
     }
 
-    [[nodiscard]] Slab *grow() noexcept {
+    [[nodiscard]] slab *grow() noexcept {
         queue_full_backoff backoff(64U);
         while (expanding_.test_and_set(std::memory_order_acquire)) {
             backoff.wait();
         }
 
-        Slab *published = nullptr;
+        slab *published = nullptr;
         try {
             published = find_slab_with_free_slot();
             if (published == nullptr) {
-                auto slab = std::make_unique<Slab>(this, next_slab_capacity_);
-                published = slab.get();
-                slabs_.push_back(std::move(slab));
+                auto new_slab = std::make_unique<slab>(this, next_slab_capacity_);
+                published = new_slab.get();
+                slabs_.push_back(std::move(new_slab));
 
-                Slab *head = slab_head_.load(std::memory_order_acquire);
+                slab *head = slab_head_.load(std::memory_order_acquire);
                 do {
                     published->next.store(head, std::memory_order_relaxed);
                 } while (!slab_head_.compare_exchange_weak(
@@ -435,44 +436,44 @@ private:
         return published;
     }
 
-    void release_slots(Slot *const *slots, std::size_t count) noexcept {
+    void release_slots(slot *const *slots, std::size_t count) noexcept {
         std::size_t begin = 0;
         while (begin < count) {
-            Slot *first = slots[begin];
+            slot *first = slots[begin];
             AF_ASSERT(first != nullptr && first->owner == this && first->slab != nullptr);
-            Slab *const slab = first->slab;
+            slab *const current_slab = first->slab;
 
             std::size_t end = begin + 1U;
             while (end < count) {
-                Slot *slot = slots[end];
-                AF_ASSERT(slot != nullptr && slot->owner == this && slot->slab != nullptr);
-                if (slot->slab != slab) {
+                slot *entry = slots[end];
+                AF_ASSERT(entry != nullptr && entry->owner == this && entry->slab != nullptr);
+                if (entry->slab != current_slab) {
                     break;
                 }
                 ++end;
             }
 
-            release_slots_to_slab(*slab, slots + begin, end - begin);
+            release_slots_to_slab(*current_slab, slots + begin, end - begin);
             begin = end;
         }
     }
 
-    void release(Slot *slot) noexcept {
-        AF_ASSERT(slot != nullptr && slot->slab != nullptr);
-        Slab &slab = *slot->slab;
-        const std::uint32_t index = slot->index;
-        std::uint64_t head = slab.free_head.load(std::memory_order_relaxed);
+    void release(slot *entry) noexcept {
+        AF_ASSERT(entry != nullptr && entry->slab != nullptr);
+        slab &current_slab = *entry->slab;
+        const std::uint32_t index = entry->index;
+        std::uint64_t head = current_slab.free_head.load(std::memory_order_relaxed);
         for (;;) {
-            slot->next.store(head_index(head), std::memory_order_relaxed);
+            entry->next.store(head_index(head), std::memory_order_relaxed);
             const std::uint64_t desired = pack_head(index, head_version(head) + 1U);
-            if (slab.free_head.compare_exchange_weak(head, desired, std::memory_order_release,
-                                                     std::memory_order_relaxed)) {
+            if (current_slab.free_head.compare_exchange_weak(
+                    head, desired, std::memory_order_release, std::memory_order_relaxed)) {
                 return;
             }
         }
     }
 
-    void release_slots_to_slab(Slab &slab, Slot *const *slots, std::size_t count) noexcept {
+    void release_slots_to_slab(slab &current_slab, slot *const *slots, std::size_t count) noexcept {
         if (count == 0U) {
             return;
         }
@@ -481,54 +482,54 @@ private:
             return;
         }
 
-        Slot *first = slots[0];
-        AF_ASSERT(first != nullptr && first->owner == this && first->slab == &slab);
-        Slot *previous = first;
+        slot *first = slots[0];
+        AF_ASSERT(first != nullptr && first->owner == this && first->slab == &current_slab);
+        slot *previous = first;
         for (std::size_t i = 1; i < count; ++i) {
-            Slot *slot = slots[i];
-            AF_ASSERT(slot != nullptr && slot->owner == this && slot->slab == &slab);
-            previous->next.store(slot->index, std::memory_order_relaxed);
-            previous = slot;
+            slot *entry = slots[i];
+            AF_ASSERT(entry != nullptr && entry->owner == this && entry->slab == &current_slab);
+            previous->next.store(entry->index, std::memory_order_relaxed);
+            previous = entry;
         }
 
         const std::uint32_t first_index = first->index;
-        std::uint64_t head = slab.free_head.load(std::memory_order_relaxed);
+        std::uint64_t head = current_slab.free_head.load(std::memory_order_relaxed);
         for (;;) {
             previous->next.store(head_index(head), std::memory_order_relaxed);
             const std::uint64_t desired = pack_head(first_index, head_version(head) + 1U);
-            if (slab.free_head.compare_exchange_weak(head, desired, std::memory_order_release,
-                                                     std::memory_order_relaxed)) {
+            if (current_slab.free_head.compare_exchange_weak(
+                    head, desired, std::memory_order_release, std::memory_order_relaxed)) {
                 return;
             }
         }
     }
 
-    void release_records_to_slab(Slab &slab, af::span<log_record *const> records) noexcept {
+    void release_records_to_slab(slab &current_slab, af::span<log_record *const> records) noexcept {
         if (records.empty()) {
             return;
         }
         if (records.size() == 1U) {
-            release(static_cast<Slot *>(records.front()->pool_slot()));
+            release(static_cast<slot *>(records.front()->pool_slot()));
             return;
         }
 
-        Slot *first = static_cast<Slot *>(records.front()->pool_slot());
-        AF_ASSERT(first != nullptr && first->owner == this && first->slab == &slab);
-        Slot *previous = first;
+        slot *first = static_cast<slot *>(records.front()->pool_slot());
+        AF_ASSERT(first != nullptr && first->owner == this && first->slab == &current_slab);
+        slot *previous = first;
         for (std::size_t i = 1; i < records.size(); ++i) {
-            auto *slot = static_cast<Slot *>(records[i]->pool_slot());
-            AF_ASSERT(slot != nullptr && slot->owner == this && slot->slab == &slab);
-            previous->next.store(slot->index, std::memory_order_relaxed);
-            previous = slot;
+            auto *entry = static_cast<slot *>(records[i]->pool_slot());
+            AF_ASSERT(entry != nullptr && entry->owner == this && entry->slab == &current_slab);
+            previous->next.store(entry->index, std::memory_order_relaxed);
+            previous = entry;
         }
 
         const std::uint32_t first_index = first->index;
-        std::uint64_t head = slab.free_head.load(std::memory_order_relaxed);
+        std::uint64_t head = current_slab.free_head.load(std::memory_order_relaxed);
         for (;;) {
             previous->next.store(head_index(head), std::memory_order_relaxed);
             const std::uint64_t desired = pack_head(first_index, head_version(head) + 1U);
-            if (slab.free_head.compare_exchange_weak(head, desired, std::memory_order_release,
-                                                     std::memory_order_relaxed)) {
+            if (current_slab.free_head.compare_exchange_weak(
+                    head, desired, std::memory_order_release, std::memory_order_relaxed)) {
                 return;
             }
         }
@@ -539,8 +540,8 @@ private:
     const std::size_t local_cache_capacity_;
     std::shared_ptr<void> lifetime_{std::make_shared<std::uint8_t>(0)};
     std::size_t next_slab_capacity_;
-    std::vector<std::unique_ptr<Slab>> slabs_;
-    alignas(hardware_cache_line_size) std::atomic<Slab *> slab_head_{nullptr};
+    std::vector<std::unique_ptr<slab>> slabs_;
+    alignas(hardware_cache_line_size) std::atomic<slab *> slab_head_{nullptr};
     alignas(hardware_cache_line_size) std::atomic_flag expanding_ = ATOMIC_FLAG_INIT;
 };
 

@@ -7,11 +7,11 @@
 
 namespace af::detail {
 
-template <typename Pool, typename Slot, std::size_t LocalCacheCapacity,
-          std::size_t RemoteReleaseBatchSize>
+template <typename pool_type, typename slot_type, std::size_t local_cache_capacity_value,
+          std::size_t remote_release_batch_size_value>
 struct object_pool_local_cache {
-    Pool *owner{nullptr};
-    Slot *slots[LocalCacheCapacity]{};
+    pool_type *owner{nullptr};
+    slot_type *slots[local_cache_capacity_value]{};
     std::size_t size{0};
     bool locally_acquired{false};
 
@@ -19,7 +19,7 @@ struct object_pool_local_cache {
         flush();
     }
 
-    void reset_for(Pool *pool) noexcept {
+    void reset_for(pool_type *pool) noexcept {
         if (owner == pool) {
             return;
         }
@@ -27,7 +27,7 @@ struct object_pool_local_cache {
         owner = pool;
     }
 
-    void discard_if_owner(const Pool *pool) noexcept {
+    void discard_if_owner(const pool_type *pool) noexcept {
         if (owner == pool) {
             size = 0;
             locally_acquired = false;
@@ -53,26 +53,26 @@ struct object_pool_local_cache {
         }
     }
 
-    [[nodiscard]] Slot *pop() noexcept {
+    [[nodiscard]] slot_type *pop() noexcept {
         if (size == 0U) [[unlikely]] {
             return nullptr;
         }
         return slots[--size];
     }
 
-    void push(Slot *slot) noexcept {
+    void push(slot_type *slot) noexcept {
         slots[size++] = slot;
     }
 
-    void push_remote_release(Slot *slot) noexcept {
+    void push_remote_release(slot_type *slot) noexcept {
         slots[size++] = slot;
-        if (size == RemoteReleaseBatchSize) {
+        if (size == remote_release_batch_size_value) {
             flush_some(size);
         }
     }
 
     [[nodiscard]] bool full() const noexcept {
-        return size == LocalCacheCapacity;
+        return size == local_cache_capacity_value;
     }
 
     void mark_locally_acquired() noexcept {
@@ -84,15 +84,16 @@ struct object_pool_local_cache {
     }
 };
 
-template <typename Pool, std::size_t DirectReleaseSetSize> struct object_pool_direct_release_set {
-    Pool *owners[DirectReleaseSetSize]{};
+template <typename pool_type, std::size_t direct_release_set_size_value>
+struct object_pool_direct_release_set {
+    pool_type *owners[direct_release_set_size_value]{};
     std::size_t next_victim{0};
 
-    [[nodiscard]] bool contains(Pool *pool) const noexcept {
+    [[nodiscard]] bool contains(pool_type *pool) const noexcept {
         if (owners[0] == pool) {
             return true;
         }
-        for (std::size_t i = 1; i < DirectReleaseSetSize; ++i) {
+        for (std::size_t i = 1; i < direct_release_set_size_value; ++i) {
             if (owners[i] == pool) {
                 return true;
             }
@@ -100,15 +101,15 @@ template <typename Pool, std::size_t DirectReleaseSetSize> struct object_pool_di
         return false;
     }
 
-    void insert(Pool *pool) noexcept {
+    void insert(pool_type *pool) noexcept {
         if (contains(pool)) {
             return;
         }
-        for (std::size_t i = 0; i < DirectReleaseSetSize; ++i) {
+        for (std::size_t i = 0; i < direct_release_set_size_value; ++i) {
             if (owners[i] == nullptr) {
                 owners[i] = pool;
                 next_victim = i + 1U;
-                if (next_victim == DirectReleaseSetSize) {
+                if (next_victim == direct_release_set_size_value) {
                     next_victim = 0;
                 }
                 return;
@@ -117,13 +118,13 @@ template <typename Pool, std::size_t DirectReleaseSetSize> struct object_pool_di
 
         owners[next_victim] = pool;
         ++next_victim;
-        if (next_victim == DirectReleaseSetSize) {
+        if (next_victim == direct_release_set_size_value) {
             next_victim = 0;
         }
     }
 
-    void erase(const Pool *pool) noexcept {
-        for (Pool *&owner : owners) {
+    void erase(const pool_type *pool) noexcept {
+        for (pool_type *&owner : owners) {
             if (owner == pool) {
                 owner = nullptr;
             }
@@ -131,23 +132,25 @@ template <typename Pool, std::size_t DirectReleaseSetSize> struct object_pool_di
     }
 };
 
-template <typename Pool, typename Slot, std::size_t LocalCacheCapacity,
-          std::size_t RemoteReleaseBatchSize, std::size_t DirectReleaseSetSize>
+template <typename pool_type, typename slot_type, std::size_t local_cache_capacity_value,
+          std::size_t remote_release_batch_size_value, std::size_t direct_release_set_size_value>
 struct object_pool_single_local_cache_set {
-    using LocalCache =
-        object_pool_local_cache<Pool, Slot, LocalCacheCapacity, RemoteReleaseBatchSize>;
-    using DirectReleaseSet = object_pool_direct_release_set<Pool, DirectReleaseSetSize>;
+    using local_cache_type =
+        object_pool_local_cache<pool_type, slot_type, local_cache_capacity_value,
+                                remote_release_batch_size_value>;
+    using direct_release_set_type =
+        object_pool_direct_release_set<pool_type, direct_release_set_size_value>;
 
-    LocalCache primary{};
+    local_cache_type primary{};
 
-    [[nodiscard]] LocalCache &get(Pool *pool) noexcept {
+    [[nodiscard]] local_cache_type &get(pool_type *pool) noexcept {
         if (primary.owner == pool) [[likely]] {
             return primary;
         }
         return get_slow(pool);
     }
 
-    [[nodiscard]] LocalCache *find_release_cache(Pool *pool) noexcept {
+    [[nodiscard]] local_cache_type *find_release_cache(pool_type *pool) noexcept {
         if (primary.owner == pool) [[likely]] {
             return &primary;
         }
@@ -158,77 +161,79 @@ struct object_pool_single_local_cache_set {
         return nullptr;
     }
 
-    void discard_if_owner(const Pool *pool) noexcept {
+    void discard_if_owner(const pool_type *pool) noexcept {
         primary.discard_if_owner(pool);
         direct_release_erase(pool);
     }
 
-    [[nodiscard]] AF_DETAIL_NOINLINE LocalCache &get_slow(Pool *pool) noexcept {
+    [[nodiscard]] AF_DETAIL_NOINLINE local_cache_type &get_slow(pool_type *pool) noexcept {
         direct_release_erase(pool);
         primary.reset_for(pool);
         return primary;
     }
 
-    [[nodiscard]] static bool direct_release_contains(Pool *pool) noexcept {
-        if constexpr (RemoteReleaseBatchSize == 1U) {
+    [[nodiscard]] static bool direct_release_contains(pool_type *pool) noexcept {
+        if constexpr (remote_release_batch_size_value == 1U) {
             return direct_release_set().contains(pool);
         }
         static_cast<void>(pool);
         return false;
     }
 
-    static void direct_release_insert(Pool *pool) noexcept {
-        if constexpr (RemoteReleaseBatchSize == 1U) {
+    static void direct_release_insert(pool_type *pool) noexcept {
+        if constexpr (remote_release_batch_size_value == 1U) {
             direct_release_set().insert(pool);
         } else {
             static_cast<void>(pool);
         }
     }
 
-    static void direct_release_erase(const Pool *pool) noexcept {
-        if constexpr (RemoteReleaseBatchSize == 1U) {
+    static void direct_release_erase(const pool_type *pool) noexcept {
+        if constexpr (remote_release_batch_size_value == 1U) {
             direct_release_set().erase(pool);
         } else {
             static_cast<void>(pool);
         }
     }
 
-    [[nodiscard]] static DirectReleaseSet &direct_release_set() noexcept {
-        thread_local DirectReleaseSet set;
+    [[nodiscard]] static direct_release_set_type &direct_release_set() noexcept {
+        thread_local direct_release_set_type set;
         return set;
     }
 };
 
-template <typename Pool, typename Slot, std::size_t LocalCacheCapacity,
-          std::size_t RemoteReleaseBatchSize, std::size_t LocalCacheSetSize,
-          std::size_t DirectReleaseSetSize>
+template <typename pool_type, typename slot_type, std::size_t local_cache_capacity_value,
+          std::size_t remote_release_batch_size_value, std::size_t local_cache_set_size_value,
+          std::size_t direct_release_set_size_value>
 struct object_pool_multi_local_cache_set {
-    static constexpr std::size_t overflow_cache_count = LocalCacheSetSize - 1U;
+    static constexpr std::size_t overflow_cache_count = local_cache_set_size_value - 1U;
 
-    using LocalCache =
-        object_pool_local_cache<Pool, Slot, LocalCacheCapacity, RemoteReleaseBatchSize>;
-    using DirectReleaseSet = object_pool_direct_release_set<Pool, DirectReleaseSetSize>;
+    using local_cache_type =
+        object_pool_local_cache<pool_type, slot_type, local_cache_capacity_value,
+                                remote_release_batch_size_value>;
+    using direct_release_set_type =
+        object_pool_direct_release_set<pool_type, direct_release_set_size_value>;
 
-    LocalCache primary{};
-    std::array<LocalCache, overflow_cache_count> overflow{};
-    LocalCache *active_overflow{overflow.data()};
+    local_cache_type primary{};
+    std::array<local_cache_type, overflow_cache_count> overflow{};
+    local_cache_type *active_overflow{overflow.data()};
     std::size_t active_overflow_index{0};
     std::size_t next_victim{0};
 
-    [[nodiscard]] LocalCache &get(Pool *pool) noexcept {
+    [[nodiscard]] local_cache_type &get(pool_type *pool) noexcept {
         if (primary.owner == pool) [[likely]] {
             return primary;
         }
         if (active_overflow->owner == pool) {
             return *active_overflow;
         }
-        if (LocalCache *hinted = next_overflow_hint(pool)) {
+        if (local_cache_type *hinted = next_overflow_hint(pool)) {
             return *hinted;
         }
         return get_slow(pool);
     }
 
-    [[nodiscard]] LocalCache *find_release_cache(Pool *pool) noexcept {
+    [[nodiscard]] local_cache_type *find_release_cache(pool_type *pool) noexcept {
         if (primary.owner == pool) [[likely]] {
             return &primary;
         }
@@ -238,21 +243,21 @@ struct object_pool_multi_local_cache_set {
         if (direct_release_contains(pool)) {
             return nullptr;
         }
-        if (LocalCache *hinted = next_overflow_hint(pool)) {
+        if (local_cache_type *hinted = next_overflow_hint(pool)) {
             return hinted;
         }
         return find_release_cache_slow(pool);
     }
 
-    void discard_if_owner(const Pool *pool) noexcept {
+    void discard_if_owner(const pool_type *pool) noexcept {
         primary.discard_if_owner(pool);
-        for (LocalCache &entry : overflow) {
+        for (local_cache_type &entry : overflow) {
             entry.discard_if_owner(pool);
         }
         direct_release_erase(pool);
     }
 
-    [[nodiscard]] AF_DETAIL_NOINLINE LocalCache &get_slow(Pool *pool) noexcept {
+    [[nodiscard]] AF_DETAIL_NOINLINE local_cache_type &get_slow(pool_type *pool) noexcept {
         direct_release_erase(pool);
 
         for (std::size_t i = 0; i < overflow_cache_count; ++i) {
@@ -276,7 +281,7 @@ struct object_pool_multi_local_cache_set {
         }
 
         const std::size_t victim = next_victim;
-        LocalCache &entry = overflow[victim];
+        local_cache_type &entry = overflow[victim];
         ++next_victim;
         if (next_victim == overflow_cache_count) {
             next_victim = 0;
@@ -286,7 +291,8 @@ struct object_pool_multi_local_cache_set {
         return entry;
     }
 
-    [[nodiscard]] AF_DETAIL_NOINLINE LocalCache *find_release_cache_slow(Pool *pool) noexcept {
+    [[nodiscard]] AF_DETAIL_NOINLINE local_cache_type *
+    find_release_cache_slow(pool_type *pool) noexcept {
         for (std::size_t i = 0; i < overflow_cache_count; ++i) {
             if (overflow[i].owner == pool) {
                 set_active_overflow(i);
@@ -297,31 +303,31 @@ struct object_pool_multi_local_cache_set {
         return nullptr;
     }
 
-    [[nodiscard]] static bool direct_release_contains(Pool *pool) noexcept {
-        if constexpr (RemoteReleaseBatchSize == 1U) {
+    [[nodiscard]] static bool direct_release_contains(pool_type *pool) noexcept {
+        if constexpr (remote_release_batch_size_value == 1U) {
             return direct_release_set().contains(pool);
         }
         static_cast<void>(pool);
         return false;
     }
 
-    static void direct_release_insert(Pool *pool) noexcept {
-        if constexpr (RemoteReleaseBatchSize == 1U) {
+    static void direct_release_insert(pool_type *pool) noexcept {
+        if constexpr (remote_release_batch_size_value == 1U) {
             direct_release_set().insert(pool);
         } else {
             static_cast<void>(pool);
         }
     }
 
-    static void direct_release_erase(const Pool *pool) noexcept {
-        if constexpr (RemoteReleaseBatchSize == 1U) {
+    static void direct_release_erase(const pool_type *pool) noexcept {
+        if constexpr (remote_release_batch_size_value == 1U) {
             direct_release_set().erase(pool);
         } else {
             static_cast<void>(pool);
         }
     }
 
-    [[nodiscard]] LocalCache *next_overflow_hint(Pool *pool) noexcept {
+    [[nodiscard]] local_cache_type *next_overflow_hint(pool_type *pool) noexcept {
         std::size_t next = active_overflow_index + 1U;
         if (next == overflow_cache_count) {
             next = 0;
@@ -339,20 +345,22 @@ struct object_pool_multi_local_cache_set {
         active_overflow = &overflow[index];
     }
 
-    [[nodiscard]] static DirectReleaseSet &direct_release_set() noexcept {
-        thread_local DirectReleaseSet set;
+    [[nodiscard]] static direct_release_set_type &direct_release_set() noexcept {
+        thread_local direct_release_set_type set;
         return set;
     }
 };
 
-template <typename Pool, typename Slot, std::size_t LocalCacheCapacity,
-          std::size_t RemoteReleaseBatchSize, std::size_t LocalCacheSetSize,
-          std::size_t DirectReleaseSetSize>
+template <typename pool_type, typename slot_type, std::size_t local_cache_capacity_value,
+          std::size_t remote_release_batch_size_value, std::size_t local_cache_set_size_value,
+          std::size_t direct_release_set_size_value>
 using object_pool_local_cache_set = std::conditional_t<
-    LocalCacheSetSize == 1U,
-    object_pool_single_local_cache_set<Pool, Slot, LocalCacheCapacity, RemoteReleaseBatchSize,
-                                       DirectReleaseSetSize>,
-    object_pool_multi_local_cache_set<Pool, Slot, LocalCacheCapacity, RemoteReleaseBatchSize,
-                                      LocalCacheSetSize, DirectReleaseSetSize>>;
+    local_cache_set_size_value == 1U,
+    object_pool_single_local_cache_set<pool_type, slot_type, local_cache_capacity_value,
+                                       remote_release_batch_size_value,
+                                       direct_release_set_size_value>,
+    object_pool_multi_local_cache_set<pool_type, slot_type, local_cache_capacity_value,
+                                      remote_release_batch_size_value, local_cache_set_size_value,
+                                      direct_release_set_size_value>>;
 
 } // namespace af::detail
