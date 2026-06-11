@@ -73,10 +73,10 @@ inline void destroy_runtime_instance_parallel_group(RuntimeInstanceParallelGroup
 } // namespace detail
 
 template <typename Op, typename KeyFn>
-ShardedOps<Op> runtime::split_by_shard(std::vector<Op> &&ops, std::uint16_t shard_count,
-                                       KeyFn &&key_fn) {
+sharded_ops<Op> runtime::split_by_shard(std::vector<Op> &&ops, std::uint16_t shard_count,
+                                        KeyFn &&key_fn) {
     AF_ASSERT(shard_count > 0);
-    ShardedOps<Op> sharded(shard_count);
+    sharded_ops<Op> sharded(shard_count);
     if (shard_count == 0) {
         return sharded;
     }
@@ -90,14 +90,14 @@ ShardedOps<Op> runtime::split_by_shard(std::vector<Op> &&ops, std::uint16_t shar
 }
 
 template <typename Op, typename Handler>
-bool runtime::parallel_shards(thread_group_ref shard_threads, ShardedOps<Op> &sharded_ops,
+bool runtime::parallel_shards(thread_group_ref shard_threads, sharded_ops<Op> &sharded_ops,
                               parallel_mode mode, runtime_task *owner, Handler &&handler) {
     return parallel_shards_impl(std::bool_constant<false>{}, shard_threads, sharded_ops, mode, 0,
                                 ordered_batch_options{}, owner, std::forward<Handler>(handler));
 }
 
 template <typename Op, typename Handler>
-bool runtime::parallel_shards(thread_ref shard_begin, ShardedOps<Op> &sharded_ops,
+bool runtime::parallel_shards(thread_ref shard_begin, sharded_ops<Op> &sharded_ops,
                               parallel_mode mode, runtime_task *owner, Handler &&handler) {
     std::vector<std::uint16_t> threads;
     threads.reserve(sharded_ops.shard_count());
@@ -109,7 +109,7 @@ bool runtime::parallel_shards(thread_ref shard_begin, ShardedOps<Op> &sharded_op
 }
 
 template <typename Op, typename Handler>
-bool runtime::parallel_shards_ordered(thread_group_ref shard_threads, ShardedOps<Op> &sharded_ops,
+bool runtime::parallel_shards_ordered(thread_group_ref shard_threads, sharded_ops<Op> &sharded_ops,
                                       std::uint64_t batch_id, runtime_task *owner,
                                       Handler &&handler) {
     return parallel_shards_ordered(shard_threads, sharded_ops, batch_id, ordered_batch_options{},
@@ -117,7 +117,7 @@ bool runtime::parallel_shards_ordered(thread_group_ref shard_threads, ShardedOps
 }
 
 template <typename Op, typename Handler>
-bool runtime::parallel_shards_ordered(thread_group_ref shard_threads, ShardedOps<Op> &sharded_ops,
+bool runtime::parallel_shards_ordered(thread_group_ref shard_threads, sharded_ops<Op> &sharded_ops,
                                       std::uint64_t batch_id, ordered_batch_options options,
                                       runtime_task *owner, Handler &&handler) {
     return parallel_shards_impl(std::bool_constant<true>{}, shard_threads, sharded_ops,
@@ -126,7 +126,7 @@ bool runtime::parallel_shards_ordered(thread_group_ref shard_threads, ShardedOps
 }
 
 template <typename Op, typename Handler>
-bool runtime::parallel_shards_ordered(thread_ref shard_begin, ShardedOps<Op> &sharded_ops,
+bool runtime::parallel_shards_ordered(thread_ref shard_begin, sharded_ops<Op> &sharded_ops,
                                       std::uint64_t batch_id, runtime_task *owner,
                                       Handler &&handler) {
     return parallel_shards_ordered(shard_begin, sharded_ops, batch_id, ordered_batch_options{},
@@ -134,7 +134,7 @@ bool runtime::parallel_shards_ordered(thread_ref shard_begin, ShardedOps<Op> &sh
 }
 
 template <typename Op, typename Handler>
-bool runtime::parallel_shards_ordered(thread_ref shard_begin, ShardedOps<Op> &sharded_ops,
+bool runtime::parallel_shards_ordered(thread_ref shard_begin, sharded_ops<Op> &sharded_ops,
                                       std::uint64_t batch_id, ordered_batch_options options,
                                       runtime_task *owner, Handler &&handler) {
     std::vector<std::uint16_t> threads;
@@ -167,7 +167,7 @@ bool runtime::start_ordered_task(thread_ref sequencer_thread, Batch &&batch) {
 
 template <typename Op, typename Handler, bool Ordered>
 bool runtime::parallel_shards_impl(std::bool_constant<Ordered>, thread_group_ref shard_threads,
-                                   ShardedOps<Op> &sharded_ops, parallel_mode mode,
+                                   sharded_ops<Op> &sharded_ops, parallel_mode mode,
                                    std::uint64_t batch_id, ordered_batch_options options,
                                    runtime_task *owner, Handler &&handler) {
     if (owner == nullptr || current_runtime_ != this || !valid_thread(current_thread_index_)) {

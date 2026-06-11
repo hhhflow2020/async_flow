@@ -7,54 +7,65 @@
 
 namespace af {
 
-enum class BatchSubmitStatus {
-    Submitted,
-    Buffered,
-    Duplicate,
+enum class batch_submit_status {
+    submitted,
+    buffered,
+    duplicate,
+    Submitted = submitted,
+    Buffered = buffered,
+    Duplicate = duplicate,
 };
 
-enum class OrderedBatchFailureAction : std::uint8_t {
-    Retry,
-    Skip,
-    Stop,
+enum class ordered_batch_failure_action : std::uint8_t {
+    retry,
+    skip,
+    stop,
+    Retry = retry,
+    Skip = skip,
+    Stop = stop,
 };
 
-struct OrderedBatchRetrySkipOptions {
+struct ordered_batch_retry_skip_options {
     std::uint32_t max_retries{0};
     bool skip_after_retries{true};
 };
 
-struct OrderedBatchFailureDecision {
-    OrderedBatchFailureAction action{OrderedBatchFailureAction::Stop};
+struct ordered_batch_failure_decision {
+    ordered_batch_failure_action action{ordered_batch_failure_action::stop};
     std::uint32_t failure_count{0};
 
     [[nodiscard]] bool should_retry() const noexcept {
-        return action == OrderedBatchFailureAction::Retry;
+        return action == ordered_batch_failure_action::retry;
     }
 
     [[nodiscard]] bool should_skip() const noexcept {
-        return action == OrderedBatchFailureAction::Skip;
+        return action == ordered_batch_failure_action::skip;
     }
 
     [[nodiscard]] bool should_stop() const noexcept {
-        return action == OrderedBatchFailureAction::Stop;
+        return action == ordered_batch_failure_action::stop;
     }
 };
 
-template <typename BatchId = std::uint64_t> class OrderedBatchRetrySkipPolicy {
+using BatchSubmitStatus = batch_submit_status;
+using OrderedBatchFailureAction = ordered_batch_failure_action;
+using OrderedBatchRetrySkipOptions = ordered_batch_retry_skip_options;
+using OrderedBatchFailureDecision = ordered_batch_failure_decision;
+
+template <typename BatchId = std::uint64_t> class ordered_batch_retry_skip_policy {
 public:
-    explicit OrderedBatchRetrySkipPolicy(OrderedBatchRetrySkipOptions options = {})
+    explicit ordered_batch_retry_skip_policy(ordered_batch_retry_skip_options options = {})
         : options_(options) {}
 
-    [[nodiscard]] OrderedBatchFailureDecision record_failure(BatchId batch_id) {
+    [[nodiscard]] ordered_batch_failure_decision record_failure(BatchId batch_id) {
         const std::uint32_t failure_count = ++failures_[batch_id];
         if (failure_count <= options_.max_retries) {
-            return {OrderedBatchFailureAction::Retry, failure_count};
+            return {ordered_batch_failure_action::retry, failure_count};
         }
         if (options_.skip_after_retries) {
-            return {OrderedBatchFailureAction::Skip, failure_count};
+            return {ordered_batch_failure_action::skip, failure_count};
         }
-        return {OrderedBatchFailureAction::Stop, failure_count};
+        return {ordered_batch_failure_action::stop, failure_count};
     }
 
     void record_success(BatchId batch_id) {
@@ -75,35 +86,38 @@ public:
     }
 
 private:
-    OrderedBatchRetrySkipOptions options_;
+    ordered_batch_retry_skip_options options_;
     absl::flat_hash_map<BatchId, std::uint32_t> failures_;
 };
 
-template <typename Batch> class BatchSequencer {
+template <typename BatchId = std::uint64_t>
+using OrderedBatchRetrySkipPolicy = ordered_batch_retry_skip_policy<BatchId>;
+
+template <typename Batch> class batch_sequencer {
 public:
-    explicit BatchSequencer(std::uint64_t first_batch_id = 1) : next_batch_id_(first_batch_id) {}
+    explicit batch_sequencer(std::uint64_t first_batch_id = 1) : next_batch_id_(first_batch_id) {}
 
     [[nodiscard]] std::uint64_t next_batch_id() const noexcept {
         return next_batch_id_;
     }
 
     template <typename SubmitFn>
-    BatchSubmitStatus submit(std::uint64_t batch_id, Batch batch, SubmitFn &&submit_fn) {
+    batch_submit_status submit(std::uint64_t batch_id, Batch batch, SubmitFn &&submit_fn) {
         if (batch_id < next_batch_id_) {
-            return BatchSubmitStatus::Duplicate;
+            return batch_submit_status::duplicate;
         }
 
         if (batch_id > next_batch_id_) {
             const auto [_, inserted] = pending_.emplace(batch_id, std::move(batch));
             if (!inserted) {
-                return BatchSubmitStatus::Duplicate;
+                return batch_submit_status::duplicate;
             }
-            return BatchSubmitStatus::Buffered;
+            return batch_submit_status::buffered;
         }
 
         submit_ready(std::move(batch), submit_fn);
         drain_ready(submit_fn);
-        return BatchSubmitStatus::Submitted;
+        return batch_submit_status::submitted;
     }
 
 private:
@@ -129,14 +143,6 @@ private:
     absl::flat_hash_map<std::uint64_t, Batch> pending_;
 };
 
-using batch_submit_status = BatchSubmitStatus;
-using ordered_batch_failure_action = OrderedBatchFailureAction;
-using ordered_batch_retry_skip_options = OrderedBatchRetrySkipOptions;
-using ordered_batch_failure_decision = OrderedBatchFailureDecision;
-
-template <typename BatchId = std::uint64_t>
-using ordered_batch_retry_skip_policy = OrderedBatchRetrySkipPolicy<BatchId>;
-
-template <typename Batch> using batch_sequencer = BatchSequencer<Batch>;
+template <typename Batch> using BatchSequencer = batch_sequencer<Batch>;
 
 } // namespace af

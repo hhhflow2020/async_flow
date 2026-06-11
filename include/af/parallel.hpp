@@ -5,41 +5,41 @@
 
 namespace af {
 
-enum class ParallelMode : std::uint8_t {
-    NonEmptyOnly,
-    AllShards,
-    non_empty_only = NonEmptyOnly,
-    all_shards = AllShards,
+enum class parallel_mode : std::uint8_t {
+    non_empty_only,
+    all_shards,
+    NonEmptyOnly = non_empty_only,
+    AllShards = all_shards,
 };
 
-enum class OrderedBatchReplayPolicy : std::uint8_t {
-    Strict,
-    SkipAlreadyApplied,
-    strict = Strict,
-    skip_already_applied = SkipAlreadyApplied,
+enum class ordered_batch_replay_policy : std::uint8_t {
+    strict,
+    skip_already_applied,
+    Strict = strict,
+    SkipAlreadyApplied = skip_already_applied,
 };
 
-struct OrderedBatchOptions {
-    OrderedBatchReplayPolicy replay_policy{OrderedBatchReplayPolicy::Strict};
+struct ordered_batch_options {
+    ordered_batch_replay_policy replay_policy{ordered_batch_replay_policy::strict};
 };
 
-using parallel_mode = ParallelMode;
-using ordered_batch_replay_policy = OrderedBatchReplayPolicy;
-using ordered_batch_options = OrderedBatchOptions;
+using ParallelMode = parallel_mode;
+using OrderedBatchReplayPolicy = ordered_batch_replay_policy;
+using OrderedBatchOptions = ordered_batch_options;
 
-inline constexpr OrderedBatchOptions retryable_ordered_batch_options{
-    OrderedBatchReplayPolicy::SkipAlreadyApplied};
+inline constexpr ordered_batch_options retryable_ordered_batch_options{
+    ordered_batch_replay_policy::skip_already_applied};
 
-template <typename Op> struct ShardedOps {
+template <typename Op> struct sharded_ops {
     std::vector<std::vector<Op>> shards;
 
-    explicit ShardedOps(std::uint16_t shard_count = 0) : shards(shard_count) {}
+    explicit sharded_ops(std::uint16_t shard_count = 0) : shards(shard_count) {}
 
     [[nodiscard]] std::uint16_t shard_count() const noexcept {
         return static_cast<std::uint16_t>(shards.size());
     }
 };
 
-template <typename Op> using sharded_ops = ShardedOps<Op>;
+template <typename Op> using ShardedOps = sharded_ops<Op>;
 
 } // namespace af

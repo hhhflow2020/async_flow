@@ -284,35 +284,35 @@ public:
     }
 
     template <typename Op, typename KeyFn>
-    [[nodiscard]] static ShardedOps<Op> split_by_shard(std::vector<Op> &&ops,
-                                                       std::uint16_t shard_count, KeyFn &&key_fn);
+    [[nodiscard]] static sharded_ops<Op> split_by_shard(std::vector<Op> &&ops,
+                                                        std::uint16_t shard_count, KeyFn &&key_fn);
 
     template <typename Op, typename Handler>
-    [[nodiscard]] bool parallel_shards(thread_group_ref shard_threads, ShardedOps<Op> &sharded_ops,
+    [[nodiscard]] bool parallel_shards(thread_group_ref shard_threads, sharded_ops<Op> &sharded_ops,
                                        parallel_mode mode, runtime_task *owner, Handler &&handler);
 
     template <typename Op, typename Handler>
-    [[nodiscard]] bool parallel_shards(thread_ref shard_begin, ShardedOps<Op> &sharded_ops,
+    [[nodiscard]] bool parallel_shards(thread_ref shard_begin, sharded_ops<Op> &sharded_ops,
                                        parallel_mode mode, runtime_task *owner, Handler &&handler);
 
     template <typename Op, typename Handler>
     [[nodiscard]] bool parallel_shards_ordered(thread_group_ref shard_threads,
-                                               ShardedOps<Op> &sharded_ops, std::uint64_t batch_id,
+                                               sharded_ops<Op> &sharded_ops, std::uint64_t batch_id,
                                                runtime_task *owner, Handler &&handler);
 
     template <typename Op, typename Handler>
     [[nodiscard]] bool parallel_shards_ordered(thread_group_ref shard_threads,
-                                               ShardedOps<Op> &sharded_ops, std::uint64_t batch_id,
+                                               sharded_ops<Op> &sharded_ops, std::uint64_t batch_id,
                                                ordered_batch_options options, runtime_task *owner,
                                                Handler &&handler);
 
     template <typename Op, typename Handler>
-    [[nodiscard]] bool parallel_shards_ordered(thread_ref shard_begin, ShardedOps<Op> &sharded_ops,
+    [[nodiscard]] bool parallel_shards_ordered(thread_ref shard_begin, sharded_ops<Op> &sharded_ops,
                                                std::uint64_t batch_id, runtime_task *owner,
                                                Handler &&handler);
 
     template <typename Op, typename Handler>
-    [[nodiscard]] bool parallel_shards_ordered(thread_ref shard_begin, ShardedOps<Op> &sharded_ops,
+    [[nodiscard]] bool parallel_shards_ordered(thread_ref shard_begin, sharded_ops<Op> &sharded_ops,
                                                std::uint64_t batch_id,
                                                ordered_batch_options options, runtime_task *owner,
                                                Handler &&handler);
@@ -379,7 +379,7 @@ private:
     template <typename Op, typename Handler, bool Ordered>
     [[nodiscard]] bool
     parallel_shards_impl(std::bool_constant<Ordered>, thread_group_ref shard_threads,
-                         ShardedOps<Op> &sharded_ops, parallel_mode mode, std::uint64_t batch_id,
+                         sharded_ops<Op> &sharded_ops, parallel_mode mode, std::uint64_t batch_id,
                          ordered_batch_options options, runtime_task *owner, Handler &&handler);
 
     [[nodiscard]] ordered_guard_decision check_order_guard(std::uint64_t batch_id,

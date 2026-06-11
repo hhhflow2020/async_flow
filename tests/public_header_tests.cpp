@@ -38,7 +38,13 @@ TEST(PublicHeaderTests, UtilityUmbrellaExposesLowerCaseNames) {
     static_assert(std::is_same_v<af::buffer, af::Buffer>);
     static_assert(std::is_same_v<af::buffer_chain, af::BufferChain>);
     static_assert(std::is_same_v<af::batch_submit_status, af::BatchSubmitStatus>);
+    static_assert(af::batch_submit_status::submitted == af::BatchSubmitStatus::Submitted);
+    static_assert(af::batch_submit_status::buffered == af::BatchSubmitStatus::Buffered);
+    static_assert(af::batch_submit_status::duplicate == af::BatchSubmitStatus::Duplicate);
     static_assert(std::is_same_v<af::ordered_batch_failure_action, af::OrderedBatchFailureAction>);
+    static_assert(af::ordered_batch_failure_action::retry == af::OrderedBatchFailureAction::Retry);
+    static_assert(af::ordered_batch_failure_action::skip == af::OrderedBatchFailureAction::Skip);
+    static_assert(af::ordered_batch_failure_action::stop == af::OrderedBatchFailureAction::Stop);
     static_assert(
         std::is_same_v<af::ordered_batch_retry_skip_options, af::OrderedBatchRetrySkipOptions>);
     static_assert(
@@ -47,6 +53,9 @@ TEST(PublicHeaderTests, UtilityUmbrellaExposesLowerCaseNames) {
                                  af::OrderedBatchRetrySkipPolicy<std::uint64_t>>);
     static_assert(std::is_same_v<af::batch_sequencer<int>, af::BatchSequencer<int>>);
     static_assert(std::is_same_v<af::op_type, af::OpType>);
+    static_assert(af::op_type::add == af::OpType::Add);
+    static_assert(af::op_type::update == af::OpType::Update);
+    static_assert(af::op_type::delete_op == af::OpType::Delete);
     static_assert(std::is_same_v<af::crud_op<int, int>, af::CrudOp<int, int>>);
     static_assert(std::is_same_v<af::change_batch<int, int>, af::ChangeBatch<int, int>>);
     static_assert(std::is_same_v<af::signal_wait_result, af::SignalWaitResult>);

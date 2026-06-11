@@ -18,7 +18,7 @@
 
 `af/async_flow.hpp` 已从默认 umbrella 中移除旧 `af/io.hpp` facade，并改为导出 `af/net.hpp`。旧 task 级 async IO facade 已物理删除：`include/af/io*.hpp` 与 `include/af/detail/io/` 不再作为公开或兼容入口存在。新网络代码统一走 runtime-native reactor/net API。
 
-对外命名继续向 lower_case 迁移：buffer、batch、crud、signal、log 配置/句柄等 public 类型已补 lower_case alias，并通过 public header 测试覆盖。compile-time `thread_layout` 相关主类型也已迁移为 `thread_id`、`static_thread_group`、`thread_group_spec` 和 `static_thread_layout`，旧 CamelCase 名称仅作为过渡 alias 保留。后续可以继续迁移示例/文档，再按版本窗口删除旧名。
+对外命名继续向 lower_case 迁移：batch/crud/parallel utility 与 compile-time `thread_layout` 相关主类型已迁移为 lower_case，旧 CamelCase 名称仅作为过渡 alias 保留。buffer、signal、log 配置/句柄等 public 类型已补 lower_case alias，并通过 public header 测试覆盖。后续可以继续迁移示例/文档，再按版本窗口删除旧名。
 
 通用 service task 由 runtime executor 按预算轮询执行；service 自身负责 pending 状态和内部队列，跨线程 producer 通过 `wake_service_tasks()` 唤醒 executor。runtime async logger 现在就是一个 service task，消费热路径不进入 task 状态机；推荐手工入口是 `start_runtime_logging()`，runtime 配置了日志后会在 `runtime::start()` 中自动启动并在 `runtime::stop()` 中 drain/flush。
 

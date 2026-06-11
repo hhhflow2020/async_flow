@@ -25,10 +25,10 @@ TEST(UtilityTests, SplitByShardGroupsByKey) {
 }
 
 TEST(UtilityTests, SplitCrudOpsGroupsByKeyAndKeepsOperationData) {
-    std::vector<af::CrudOp<std::uint64_t, int>> ops{
-        {af::OpType::Add, 0, 10},
-        {af::OpType::Update, 5, 15},
-        {af::OpType::Delete, 2, 20},
+    std::vector<af::crud_op<std::uint64_t, int>> ops{
+        {af::op_type::add, 0, 10},
+        {af::op_type::update, 5, 15},
+        {af::op_type::delete_op, 2, 20},
     };
 
     auto sharded = af::split_crud_ops(std::move(ops), 4);
@@ -37,21 +37,21 @@ TEST(UtilityTests, SplitCrudOpsGroupsByKeyAndKeepsOperationData) {
     ASSERT_EQ(sharded.shards[0].size(), 1);
     ASSERT_EQ(sharded.shards[1].size(), 1);
     ASSERT_EQ(sharded.shards[2].size(), 1);
-    EXPECT_EQ(sharded.shards[0][0].type, af::OpType::Add);
+    EXPECT_EQ(sharded.shards[0][0].type, af::op_type::add);
     EXPECT_EQ(sharded.shards[0][0].value, 10);
-    EXPECT_EQ(sharded.shards[1][0].type, af::OpType::Update);
+    EXPECT_EQ(sharded.shards[1][0].type, af::op_type::update);
     EXPECT_EQ(sharded.shards[1][0].value, 15);
-    EXPECT_EQ(sharded.shards[2][0].type, af::OpType::Delete);
+    EXPECT_EQ(sharded.shards[2][0].type, af::op_type::delete_op);
     EXPECT_EQ(sharded.shards[2][0].value, 20);
 }
 
 TEST(UtilityTests, SplitChangeBatchSupportsCustomShardFunction) {
-    af::ChangeBatch<std::uint64_t, int> batch{
+    af::change_batch<std::uint64_t, int> batch{
         7,
         {
-            {af::OpType::Add, 10, 1},
-            {af::OpType::Update, 11, 2},
-            {af::OpType::Delete, 12, 3},
+            {af::op_type::add, 10, 1},
+            {af::op_type::update, 11, 2},
+            {af::op_type::delete_op, 12, 3},
         },
     };
 
@@ -68,23 +68,23 @@ TEST(UtilityTests, SplitChangeBatchSupportsCustomShardFunction) {
 }
 
 TEST(UtilityTests, BatchSequencerBuffersOutOfOrderBatches) {
-    af::BatchSequencer<int> sequencer(1);
+    af::batch_sequencer<int> sequencer(1);
     std::vector<int> submitted;
 
     auto submit = [&](int value) { submitted.push_back(value); };
 
-    EXPECT_EQ(sequencer.submit(2, 20, submit), af::BatchSubmitStatus::Buffered);
-    EXPECT_EQ(sequencer.submit(2, 200, submit), af::BatchSubmitStatus::Duplicate);
+    EXPECT_EQ(sequencer.submit(2, 20, submit), af::batch_submit_status::buffered);
+    EXPECT_EQ(sequencer.submit(2, 200, submit), af::batch_submit_status::duplicate);
     EXPECT_TRUE(submitted.empty());
-    EXPECT_EQ(sequencer.submit(1, 10, submit), af::BatchSubmitStatus::Submitted);
+    EXPECT_EQ(sequencer.submit(1, 10, submit), af::batch_submit_status::submitted);
     ASSERT_EQ(submitted.size(), 2);
     EXPECT_EQ(submitted[0], 10);
     EXPECT_EQ(submitted[1], 20);
-    EXPECT_EQ(sequencer.submit(1, 10, submit), af::BatchSubmitStatus::Duplicate);
+    EXPECT_EQ(sequencer.submit(1, 10, submit), af::batch_submit_status::duplicate);
 }
 
 TEST(UtilityTests, OrderedBatchRetrySkipPolicyTracksRetryAndSkipDecisions) {
-    af::OrderedBatchRetrySkipPolicy<std::uint64_t> policy({
+    af::ordered_batch_retry_skip_policy<std::uint64_t> policy({
         .max_retries = 2,
         .skip_after_retries = true,
     });
@@ -108,7 +108,7 @@ TEST(UtilityTests, OrderedBatchRetrySkipPolicyTracksRetryAndSkipDecisions) {
 }
 
 TEST(UtilityTests, OrderedBatchRetrySkipPolicyCanStopInsteadOfSkipping) {
-    af::OrderedBatchRetrySkipPolicy<std::uint64_t> policy({
+    af::ordered_batch_retry_skip_policy<std::uint64_t> policy({
         .max_retries = 0,
         .skip_after_retries = false,
     });
