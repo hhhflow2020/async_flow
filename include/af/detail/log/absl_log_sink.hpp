@@ -329,7 +329,7 @@ private:
 class async_log_handle {
 public:
     async_log_handle(std::shared_ptr<async_logger> logger, std::unique_ptr<absl::LogSink> sink,
-                     std::unique_ptr<detail::AsyncLogConsumerController> consumer_controller)
+                     std::unique_ptr<detail::async_log_consumer_controller> consumer_controller)
         : logger_(std::move(logger)), sink_(std::move(sink)),
           consumer_controller_(std::move(consumer_controller)) {
         AF_ASSERT(sink_ != nullptr);
@@ -380,7 +380,7 @@ private:
 
     std::shared_ptr<async_logger> logger_;
     std::unique_ptr<absl::LogSink> sink_;
-    std::unique_ptr<detail::AsyncLogConsumerController> consumer_controller_;
+    std::unique_ptr<detail::async_log_consumer_controller> consumer_controller_;
     std::atomic<bool> registered_{false};
 };
 
@@ -430,8 +430,9 @@ start_runtime_logging(runtime &owner, async_log_config config,
     const std::size_t max_consumer_batches_per_run = config.max_consumer_batches_per_run;
 
     auto logger = std::make_shared<async_logger>(std::move(config));
-    auto consumer_controller = std::make_unique<detail::RuntimeInstanceAsyncLogConsumerController>(
-        owner, logger, consumer_thread, max_consumer_batches_per_run);
+    auto consumer_controller =
+        std::make_unique<detail::runtime_instance_async_log_consumer_controller>(
+            owner, logger, consumer_thread, max_consumer_batches_per_run);
     if (!consumer_controller->start()) {
         throw std::runtime_error("failed to start runtime async log consumer");
     }

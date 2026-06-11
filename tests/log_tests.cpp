@@ -67,6 +67,24 @@ TEST(LogTests, LogDetailTypesExposeLowerCasePrimaryNames) {
                                  af::detail::AsyncLogProducerShardStorage>);
     static_assert(std::is_same_v<af::detail::async_log_runtime_lane_storage,
                                  af::detail::AsyncLogRuntimeLaneStorage>);
+    static_assert(std::is_same_v<af::detail::async_log_consumer_wake_target,
+                                 af::detail::AsyncLogConsumerWakeTarget>);
+    static_assert(std::is_same_v<af::detail::async_log_consumer_controller,
+                                 af::detail::AsyncLogConsumerController>);
+    static_assert(std::is_same_v<af::detail::runtime_instance_async_log_consumer_control_operation,
+                                 af::detail::RuntimeInstanceAsyncLogConsumerControlOperation>);
+    static_assert(std::is_same_v<af::detail::runtime_instance_async_log_consumer_control_completion,
+                                 af::detail::RuntimeInstanceAsyncLogConsumerControlCompletion>);
+    static_assert(std::is_same_v<af::detail::runtime_instance_async_log_consumer_control_task,
+                                 af::detail::RuntimeInstanceAsyncLogConsumerControlTask>);
+    static_assert(std::is_same_v<af::detail::runtime_instance_async_log_consumer_controller,
+                                 af::detail::RuntimeInstanceAsyncLogConsumerController>);
+    static_assert(
+        af::detail::runtime_instance_async_log_consumer_control_operation::register_consumer ==
+        af::detail::RuntimeInstanceAsyncLogConsumerControlOperation::Register);
+    static_assert(
+        af::detail::runtime_instance_async_log_consumer_control_operation::unregister_consumer ==
+        af::detail::RuntimeInstanceAsyncLogConsumerControlOperation::Unregister);
 }
 
 [[nodiscard]] std::string read_file(const std::filesystem::path &path) {
@@ -432,7 +450,7 @@ public:
     ScopedRuntimeInstanceLogConsumer(af::runtime &runtime, std::shared_ptr<af::async_logger> logger,
                                      af::runtime::thread_index thread,
                                      std::size_t max_batches_per_run)
-        : controller_(std::make_unique<af::detail::RuntimeInstanceAsyncLogConsumerController>(
+        : controller_(std::make_unique<af::detail::runtime_instance_async_log_consumer_controller>(
               runtime, std::move(logger), thread, max_batches_per_run)) {}
 
     ScopedRuntimeInstanceLogConsumer(const ScopedRuntimeInstanceLogConsumer &) = delete;
@@ -454,7 +472,7 @@ public:
     }
 
 private:
-    std::unique_ptr<af::detail::RuntimeInstanceAsyncLogConsumerController> controller_;
+    std::unique_ptr<af::detail::runtime_instance_async_log_consumer_controller> controller_;
 };
 
 class LogTestRuntimeGuard {

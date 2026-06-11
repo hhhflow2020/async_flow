@@ -23,7 +23,7 @@ inline bool async_logger::flush(std::chrono::milliseconds timeout) noexcept {
 }
 
 inline bool
-async_logger::start_bound_consumer(detail::AsyncLogConsumerWakeTarget &target) noexcept {
+async_logger::start_bound_consumer(detail::async_log_consumer_wake_target &target) noexcept {
     bool expected = false;
     if (!started_.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
                                           std::memory_order_acquire)) {
@@ -232,7 +232,7 @@ inline void async_logger::shutdown_backends() noexcept {
 }
 
 inline void async_logger::notify_consumer() noexcept {
-    detail::AsyncLogConsumerWakeTarget *target =
+    detail::async_log_consumer_wake_target *target =
         consumer_wake_target_.load(std::memory_order_acquire);
     if (target != nullptr) {
         static_cast<void>(target->wake_async_log_consumer());

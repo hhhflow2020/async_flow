@@ -36,7 +36,7 @@ public:
     [[nodiscard]] std::chrono::milliseconds fatal_flush_timeout() const noexcept;
 
 private:
-    friend class detail::RuntimeInstanceAsyncLogConsumerController;
+    friend class detail::runtime_instance_async_log_consumer_controller;
     friend class RuntimeInstanceAbslAsyncLogSink;
 
     [[nodiscard]] bool try_log_from_runtime_thread(std::uint16_t thread_index,
@@ -45,7 +45,8 @@ private:
     template <typename Lane>
     [[nodiscard]] bool try_log_on_lane(Lane &lane, std::string_view message) noexcept;
 
-    [[nodiscard]] bool start_bound_consumer(detail::AsyncLogConsumerWakeTarget &target) noexcept;
+    [[nodiscard]] bool
+    start_bound_consumer(detail::async_log_consumer_wake_target &target) noexcept;
     void stop_bound_consumer_admission() noexcept;
     void finish_bound_consumer_shutdown() noexcept;
     [[nodiscard]] bool consumer_stop_requested() const noexcept;
@@ -165,7 +166,7 @@ private:
     alignas(detail::hardware_cache_line_size) std::atomic<bool> accepting_{false};
     alignas(detail::hardware_cache_line_size) std::atomic<bool> stopping_{false};
     alignas(detail::hardware_cache_line_size)
-        std::atomic<detail::AsyncLogConsumerWakeTarget *> consumer_wake_target_{nullptr};
+        std::atomic<detail::async_log_consumer_wake_target *> consumer_wake_target_{nullptr};
     alignas(detail::hardware_cache_line_size) std::atomic<std::size_t> next_ordered_producer_shard_{
         0};
     alignas(detail::hardware_cache_line_size) std::atomic<std::size_t> next_producer_shard_{0};

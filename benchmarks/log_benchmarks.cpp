@@ -59,8 +59,8 @@ void run_async_logger_external_producer_benchmark(benchmark::State &state,
     config.backends.push_back(std::move(backend));
 
     auto logger = std::make_shared<af::async_logger>(std::move(config));
-    af::detail::RuntimeInstanceAsyncLogConsumerController consumer(runtime, logger,
-                                                                   threads.io_0.index, 1024);
+    af::detail::runtime_instance_async_log_consumer_controller consumer(runtime, logger,
+                                                                        threads.io_0.index, 1024);
     if (!consumer.start()) {
         runtime.stop();
         state.SkipWithError("failed to start async log consumer");

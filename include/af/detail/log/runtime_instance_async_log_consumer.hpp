@@ -14,54 +14,59 @@
 
 namespace af::detail {
 
-enum class RuntimeInstanceAsyncLogConsumerControlOperation : std::uint8_t {
-    Register,
-    Unregister,
+enum class runtime_instance_async_log_consumer_control_operation : std::uint8_t {
+    register_consumer,
+    unregister_consumer,
+    Register = register_consumer,
+    Unregister = unregister_consumer,
 };
 
-struct RuntimeInstanceAsyncLogConsumerControlCompletion {
+struct runtime_instance_async_log_consumer_control_completion {
     std::atomic<bool> done{false};
     std::atomic<bool> ok{false};
 };
 
-class RuntimeInstanceAsyncLogConsumerController;
+class runtime_instance_async_log_consumer_controller;
 
-class RuntimeInstanceAsyncLogConsumerControlTask final : public runtime_task {
+class runtime_instance_async_log_consumer_control_task final : public runtime_task {
 public:
-    RuntimeInstanceAsyncLogConsumerControlTask(runtime_task::factory_token token, runtime &owner)
+    runtime_instance_async_log_consumer_control_task(runtime_task::factory_token token,
+                                                     runtime &owner)
         : runtime_task(token, owner) {}
 
-    [[nodiscard]] bool do_it(RuntimeInstanceAsyncLogConsumerController *controller,
-                             RuntimeInstanceAsyncLogConsumerControlOperation operation,
-                             RuntimeInstanceAsyncLogConsumerControlCompletion *completion) noexcept;
+    [[nodiscard]] bool
+    do_it(runtime_instance_async_log_consumer_controller *controller,
+          runtime_instance_async_log_consumer_control_operation operation,
+          runtime_instance_async_log_consumer_control_completion *completion) noexcept;
 
 private:
     task_result run_task() noexcept override;
 
-    RuntimeInstanceAsyncLogConsumerController *controller_{nullptr};
-    RuntimeInstanceAsyncLogConsumerControlOperation operation_{
-        RuntimeInstanceAsyncLogConsumerControlOperation::Register};
-    RuntimeInstanceAsyncLogConsumerControlCompletion *completion_{nullptr};
+    runtime_instance_async_log_consumer_controller *controller_{nullptr};
+    runtime_instance_async_log_consumer_control_operation operation_{
+        runtime_instance_async_log_consumer_control_operation::register_consumer};
+    runtime_instance_async_log_consumer_control_completion *completion_{nullptr};
 };
 
-class RuntimeInstanceAsyncLogConsumerController final : public RuntimeServiceTask,
-                                                        public AsyncLogConsumerWakeTarget,
-                                                        public AsyncLogConsumerController {
+class runtime_instance_async_log_consumer_controller final : public RuntimeServiceTask,
+                                                             public async_log_consumer_wake_target,
+                                                             public async_log_consumer_controller {
 public:
-    RuntimeInstanceAsyncLogConsumerController(runtime &owner, std::shared_ptr<async_logger> logger,
-                                              runtime::thread_index thread,
-                                              std::size_t max_batches_per_run)
+    runtime_instance_async_log_consumer_controller(runtime &owner,
+                                                   std::shared_ptr<async_logger> logger,
+                                                   runtime::thread_index thread,
+                                                   std::size_t max_batches_per_run)
         : owner_(owner), logger_(std::move(logger)), thread_(thread),
           max_batches_per_run_(max_batches_per_run == 0U ? 1U : max_batches_per_run) {
         AF_ASSERT(logger_ != nullptr);
     }
 
-    RuntimeInstanceAsyncLogConsumerController(const RuntimeInstanceAsyncLogConsumerController &) =
-        delete;
-    RuntimeInstanceAsyncLogConsumerController &
-    operator=(const RuntimeInstanceAsyncLogConsumerController &) = delete;
+    runtime_instance_async_log_consumer_controller(
+        const runtime_instance_async_log_consumer_controller &) = delete;
+    runtime_instance_async_log_consumer_controller &
+    operator=(const runtime_instance_async_log_consumer_controller &) = delete;
 
-    ~RuntimeInstanceAsyncLogConsumerController() override {
+    ~runtime_instance_async_log_consumer_controller() override {
         shutdown(std::chrono::seconds(5));
     }
 
@@ -75,7 +80,8 @@ public:
         if (!logger_->start_bound_consumer(*this)) {
             return false;
         }
-        if (!run_control_and_wait(RuntimeInstanceAsyncLogConsumerControlOperation::Register)) {
+        if (!run_control_and_wait(
+                runtime_instance_async_log_consumer_control_operation::register_consumer)) {
             logger_->stop_bound_consumer_admission();
             logger_->finish_bound_consumer_shutdown();
             return false;
@@ -129,8 +135,8 @@ public:
         drain_until_finished(deadline);
 
         if (registered_.load(std::memory_order_acquire)) {
-            static_cast<void>(
-                run_control_and_wait(RuntimeInstanceAsyncLogConsumerControlOperation::Unregister));
+            static_cast<void>(run_control_and_wait(
+                runtime_instance_async_log_consumer_control_operation::unregister_consumer));
         }
         logger_->finish_bound_consumer_shutdown();
     }
@@ -140,16 +146,16 @@ public:
     }
 
     [[nodiscard]] bool
-    run_control(RuntimeInstanceAsyncLogConsumerControlOperation operation) noexcept {
+    run_control(runtime_instance_async_log_consumer_control_operation operation) noexcept {
         switch (operation) {
-        case RuntimeInstanceAsyncLogConsumerControlOperation::Register: {
+        case runtime_instance_async_log_consumer_control_operation::register_consumer: {
             const bool ok = owner_.register_service_task(thread_, this);
             if (ok) {
                 registered_.store(true, std::memory_order_release);
             }
             return ok;
         }
-        case RuntimeInstanceAsyncLogConsumerControlOperation::Unregister: {
+        case runtime_instance_async_log_consumer_control_operation::unregister_consumer: {
             const bool ok = owner_.unregister_service_task(thread_, this);
             if (ok) {
                 registered_.store(false, std::memory_order_release);
@@ -210,17 +216,17 @@ private:
     }
 
     [[nodiscard]] bool
-    run_control_and_wait(RuntimeInstanceAsyncLogConsumerControlOperation operation) noexcept {
+    run_control_and_wait(runtime_instance_async_log_consumer_control_operation operation) noexcept {
         if (is_owner_runtime_thread()) {
             return run_control(operation);
         }
 
-        auto task = try_make_task<RuntimeInstanceAsyncLogConsumerControlTask>(owner_);
+        auto task = try_make_task<runtime_instance_async_log_consumer_control_task>(owner_);
         if (!task) {
             return false;
         }
 
-        RuntimeInstanceAsyncLogConsumerControlCompletion completion;
+        runtime_instance_async_log_consumer_control_completion completion;
         if (!task->do_it(this, operation, &completion)) {
             return false;
         }
@@ -251,10 +257,10 @@ private:
     CacheLineAtomic<bool> finished_{false};
 };
 
-inline bool RuntimeInstanceAsyncLogConsumerControlTask::do_it(
-    RuntimeInstanceAsyncLogConsumerController *controller,
-    RuntimeInstanceAsyncLogConsumerControlOperation operation,
-    RuntimeInstanceAsyncLogConsumerControlCompletion *completion) noexcept {
+inline bool runtime_instance_async_log_consumer_control_task::do_it(
+    runtime_instance_async_log_consumer_controller *controller,
+    runtime_instance_async_log_consumer_control_operation operation,
+    runtime_instance_async_log_consumer_control_completion *completion) noexcept {
     controller_ = controller;
     operation_ = operation;
     completion_ = completion;
@@ -264,7 +270,7 @@ inline bool RuntimeInstanceAsyncLogConsumerControlTask::do_it(
     return schedule_to(controller_->thread());
 }
 
-inline task_result RuntimeInstanceAsyncLogConsumerControlTask::run_task() noexcept {
+inline task_result runtime_instance_async_log_consumer_control_task::run_task() noexcept {
     bool ok = false;
     if (controller_ != nullptr) [[likely]] {
         ok = controller_->run_control(operation_);
@@ -275,5 +281,11 @@ inline task_result RuntimeInstanceAsyncLogConsumerControlTask::run_task() noexce
     }
     return done();
 }
+
+using RuntimeInstanceAsyncLogConsumerControlOperation =
+    runtime_instance_async_log_consumer_control_operation;
+using RuntimeInstanceAsyncLogConsumerControlCompletion =
+    runtime_instance_async_log_consumer_control_completion;
+using RuntimeInstanceAsyncLogConsumerControlTask = runtime_instance_async_log_consumer_control_task;
 
 } // namespace af::detail
