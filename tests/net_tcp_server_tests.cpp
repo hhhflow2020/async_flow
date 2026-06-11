@@ -322,14 +322,14 @@ void runtime_tcp_slot_reuse_accept(void *owner, af::net::tcp_connection_ref conn
     state->slots[array_index].store(conn.slot(), std::memory_order_relaxed);
     state->generations[array_index].store(conn.generation(), std::memory_order_relaxed);
     if (index == 1) {
-        const af::net::send_result result = state->handles[0].send(af::Buffer::copy("stale", 5));
+        const af::net::send_result result = state->handles[0].send(af::buffer::copy("stale", 5));
         state->stale_send_result.store(static_cast<int>(result), std::memory_order_release);
     }
     state->published[array_index].store(true, std::memory_order_release);
 }
 
 void runtime_tcp_connection_read(void *owner, af::net::tcp_connection_ref conn,
-                                 af::BufferView bytes) noexcept {
+                                 af::buffer_view bytes) noexcept {
     auto *state = static_cast<RuntimeTcpListenerState *>(owner);
     if (state != nullptr) {
         state->reads.fetch_add(1, std::memory_order_release);
@@ -338,7 +338,7 @@ void runtime_tcp_connection_read(void *owner, af::net::tcp_connection_ref conn,
 }
 
 void runtime_tcp_connection_record_read(void *owner, af::net::tcp_connection_ref conn,
-                                        af::BufferView bytes) noexcept {
+                                        af::buffer_view bytes) noexcept {
     auto *state = static_cast<RuntimeTcpListenerState *>(owner);
     if (state != nullptr) {
         state->reads.fetch_add(1, std::memory_order_release);
@@ -351,22 +351,22 @@ void runtime_tcp_connection_record_read(void *owner, af::net::tcp_connection_ref
 }
 
 void runtime_tcp_connection_read_and_close(void *owner, af::net::tcp_connection_ref conn,
-                                           af::BufferView bytes) noexcept {
+                                           af::buffer_view bytes) noexcept {
     static_cast<void>(owner);
     static_cast<void>(conn.send(bytes));
     conn.close_after_flush();
 }
 
 void runtime_tcp_connection_read_via_handle(void *owner, af::net::tcp_connection_ref conn,
-                                            af::BufferView bytes) noexcept {
+                                            af::buffer_view bytes) noexcept {
     auto *state = static_cast<RuntimeTcpListenerState *>(owner);
     if (state != nullptr) {
         state->reads.fetch_add(1, std::memory_order_release);
     }
 
-    af::Buffer payload;
+    af::buffer payload;
     try {
-        payload = af::Buffer::copy(bytes);
+        payload = af::buffer::copy(bytes);
     } catch (...) {
         if (state != nullptr) {
             state->handle_send_result.store(static_cast<int>(af::net::send_result::backpressure),
@@ -400,7 +400,7 @@ void runtime_tcp_connection_read_via_handle(void *owner, af::net::tcp_connection
 }
 
 void runtime_tcp_connection_owner_control_read(void *owner, af::net::tcp_connection_ref conn,
-                                               af::BufferView bytes) noexcept {
+                                               af::buffer_view bytes) noexcept {
     auto *state = static_cast<RuntimeTcpListenerState *>(owner);
     if (state != nullptr) {
         state->reads.fetch_add(1, std::memory_order_release);
@@ -423,7 +423,7 @@ void runtime_tcp_connection_owner_control_read(void *owner, af::net::tcp_connect
 }
 
 void runtime_tcp_connection_pause_after_first_read(void *owner, af::net::tcp_connection_ref conn,
-                                                   af::BufferView bytes) noexcept {
+                                                   af::buffer_view bytes) noexcept {
     auto *state = static_cast<RuntimeTcpListenerState *>(owner);
     if (state != nullptr) {
         const int previous = state->reads.fetch_add(1, std::memory_order_release);
@@ -475,7 +475,7 @@ void runtime_tcp_fill_send_queue_on_accept(void *owner, af::net::tcp_connection_
     state->accepted.store(true, std::memory_order_release);
     af::net::send_result last_result = af::net::send_result::accepted;
     for (int i = 0; i < 4096; ++i) {
-        last_result = conn.send(af::BufferView(state->payload.data(), state->payload.size()));
+        last_result = conn.send(af::buffer_view(state->payload.data(), state->payload.size()));
         if (last_result == af::net::send_result::backpressure ||
             last_result == af::net::send_result::closed) {
             break;
@@ -1149,7 +1149,7 @@ TEST(NetTcpServerTests, RuntimeTcpConnectionHandleReportsClosedAfterServerStop) 
     ASSERT_TRUE(wait_until([&] { return state.stopped.load(std::memory_order_acquire); }));
     EXPECT_TRUE(state.stop_ok.load(std::memory_order_acquire));
     EXPECT_TRUE(wait_until([&] { return state.closes.load(std::memory_order_acquire) >= 1; }));
-    EXPECT_EQ(state.handle.send(af::Buffer::copy("after-stop", 10)), af::net::send_result::closed);
+    EXPECT_EQ(state.handle.send(af::buffer::copy("after-stop", 10)), af::net::send_result::closed);
 
     runtime.stop();
 }

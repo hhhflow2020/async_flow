@@ -19,7 +19,7 @@ class tcp_connection_ref;
 
 using tcp_connection_accept_callback = void (*)(void *owner, tcp_connection_ref conn) noexcept;
 using tcp_connection_read_callback = void (*)(void *owner, tcp_connection_ref conn,
-                                              af::BufferView bytes) noexcept;
+                                              af::buffer_view bytes) noexcept;
 using tcp_connection_close_callback = void (*)(void *owner, tcp_connection_ref conn,
                                                close_reason reason) noexcept;
 
@@ -37,10 +37,10 @@ public:
     [[nodiscard]] virtual af::runtime &runtime_owner() noexcept = 0;
     [[nodiscard]] virtual send_result send_to_connection(std::uint32_t slot,
                                                          std::uint32_t generation,
-                                                         af::Buffer buffer) noexcept = 0;
+                                                         af::buffer buffer) noexcept = 0;
     [[nodiscard]] virtual send_result send_to_connection(std::uint32_t slot,
                                                          std::uint32_t generation,
-                                                         af::BufferView view) noexcept = 0;
+                                                         af::buffer_view view) noexcept = 0;
     [[nodiscard]] virtual bool pause_connection_read(std::uint32_t slot,
                                                      std::uint32_t generation) noexcept = 0;
     [[nodiscard]] virtual bool resume_connection_read(std::uint32_t slot,
@@ -96,8 +96,8 @@ public:
         return generation_;
     }
 
-    [[nodiscard]] send_result send(af::Buffer buffer) const noexcept;
-    [[nodiscard]] send_result send(af::BufferView view) const noexcept;
+    [[nodiscard]] send_result send(af::buffer buffer) const noexcept;
+    [[nodiscard]] send_result send(af::buffer_view view) const noexcept;
     [[nodiscard]] bool pause_read() const noexcept;
     [[nodiscard]] bool resume_read() const noexcept;
     [[nodiscard]] bool set_no_delay(bool enabled) const noexcept;
@@ -145,8 +145,8 @@ public:
     [[nodiscard]] const tcp_endpoint &local_endpoint() const noexcept;
     [[nodiscard]] const tcp_endpoint &peer_endpoint() const noexcept;
     [[nodiscard]] std::size_t queued_bytes() const noexcept;
-    [[nodiscard]] send_result send(af::Buffer buffer) const noexcept;
-    [[nodiscard]] send_result send(af::BufferView view) const noexcept;
+    [[nodiscard]] send_result send(af::buffer buffer) const noexcept;
+    [[nodiscard]] send_result send(af::buffer_view view) const noexcept;
     [[nodiscard]] bool pause_read() const noexcept;
     [[nodiscard]] bool resume_read() const noexcept;
     [[nodiscard]] bool set_no_delay(bool enabled) const noexcept;

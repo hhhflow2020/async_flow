@@ -64,35 +64,35 @@ struct runtime_udp_shard {
         return udp_socket_handle(state, owner_thread, generation());
     }
 
-    [[nodiscard]] udp_send_result send(af::Buffer buffer) noexcept {
+    [[nodiscard]] udp_send_result send(af::buffer buffer) noexcept {
         if (!connect_remote) {
             return udp_send_result::unsupported;
         }
         return send_impl(buffer.view(), nullptr);
     }
 
-    [[nodiscard]] udp_send_result send(af::BufferView view) noexcept {
+    [[nodiscard]] udp_send_result send(af::buffer_view view) noexcept {
         if (!connect_remote) {
             return udp_send_result::unsupported;
         }
         return send_impl(view, nullptr);
     }
 
-    [[nodiscard]] udp_send_result send_to(af::Buffer buffer,
+    [[nodiscard]] udp_send_result send_to(af::buffer buffer,
                                           const af::detail::SocketAddress &address) noexcept {
         return send_impl(buffer.view(), &address);
     }
 
-    [[nodiscard]] udp_send_result send_to(af::BufferView view,
+    [[nodiscard]] udp_send_result send_to(af::buffer_view view,
                                           const af::detail::SocketAddress &address) noexcept {
         return send_impl(view, &address);
     }
 
-    [[nodiscard]] udp_send_result send_to(af::Buffer buffer, const udp_peer &peer) noexcept {
+    [[nodiscard]] udp_send_result send_to(af::buffer buffer, const udp_peer &peer) noexcept {
         return send_to(std::move(buffer), peer.socket_address());
     }
 
-    [[nodiscard]] udp_send_result send_to(af::BufferView view, const udp_peer &peer) noexcept {
+    [[nodiscard]] udp_send_result send_to(af::buffer_view view, const udp_peer &peer) noexcept {
         return send_to(view, peer.socket_address());
     }
 
@@ -157,7 +157,7 @@ struct runtime_udp_shard {
                 udp_peer peer(reinterpret_cast<const sockaddr *>(&peer_storage),
                               message.msg_namelen);
                 callbacks.on_datagram(callbacks.owner, udp_socket_ref(this),
-                                      af::BufferView(read_buffer.data(), size), peer);
+                                      af::buffer_view(read_buffer.data(), size), peer);
                 continue;
             }
 
@@ -173,7 +173,7 @@ struct runtime_udp_shard {
         }
     }
 
-    [[nodiscard]] udp_send_result send_impl(af::BufferView view,
+    [[nodiscard]] udp_send_result send_impl(af::buffer_view view,
                                             const af::detail::SocketAddress *address) noexcept {
         if (fd < 0 || !active()) {
             return udp_send_result::closed;

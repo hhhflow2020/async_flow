@@ -9,14 +9,14 @@
 TEST(NetBufferTests, BufferCopyKeepsPayload) {
     const std::array<std::byte, 4> input{std::byte{'a'}, std::byte{'b'}, std::byte{'c'},
                                          std::byte{'d'}};
-    af::Buffer buffer = af::Buffer::copy(input.data(), input.size());
+    af::buffer buffer = af::buffer::copy(input.data(), input.size());
 
     ASSERT_EQ(buffer.size(), input.size());
     EXPECT_EQ(std::memcmp(buffer.data(), input.data(), input.size()), 0);
 }
 
 TEST(NetBufferTests, BufferWithCapacityTracksHeadroomAndTailroom) {
-    af::Buffer buffer = af::Buffer::with_capacity(16, 4);
+    af::buffer buffer = af::buffer::with_capacity(16, 4);
 
     EXPECT_TRUE(buffer.empty());
     EXPECT_EQ(buffer.capacity(), 16U);
@@ -25,7 +25,7 @@ TEST(NetBufferTests, BufferWithCapacityTracksHeadroomAndTailroom) {
 }
 
 TEST(NetBufferTests, BufferTryAppendUsesExistingTailroom) {
-    af::Buffer buffer = af::Buffer::with_capacity(8, 2);
+    af::buffer buffer = af::buffer::with_capacity(8, 2);
 
     ASSERT_TRUE(buffer.try_append("abc", 3));
     EXPECT_EQ(buffer.size(), 3U);
@@ -35,7 +35,7 @@ TEST(NetBufferTests, BufferTryAppendUsesExistingTailroom) {
 }
 
 TEST(NetBufferTests, BufferTryAppendRejectsOverflowWithoutChangingSize) {
-    af::Buffer buffer = af::Buffer::with_capacity(4);
+    af::buffer buffer = af::buffer::with_capacity(4);
 
     ASSERT_TRUE(buffer.try_append("abc", 3));
     EXPECT_FALSE(buffer.try_append("de", 2));
@@ -45,7 +45,7 @@ TEST(NetBufferTests, BufferTryAppendRejectsOverflowWithoutChangingSize) {
 }
 
 TEST(NetBufferTests, BufferAppendUninitializedReturnsWritableTail) {
-    af::Buffer buffer = af::Buffer::with_capacity(8);
+    af::buffer buffer = af::buffer::with_capacity(8);
 
     std::byte *tail = buffer.try_append_uninitialized_data(4);
     ASSERT_NE(tail, nullptr);
@@ -58,7 +58,7 @@ TEST(NetBufferTests, BufferAppendUninitializedReturnsWritableTail) {
 
 TEST(NetBufferTests, RemovePrefixAdvancesView) {
     const char *payload = "abcdef";
-    af::Buffer buffer = af::Buffer::copy(payload, 6);
+    af::buffer buffer = af::buffer::copy(payload, 6);
 
     buffer.remove_prefix(2);
 
@@ -67,7 +67,7 @@ TEST(NetBufferTests, RemovePrefixAdvancesView) {
 }
 
 TEST(NetBufferTests, RemoveSuffixTrimsView) {
-    af::Buffer buffer = af::Buffer::copy("abcdef", 6);
+    af::buffer buffer = af::buffer::copy("abcdef", 6);
 
     buffer.remove_suffix(2);
 
@@ -76,8 +76,8 @@ TEST(NetBufferTests, RemoveSuffixTrimsView) {
 }
 
 TEST(NetBufferTests, BufferSliceSharesStorageWithoutCopying) {
-    af::Buffer buffer = af::Buffer::copy("abcdef", 6);
-    af::Buffer slice = buffer.slice(2, 3);
+    af::buffer buffer = af::buffer::copy("abcdef", 6);
+    af::buffer slice = buffer.slice(2, 3);
 
     ASSERT_EQ(slice.size(), 3U);
     EXPECT_EQ(slice.view().string_view(), "cde");
@@ -88,9 +88,9 @@ TEST(NetBufferTests, BufferSliceSharesStorageWithoutCopying) {
 }
 
 TEST(NetBufferTests, BufferChainTracksTotalBytes) {
-    af::BufferChain chain;
-    chain.push_back(af::Buffer::copy("ab", 2));
-    chain.push_back(af::Buffer::copy("cde", 3));
+    af::buffer_chain chain;
+    chain.push_back(af::buffer::copy("ab", 2));
+    chain.push_back(af::buffer::copy("cde", 3));
 
     EXPECT_FALSE(chain.empty());
     EXPECT_EQ(chain.size(), 5U);
@@ -98,10 +98,10 @@ TEST(NetBufferTests, BufferChainTracksTotalBytes) {
 }
 
 TEST(NetBufferTests, BufferChainRemovePrefixConsumesAcrossBuffers) {
-    af::BufferChain chain;
-    chain.push_back(af::Buffer::copy("ab", 2));
-    chain.push_back(af::Buffer::copy("cde", 3));
-    chain.push_back(af::Buffer::copy("fg", 2));
+    af::buffer_chain chain;
+    chain.push_back(af::buffer::copy("ab", 2));
+    chain.push_back(af::buffer::copy("cde", 3));
+    chain.push_back(af::buffer::copy("fg", 2));
 
     chain.remove_prefix(4);
 
@@ -112,10 +112,10 @@ TEST(NetBufferTests, BufferChainRemovePrefixConsumesAcrossBuffers) {
 }
 
 TEST(NetBufferTests, BufferChainPopFrontKeepsOnlyActiveBuffersVisible) {
-    af::BufferChain chain;
-    chain.push_back(af::Buffer::copy("ab", 2));
-    chain.push_back(af::Buffer::copy("cd", 2));
-    chain.push_back(af::Buffer::copy("ef", 2));
+    af::buffer_chain chain;
+    chain.push_back(af::buffer::copy("ab", 2));
+    chain.push_back(af::buffer::copy("cd", 2));
+    chain.push_back(af::buffer::copy("ef", 2));
 
     chain.pop_front();
 
@@ -126,21 +126,21 @@ TEST(NetBufferTests, BufferChainPopFrontKeepsOnlyActiveBuffersVisible) {
 }
 
 TEST(NetBufferTests, BufferChainRecomputesSizeAfterMutableBufferAccess) {
-    af::BufferChain chain;
-    chain.push_back(af::Buffer::copy("ab", 2));
+    af::buffer_chain chain;
+    chain.push_back(af::buffer::copy("ab", 2));
 
-    chain.buffers().push_back(af::Buffer::copy("cde", 3));
+    chain.buffers().push_back(af::buffer::copy("cde", 3));
 
     EXPECT_EQ(chain.size(), 5U);
 }
 
 TEST(NetBufferTests, BufferChainFillsScatterGatherViews) {
-    af::BufferChain chain;
-    chain.push_back(af::Buffer::copy("ab", 2));
-    chain.push_back(af::Buffer::copy("cde", 3));
-    chain.push_back(af::Buffer::copy("fg", 2));
+    af::buffer_chain chain;
+    chain.push_back(af::buffer::copy("ab", 2));
+    chain.push_back(af::buffer::copy("cde", 3));
+    chain.push_back(af::buffer::copy("fg", 2));
 
-    std::array<af::BufferView, 2> views{};
+    std::array<af::buffer_view, 2> views{};
     const std::size_t count = chain.fill_views(views);
 
     ASSERT_EQ(count, 2U);
@@ -150,14 +150,14 @@ TEST(NetBufferTests, BufferChainFillsScatterGatherViews) {
 }
 
 TEST(NetBufferTests, BufferChainFillViewsStartsAtActivePrefix) {
-    af::BufferChain chain;
-    chain.push_back(af::Buffer::copy("ab", 2));
-    chain.push_back(af::Buffer::copy("cd", 2));
-    chain.push_back(af::Buffer::copy("ef", 2));
+    af::buffer_chain chain;
+    chain.push_back(af::buffer::copy("ab", 2));
+    chain.push_back(af::buffer::copy("cd", 2));
+    chain.push_back(af::buffer::copy("ef", 2));
 
     chain.pop_front();
 
-    std::array<af::BufferView, 4> views{};
+    std::array<af::buffer_view, 4> views{};
     const std::size_t count = chain.fill_views(views);
 
     ASSERT_EQ(count, 2U);

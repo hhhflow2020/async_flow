@@ -2,7 +2,7 @@
 
 namespace af::net {
 
-inline send_result tcp_connection_handle::send(af::Buffer buffer) const noexcept {
+inline send_result tcp_connection_handle::send(af::buffer buffer) const noexcept {
     auto state = state_.lock();
     if (state == nullptr) {
         return send_result::closed;
@@ -40,7 +40,7 @@ inline send_result tcp_connection_handle::send(af::Buffer buffer) const noexcept
     }
 }
 
-inline send_result tcp_connection_handle::send(af::BufferView view) const noexcept {
+inline send_result tcp_connection_handle::send(af::buffer_view view) const noexcept {
     auto state = state_.lock();
     if (state == nullptr) {
         return send_result::closed;
@@ -57,7 +57,7 @@ inline send_result tcp_connection_handle::send(af::BufferView view) const noexce
         return send_result::closed;
     }
     try {
-        af::Buffer buffer = af::Buffer::copy(view);
+        af::buffer buffer = af::buffer::copy(view);
         return send(std::move(buffer));
     } catch (...) {
         return send_result::backpressure;

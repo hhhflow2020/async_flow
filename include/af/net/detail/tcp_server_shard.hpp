@@ -671,7 +671,7 @@ private:
     }
 
     [[nodiscard]] send_result send_to_connection(std::uint32_t slot, std::uint32_t generation,
-                                                 af::Buffer buffer) noexcept override {
+                                                 af::buffer buffer) noexcept override {
         connection_entry *entry = find_connection_entry(slot, generation);
         if (entry == nullptr) {
             return send_result::closed;
@@ -685,7 +685,7 @@ private:
     }
 
     [[nodiscard]] send_result send_to_connection(std::uint32_t slot, std::uint32_t generation,
-                                                 af::BufferView view) noexcept override {
+                                                 af::buffer_view view) noexcept override {
         connection_entry *entry = find_connection_entry(slot, generation);
         if (entry == nullptr) {
             return send_result::closed;

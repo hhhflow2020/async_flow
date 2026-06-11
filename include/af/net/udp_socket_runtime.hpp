@@ -20,7 +20,7 @@ class udp_socket;
 class udp_socket_handle;
 class udp_socket_ref;
 
-using udp_datagram_callback = void (*)(void *owner, udp_socket_ref socket, af::BufferView bytes,
+using udp_datagram_callback = void (*)(void *owner, udp_socket_ref socket, af::buffer_view bytes,
                                        const udp_peer &peer) noexcept;
 using udp_error_callback = void (*)(void *owner, udp_socket_handle socket, int error) noexcept;
 
@@ -69,13 +69,14 @@ public:
         return generation_;
     }
 
-    [[nodiscard]] udp_send_result send(af::Buffer buffer) const noexcept;
-    [[nodiscard]] udp_send_result send(af::BufferView view) const noexcept;
-    [[nodiscard]] udp_send_result send_to(af::Buffer buffer, udp_endpoint endpoint) const noexcept;
-    [[nodiscard]] udp_send_result send_to(af::BufferView view,
+    [[nodiscard]] udp_send_result send(af::buffer buffer) const noexcept;
+    [[nodiscard]] udp_send_result send(af::buffer_view view) const noexcept;
+    [[nodiscard]] udp_send_result send_to(af::buffer buffer, udp_endpoint endpoint) const noexcept;
+    [[nodiscard]] udp_send_result send_to(af::buffer_view view,
                                           udp_endpoint endpoint) const noexcept;
-    [[nodiscard]] udp_send_result send_to(af::Buffer buffer, const udp_peer &peer) const noexcept;
-    [[nodiscard]] udp_send_result send_to(af::BufferView view, const udp_peer &peer) const noexcept;
+    [[nodiscard]] udp_send_result send_to(af::buffer buffer, const udp_peer &peer) const noexcept;
+    [[nodiscard]] udp_send_result send_to(af::buffer_view view,
+                                          const udp_peer &peer) const noexcept;
 
 private:
     friend class udp_socket;
@@ -101,13 +102,14 @@ public:
     [[nodiscard]] udp_socket_handle handle() const noexcept;
     [[nodiscard]] af::thread_ref owner_thread() const noexcept;
     [[nodiscard]] const udp_endpoint &local_endpoint() const noexcept;
-    [[nodiscard]] udp_send_result send(af::Buffer buffer) const noexcept;
-    [[nodiscard]] udp_send_result send(af::BufferView view) const noexcept;
-    [[nodiscard]] udp_send_result send_to(af::Buffer buffer, udp_endpoint endpoint) const noexcept;
-    [[nodiscard]] udp_send_result send_to(af::BufferView view,
+    [[nodiscard]] udp_send_result send(af::buffer buffer) const noexcept;
+    [[nodiscard]] udp_send_result send(af::buffer_view view) const noexcept;
+    [[nodiscard]] udp_send_result send_to(af::buffer buffer, udp_endpoint endpoint) const noexcept;
+    [[nodiscard]] udp_send_result send_to(af::buffer_view view,
                                           udp_endpoint endpoint) const noexcept;
-    [[nodiscard]] udp_send_result send_to(af::Buffer buffer, const udp_peer &peer) const noexcept;
-    [[nodiscard]] udp_send_result send_to(af::BufferView view, const udp_peer &peer) const noexcept;
+    [[nodiscard]] udp_send_result send_to(af::buffer buffer, const udp_peer &peer) const noexcept;
+    [[nodiscard]] udp_send_result send_to(af::buffer_view view,
+                                          const udp_peer &peer) const noexcept;
 
 private:
     detail::runtime_udp_shard *shard_{nullptr};
@@ -147,14 +149,14 @@ private:
     void stop_shard_on_owner(detail::runtime_udp_shard &shard) noexcept;
 
     [[nodiscard]] udp_send_result send_on_owner(af::thread_ref thread, std::uint32_t generation,
-                                                af::Buffer buffer) noexcept;
+                                                af::buffer buffer) noexcept;
     [[nodiscard]] udp_send_result send_on_owner(af::thread_ref thread, std::uint32_t generation,
-                                                af::BufferView view) noexcept;
+                                                af::buffer_view view) noexcept;
     [[nodiscard]] udp_send_result
-    send_to_on_owner(af::thread_ref thread, std::uint32_t generation, af::Buffer buffer,
+    send_to_on_owner(af::thread_ref thread, std::uint32_t generation, af::buffer buffer,
                      const af::detail::SocketAddress &address) noexcept;
     [[nodiscard]] udp_send_result
-    send_to_on_owner(af::thread_ref thread, std::uint32_t generation, af::BufferView view,
+    send_to_on_owner(af::thread_ref thread, std::uint32_t generation, af::buffer_view view,
                      const af::detail::SocketAddress &address) noexcept;
 
     [[nodiscard]] std::shared_ptr<detail::runtime_udp_shard>

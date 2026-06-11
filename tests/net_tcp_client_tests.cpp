@@ -136,7 +136,7 @@ void runtime_tcp_client_server_accept(void *owner, af::net::tcp_connection_ref c
 }
 
 void runtime_tcp_client_server_read(void *owner, af::net::tcp_connection_ref conn,
-                                    af::BufferView bytes) noexcept {
+                                    af::buffer_view bytes) noexcept {
     auto *state = static_cast<RuntimeTcpClientServerState *>(owner);
     if (state != nullptr) {
         state->reads.fetch_add(1, std::memory_order_release);
@@ -162,12 +162,12 @@ void runtime_tcp_client_connect(void *owner, af::net::tcp_connection_ref conn) n
     state->handle = conn.handle();
     state->connected.store(true, std::memory_order_release);
     if (state->send_on_connect) {
-        static_cast<void>(conn.send(af::Buffer::copy("hello", 5)));
+        static_cast<void>(conn.send(af::buffer::copy("hello", 5)));
     }
 }
 
 void runtime_tcp_client_read(void *owner, af::net::tcp_connection_ref conn,
-                             af::BufferView bytes) noexcept {
+                             af::buffer_view bytes) noexcept {
     static_cast<void>(conn);
     auto *state = static_cast<RuntimeTcpClientState *>(owner);
     if (state == nullptr) {
@@ -513,7 +513,7 @@ TEST(NetTcpClientTests, RuntimeTcpClientHandleSendsFromExternalThread) {
     ASSERT_TRUE(client_state.connect_ok.load(std::memory_order_acquire));
     ASSERT_TRUE(wait_until([&] { return client_state.connected.load(std::memory_order_acquire); }));
 
-    EXPECT_EQ(client_state.handle.send(af::Buffer::copy("queued", 6)),
+    EXPECT_EQ(client_state.handle.send(af::buffer::copy("queued", 6)),
               af::net::send_result::queued);
     ASSERT_TRUE(
         wait_until([&] { return client_state.size.load(std::memory_order_acquire) == 6U; }));
@@ -763,7 +763,7 @@ TEST(NetTcpClientTests, ExternalHandleSendIsQueuedToOwnerIoThread) {
         "tcp-client-external-send"));
 
     ASSERT_TRUE(wait_until([&] { return client_state.connected.load(std::memory_order_acquire); }));
-    EXPECT_EQ(client_state.handle.send(af::Buffer::copy("queued", 6)),
+    EXPECT_EQ(client_state.handle.send(af::buffer::copy("queued", 6)),
               af::net::send_result::queued);
     ASSERT_TRUE(
         wait_until([&] { return client_state.size.load(std::memory_order_acquire) == 6U; }));
@@ -797,7 +797,7 @@ TEST(NetTcpClientTests, StopRejectsWritesFromOldHandles) {
 
     ASSERT_TRUE(wait_until([&] { return client_state.connected.load(std::memory_order_acquire); }));
     EXPECT_TRUE(stop_runtime_tcp_client(runtime, io_thread, client, client_state));
-    EXPECT_EQ(client_state.handle.send(af::Buffer::copy("late", 4)), af::net::send_result::closed);
+    EXPECT_EQ(client_state.handle.send(af::buffer::copy("late", 4)), af::net::send_result::closed);
 
     EXPECT_TRUE(stop_runtime_tcp_server(runtime, io_thread, server, server_state));
     runtime.stop();

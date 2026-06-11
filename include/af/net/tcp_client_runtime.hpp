@@ -19,7 +19,7 @@ namespace af::net {
 
 using tcp_client_connect_callback = void (*)(void *owner, tcp_connection_ref conn) noexcept;
 using tcp_client_read_callback = void (*)(void *owner, tcp_connection_ref conn,
-                                          af::BufferView bytes) noexcept;
+                                          af::buffer_view bytes) noexcept;
 using tcp_client_close_callback = void (*)(void *owner, tcp_connection_ref conn,
                                            close_reason reason) noexcept;
 using tcp_client_error_callback = void (*)(void *owner, int error) noexcept;
@@ -75,9 +75,9 @@ private:
 
     [[nodiscard]] af::runtime &runtime_owner() noexcept override;
     [[nodiscard]] send_result send_to_connection(std::uint32_t slot, std::uint32_t generation,
-                                                 af::Buffer buffer) noexcept override;
+                                                 af::buffer buffer) noexcept override;
     [[nodiscard]] send_result send_to_connection(std::uint32_t slot, std::uint32_t generation,
-                                                 af::BufferView view) noexcept override;
+                                                 af::buffer_view view) noexcept override;
     [[nodiscard]] bool pause_connection_read(std::uint32_t slot,
                                              std::uint32_t generation) noexcept override;
     [[nodiscard]] bool resume_connection_read(std::uint32_t slot,

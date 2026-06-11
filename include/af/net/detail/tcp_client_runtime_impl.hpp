@@ -587,7 +587,7 @@ inline tcp_connection *tcp_client::find_connection(std::uint32_t slot,
 }
 
 inline send_result tcp_client::send_to_connection(std::uint32_t slot, std::uint32_t generation,
-                                                  af::Buffer buffer) noexcept {
+                                                  af::buffer buffer) noexcept {
     connection_entry *entry = find_connection_entry(slot, generation);
     if (entry == nullptr) {
         return send_result::closed;
@@ -601,7 +601,7 @@ inline send_result tcp_client::send_to_connection(std::uint32_t slot, std::uint3
 }
 
 inline send_result tcp_client::send_to_connection(std::uint32_t slot, std::uint32_t generation,
-                                                  af::BufferView view) noexcept {
+                                                  af::buffer_view view) noexcept {
     connection_entry *entry = find_connection_entry(slot, generation);
     if (entry == nullptr) {
         return send_result::closed;

@@ -12,11 +12,11 @@
 
 namespace af {
 
-class BufferView {
+class buffer_view {
 public:
-    constexpr BufferView() noexcept = default;
+    constexpr buffer_view() noexcept = default;
 
-    constexpr BufferView(const void *data, std::size_t size) noexcept
+    constexpr buffer_view(const void *data, std::size_t size) noexcept
         : data_(static_cast<const std::byte *>(data)), size_(size) {}
 
     [[nodiscard]] constexpr const std::byte *data() const noexcept {
@@ -44,32 +44,32 @@ private:
     std::size_t size_{0};
 };
 
-class Buffer {
+class buffer {
 public:
     static constexpr std::size_t npos = static_cast<std::size_t>(-1);
 
-    Buffer() = default;
+    buffer() = default;
 
-    explicit Buffer(std::size_t size)
+    explicit buffer(std::size_t size)
         : storage_(std::make_shared<std::vector<std::byte>>(size)), size_(size) {}
 
-    [[nodiscard]] static Buffer with_capacity(std::size_t capacity, std::size_t headroom = 0U) {
+    [[nodiscard]] static buffer with_capacity(std::size_t capacity, std::size_t headroom = 0U) {
         if (headroom > capacity) {
             headroom = capacity;
         }
-        return Buffer(std::make_shared<std::vector<std::byte>>(capacity), headroom, 0U);
+        return buffer(std::make_shared<std::vector<std::byte>>(capacity), headroom, 0U);
     }
 
-    [[nodiscard]] static Buffer copy(BufferView view) {
-        Buffer buffer(view.size());
+    [[nodiscard]] static buffer copy(buffer_view view) {
+        buffer result(view.size());
         if (!view.empty()) {
-            std::memcpy(buffer.mutable_data(), view.data(), view.size());
+            std::memcpy(result.mutable_data(), view.data(), view.size());
         }
-        return buffer;
+        return result;
     }
 
-    [[nodiscard]] static Buffer copy(const void *data, std::size_t size) {
-        return copy(BufferView(data, size));
+    [[nodiscard]] static buffer copy(const void *data, std::size_t size) {
+        return copy(buffer_view(data, size));
     }
 
     [[nodiscard]] std::byte *mutable_data() noexcept {
@@ -96,7 +96,7 @@ public:
         return size_ == 0U;
     }
 
-    [[nodiscard]] BufferView view() const noexcept {
+    [[nodiscard]] buffer_view view() const noexcept {
         return {data(), size_};
     }
 
@@ -129,7 +129,7 @@ public:
         return try_append_uninitialized(count) ? tail : nullptr;
     }
 
-    [[nodiscard]] bool try_append(BufferView view) noexcept {
+    [[nodiscard]] bool try_append(buffer_view view) noexcept {
         if (view.size() > tailroom()) {
             return false;
         }
@@ -141,16 +141,16 @@ public:
     }
 
     [[nodiscard]] bool try_append(const void *data, std::size_t size) noexcept {
-        return try_append(BufferView(data, size));
+        return try_append(buffer_view(data, size));
     }
 
-    [[nodiscard]] Buffer slice(std::size_t offset, std::size_t count = npos) const noexcept {
+    [[nodiscard]] buffer slice(std::size_t offset, std::size_t count = npos) const noexcept {
         if (storage_ == nullptr || offset > size_) {
             return {};
         }
         const std::size_t available = size_ - offset;
         const std::size_t slice_size = count == npos || count > available ? available : count;
-        return Buffer(storage_, offset_ + offset, slice_size);
+        return buffer(storage_, offset_ + offset, slice_size);
     }
 
     void remove_prefix(std::size_t count) noexcept {
@@ -172,7 +172,7 @@ public:
     }
 
 private:
-    Buffer(std::shared_ptr<std::vector<std::byte>> storage, std::size_t offset,
+    buffer(std::shared_ptr<std::vector<std::byte>> storage, std::size_t offset,
            std::size_t size) noexcept
         : storage_(std::move(storage)), offset_(offset), size_(size) {}
 
@@ -181,14 +181,14 @@ private:
     std::size_t size_{0};
 };
 
-class BufferChain {
+class buffer_chain {
 public:
-    void push_back(Buffer buffer) {
-        if (!buffer.empty()) {
+    void push_back(buffer buf) {
+        if (!buf.empty()) {
             if (!total_dirty_) {
-                total_bytes_ += buffer.size();
+                total_bytes_ += buf.size();
             }
-            buffers_.push_back(std::move(buffer));
+            buffers_.push_back(std::move(buf));
         }
     }
 
@@ -221,7 +221,7 @@ public:
     void remove_prefix(std::size_t count) noexcept {
         ensure_total_clean();
         while (count != 0U && !empty()) {
-            Buffer &front = buffers_[first_];
+            buffer &front = buffers_[first_];
             const std::size_t consumed = count < front.size() ? count : front.size();
             front.remove_prefix(consumed);
             total_bytes_ -= consumed;
@@ -233,18 +233,18 @@ public:
         }
     }
 
-    [[nodiscard]] std::vector<Buffer> &buffers() noexcept {
+    [[nodiscard]] std::vector<buffer> &buffers() noexcept {
         compact_front();
         total_dirty_ = true;
         return buffers_;
     }
 
-    [[nodiscard]] const std::vector<Buffer> &buffers() const noexcept {
+    [[nodiscard]] const std::vector<buffer> &buffers() const noexcept {
         compact_front();
         return buffers_;
     }
 
-    [[nodiscard]] std::size_t fill_views(af::Span<BufferView> views) const noexcept {
+    [[nodiscard]] std::size_t fill_views(af::Span<buffer_view> views) const noexcept {
         std::size_t count = 0;
         for (std::size_t i = first_; i < buffers_.size() && count < views.size(); ++i) {
             if (buffers_[i].empty()) {
@@ -263,8 +263,8 @@ private:
         }
         std::size_t total = 0;
         for (std::size_t i = first_; i < buffers_.size(); ++i) {
-            const Buffer &buffer = buffers_[i];
-            total += buffer.size();
+            const buffer &buf = buffers_[i];
+            total += buf.size();
         }
         total_bytes_ = total;
         total_dirty_ = false;
@@ -294,14 +294,14 @@ private:
         first_ = 0;
     }
 
-    mutable std::vector<Buffer> buffers_;
+    mutable std::vector<buffer> buffers_;
     mutable std::size_t first_{0};
     mutable std::size_t total_bytes_{0};
     mutable bool total_dirty_{false};
 };
 
-using buffer_view = BufferView;
-using buffer = Buffer;
-using buffer_chain = BufferChain;
+using BufferView = buffer_view;
+using Buffer = buffer;
+using BufferChain = buffer_chain;
 
 } // namespace af

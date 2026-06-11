@@ -203,7 +203,7 @@ udp_socket::shard_for_thread(af::thread_ref thread) const noexcept {
 }
 
 inline udp_send_result udp_socket::send_on_owner(af::thread_ref thread, std::uint32_t generation,
-                                                 af::Buffer buffer) noexcept {
+                                                 af::buffer buffer) noexcept {
     auto shard = shard_for_thread(thread);
     if (shard == nullptr || !shard->matches_generation(generation)) {
         return udp_send_result::closed;
@@ -212,7 +212,7 @@ inline udp_send_result udp_socket::send_on_owner(af::thread_ref thread, std::uin
 }
 
 inline udp_send_result udp_socket::send_on_owner(af::thread_ref thread, std::uint32_t generation,
-                                                 af::BufferView view) noexcept {
+                                                 af::buffer_view view) noexcept {
     auto shard = shard_for_thread(thread);
     if (shard == nullptr || !shard->matches_generation(generation)) {
         return udp_send_result::closed;
@@ -221,7 +221,7 @@ inline udp_send_result udp_socket::send_on_owner(af::thread_ref thread, std::uin
 }
 
 inline udp_send_result
-udp_socket::send_to_on_owner(af::thread_ref thread, std::uint32_t generation, af::Buffer buffer,
+udp_socket::send_to_on_owner(af::thread_ref thread, std::uint32_t generation, af::buffer buffer,
                              const af::detail::SocketAddress &address) noexcept {
     auto shard = shard_for_thread(thread);
     if (shard == nullptr || !shard->matches_generation(generation)) {
@@ -231,7 +231,7 @@ udp_socket::send_to_on_owner(af::thread_ref thread, std::uint32_t generation, af
 }
 
 inline udp_send_result
-udp_socket::send_to_on_owner(af::thread_ref thread, std::uint32_t generation, af::BufferView view,
+udp_socket::send_to_on_owner(af::thread_ref thread, std::uint32_t generation, af::buffer_view view,
                              const af::detail::SocketAddress &address) noexcept {
     auto shard = shard_for_thread(thread);
     if (shard == nullptr || !shard->matches_generation(generation)) {
@@ -313,7 +313,7 @@ inline std::shared_ptr<detail::runtime_udp_shard> udp_socket_handle::lock_shard(
     return shard;
 }
 
-inline udp_send_result udp_socket_handle::send(af::Buffer buffer) const noexcept {
+inline udp_send_result udp_socket_handle::send(af::buffer buffer) const noexcept {
     auto state = state_.lock();
     auto shard = lock_shard(state);
     if (state == nullptr || shard == nullptr) {
@@ -339,7 +339,7 @@ inline udp_send_result udp_socket_handle::send(af::Buffer buffer) const noexcept
     }
 }
 
-inline udp_send_result udp_socket_handle::send(af::BufferView view) const noexcept {
+inline udp_send_result udp_socket_handle::send(af::buffer_view view) const noexcept {
     auto state = state_.lock();
     auto shard = lock_shard(state);
     if (state == nullptr || shard == nullptr) {
@@ -353,7 +353,7 @@ inline udp_send_result udp_socket_handle::send(af::BufferView view) const noexce
         return udp_send_result::closed;
     }
     try {
-        af::Buffer buffer = af::Buffer::copy(view);
+        af::buffer buffer = af::buffer::copy(view);
         const bool posted = state->owner->post(
             owner_thread_, [shard, generation = generation_, buffer = std::move(buffer)]() mutable {
                 if (shard != nullptr && shard->matches_generation(generation)) {
@@ -366,7 +366,7 @@ inline udp_send_result udp_socket_handle::send(af::BufferView view) const noexce
     }
 }
 
-inline udp_send_result udp_socket_handle::send_to(af::Buffer buffer,
+inline udp_send_result udp_socket_handle::send_to(af::buffer buffer,
                                                   udp_endpoint endpoint) const noexcept {
     auto state = state_.lock();
     auto shard = lock_shard(state);
@@ -398,7 +398,7 @@ inline udp_send_result udp_socket_handle::send_to(af::Buffer buffer,
     }
 }
 
-inline udp_send_result udp_socket_handle::send_to(af::BufferView view,
+inline udp_send_result udp_socket_handle::send_to(af::buffer_view view,
                                                   udp_endpoint endpoint) const noexcept {
     auto state = state_.lock();
     auto shard = lock_shard(state);
@@ -417,7 +417,7 @@ inline udp_send_result udp_socket_handle::send_to(af::BufferView view,
         return udp_send_result::closed;
     }
     try {
-        af::Buffer buffer = af::Buffer::copy(view);
+        af::buffer buffer = af::buffer::copy(view);
         const bool posted =
             state->owner->post(owner_thread_, [shard, generation = generation_,
                                                buffer = std::move(buffer), address]() mutable {
@@ -431,7 +431,7 @@ inline udp_send_result udp_socket_handle::send_to(af::BufferView view,
     }
 }
 
-inline udp_send_result udp_socket_handle::send_to(af::Buffer buffer,
+inline udp_send_result udp_socket_handle::send_to(af::buffer buffer,
                                                   const udp_peer &peer) const noexcept {
     auto state = state_.lock();
     auto shard = lock_shard(state);
@@ -463,7 +463,7 @@ inline udp_send_result udp_socket_handle::send_to(af::Buffer buffer,
     }
 }
 
-inline udp_send_result udp_socket_handle::send_to(af::BufferView view,
+inline udp_send_result udp_socket_handle::send_to(af::buffer_view view,
                                                   const udp_peer &peer) const noexcept {
     auto state = state_.lock();
     auto shard = lock_shard(state);
@@ -482,7 +482,7 @@ inline udp_send_result udp_socket_handle::send_to(af::BufferView view,
         return udp_send_result::closed;
     }
     try {
-        af::Buffer buffer = af::Buffer::copy(view);
+        af::buffer buffer = af::buffer::copy(view);
         const bool posted =
             state->owner->post(owner_thread_, [shard, generation = generation_,
                                                buffer = std::move(buffer), address]() mutable {
@@ -513,15 +513,15 @@ inline const udp_endpoint &udp_socket_ref::local_endpoint() const noexcept {
     return shard_ == nullptr ? empty : shard_->local_endpoint;
 }
 
-inline udp_send_result udp_socket_ref::send(af::Buffer buffer) const noexcept {
+inline udp_send_result udp_socket_ref::send(af::buffer buffer) const noexcept {
     return shard_ == nullptr ? udp_send_result::closed : shard_->send(std::move(buffer));
 }
 
-inline udp_send_result udp_socket_ref::send(af::BufferView view) const noexcept {
+inline udp_send_result udp_socket_ref::send(af::buffer_view view) const noexcept {
     return shard_ == nullptr ? udp_send_result::closed : shard_->send(view);
 }
 
-inline udp_send_result udp_socket_ref::send_to(af::Buffer buffer,
+inline udp_send_result udp_socket_ref::send_to(af::buffer buffer,
                                                udp_endpoint endpoint) const noexcept {
     if (shard_ == nullptr) {
         return udp_send_result::closed;
@@ -532,7 +532,7 @@ inline udp_send_result udp_socket_ref::send_to(af::Buffer buffer,
                : udp_send_result::unsupported;
 }
 
-inline udp_send_result udp_socket_ref::send_to(af::BufferView view,
+inline udp_send_result udp_socket_ref::send_to(af::buffer_view view,
                                                udp_endpoint endpoint) const noexcept {
     if (shard_ == nullptr) {
         return udp_send_result::closed;
@@ -542,12 +542,12 @@ inline udp_send_result udp_socket_ref::send_to(af::BufferView view,
                                                                   : udp_send_result::unsupported;
 }
 
-inline udp_send_result udp_socket_ref::send_to(af::Buffer buffer,
+inline udp_send_result udp_socket_ref::send_to(af::buffer buffer,
                                                const udp_peer &peer) const noexcept {
     return shard_ == nullptr ? udp_send_result::closed : shard_->send_to(std::move(buffer), peer);
 }
 
-inline udp_send_result udp_socket_ref::send_to(af::BufferView view,
+inline udp_send_result udp_socket_ref::send_to(af::buffer_view view,
                                                const udp_peer &peer) const noexcept {
     return shard_ == nullptr ? udp_send_result::closed : shard_->send_to(view, peer);
 }

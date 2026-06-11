@@ -34,9 +34,13 @@ TEST(PublicHeaderTests, LogUmbrellaExposesLowerCaseNames) {
 }
 
 TEST(PublicHeaderTests, UtilityUmbrellaExposesLowerCaseNames) {
-    static_assert(std::is_same_v<af::buffer_view, af::BufferView>);
-    static_assert(std::is_same_v<af::buffer, af::Buffer>);
-    static_assert(std::is_same_v<af::buffer_chain, af::BufferChain>);
+    static_assert(std::is_same_v<af::BufferView, af::buffer_view>);
+    static_assert(std::is_same_v<af::Buffer, af::buffer>);
+    static_assert(std::is_same_v<af::BufferChain, af::buffer_chain>);
+    af::buffer buffer = af::buffer::copy("ok", 2);
+    af::buffer_chain chain;
+    chain.push_back(buffer.slice(0));
+    EXPECT_EQ(chain.size(), 2U);
     static_assert(std::is_same_v<af::batch_submit_status, af::BatchSubmitStatus>);
     static_assert(af::batch_submit_status::submitted == af::BatchSubmitStatus::Submitted);
     static_assert(af::batch_submit_status::buffered == af::BatchSubmitStatus::Buffered);

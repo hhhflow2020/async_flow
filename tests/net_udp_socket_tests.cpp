@@ -130,7 +130,7 @@ struct RuntimeUdpState {
     af::net::udp_socket_handle handle;
 };
 
-void runtime_udp_echo_datagram(void *owner, af::net::udp_socket_ref socket, af::BufferView bytes,
+void runtime_udp_echo_datagram(void *owner, af::net::udp_socket_ref socket, af::buffer_view bytes,
                                const af::net::udp_peer &peer) noexcept {
     auto *state = static_cast<RuntimeUdpState *>(owner);
     if (state != nullptr) {
@@ -140,7 +140,7 @@ void runtime_udp_echo_datagram(void *owner, af::net::udp_socket_ref socket, af::
 }
 
 void runtime_udp_peer_echo_datagram(void *owner, af::net::udp_socket_ref socket,
-                                    af::BufferView bytes, const af::net::udp_peer &peer) noexcept {
+                                    af::buffer_view bytes, const af::net::udp_peer &peer) noexcept {
     auto *state = static_cast<RuntimeUdpState *>(owner);
     if (state != nullptr) {
         try {
@@ -155,8 +155,8 @@ void runtime_udp_peer_echo_datagram(void *owner, af::net::udp_socket_ref socket,
     static_cast<void>(socket.send_to(bytes, peer));
 }
 
-void runtime_udp_capture_datagram(void *owner, af::net::udp_socket_ref socket, af::BufferView bytes,
-                                  const af::net::udp_peer &peer) noexcept {
+void runtime_udp_capture_datagram(void *owner, af::net::udp_socket_ref socket,
+                                  af::buffer_view bytes, const af::net::udp_peer &peer) noexcept {
     static_cast<void>(peer);
     auto *state = static_cast<RuntimeUdpState *>(owner);
     if (state == nullptr) {
@@ -170,7 +170,7 @@ void runtime_udp_capture_datagram(void *owner, af::net::udp_socket_ref socket, a
 }
 
 void runtime_udp_owner_handle_echo(void *owner, af::net::udp_socket_ref socket,
-                                   af::BufferView bytes, const af::net::udp_peer &peer) noexcept {
+                                   af::buffer_view bytes, const af::net::udp_peer &peer) noexcept {
     auto *state = static_cast<RuntimeUdpState *>(owner);
     const af::net::udp_send_result result = socket.handle().send_to(bytes, peer);
     if (state != nullptr) {
@@ -179,7 +179,7 @@ void runtime_udp_owner_handle_echo(void *owner, af::net::udp_socket_ref socket,
     }
 }
 
-void runtime_udp_noop_datagram(void *owner, af::net::udp_socket_ref socket, af::BufferView bytes,
+void runtime_udp_noop_datagram(void *owner, af::net::udp_socket_ref socket, af::buffer_view bytes,
                                const af::net::udp_peer &peer) noexcept {
     static_cast<void>(socket);
     static_cast<void>(bytes);
@@ -191,7 +191,7 @@ void runtime_udp_noop_datagram(void *owner, af::net::udp_socket_ref socket, af::
 }
 
 void runtime_udp_counting_echo_datagram(void *owner, af::net::udp_socket_ref socket,
-                                        af::BufferView bytes,
+                                        af::buffer_view bytes,
                                         const af::net::udp_peer &peer) noexcept {
     auto *state = static_cast<RuntimeUdpState *>(owner);
     if (state != nullptr) {
@@ -488,7 +488,7 @@ TEST(NetUdpSocketTests, RuntimeUdpConnectedClientSendsThroughHandle) {
     ASSERT_TRUE(client_state.start_ok.load(std::memory_order_acquire));
     ASSERT_TRUE(client_state.handle.valid());
 
-    EXPECT_EQ(client_state.handle.send(af::Buffer::copy("ping", 4)),
+    EXPECT_EQ(client_state.handle.send(af::buffer::copy("ping", 4)),
               af::net::udp_send_result::queued);
     ASSERT_TRUE(
         wait_until([&] { return client_state.size.load(std::memory_order_acquire) == 4U; }));
@@ -503,7 +503,7 @@ TEST(NetUdpSocketTests, RuntimeUdpConnectedClientSendsThroughHandle) {
     }));
     ASSERT_TRUE(wait_until([&] { return client_state.stopped.load(std::memory_order_acquire); }));
     EXPECT_TRUE(client_state.stop_ok.load(std::memory_order_acquire));
-    EXPECT_EQ(client_state.handle.send(af::Buffer::copy("after", 5)),
+    EXPECT_EQ(client_state.handle.send(af::buffer::copy("after", 5)),
               af::net::udp_send_result::closed);
 
     ASSERT_TRUE(runtime.post(io_thread, [&] {
@@ -571,8 +571,8 @@ TEST(NetUdpSocketTests, RuntimeUdpConnectedClientUsesMultipleIoShards) {
     EXPECT_TRUE(socket.handle_for_thread(io_thread0).valid());
     EXPECT_TRUE(socket.handle_for_thread(io_thread1).valid());
 
-    EXPECT_EQ(handles[0].send(af::Buffer::copy("one", 3)), af::net::udp_send_result::queued);
-    EXPECT_EQ(handles[1].send(af::Buffer::copy("two", 3)), af::net::udp_send_result::queued);
+    EXPECT_EQ(handles[0].send(af::buffer::copy("one", 3)), af::net::udp_send_result::queued);
+    EXPECT_EQ(handles[1].send(af::buffer::copy("two", 3)), af::net::udp_send_result::queued);
 
     std::array<char, 8> buffer{};
     std::vector<std::string> received;
@@ -591,7 +591,7 @@ TEST(NetUdpSocketTests, RuntimeUdpConnectedClientUsesMultipleIoShards) {
     ASSERT_TRUE(wait_until([&] { return state.stopped.load(std::memory_order_acquire); }));
     EXPECT_TRUE(state.stop_ok.load(std::memory_order_acquire));
     ASSERT_TRUE(wait_until([&] { return socket.active_shard_count() == 0U; }));
-    EXPECT_EQ(handles[0].send(af::Buffer::copy("after", 5)), af::net::udp_send_result::closed);
+    EXPECT_EQ(handles[0].send(af::buffer::copy("after", 5)), af::net::udp_send_result::closed);
 
     runtime.stop();
 }
@@ -901,8 +901,8 @@ TEST(NetUdpSocketTests, HandlesExposeBoundShardsAndDefaultHandleRoundRobins) {
     EXPECT_NE(first.owner_thread(), second.owner_thread());
     EXPECT_EQ(client.handle_for_thread(first.owner_thread()).owner_thread(), first.owner_thread());
 
-    EXPECT_EQ(first.send(af::Buffer::copy("one", 3)), af::net::udp_send_result::queued);
-    EXPECT_EQ(second.send(af::Buffer::copy("two", 3)), af::net::udp_send_result::queued);
+    EXPECT_EQ(first.send(af::buffer::copy("one", 3)), af::net::udp_send_result::queued);
+    EXPECT_EQ(second.send(af::buffer::copy("two", 3)), af::net::udp_send_result::queued);
 
     std::array<char, 8> buffer{};
     std::vector<std::string> received;
@@ -916,9 +916,9 @@ TEST(NetUdpSocketTests, HandlesExposeBoundShardsAndDefaultHandleRoundRobins) {
 
     EXPECT_TRUE(stop_udp_socket(runtime, io_thread0, client, state));
     EXPECT_TRUE(client.handles().empty());
-    EXPECT_EQ(client.handle().send(af::Buffer::copy("stopped", 7)),
+    EXPECT_EQ(client.handle().send(af::buffer::copy("stopped", 7)),
               af::net::udp_send_result::closed);
-    EXPECT_EQ(client.handle_for_thread(first.owner_thread()).send(af::Buffer::copy("stopped", 7)),
+    EXPECT_EQ(client.handle_for_thread(first.owner_thread()).send(af::buffer::copy("stopped", 7)),
               af::net::udp_send_result::closed);
     runtime.stop();
 }
@@ -952,7 +952,7 @@ TEST(NetUdpSocketTests, ConnectedClientSendsThroughRuntimeTask) {
     ASSERT_TRUE(start_udp_socket(runtime, io_thread, client, std::move(client_config), client_state,
                                  &runtime_udp_capture_datagram));
 
-    EXPECT_EQ(client_state.handle.send(af::Buffer::copy("ping", 4)),
+    EXPECT_EQ(client_state.handle.send(af::buffer::copy("ping", 4)),
               af::net::udp_send_result::queued);
     ASSERT_TRUE(
         wait_until([&] { return client_state.size.load(std::memory_order_acquire) == 4U; }));
@@ -994,7 +994,7 @@ TEST(NetUdpSocketTests, ConnectedClientAcceptsInferredIpv4RemoteFamily) {
     ASSERT_TRUE(start_udp_socket(runtime, io_thread, client, std::move(client_config), client_state,
                                  &runtime_udp_capture_datagram));
 
-    EXPECT_EQ(client_state.handle.send(af::Buffer::copy("ping", 4)),
+    EXPECT_EQ(client_state.handle.send(af::buffer::copy("ping", 4)),
               af::net::udp_send_result::queued);
     ASSERT_TRUE(
         wait_until([&] { return client_state.size.load(std::memory_order_acquire) == 4U; }));
@@ -1074,12 +1074,12 @@ TEST(NetUdpSocketTests, StoppedSocketHandlesReportClosedForSends) {
     EXPECT_TRUE(stop_udp_socket(runtime, io_thread, socket, state));
 
     const std::string_view payload = "x";
-    EXPECT_EQ(handle.send(af::Buffer::copy("x", 1)), af::net::udp_send_result::closed);
-    EXPECT_EQ(handle.send(af::BufferView(payload.data(), payload.size())),
+    EXPECT_EQ(handle.send(af::buffer::copy("x", 1)), af::net::udp_send_result::closed);
+    EXPECT_EQ(handle.send(af::buffer_view(payload.data(), payload.size())),
               af::net::udp_send_result::closed);
-    EXPECT_EQ(handle.send_to(af::Buffer::copy("x", 1), af::net::udp_endpoint::loopback_v4(port)),
+    EXPECT_EQ(handle.send_to(af::buffer::copy("x", 1), af::net::udp_endpoint::loopback_v4(port)),
               af::net::udp_send_result::closed);
-    EXPECT_EQ(handle.send_to(af::BufferView(payload.data(), payload.size()),
+    EXPECT_EQ(handle.send_to(af::buffer_view(payload.data(), payload.size()),
                              af::net::udp_endpoint::loopback_v4(port)),
               af::net::udp_send_result::closed);
 
@@ -1107,10 +1107,10 @@ TEST(NetUdpSocketTests, StopPublishesClosedStateBeforeOwnerStops) {
                                  &runtime_udp_noop_datagram));
 
     const af::net::udp_socket_handle handle = state.handle;
-    EXPECT_EQ(handle.send(af::Buffer::copy("pre", 3)), af::net::udp_send_result::queued);
+    EXPECT_EQ(handle.send(af::buffer::copy("pre", 3)), af::net::udp_send_result::queued);
 
     EXPECT_TRUE(stop_udp_socket(runtime, io_thread, socket, state));
-    EXPECT_EQ(handle.send(af::Buffer::copy("x", 1)), af::net::udp_send_result::closed);
+    EXPECT_EQ(handle.send(af::buffer::copy("x", 1)), af::net::udp_send_result::closed);
     runtime.stop();
 }
 
@@ -1148,11 +1148,11 @@ TEST(NetUdpSocketTests, OldHandleReportsClosedAfterSocketRestart) {
                                  &runtime_udp_noop_datagram));
     const af::net::udp_socket_handle current_handle = state.handle;
 
-    EXPECT_EQ(old_handle.send(af::Buffer::copy("old", 3)), af::net::udp_send_result::closed);
+    EXPECT_EQ(old_handle.send(af::buffer::copy("old", 3)), af::net::udp_send_result::closed);
     EXPECT_EQ(
-        old_handle.send_to(af::Buffer::copy("old", 3), af::net::udp_endpoint::loopback_v4(port)),
+        old_handle.send_to(af::buffer::copy("old", 3), af::net::udp_endpoint::loopback_v4(port)),
         af::net::udp_send_result::closed);
-    EXPECT_EQ(current_handle.send(af::Buffer::copy("new", 3)), af::net::udp_send_result::queued);
+    EXPECT_EQ(current_handle.send(af::buffer::copy("new", 3)), af::net::udp_send_result::queued);
 
     EXPECT_TRUE(stop_udp_socket(runtime, io_thread, socket, state));
     runtime.stop();
@@ -1184,9 +1184,9 @@ TEST(NetUdpSocketTests, StoppedSocketHandleReportsClosedOnOwnerThread) {
     std::atomic<int> send_to_result{-1};
     std::atomic<bool> done{false};
     ASSERT_TRUE(runtime.post(io_thread, [handle, port, &send_result, &send_to_result, &done] {
-        const af::net::udp_send_result send = handle.send(af::Buffer::copy("x", 1));
+        const af::net::udp_send_result send = handle.send(af::buffer::copy("x", 1));
         const af::net::udp_send_result send_to =
-            handle.send_to(af::Buffer::copy("x", 1), af::net::udp_endpoint::loopback_v4(port));
+            handle.send_to(af::buffer::copy("x", 1), af::net::udp_endpoint::loopback_v4(port));
         send_result.store(static_cast<int>(send), std::memory_order_release);
         send_to_result.store(static_cast<int>(send_to), std::memory_order_release);
         done.store(true, std::memory_order_release);
@@ -1274,7 +1274,7 @@ TEST(NetUdpSocketTests, IpSocketRejectsUnixPeerEndpoint) {
     ASSERT_TRUE(start_udp_socket(runtime, io_thread, socket, std::move(socket_config), state,
                                  &runtime_udp_noop_datagram));
 
-    EXPECT_EQ(state.handle.send_to(af::Buffer::copy("x", 1),
+    EXPECT_EQ(state.handle.send_to(af::buffer::copy("x", 1),
                                    af::net::unix_endpoint::unix_path("/tmp/af-udp-peer.sock")),
               af::net::udp_send_result::unsupported);
 

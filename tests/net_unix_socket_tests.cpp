@@ -85,7 +85,7 @@ void runtime_unix_stream_accept(void *owner, af::net::unix_connection_ref conn) 
 }
 
 void runtime_unix_stream_echo(void *owner, af::net::unix_connection_ref conn,
-                              af::BufferView bytes) noexcept {
+                              af::buffer_view bytes) noexcept {
     static_cast<void>(owner);
     static_cast<void>(conn.send(bytes));
 }
@@ -99,7 +99,7 @@ void runtime_unix_stream_connect(void *owner, af::net::unix_connection_ref conn)
         payload = state->connect_payload;
     }
     if (!payload.empty()) {
-        static_cast<void>(conn.send(af::Buffer::copy(payload.data(), payload.size())));
+        static_cast<void>(conn.send(af::buffer::copy(payload.data(), payload.size())));
     }
 }
 
@@ -112,7 +112,7 @@ void runtime_unix_stream_passive_connect(void *owner, af::net::unix_connection_r
 }
 
 void runtime_unix_stream_capture(void *owner, af::net::unix_connection_ref conn,
-                                 af::BufferView bytes) noexcept {
+                                 af::buffer_view bytes) noexcept {
     auto *state = static_cast<RuntimeUnixStreamState *>(owner);
     if (state == nullptr) {
         return;
@@ -145,7 +145,7 @@ struct RuntimeUnixDatagramState {
 };
 
 void runtime_unix_datagram_echo(void *owner, af::net::unix_datagram_socket_ref socket,
-                                af::BufferView bytes,
+                                af::buffer_view bytes,
                                 const af::net::unix_datagram_peer &peer) noexcept {
     auto *state = static_cast<RuntimeUnixDatagramState *>(owner);
     if (state != nullptr) {
@@ -155,7 +155,7 @@ void runtime_unix_datagram_echo(void *owner, af::net::unix_datagram_socket_ref s
 }
 
 void runtime_unix_datagram_capture(void *owner, af::net::unix_datagram_socket_ref socket,
-                                   af::BufferView bytes,
+                                   af::buffer_view bytes,
                                    const af::net::unix_datagram_peer &peer) noexcept {
     static_cast<void>(peer);
     auto *state = static_cast<RuntimeUnixDatagramState *>(owner);
@@ -180,7 +180,7 @@ void runtime_unix_datagram_error(void *owner, af::net::unix_datagram_socket_hand
 }
 
 void runtime_unix_datagram_noop(void *owner, af::net::unix_datagram_socket_ref socket,
-                                af::BufferView bytes,
+                                af::buffer_view bytes,
                                 const af::net::unix_datagram_peer &peer) noexcept {
     static_cast<void>(socket);
     static_cast<void>(bytes);
@@ -407,7 +407,7 @@ TEST(NetUnixSocketTests, ExternalHandleSendIsQueuedToOwnerIoThread) {
                                            &runtime_unix_stream_passive_connect));
 
     ASSERT_TRUE(wait_until([&] { return state.connected.load(std::memory_order_acquire) == 1; }));
-    EXPECT_EQ(state.handle.send(af::Buffer::copy("queued", 6)), af::net::send_result::queued);
+    EXPECT_EQ(state.handle.send(af::buffer::copy("queued", 6)), af::net::send_result::queued);
     ASSERT_TRUE(wait_until([&] { return state.size.load(std::memory_order_acquire) == 6U; }));
     EXPECT_EQ(std::string(state.data.data(), state.size.load(std::memory_order_acquire)), "queued");
 
@@ -494,7 +494,7 @@ TEST(NetUnixSocketTests, DatagramServerAndClientEchoOverUnixSocket) {
                                              server_path.path(), state,
                                              &runtime_unix_datagram_capture));
 
-    EXPECT_EQ(state.handle.send(af::Buffer::copy("unix-dgram", 10)),
+    EXPECT_EQ(state.handle.send(af::buffer::copy("unix-dgram", 10)),
               af::net::udp_send_result::queued);
     ASSERT_TRUE(wait_until([&] { return state.size.load(std::memory_order_acquire) == 10U; }));
     EXPECT_EQ(std::string(state.data.data(), state.size.load(std::memory_order_acquire)),
@@ -661,7 +661,7 @@ TEST(NetUnixSocketTests, RuntimeUnixDatagramServerAndClientEcho) {
 
     ASSERT_TRUE(wait_until([&] { return state.client_started.load(std::memory_order_acquire); }));
     ASSERT_TRUE(state.client_start_ok.load(std::memory_order_acquire));
-    EXPECT_EQ(state.handle.send(af::Buffer::copy("runtime-dgram", 13)),
+    EXPECT_EQ(state.handle.send(af::buffer::copy("runtime-dgram", 13)),
               af::net::udp_send_result::queued);
 
     ASSERT_TRUE(wait_until([&] { return state.size.load(std::memory_order_acquire) == 13U; }));

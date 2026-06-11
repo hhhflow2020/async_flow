@@ -100,7 +100,7 @@ public:
         return queued_bytes_;
     }
 
-    [[nodiscard]] send_result send(af::Buffer buffer) noexcept {
+    [[nodiscard]] send_result send(af::buffer buffer) noexcept {
         if (!alive()) {
             return send_result::closed;
         }
@@ -121,7 +121,7 @@ public:
         return alive() ? send_result::accepted : send_result::closed;
     }
 
-    [[nodiscard]] send_result send(af::BufferView view) noexcept {
+    [[nodiscard]] send_result send(af::buffer_view view) noexcept {
         if (!alive()) {
             return send_result::closed;
         }
@@ -140,7 +140,7 @@ public:
                 }
                 if (n > 0) {
                     const std::size_t written = static_cast<std::size_t>(n);
-                    view = af::BufferView(view.data() + written, view.size() - written);
+                    view = af::buffer_view(view.data() + written, view.size() - written);
                     break;
                 }
                 if (n == 0) {
@@ -158,7 +158,7 @@ public:
             }
         }
         try {
-            return send(af::Buffer::copy(view));
+            return send(af::buffer::copy(view));
         } catch (...) {
             return send_result::backpressure;
         }
@@ -330,7 +330,7 @@ private:
                 if (callbacks_.on_read != nullptr) {
                     begin_user_callback();
                     callbacks_.on_read(callbacks_.owner, tcp_connection_ref(this),
-                                       af::BufferView(read_buffer_.data(), size));
+                                       af::buffer_view(read_buffer_.data(), size));
                     end_user_callback();
                 }
                 continue;
@@ -393,7 +393,7 @@ private:
         if (max_bytes == 0U) {
             return 0;
         }
-        std::array<af::BufferView, 64> views{};
+        std::array<af::buffer_view, 64> views{};
         std::array<iovec, 64> iov{};
         const std::size_t count = output_.fill_views(views);
         std::size_t send_count = 0;
@@ -495,7 +495,7 @@ private:
     detail::tcp_connection_lifecycle lifecycle_{};
     std::weak_ptr<detail::tcp_connection_handle_state> handle_state_;
     af::fd_event_source source_{};
-    af::BufferChain output_;
+    af::buffer_chain output_;
     std::vector<std::byte> read_buffer_;
     std::size_t queued_bytes_{0};
     bool registered_{false};
@@ -537,11 +537,11 @@ inline std::size_t tcp_connection_ref::queued_bytes() const noexcept {
     return connection_ == nullptr ? 0U : connection_->queued_bytes();
 }
 
-inline send_result tcp_connection_ref::send(af::Buffer buffer) const noexcept {
+inline send_result tcp_connection_ref::send(af::buffer buffer) const noexcept {
     return connection_ == nullptr ? send_result::closed : connection_->send(std::move(buffer));
 }
 
-inline send_result tcp_connection_ref::send(af::BufferView view) const noexcept {
+inline send_result tcp_connection_ref::send(af::buffer_view view) const noexcept {
     return connection_ == nullptr ? send_result::closed : connection_->send(view);
 }
 
