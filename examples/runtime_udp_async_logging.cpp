@@ -19,13 +19,15 @@ namespace {
 
 inline constexpr std::uint32_t runtime_udp_records_per_task = 32;
 
-class RuntimeUdpLogTask final : public af::runtime_task {
+class runtime_udp_log_task final : public af::runtime_task {
 public:
-    RuntimeUdpLogTask(af::runtime_task::factory_token token, af::runtime &owner,
-                      std::uint32_t task_id, std::atomic<int> &completed)
-        : af::runtime_task(token, owner), task_id_(task_id), completed_(completed) {}
+    runtime_udp_log_task(af::runtime_task::factory_token token, af::runtime &owner) noexcept
+        : af::runtime_task(token, owner) {}
 
-    [[nodiscard]] bool do_it(af::thread_group_ref logic_threads) noexcept {
+    [[nodiscard]] bool do_it(af::thread_group_ref logic_threads, std::uint32_t task_id,
+                             std::atomic<int> &completed) noexcept {
+        task_id_ = task_id;
+        completed_ = &completed;
         return schedule_to(logic_threads.shard(task_id_));
     }
 
@@ -35,12 +37,12 @@ private:
             AF_LOG(INFO) << "runtime udp log task=" << task_id_ << " seq=" << i
                          << " thread=" << af::runtime::current_thread_index();
         }
-        completed_.fetch_add(1, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
 
     std::uint32_t task_id_{0};
-    std::atomic<int> &completed_;
+    std::atomic<int> *completed_{nullptr};
 };
 
 [[nodiscard]] bool wait_for_completion(std::atomic<int> &completed, int expected) {
@@ -176,8 +178,8 @@ int main() {
     std::atomic<int> completed{0};
     bool started = true;
     for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(task_count); ++i) {
-        auto task = af::make_task<RuntimeUdpLogTask>(runtime, i, completed);
-        const bool task_started = task->do_it(logic_threads);
+        auto task = af::make_task<runtime_udp_log_task>(runtime);
+        const bool task_started = task->do_it(logic_threads, i, completed);
         started = task_started && started;
     }
 

@@ -32,16 +32,16 @@ std::mutex cout_mutex;
     return counter.load(std::memory_order_acquire) >= expected;
 }
 
-class AddGoldTask final : public af::runtime_task {
+class add_gold_task final : public af::runtime_task {
 public:
-    AddGoldTask(af::runtime_task::factory_token token, af::runtime &owner,
-                std::atomic<int> &completed)
-        : af::runtime_task(token, owner), completed_(completed) {}
+    add_gold_task(af::runtime_task::factory_token token, af::runtime &owner) noexcept
+        : af::runtime_task(token, owner) {}
 
-    [[nodiscard]] bool do_it(std::uint64_t player_id, int gold,
-                             af::thread_group_ref logic_threads) noexcept {
+    [[nodiscard]] bool do_it(std::uint64_t player_id, int gold, af::thread_group_ref logic_threads,
+                             std::atomic<int> &completed) noexcept {
         player_id_ = player_id;
         gold_ = gold;
+        completed_ = &completed;
         return schedule_to(logic_threads.shard(player_id_));
     }
 
@@ -50,26 +50,26 @@ private:
         const std::lock_guard<std::mutex> lock(cout_mutex);
         std::cout << "add " << gold_ << " gold to player " << player_id_ << " on logic thread "
                   << af::runtime::current_thread_index() << '\n';
-        completed_.fetch_add(1, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
 
-    std::atomic<int> &completed_;
+    std::atomic<int> *completed_{nullptr};
     std::uint64_t player_id_{0};
     int gold_{0};
 };
 
-class LoginTask final : public af::runtime_task {
+class login_task final : public af::runtime_task {
 public:
-    LoginTask(af::runtime_task::factory_token token, af::runtime &owner,
-              std::atomic<int> &completed)
-        : af::runtime_task(token, owner), completed_(completed) {}
+    login_task(af::runtime_task::factory_token token, af::runtime &owner) noexcept
+        : af::runtime_task(token, owner) {}
 
     [[nodiscard]] bool do_it(std::uint64_t player_id, af::thread_group_ref logic_threads,
-                             af::thread_ref db_thread) noexcept {
+                             af::thread_ref db_thread, std::atomic<int> &completed) noexcept {
         player_id_ = player_id;
         logic_threads_ = logic_threads;
         db_thread_ = db_thread;
+        completed_ = &completed;
         state_ = state::start;
         return schedule_to(logic_threads_.shard(player_id_));
     }
@@ -121,11 +121,11 @@ private:
     }
 
     af::task_result finish() noexcept {
-        completed_.fetch_add(1, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
 
-    std::atomic<int> &completed_;
+    std::atomic<int> *completed_{nullptr};
     af::thread_group_ref logic_threads_;
     af::thread_ref db_thread_;
     state state_{state::start};
@@ -152,11 +152,12 @@ int main() {
     std::atomic<int> completed{0};
     bool started = true;
     {
-        auto add_task = af::make_task<AddGoldTask>(runtime, completed);
-        auto login_task = af::make_task<LoginTask>(runtime, completed);
+        auto add_task = af::make_task<add_gold_task>(runtime);
+        auto login = af::make_task<login_task>(runtime);
 
-        const bool add_started = add_task->do_it(1001U, 100, logic_threads);
-        const bool login_started = login_task->do_it(1002U, logic_threads, db_threads.front());
+        const bool add_started = add_task->do_it(1001U, 100, logic_threads, completed);
+        const bool login_started =
+            login->do_it(1002U, logic_threads, db_threads.front(), completed);
         started = add_started && login_started;
     }
 

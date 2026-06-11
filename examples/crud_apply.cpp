@@ -14,17 +14,17 @@
 
 namespace {
 
-struct PlayerProfile {
+struct player_profile {
     std::uint32_t level{1};
     int gold{0};
 };
 
-using PlayerChangeBatch = af::change_batch<std::uint64_t, PlayerProfile>;
-using PlayerStore = absl::flat_hash_map<std::uint64_t, PlayerProfile>;
+using player_change_batch = af::change_batch<std::uint64_t, player_profile>;
+using player_store = absl::flat_hash_map<std::uint64_t, player_profile>;
 
-struct PlayerCrudStream {};
+struct player_crud_stream {};
 
-std::array<PlayerStore, player_logic_shard_count> player_stores;
+std::array<player_store, player_logic_shard_count> player_stores;
 std::atomic<int> applied_batches{0};
 
 [[nodiscard]] bool wait_for_counter(std::atomic<int> &counter, int expected) {
@@ -38,12 +38,12 @@ std::atomic<int> applied_batches{0};
     return counter.load(std::memory_order_acquire) >= expected;
 }
 
-class ApplyPlayerCrudBatchTask final : public af::runtime_task {
+class apply_player_crud_batch_task final : public af::runtime_task {
 public:
-    ApplyPlayerCrudBatchTask(af::runtime_task::factory_token token, af::runtime &owner)
+    apply_player_crud_batch_task(af::runtime_task::factory_token token, af::runtime &owner)
         : af::runtime_task(token, owner) {}
 
-    [[nodiscard]] bool do_it(PlayerChangeBatch batch) {
+    [[nodiscard]] bool do_it(player_change_batch batch) {
         batch_ = std::move(batch);
         logic_threads_ = owner().thread_group("logic");
         if (logic_threads_.empty()) {
@@ -83,7 +83,7 @@ private:
     }
 
     static bool apply_shard(std::uint16_t shard,
-                            const std::vector<af::crud_op<std::uint64_t, PlayerProfile>> &ops) {
+                            const std::vector<af::crud_op<std::uint64_t, player_profile>> &ops) {
         auto &store = player_stores[shard];
         for (const auto &op : ops) {
             if (!apply_op(store, op)) {
@@ -93,7 +93,8 @@ private:
         return true;
     }
 
-    static bool apply_op(PlayerStore &store, const af::crud_op<std::uint64_t, PlayerProfile> &op) {
+    static bool apply_op(player_store &store,
+                         const af::crud_op<std::uint64_t, player_profile> &op) {
         switch (op.type) {
         case af::op_type::add:
             store[op.key] = op.value;
@@ -128,16 +129,16 @@ private:
 
     state state_{state::apply};
     af::thread_group_ref logic_threads_;
-    PlayerChangeBatch batch_;
-    af::sharded_ops<af::crud_op<std::uint64_t, PlayerProfile>> sharded_ops_;
+    player_change_batch batch_;
+    af::sharded_ops<af::crud_op<std::uint64_t, player_profile>> sharded_ops_;
 };
 
-class SubmitPlayerCrudBatchTask final : public af::runtime_task {
+class submit_player_crud_batch_task final : public af::runtime_task {
 public:
-    SubmitPlayerCrudBatchTask(af::runtime_task::factory_token token, af::runtime &owner)
+    submit_player_crud_batch_task(af::runtime_task::factory_token token, af::runtime &owner)
         : af::runtime_task(token, owner) {}
 
-    [[nodiscard]] bool do_it(PlayerChangeBatch batch, af::thread_ref io_thread) {
+    [[nodiscard]] bool do_it(player_change_batch batch, af::thread_ref io_thread) {
         batch_ = std::move(batch);
         return schedule_to(io_thread);
     }
@@ -148,12 +149,13 @@ private:
         if (io_threads.empty()) {
             return failed();
         }
-        const bool ok = owner().start_ordered_task<PlayerCrudStream, ApplyPlayerCrudBatchTask>(
-            io_threads.front(), std::move(batch_));
+        const bool ok =
+            owner().start_ordered_task<player_crud_stream, apply_player_crud_batch_task>(
+                io_threads.front(), std::move(batch_));
         return ok ? done() : failed();
     }
 
-    PlayerChangeBatch batch_;
+    player_change_batch batch_;
 };
 
 } // namespace
@@ -173,11 +175,11 @@ int main() {
         return 1;
     }
 
-    auto second_task = af::make_task<SubmitPlayerCrudBatchTask>(runtime);
-    auto first_task = af::make_task<SubmitPlayerCrudBatchTask>(runtime);
+    auto second_task = af::make_task<submit_player_crud_batch_task>(runtime);
+    auto first_task = af::make_task<submit_player_crud_batch_task>(runtime);
 
     const bool second_started = second_task->do_it(
-        PlayerChangeBatch{
+        player_change_batch{
             2,
             {
                 {af::op_type::update, 1001U, {3, 250}},
@@ -186,7 +188,7 @@ int main() {
         },
         io_threads.front());
     const bool first_started = first_task->do_it(
-        PlayerChangeBatch{
+        player_change_batch{
             1,
             {
                 {af::op_type::add, 1001U, {2, 100}},

@@ -16,13 +16,15 @@ namespace {
 
 inline constexpr std::uint32_t runtime_file_records_per_task = 128;
 
-class RuntimeFileLogTask final : public af::runtime_task {
+class runtime_file_log_task final : public af::runtime_task {
 public:
-    RuntimeFileLogTask(af::runtime_task::factory_token token, af::runtime &owner,
-                       std::uint32_t task_id, std::atomic<int> &completed)
-        : af::runtime_task(token, owner), task_id_(task_id), completed_(completed) {}
+    runtime_file_log_task(af::runtime_task::factory_token token, af::runtime &owner) noexcept
+        : af::runtime_task(token, owner) {}
 
-    [[nodiscard]] bool do_it(af::thread_ref thread) noexcept {
+    [[nodiscard]] bool do_it(af::thread_ref thread, std::uint32_t task_id,
+                             std::atomic<int> &completed) noexcept {
+        task_id_ = task_id;
+        completed_ = &completed;
         return schedule_to(thread);
     }
 
@@ -32,12 +34,12 @@ private:
             AF_LOG(INFO) << "runtime file log task=" << task_id_ << " seq=" << i
                          << " thread=" << af::runtime::current_thread_index();
         }
-        completed_.fetch_add(1, std::memory_order_release);
+        completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
 
     std::uint32_t task_id_{0};
-    std::atomic<int> &completed_;
+    std::atomic<int> *completed_{nullptr};
 };
 
 bool wait_for_completion(std::atomic<int> &completed, int expected) {
@@ -97,8 +99,8 @@ int main(int argc, char **argv) {
     std::atomic<int> completed{0};
     bool started = true;
     for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(task_count); ++i) {
-        auto task = af::make_task<RuntimeFileLogTask>(runtime, i, completed);
-        const bool task_started = task->do_it(cpu_threads.shard(i));
+        auto task = af::make_task<runtime_file_log_task>(runtime);
+        const bool task_started = task->do_it(cpu_threads.shard(i), i, completed);
         started = task_started && started;
     }
 

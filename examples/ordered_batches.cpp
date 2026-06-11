@@ -10,9 +10,9 @@
 
 namespace {
 
-struct PlayerDeltaStream {};
+struct player_delta_stream {};
 
-struct PlayerDeltaBatch {
+struct player_delta_batch {
     std::uint64_t batch_id{0};
     std::vector<int> deltas;
     std::atomic<int> *total_delta{nullptr};
@@ -31,12 +31,12 @@ struct PlayerDeltaBatch {
     return counter.load(std::memory_order_acquire) >= expected;
 }
 
-class ApplyPlayerDeltaBatchTask final : public af::runtime_task {
+class apply_player_delta_batch_task final : public af::runtime_task {
 public:
-    ApplyPlayerDeltaBatchTask(af::runtime_task::factory_token token, af::runtime &owner)
+    apply_player_delta_batch_task(af::runtime_task::factory_token token, af::runtime &owner)
         : af::runtime_task(token, owner) {}
 
-    [[nodiscard]] bool do_it(PlayerDeltaBatch batch) {
+    [[nodiscard]] bool do_it(player_delta_batch batch) {
         batch_ = std::move(batch);
         logic_threads_ = owner().thread_group("logic");
         if (logic_threads_.empty()) {
@@ -93,17 +93,17 @@ private:
     }
 
     state state_{state::apply};
-    PlayerDeltaBatch batch_;
+    player_delta_batch batch_;
     af::thread_group_ref logic_threads_;
     af::sharded_ops<int> sharded_deltas_;
 };
 
-class SubmitPlayerDeltaBatchTask final : public af::runtime_task {
+class submit_player_delta_batch_task final : public af::runtime_task {
 public:
-    SubmitPlayerDeltaBatchTask(af::runtime_task::factory_token token, af::runtime &owner)
+    submit_player_delta_batch_task(af::runtime_task::factory_token token, af::runtime &owner)
         : af::runtime_task(token, owner) {}
 
-    [[nodiscard]] bool do_it(PlayerDeltaBatch batch, af::thread_ref io_thread) {
+    [[nodiscard]] bool do_it(player_delta_batch batch, af::thread_ref io_thread) {
         batch_ = std::move(batch);
         return schedule_to(io_thread);
     }
@@ -115,12 +115,12 @@ private:
             return failed();
         }
         const bool started =
-            owner().start_ordered_task<PlayerDeltaStream, ApplyPlayerDeltaBatchTask>(
+            owner().start_ordered_task<player_delta_stream, apply_player_delta_batch_task>(
                 logic_threads.front(), std::move(batch_));
         return started ? done() : failed();
     }
 
-    PlayerDeltaBatch batch_;
+    player_delta_batch batch_;
 };
 
 } // namespace
@@ -144,14 +144,14 @@ int main() {
     std::atomic<int> completed_batches{0};
     std::array<std::atomic<std::uint64_t>, player_logic_shard_count> shard_batch_seen{};
 
-    auto second_task = af::make_task<SubmitPlayerDeltaBatchTask>(runtime);
-    auto first_task = af::make_task<SubmitPlayerDeltaBatchTask>(runtime);
+    auto second_task = af::make_task<submit_player_delta_batch_task>(runtime);
+    auto first_task = af::make_task<submit_player_delta_batch_task>(runtime);
 
     const bool second_started = second_task->do_it(
-        PlayerDeltaBatch{2, {5, 6}, &total_delta, &shard_batch_seen, &completed_batches},
+        player_delta_batch{2, {5, 6}, &total_delta, &shard_batch_seen, &completed_batches},
         io_threads.front());
     const bool first_started = first_task->do_it(
-        PlayerDeltaBatch{1, {1, 2, 3, 4}, &total_delta, &shard_batch_seen, &completed_batches},
+        player_delta_batch{1, {1, 2, 3, 4}, &total_delta, &shard_batch_seen, &completed_batches},
         io_threads.front());
 
     const bool completed_all = wait_for_counter(completed_batches, 2);
