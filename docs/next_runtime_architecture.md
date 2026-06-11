@@ -437,9 +437,9 @@ server.add_listener(public_listener);
 server.start();
 ```
 
-以上控制代码应在 server control IO task 中执行。外部线程需要先投递控制 task，再在目标 reactor 线程调用 `add_listener()` / `start()` / `stop()`。
+以上控制代码应在相关 owner IO task 中执行。外部线程需要先投递 runtime task 到目标 reactor 线程，再调用 `add_listener()` / `start()` / `stop()`；框架不维护隐藏 command queue，也不在 release 热路径保存固定 control thread 状态。
 
-`threads` 可绑定一个或多个 IO 线程。未填写时默认使用 `rt.io_threads()`。运行中 `add_listener()` 和 `remove_listener()` 支持动态监听地址管理，但调用方需要先切到 server control thread。
+`threads` 可绑定一个或多个 IO 线程。未填写时默认使用 `rt.io_threads()`。运行中 `add_listener()` 和 `remove_listener()` 支持动态监听地址管理，但调用方需要先显式切到涉及对象所属的 owner IO 线程。
 
 多 IO 线程监听策略：
 

@@ -54,36 +54,32 @@ AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_close_existing_connections_value, CloseEx
 TEST(NetSocketAddressTests, LowerCaseNetAliasesMatchPublicTypes) {
     static_assert(std::is_same_v<af::detail::socket_address, af::detail::SocketAddress>);
 
-    static_assert(std::is_same_v<af::net::address_family, af::net::AddressFamily>);
-    static_assert(std::is_same_v<af::net::ip_endpoint, af::net::IpEndpoint>);
-    static_assert(std::is_same_v<af::net::tcp_endpoint, af::net::TcpEndpoint>);
-    static_assert(std::is_same_v<af::net::udp_endpoint, af::net::UdpEndpoint>);
-    static_assert(std::is_same_v<af::net::unix_endpoint, af::net::UnixEndpoint>);
+    static_assert(std::is_enum_v<af::net::address_family>);
+    static_assert(std::is_same_v<af::net::ip_endpoint, af::net::tcp_endpoint>);
+    static_assert(std::is_same_v<af::net::ip_endpoint, af::net::udp_endpoint>);
+    static_assert(std::is_same_v<af::net::ip_endpoint, af::net::unix_endpoint>);
 
-    static_assert(std::is_same_v<af::net::send_result, af::net::SendResult>);
-    static_assert(std::is_same_v<af::net::close_reason, af::net::CloseReason>);
+    static_assert(std::is_enum_v<af::net::send_result>);
+    static_assert(std::is_enum_v<af::net::close_reason>);
     static_assert(std::is_same_v<af::net::tcp_accept_strategy, af::net::accept_strategy>);
-    static_assert(std::is_same_v<af::net::accept_strategy, af::net::AcceptStrategy>);
-    static_assert(std::is_same_v<af::net::listener_state, af::net::ListenerState>);
-    static_assert(std::is_same_v<af::net::remove_listener_policy, af::net::RemoveListenerPolicy>);
-    static_assert(std::is_same_v<af::net::tcp_listener_options, af::net::TcpListenerOptions>);
-    static_assert(std::is_same_v<af::net::tcp_connection_config, af::net::TcpConnectionConfig>);
-    static_assert(std::is_same_v<af::net::tcp_listener_config, af::net::TcpListenerConfig>);
-    static_assert(std::is_same_v<af::net::tcp_server_config, af::net::TcpServerConfig>);
-    static_assert(std::is_same_v<af::net::listener_id, af::net::ListenerId>);
-    static_assert(std::is_same_v<af::net::tcp_listener_handle, af::net::TcpListenerHandle>);
-    static_assert(std::is_same_v<af::net::listener_result, af::net::ListenerResult>);
+    static_assert(std::is_enum_v<af::net::listener_state>);
+    static_assert(std::is_enum_v<af::net::remove_listener_policy>);
+    static_assert(std::is_class_v<af::net::tcp_listener_options>);
+    static_assert(std::is_class_v<af::net::tcp_connection_config>);
+    static_assert(std::is_class_v<af::net::tcp_listener_config>);
+    static_assert(std::is_class_v<af::net::tcp_server_config>);
+    static_assert(std::is_class_v<af::net::listener_id>);
+    static_assert(std::is_class_v<af::net::tcp_listener_handle>);
+    static_assert(std::is_class_v<af::net::listener_result>);
     static_assert(std::is_class_v<af::net::tcp_connection_ref>);
     static_assert(std::is_class_v<af::net::tcp_connection_handle>);
     static_assert(std::is_class_v<af::net::tcp_client>);
-    static_assert(std::is_same_v<af::net::tcp_client_options, af::net::TcpClientOptions>);
-    static_assert(
-        std::is_same_v<af::net::tcp_client_runtime_config, af::net::TcpClientRuntimeConfig>);
-    static_assert(std::is_same_v<af::net::udp_send_result, af::net::UdpSendResult>);
-    static_assert(std::is_same_v<af::net::udp_socket_options, af::net::UdpSocketOptions>);
-    static_assert(
-        std::is_same_v<af::net::udp_socket_runtime_config, af::net::UdpSocketRuntimeConfig>);
-    static_assert(std::is_same_v<af::net::udp_peer, af::net::UdpPeer>);
+    static_assert(std::is_class_v<af::net::tcp_client_options>);
+    static_assert(std::is_class_v<af::net::tcp_client_runtime_config>);
+    static_assert(std::is_enum_v<af::net::udp_send_result>);
+    static_assert(std::is_class_v<af::net::udp_socket_options>);
+    static_assert(std::is_class_v<af::net::udp_socket_runtime_config>);
+    static_assert(std::is_class_v<af::net::udp_peer>);
 
     static_assert(std::is_class_v<af::net::tcp_server>);
     static_assert(std::is_class_v<af::net::udp_socket>);
@@ -191,8 +187,8 @@ TEST(NetSocketAddressTests, TcpListenerConfigAcceptsRuntimeThreadRefs) {
 }
 
 TEST(NetSocketAddressTests, ConvertsIpv4EndpointToSocketAddress) {
-    const af::net::TcpEndpoint endpoint =
-        af::net::TcpEndpoint::host("127.0.0.1", 43210, af::net::address_family::ipv4);
+    const af::net::tcp_endpoint endpoint =
+        af::net::tcp_endpoint::host("127.0.0.1", 43210, af::net::address_family::ipv4);
     af::detail::socket_address address{};
     int error = 0;
 
@@ -207,8 +203,8 @@ TEST(NetSocketAddressTests, ConvertsIpv4EndpointToSocketAddress) {
 }
 
 TEST(NetSocketAddressTests, ConvertsIpv6EndpointToSocketAddress) {
-    const af::net::TcpEndpoint endpoint =
-        af::net::TcpEndpoint::host("::1", 44321, af::net::address_family::ipv6);
+    const af::net::tcp_endpoint endpoint =
+        af::net::tcp_endpoint::host("::1", 44321, af::net::address_family::ipv6);
     af::detail::socket_address address{};
     int error = 0;
 
@@ -226,12 +222,12 @@ TEST(NetSocketAddressTests, InfersAddressFamilyForHostFactory) {
     af::detail::socket_address address{};
     int error = 0;
 
-    ASSERT_TRUE(af::detail::socket_address_from_endpoint(af::net::TcpEndpoint::host("::", 1234),
+    ASSERT_TRUE(af::detail::socket_address_from_endpoint(af::net::tcp_endpoint::host("::", 1234),
                                                          address, error));
     EXPECT_EQ(address.family, AF_INET6);
 
     ASSERT_TRUE(af::detail::socket_address_from_endpoint(
-        af::net::TcpEndpoint::host("0.0.0.0", 1234), address, error));
+        af::net::tcp_endpoint::host("0.0.0.0", 1234), address, error));
     EXPECT_EQ(address.family, AF_INET);
 }
 
@@ -241,7 +237,7 @@ TEST(NetSocketAddressTests, ConvertsSocketAddressBackToEndpoint) {
     ipv6.sin6_port = htons(23456);
     ASSERT_EQ(::inet_pton(AF_INET6, "::1", &ipv6.sin6_addr), 1);
 
-    const af::net::TcpEndpoint endpoint = af::detail::endpoint_from_socket_address(
+    const af::net::tcp_endpoint endpoint = af::detail::endpoint_from_socket_address(
         reinterpret_cast<const sockaddr *>(&ipv6), sizeof(ipv6));
     EXPECT_EQ(endpoint.address, "::1");
     EXPECT_EQ(endpoint.port, 23456U);
@@ -249,7 +245,7 @@ TEST(NetSocketAddressTests, ConvertsSocketAddressBackToEndpoint) {
 }
 
 TEST(NetSocketAddressTests, ConvertsUnixEndpointToSocketAddress) {
-    const af::net::UnixEndpoint endpoint = af::net::UnixEndpoint::unix_path("/tmp/af-test.sock");
+    const af::net::unix_endpoint endpoint = af::net::unix_endpoint::unix_path("/tmp/af-test.sock");
     af::detail::socket_address address{};
     int error = 0;
 
@@ -261,7 +257,7 @@ TEST(NetSocketAddressTests, ConvertsUnixEndpointToSocketAddress) {
     EXPECT_EQ(unix_address->sun_family, AF_UNIX);
     EXPECT_STREQ(unix_address->sun_path, "/tmp/af-test.sock");
 
-    const af::net::UnixEndpoint roundtrip = af::detail::endpoint_from_socket_address(
+    const af::net::unix_endpoint roundtrip = af::detail::endpoint_from_socket_address(
         reinterpret_cast<const sockaddr *>(unix_address), address.size);
     EXPECT_EQ(roundtrip.address, "/tmp/af-test.sock");
     EXPECT_EQ(roundtrip.family, af::net::address_family::unix_domain);

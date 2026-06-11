@@ -56,10 +56,4 @@ using tcp_endpoint = ip_endpoint;
 using udp_endpoint = ip_endpoint;
 using unix_endpoint = ip_endpoint;
 
-using AddressFamily = address_family;
-using IpEndpoint = ip_endpoint;
-using TcpEndpoint = tcp_endpoint;
-using UdpEndpoint = udp_endpoint;
-using UnixEndpoint = unix_endpoint;
-
 } // namespace af::net

@@ -88,9 +88,4 @@ private:
     af::detail::socket_address address_{};
 };
 
-using UdpSendResult = udp_send_result;
-using UdpSocketOptions = udp_socket_options;
-using UdpSocketRuntimeConfig = udp_socket_runtime_config;
-using UdpPeer = udp_peer;
-
 } // namespace af::net

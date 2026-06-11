@@ -12,7 +12,4 @@ struct tcp_client_options {
 
 struct tcp_client_runtime_config {};
 
-using TcpClientOptions = tcp_client_options;
-using TcpClientRuntimeConfig = tcp_client_runtime_config;
-
 } // namespace af::net

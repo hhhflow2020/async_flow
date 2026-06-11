@@ -173,6 +173,11 @@ if(ASYNCFLOW_BUILD_TESTS)
         tests/public_header_tests.cpp
     )
     target_link_libraries(asyncflow_runtime_tests PRIVATE AsyncFlow::AsyncFlow GTest::gtest_main)
+    target_compile_definitions(
+        asyncflow_runtime_tests
+        PRIVATE
+            ASYNCFLOW_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    )
 
     add_executable(asyncflow_log_tests tests/log_tests.cpp)
     target_link_libraries(asyncflow_log_tests PRIVATE AsyncFlow::AsyncFlow GTest::gtest_main)

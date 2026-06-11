@@ -1,5 +1,10 @@
 #include "af/async_flow.hpp"
 
+#include <array>
+#include <fstream>
+#include <iterator>
+#include <string>
+#include <string_view>
 #include <type_traits>
 
 #include <gtest/gtest.h>
@@ -9,6 +14,17 @@
 #endif
 
 namespace {
+
+struct forbidden_source_snippet {
+    const char *relative_path;
+    const char *snippet;
+};
+
+[[nodiscard]] std::string read_source_file(std::string_view relative_path) {
+    const std::string path = std::string(ASYNCFLOW_SOURCE_DIR) + "/" + std::string(relative_path);
+    std::ifstream input(path);
+    return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+}
 
 #define AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(name, value)                                            \
     template <typename EnumT, typename = void> struct name : std::false_type {};                   \
@@ -128,6 +144,42 @@ TEST(PublicHeaderTests, NetUmbrellaExposesRuntimeNativeApi) {
     static_assert(std::is_class_v<af::net::udp_socket>);
     static_assert(std::is_class_v<af::net::unix_stream_server>);
     static_assert(std::is_class_v<af::net::unix_datagram_socket>);
+}
+
+TEST(PublicHeaderTests, NetPublicHeadersDoNotExposeCamelCaseTypeAliases) {
+    constexpr std::array forbidden{
+        forbidden_source_snippet{"include/af/net/tcp_endpoint.hpp", "using AddressFamily ="},
+        forbidden_source_snippet{"include/af/net/tcp_endpoint.hpp", "using IpEndpoint ="},
+        forbidden_source_snippet{"include/af/net/tcp_endpoint.hpp", "using TcpEndpoint ="},
+        forbidden_source_snippet{"include/af/net/tcp_endpoint.hpp", "using UdpEndpoint ="},
+        forbidden_source_snippet{"include/af/net/tcp_endpoint.hpp", "using UnixEndpoint ="},
+        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using SendResult ="},
+        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using CloseReason ="},
+        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using AcceptStrategy ="},
+        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using ListenerState ="},
+        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using RemoveListenerPolicy ="},
+        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using TcpListenerOptions ="},
+        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using TcpConnectionConfig ="},
+        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using TcpListenerConfig ="},
+        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using TcpServerConfig ="},
+        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using ListenerId ="},
+        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using TcpListenerHandle ="},
+        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using ListenerResult ="},
+        forbidden_source_snippet{"include/af/net/tcp_client_types.hpp", "using TcpClientOptions ="},
+        forbidden_source_snippet{"include/af/net/tcp_client_types.hpp",
+                                 "using TcpClientRuntimeConfig ="},
+        forbidden_source_snippet{"include/af/net/udp_types.hpp", "using UdpSendResult ="},
+        forbidden_source_snippet{"include/af/net/udp_types.hpp", "using UdpSocketOptions ="},
+        forbidden_source_snippet{"include/af/net/udp_types.hpp", "using UdpSocketRuntimeConfig ="},
+        forbidden_source_snippet{"include/af/net/udp_types.hpp", "using UdpPeer ="},
+    };
+
+    for (const forbidden_source_snippet item : forbidden) {
+        const std::string content = read_source_file(item.relative_path);
+        ASSERT_FALSE(content.empty()) << item.relative_path;
+        EXPECT_EQ(content.find(item.snippet), std::string::npos)
+            << item.relative_path << " still contains " << item.snippet;
+    }
 }
 
 TEST(PublicHeaderTests, LogUmbrellaExposesLowerCaseNames) {

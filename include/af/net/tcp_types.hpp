@@ -140,17 +140,4 @@ struct listener_result {
     }
 };
 
-using SendResult = send_result;
-using CloseReason = close_reason;
-using AcceptStrategy = tcp_accept_strategy;
-using ListenerState = listener_state;
-using RemoveListenerPolicy = remove_listener_policy;
-using TcpListenerOptions = tcp_listener_options;
-using TcpConnectionConfig = tcp_connection_config;
-using TcpListenerConfig = tcp_listener_config;
-using TcpServerConfig = tcp_server_config;
-using ListenerId = listener_id;
-using TcpListenerHandle = tcp_listener_handle;
-using ListenerResult = listener_result;
-
 } // namespace af::net
