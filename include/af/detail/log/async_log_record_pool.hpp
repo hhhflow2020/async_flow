@@ -20,7 +20,6 @@ namespace af::detail {
 
 enum class async_log_record_pool_kind : std::uint8_t {
     shared,
-    Shared = shared,
 };
 
 struct async_log_record_pool_slot {

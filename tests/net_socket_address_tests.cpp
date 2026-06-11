@@ -19,6 +19,36 @@ namespace {
 
 struct NetAliasRuntime;
 
+#define AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(name, value)                                            \
+    template <typename EnumT, typename = void> struct name : std::false_type {};                   \
+    template <typename EnumT>                                                                      \
+    struct name<EnumT, std::void_t<decltype(EnumT::value)>> : std::true_type {}
+
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_unspecified_value, Unspecified);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_ipv4_value, IPv4);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_ipv6_value, IPv6);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_unix_value, Unix);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_accepted_value, Accepted);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_queued_value, Queued);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_backpressure_value, Backpressure);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_closed_value, Closed);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_unsupported_value, Unsupported);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_local_value, Local);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_peer_value, Peer);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_error_value, Error);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_auto_value, Auto);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_reuse_port_per_io_thread_value, ReusePortPerIoThread);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_single_acceptor_value, SingleAcceptor);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_configured_value, Configured);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_starting_value, Starting);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_active_value, Active);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_failed_value, Failed);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_removed_value, Removed);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_stop_accept_only_value, StopAcceptOnly);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_close_existing_connections_value, CloseExistingConnections);
+
+#undef AF_TEST_DEFINE_ENUM_VALUE_DETECTOR
+
 } // namespace
 
 TEST(NetSocketAddressTests, LowerCaseNetAliasesMatchPublicTypes) {
@@ -68,37 +98,65 @@ TEST(NetSocketAddressTests, LowerCaseNetAliasesMatchPublicTypes) {
     static_assert(std::is_class_v<af::net::unix_stream_client>);
     static_assert(std::is_class_v<af::net::unix_datagram_socket>);
 
-    static_assert(af::net::address_family::unspecified == af::net::AddressFamily::Unspecified);
-    static_assert(af::net::address_family::ipv4 == af::net::AddressFamily::IPv4);
-    static_assert(af::net::address_family::ipv6 == af::net::AddressFamily::IPv6);
-    static_assert(af::net::address_family::unix_domain == af::net::AddressFamily::Unix);
-    static_assert(af::net::send_result::accepted == af::net::SendResult::Accepted);
-    static_assert(af::net::send_result::queued == af::net::SendResult::Queued);
-    static_assert(af::net::send_result::backpressure == af::net::SendResult::Backpressure);
-    static_assert(af::net::send_result::closed == af::net::SendResult::Closed);
-    static_assert(af::net::send_result::unsupported == af::net::SendResult::Unsupported);
-    static_assert(af::net::close_reason::local == af::net::CloseReason::Local);
-    static_assert(af::net::close_reason::peer == af::net::CloseReason::Peer);
-    static_assert(af::net::close_reason::error == af::net::CloseReason::Error);
-    static_assert(af::net::tcp_accept_strategy::auto_select == af::net::AcceptStrategy::Auto);
+    static_assert(af::net::address_family::unspecified == af::net::address_family::unspecified);
+    static_assert(af::net::address_family::ipv4 == af::net::address_family::ipv4);
+    static_assert(af::net::address_family::ipv6 == af::net::address_family::ipv6);
+    static_assert(af::net::address_family::unix_domain == af::net::address_family::unix_domain);
+    static_assert(!has_unspecified_value<af::net::address_family>::value);
+    static_assert(!has_ipv4_value<af::net::address_family>::value);
+    static_assert(!has_ipv6_value<af::net::address_family>::value);
+    static_assert(!has_unix_value<af::net::address_family>::value);
+    static_assert(af::net::send_result::accepted == af::net::send_result::accepted);
+    static_assert(af::net::send_result::queued == af::net::send_result::queued);
+    static_assert(af::net::send_result::backpressure == af::net::send_result::backpressure);
+    static_assert(af::net::send_result::closed == af::net::send_result::closed);
+    static_assert(af::net::send_result::unsupported == af::net::send_result::unsupported);
+    static_assert(!has_accepted_value<af::net::send_result>::value);
+    static_assert(!has_queued_value<af::net::send_result>::value);
+    static_assert(!has_backpressure_value<af::net::send_result>::value);
+    static_assert(!has_closed_value<af::net::send_result>::value);
+    static_assert(!has_unsupported_value<af::net::send_result>::value);
+    static_assert(af::net::close_reason::local == af::net::close_reason::local);
+    static_assert(af::net::close_reason::peer == af::net::close_reason::peer);
+    static_assert(af::net::close_reason::error == af::net::close_reason::error);
+    static_assert(!has_local_value<af::net::close_reason>::value);
+    static_assert(!has_peer_value<af::net::close_reason>::value);
+    static_assert(!has_error_value<af::net::close_reason>::value);
+    static_assert(af::net::tcp_accept_strategy::auto_select ==
+                  af::net::tcp_accept_strategy::auto_select);
     static_assert(af::net::tcp_accept_strategy::reuse_port_per_io_thread ==
-                  af::net::AcceptStrategy::ReusePortPerIoThread);
+                  af::net::tcp_accept_strategy::reuse_port_per_io_thread);
     static_assert(af::net::tcp_accept_strategy::single_acceptor ==
-                  af::net::AcceptStrategy::SingleAcceptor);
-    static_assert(af::net::listener_state::configured == af::net::ListenerState::Configured);
-    static_assert(af::net::listener_state::starting == af::net::ListenerState::Starting);
-    static_assert(af::net::listener_state::active == af::net::ListenerState::Active);
-    static_assert(af::net::listener_state::failed == af::net::ListenerState::Failed);
-    static_assert(af::net::listener_state::removed == af::net::ListenerState::Removed);
+                  af::net::tcp_accept_strategy::single_acceptor);
+    static_assert(!has_auto_value<af::net::tcp_accept_strategy>::value);
+    static_assert(!has_reuse_port_per_io_thread_value<af::net::tcp_accept_strategy>::value);
+    static_assert(!has_single_acceptor_value<af::net::tcp_accept_strategy>::value);
+    static_assert(af::net::listener_state::configured == af::net::listener_state::configured);
+    static_assert(af::net::listener_state::starting == af::net::listener_state::starting);
+    static_assert(af::net::listener_state::active == af::net::listener_state::active);
+    static_assert(af::net::listener_state::failed == af::net::listener_state::failed);
+    static_assert(af::net::listener_state::removed == af::net::listener_state::removed);
+    static_assert(!has_configured_value<af::net::listener_state>::value);
+    static_assert(!has_starting_value<af::net::listener_state>::value);
+    static_assert(!has_active_value<af::net::listener_state>::value);
+    static_assert(!has_failed_value<af::net::listener_state>::value);
+    static_assert(!has_removed_value<af::net::listener_state>::value);
     static_assert(af::net::remove_listener_policy::stop_accept_only ==
-                  af::net::RemoveListenerPolicy::StopAcceptOnly);
+                  af::net::remove_listener_policy::stop_accept_only);
     static_assert(af::net::remove_listener_policy::close_existing_connections ==
-                  af::net::RemoveListenerPolicy::CloseExistingConnections);
-    static_assert(af::net::udp_send_result::accepted == af::net::UdpSendResult::Accepted);
-    static_assert(af::net::udp_send_result::queued == af::net::UdpSendResult::Queued);
-    static_assert(af::net::udp_send_result::backpressure == af::net::UdpSendResult::Backpressure);
-    static_assert(af::net::udp_send_result::closed == af::net::UdpSendResult::Closed);
-    static_assert(af::net::udp_send_result::unsupported == af::net::UdpSendResult::Unsupported);
+                  af::net::remove_listener_policy::close_existing_connections);
+    static_assert(!has_stop_accept_only_value<af::net::remove_listener_policy>::value);
+    static_assert(!has_close_existing_connections_value<af::net::remove_listener_policy>::value);
+    static_assert(af::net::udp_send_result::accepted == af::net::udp_send_result::accepted);
+    static_assert(af::net::udp_send_result::queued == af::net::udp_send_result::queued);
+    static_assert(af::net::udp_send_result::backpressure == af::net::udp_send_result::backpressure);
+    static_assert(af::net::udp_send_result::closed == af::net::udp_send_result::closed);
+    static_assert(af::net::udp_send_result::unsupported == af::net::udp_send_result::unsupported);
+    static_assert(!has_accepted_value<af::net::udp_send_result>::value);
+    static_assert(!has_queued_value<af::net::udp_send_result>::value);
+    static_assert(!has_backpressure_value<af::net::udp_send_result>::value);
+    static_assert(!has_closed_value<af::net::udp_send_result>::value);
+    static_assert(!has_unsupported_value<af::net::udp_send_result>::value);
 }
 
 TEST(NetSocketAddressTests, ThreadListCopiesRuntimeThreadGroupRef) {
@@ -134,7 +192,7 @@ TEST(NetSocketAddressTests, TcpListenerConfigAcceptsRuntimeThreadRefs) {
 
 TEST(NetSocketAddressTests, ConvertsIpv4EndpointToSocketAddress) {
     const af::net::TcpEndpoint endpoint =
-        af::net::TcpEndpoint::host("127.0.0.1", 43210, af::net::AddressFamily::IPv4);
+        af::net::TcpEndpoint::host("127.0.0.1", 43210, af::net::address_family::ipv4);
     af::detail::socket_address address{};
     int error = 0;
 
@@ -150,7 +208,7 @@ TEST(NetSocketAddressTests, ConvertsIpv4EndpointToSocketAddress) {
 
 TEST(NetSocketAddressTests, ConvertsIpv6EndpointToSocketAddress) {
     const af::net::TcpEndpoint endpoint =
-        af::net::TcpEndpoint::host("::1", 44321, af::net::AddressFamily::IPv6);
+        af::net::TcpEndpoint::host("::1", 44321, af::net::address_family::ipv6);
     af::detail::socket_address address{};
     int error = 0;
 
@@ -187,7 +245,7 @@ TEST(NetSocketAddressTests, ConvertsSocketAddressBackToEndpoint) {
         reinterpret_cast<const sockaddr *>(&ipv6), sizeof(ipv6));
     EXPECT_EQ(endpoint.address, "::1");
     EXPECT_EQ(endpoint.port, 23456U);
-    EXPECT_EQ(endpoint.family, af::net::AddressFamily::IPv6);
+    EXPECT_EQ(endpoint.family, af::net::address_family::ipv6);
 }
 
 TEST(NetSocketAddressTests, ConvertsUnixEndpointToSocketAddress) {
@@ -206,5 +264,5 @@ TEST(NetSocketAddressTests, ConvertsUnixEndpointToSocketAddress) {
     const af::net::UnixEndpoint roundtrip = af::detail::endpoint_from_socket_address(
         reinterpret_cast<const sockaddr *>(unix_address), address.size);
     EXPECT_EQ(roundtrip.address, "/tmp/af-test.sock");
-    EXPECT_EQ(roundtrip.family, af::net::AddressFamily::Unix);
+    EXPECT_EQ(roundtrip.family, af::net::address_family::unix_domain);
 }

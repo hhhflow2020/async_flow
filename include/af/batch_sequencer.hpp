@@ -11,18 +11,12 @@ enum class batch_submit_status {
     submitted,
     buffered,
     duplicate,
-    Submitted = submitted,
-    Buffered = buffered,
-    Duplicate = duplicate,
 };
 
 enum class ordered_batch_failure_action : std::uint8_t {
     retry,
     skip,
     stop,
-    Retry = retry,
-    Skip = skip,
-    Stop = stop,
 };
 
 struct ordered_batch_retry_skip_options {

@@ -11,10 +11,6 @@ enum class address_family : std::uint8_t {
     ipv4,
     ipv6,
     unix_domain,
-    Unspecified = unspecified,
-    IPv4 = ipv4,
-    IPv6 = ipv6,
-    Unix = unix_domain,
 };
 
 struct ip_endpoint {

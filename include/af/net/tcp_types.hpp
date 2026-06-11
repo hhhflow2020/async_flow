@@ -19,29 +19,18 @@ enum class send_result : std::uint8_t {
     backpressure,
     closed,
     unsupported,
-    Accepted = accepted,
-    Queued = queued,
-    Backpressure = backpressure,
-    Closed = closed,
-    Unsupported = unsupported,
 };
 
 enum class close_reason : std::uint8_t {
     local,
     peer,
     error,
-    Local = local,
-    Peer = peer,
-    Error = error,
 };
 
 enum class tcp_accept_strategy : std::uint8_t {
     auto_select,
     reuse_port_per_io_thread,
     single_acceptor,
-    Auto = auto_select,
-    ReusePortPerIoThread = reuse_port_per_io_thread,
-    SingleAcceptor = single_acceptor,
 };
 
 using accept_strategy = tcp_accept_strategy;
@@ -52,18 +41,11 @@ enum class listener_state : std::uint8_t {
     active,
     failed,
     removed,
-    Configured = configured,
-    Starting = starting,
-    Active = active,
-    Failed = failed,
-    Removed = removed,
 };
 
 enum class remove_listener_policy : std::uint8_t {
     stop_accept_only,
     close_existing_connections,
-    StopAcceptOnly = stop_accept_only,
-    CloseExistingConnections = close_existing_connections,
 };
 
 struct tcp_listener_options {

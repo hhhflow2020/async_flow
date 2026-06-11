@@ -654,7 +654,7 @@ TEST(NetTcpServerTests, RuntimeTcpServerStartsConfiguredListenersOnRuntimeReacto
     runtime.stop();
 }
 
-TEST(NetTcpServerTests, RuntimeTcpServerRejectsControlFromSecondIoThread) {
+TEST(NetTcpServerTests, RuntimeTcpServerAllowsSequentialControlFromAnotherIoThread) {
     af::runtime_config config;
     config.threads = {af::io_threads("net-rt-io", 2)};
     config.logger.consumer_thread = af::thread_selector::io(0);
@@ -670,8 +670,9 @@ TEST(NetTcpServerTests, RuntimeTcpServerRejectsControlFromSecondIoThread) {
     af::net::tcp_server server(runtime);
 
     std::atomic<bool> second_done{false};
-    std::atomic<bool> second_ok{true};
+    std::atomic<bool> second_ok{false};
     std::atomic<int> second_error{0};
+    std::atomic<int> second_port{0};
 
     ASSERT_TRUE(runtime.post(io_0, [&] {
         af::net::tcp_listener_callbacks callbacks;
@@ -707,13 +708,25 @@ TEST(NetTcpServerTests, RuntimeTcpServerRejectsControlFromSecondIoThread) {
 
         const af::net::listener_result listener =
             server.add_listener(std::move(listener_config), callbacks);
-        second_ok.store(listener.ok(), std::memory_order_release);
+        const af::net::tcp_endpoint *endpoint =
+            listener.ok() ? server.local_endpoint(listener.listener) : nullptr;
+        second_ok.store(listener.ok() && endpoint != nullptr, std::memory_order_release);
         second_error.store(listener.error, std::memory_order_release);
+        second_port.store(endpoint == nullptr ? 0 : endpoint->port, std::memory_order_release);
         second_done.store(true, std::memory_order_release);
     }));
     ASSERT_TRUE(wait_until([&] { return second_done.load(std::memory_order_acquire); }));
-    EXPECT_FALSE(second_ok.load(std::memory_order_acquire));
-    EXPECT_EQ(second_error.load(std::memory_order_acquire), EPERM);
+    EXPECT_TRUE(second_ok.load(std::memory_order_acquire));
+    EXPECT_EQ(second_error.load(std::memory_order_acquire), 0);
+
+    if (second_ok.load(std::memory_order_acquire)) {
+        UniqueFd client = connect_loopback(
+            static_cast<std::uint16_t>(second_port.load(std::memory_order_acquire)));
+        EXPECT_GE(client.get(), 0);
+        EXPECT_TRUE(
+            wait_until([&] { return state.accepted.load(std::memory_order_acquire) >= 1; }));
+        EXPECT_EQ(state.errors.load(std::memory_order_acquire), 0);
+    }
 
     ASSERT_TRUE(runtime.post(io_0, [&] {
         state.stop_ok.store(server.stop(), std::memory_order_release);

@@ -43,6 +43,17 @@ static_assert(alignof(af::detail::cache_line_atomic<std::uint64_t>) ==
 static_assert(sizeof(af::detail::cache_line_atomic<std::uint64_t>) >=
               af::detail::hardware_cache_line_size);
 
+#define AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(name, value)                                            \
+    template <typename EnumT, typename = void> struct name : std::false_type {};                   \
+    template <typename EnumT>                                                                      \
+    struct name<EnumT, std::void_t<decltype(EnumT::value)>> : std::true_type {}
+
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_shared_value, Shared);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_register_value, Register);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_unregister_value, Unregister);
+
+#undef AF_TEST_DEFINE_ENUM_VALUE_DETECTOR
+
 TEST(LogTests, LogDetailTypesExposeLowerCasePrimaryNames) {
     static_assert(std::is_same_v<af::runtime_instance_absl_async_log_sink,
                                  af::RuntimeInstanceAbslAsyncLogSink>);
@@ -56,7 +67,8 @@ TEST(LogTests, LogDetailTypesExposeLowerCasePrimaryNames) {
     static_assert(
         std::is_same_v<af::detail::async_log_record_pool_kind, af::detail::AsyncLogRecordPoolKind>);
     static_assert(af::detail::async_log_record_pool_kind::shared ==
-                  af::detail::AsyncLogRecordPoolKind::Shared);
+                  af::detail::async_log_record_pool_kind::shared);
+    static_assert(!has_shared_value<af::detail::async_log_record_pool_kind>::value);
     static_assert(
         std::is_same_v<af::detail::async_log_stat_counter, af::detail::AsyncLogStatCounter>);
     static_assert(
@@ -87,10 +99,14 @@ TEST(LogTests, LogDetailTypesExposeLowerCasePrimaryNames) {
                                  af::detail::RuntimeInstanceAsyncLogConsumerController>);
     static_assert(
         af::detail::runtime_instance_async_log_consumer_control_operation::register_consumer ==
-        af::detail::RuntimeInstanceAsyncLogConsumerControlOperation::Register);
+        af::detail::runtime_instance_async_log_consumer_control_operation::register_consumer);
     static_assert(
         af::detail::runtime_instance_async_log_consumer_control_operation::unregister_consumer ==
-        af::detail::RuntimeInstanceAsyncLogConsumerControlOperation::Unregister);
+        af::detail::runtime_instance_async_log_consumer_control_operation::unregister_consumer);
+    static_assert(!has_register_value<
+                  af::detail::runtime_instance_async_log_consumer_control_operation>::value);
+    static_assert(!has_unregister_value<
+                  af::detail::runtime_instance_async_log_consumer_control_operation>::value);
     static_assert(std::is_same_v<af::file_log_backend_options, af::FileLogBackendConfig>);
     static_assert(std::is_same_v<af::file_log_backend, af::FileLogBackend>);
     static_assert(std::is_same_v<af::udp_log_backend_options, af::UdpLogBackendConfig>);

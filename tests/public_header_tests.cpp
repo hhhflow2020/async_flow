@@ -10,6 +10,23 @@
 
 namespace {
 
+#define AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(name, value)                                            \
+    template <typename EnumT, typename = void> struct name : std::false_type {};                   \
+    template <typename EnumT>                                                                      \
+    struct name<EnumT, std::void_t<decltype(EnumT::value)>> : std::true_type {}
+
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_submitted_value, Submitted);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_buffered_value, Buffered);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_duplicate_value, Duplicate);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_retry_value, Retry);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_skip_value, Skip);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_stop_value, Stop);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_add_value, Add);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_update_value, Update);
+AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_delete_value, Delete);
+
+#undef AF_TEST_DEFINE_ENUM_VALUE_DETECTOR
+
 class runtime_task_legacy_schedule_probe final : public af::runtime_task {
 public:
     runtime_task_legacy_schedule_probe(factory_token token, af::runtime &owner)
@@ -135,13 +152,20 @@ TEST(PublicHeaderTests, UtilityUmbrellaExposesLowerCaseNames) {
     chain.push_back(buffer.slice(0));
     EXPECT_EQ(chain.size(), 2U);
     static_assert(std::is_same_v<af::batch_submit_status, af::BatchSubmitStatus>);
-    static_assert(af::batch_submit_status::submitted == af::BatchSubmitStatus::Submitted);
-    static_assert(af::batch_submit_status::buffered == af::BatchSubmitStatus::Buffered);
-    static_assert(af::batch_submit_status::duplicate == af::BatchSubmitStatus::Duplicate);
+    static_assert(af::batch_submit_status::submitted == af::batch_submit_status::submitted);
+    static_assert(af::batch_submit_status::buffered == af::batch_submit_status::buffered);
+    static_assert(af::batch_submit_status::duplicate == af::batch_submit_status::duplicate);
+    static_assert(!has_submitted_value<af::batch_submit_status>::value);
+    static_assert(!has_buffered_value<af::batch_submit_status>::value);
+    static_assert(!has_duplicate_value<af::batch_submit_status>::value);
     static_assert(std::is_same_v<af::ordered_batch_failure_action, af::OrderedBatchFailureAction>);
-    static_assert(af::ordered_batch_failure_action::retry == af::OrderedBatchFailureAction::Retry);
-    static_assert(af::ordered_batch_failure_action::skip == af::OrderedBatchFailureAction::Skip);
-    static_assert(af::ordered_batch_failure_action::stop == af::OrderedBatchFailureAction::Stop);
+    static_assert(af::ordered_batch_failure_action::retry ==
+                  af::ordered_batch_failure_action::retry);
+    static_assert(af::ordered_batch_failure_action::skip == af::ordered_batch_failure_action::skip);
+    static_assert(af::ordered_batch_failure_action::stop == af::ordered_batch_failure_action::stop);
+    static_assert(!has_retry_value<af::ordered_batch_failure_action>::value);
+    static_assert(!has_skip_value<af::ordered_batch_failure_action>::value);
+    static_assert(!has_stop_value<af::ordered_batch_failure_action>::value);
     static_assert(
         std::is_same_v<af::ordered_batch_retry_skip_options, af::OrderedBatchRetrySkipOptions>);
     static_assert(
@@ -150,9 +174,12 @@ TEST(PublicHeaderTests, UtilityUmbrellaExposesLowerCaseNames) {
                                  af::OrderedBatchRetrySkipPolicy<std::uint64_t>>);
     static_assert(std::is_same_v<af::batch_sequencer<int>, af::BatchSequencer<int>>);
     static_assert(std::is_same_v<af::op_type, af::OpType>);
-    static_assert(af::op_type::add == af::OpType::Add);
-    static_assert(af::op_type::update == af::OpType::Update);
-    static_assert(af::op_type::delete_op == af::OpType::Delete);
+    static_assert(af::op_type::add == af::op_type::add);
+    static_assert(af::op_type::update == af::op_type::update);
+    static_assert(af::op_type::delete_op == af::op_type::delete_op);
+    static_assert(!has_add_value<af::op_type>::value);
+    static_assert(!has_update_value<af::op_type>::value);
+    static_assert(!has_delete_value<af::op_type>::value);
     static_assert(std::is_same_v<af::crud_op<int, int>, af::CrudOp<int, int>>);
     static_assert(std::is_same_v<af::change_batch<int, int>, af::ChangeBatch<int, int>>);
     static_assert(std::is_same_v<af::SignalWaitResult, af::signal_wait_result>);

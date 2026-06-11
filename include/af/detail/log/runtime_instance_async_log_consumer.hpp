@@ -17,8 +17,6 @@ namespace af::detail {
 enum class runtime_instance_async_log_consumer_control_operation : std::uint8_t {
     register_consumer,
     unregister_consumer,
-    Register = register_consumer,
-    Unregister = unregister_consumer,
 };
 
 struct runtime_instance_async_log_consumer_control_completion {

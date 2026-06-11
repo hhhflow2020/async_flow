@@ -8,15 +8,11 @@ namespace af {
 enum class parallel_mode : std::uint8_t {
     non_empty_only,
     all_shards,
-    NonEmptyOnly = non_empty_only,
-    AllShards = all_shards,
 };
 
 enum class ordered_batch_replay_policy : std::uint8_t {
     strict,
     skip_already_applied,
-    Strict = strict,
-    SkipAlreadyApplied = skip_already_applied,
 };
 
 struct ordered_batch_options {

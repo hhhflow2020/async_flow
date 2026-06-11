@@ -13,9 +13,6 @@ enum class op_type : std::uint8_t {
     add,
     update,
     delete_op,
-    Add = add,
-    Update = update,
-    Delete = delete_op,
 };
 
 template <typename Key, typename Value> struct crud_op {

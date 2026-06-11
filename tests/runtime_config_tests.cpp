@@ -87,6 +87,41 @@ template <typename EnumT, typename = void> struct has_running_value : std::false
 template <typename EnumT>
 struct has_running_value<EnumT, std::void_t<decltype(EnumT::Running)>> : std::true_type {};
 
+template <typename EnumT, typename = void> struct has_drop_newest_value : std::false_type {};
+template <typename EnumT>
+struct has_drop_newest_value<EnumT, std::void_t<decltype(EnumT::DropNewest)>> : std::true_type {};
+
+template <typename EnumT, typename = void> struct has_block_value : std::false_type {};
+template <typename EnumT>
+struct has_block_value<EnumT, std::void_t<decltype(EnumT::Block)>> : std::true_type {};
+
+template <typename EnumT, typename = void> struct has_ordered_value : std::false_type {};
+template <typename EnumT>
+struct has_ordered_value<EnumT, std::void_t<decltype(EnumT::Ordered)>> : std::true_type {};
+
+template <typename EnumT, typename = void> struct has_relaxed_value : std::false_type {};
+template <typename EnumT>
+struct has_relaxed_value<EnumT, std::void_t<decltype(EnumT::Relaxed)>> : std::true_type {};
+
+template <typename EnumT, typename = void> struct has_non_empty_only_value : std::false_type {};
+template <typename EnumT>
+struct has_non_empty_only_value<EnumT, std::void_t<decltype(EnumT::NonEmptyOnly)>>
+    : std::true_type {};
+
+template <typename EnumT, typename = void> struct has_all_shards_value : std::false_type {};
+template <typename EnumT>
+struct has_all_shards_value<EnumT, std::void_t<decltype(EnumT::AllShards)>> : std::true_type {};
+
+template <typename EnumT, typename = void> struct has_strict_value : std::false_type {};
+template <typename EnumT>
+struct has_strict_value<EnumT, std::void_t<decltype(EnumT::Strict)>> : std::true_type {};
+
+template <typename EnumT, typename = void>
+struct has_skip_already_applied_value : std::false_type {};
+template <typename EnumT>
+struct has_skip_already_applied_value<EnumT, std::void_t<decltype(EnumT::SkipAlreadyApplied)>>
+    : std::true_type {};
+
 static_assert(af::supports_native_io_wait == (af::supports_epoll || af::supports_kqueue));
 static_assert(af::supports_eventfd == af::platform_linux);
 static_assert(af::supports_timerfd == af::platform_linux);
@@ -139,11 +174,15 @@ static_assert(!has_starting_value<af::task_state>::value);
 static_assert(!has_running_value<af::task_state>::value);
 static_assert(!has_pending_value<af::task_state>::value);
 static_assert(!has_done_value<af::task_state>::value);
-static_assert(af::parallel_mode::non_empty_only == af::ParallelMode::NonEmptyOnly);
-static_assert(af::parallel_mode::all_shards == af::ParallelMode::AllShards);
-static_assert(af::ordered_batch_replay_policy::strict == af::OrderedBatchReplayPolicy::Strict);
+static_assert(af::parallel_mode::non_empty_only == af::parallel_mode::non_empty_only);
+static_assert(af::parallel_mode::all_shards == af::parallel_mode::all_shards);
+static_assert(!has_non_empty_only_value<af::parallel_mode>::value);
+static_assert(!has_all_shards_value<af::parallel_mode>::value);
+static_assert(af::ordered_batch_replay_policy::strict == af::ordered_batch_replay_policy::strict);
 static_assert(af::ordered_batch_replay_policy::skip_already_applied ==
-              af::OrderedBatchReplayPolicy::SkipAlreadyApplied);
+              af::ordered_batch_replay_policy::skip_already_applied);
+static_assert(!has_strict_value<af::ordered_batch_replay_policy>::value);
+static_assert(!has_skip_already_applied_value<af::ordered_batch_replay_policy>::value);
 static_assert(std::is_same_v<af::log_ordering, af::LogOrdering>);
 static_assert(std::is_same_v<af::log_overflow_policy, af::LogOverflowPolicy>);
 static_assert(std::is_same_v<af::detail::runtime_pooled_object_pool_type<int, 8>,
@@ -159,10 +198,14 @@ static_assert(std::is_same_v<af::detail::runtime_instance_parallel_group,
                              af::detail::RuntimeInstanceParallelGroup>);
 static_assert(std::is_same_v<af::detail::runtime_instance_parallel_group_pool_type,
                              af::detail::RuntimeInstanceParallelGroupPool>);
-static_assert(af::log_ordering::ordered == af::LogOrdering::Ordered);
-static_assert(af::log_ordering::relaxed == af::LogOrdering::Relaxed);
-static_assert(af::log_overflow_policy::drop_newest == af::LogOverflowPolicy::DropNewest);
-static_assert(af::log_overflow_policy::block == af::LogOverflowPolicy::Block);
+static_assert(af::log_ordering::ordered == af::log_ordering::ordered);
+static_assert(af::log_ordering::relaxed == af::log_ordering::relaxed);
+static_assert(!has_ordered_value<af::log_ordering>::value);
+static_assert(!has_relaxed_value<af::log_ordering>::value);
+static_assert(af::log_overflow_policy::drop_newest == af::log_overflow_policy::drop_newest);
+static_assert(af::log_overflow_policy::block == af::log_overflow_policy::block);
+static_assert(!has_drop_newest_value<af::log_overflow_policy>::value);
+static_assert(!has_block_value<af::log_overflow_policy>::value);
 
 struct layout_logic_tag;
 struct layout_io_tag;

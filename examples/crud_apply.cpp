@@ -95,11 +95,11 @@ private:
 
     static bool apply_op(PlayerStore &store, const af::crud_op<std::uint64_t, PlayerProfile> &op) {
         switch (op.type) {
-        case af::op_type::Add:
+        case af::op_type::add:
             store[op.key] = op.value;
             return true;
 
-        case af::op_type::Update: {
+        case af::op_type::update: {
             auto it = store.find(op.key);
             if (it == store.end()) {
                 return false;
@@ -108,7 +108,7 @@ private:
             return true;
         }
 
-        case af::op_type::Delete:
+        case af::op_type::delete_op:
             store.erase(op.key);
             return true;
         }
@@ -180,8 +180,8 @@ int main() {
         PlayerChangeBatch{
             2,
             {
-                {af::op_type::Update, 1001U, {3, 250}},
-                {af::op_type::Add, 1003U, {1, 30}},
+                {af::op_type::update, 1001U, {3, 250}},
+                {af::op_type::add, 1003U, {1, 30}},
             },
         },
         io_threads.front());
@@ -189,8 +189,8 @@ int main() {
         PlayerChangeBatch{
             1,
             {
-                {af::op_type::Add, 1001U, {2, 100}},
-                {af::op_type::Add, 1002U, {5, 500}},
+                {af::op_type::add, 1001U, {2, 100}},
+                {af::op_type::add, 1002U, {5, 500}},
             },
         },
         io_threads.front());

@@ -187,8 +187,6 @@ private:
     enum class control_operation : std::uint8_t {
         register_service,
         unregister_service,
-        Register = register_service,
-        Unregister = unregister_service,
     };
 
     using ControlOperation = control_operation;

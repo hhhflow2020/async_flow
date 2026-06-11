@@ -13,15 +13,11 @@ namespace af {
 enum class log_overflow_policy : std::uint8_t {
     drop_newest,
     block,
-    DropNewest = drop_newest,
-    Block = block,
 };
 
 enum class log_ordering : std::uint8_t {
     ordered,
     relaxed,
-    Ordered = ordered,
-    Relaxed = relaxed,
 };
 
 inline constexpr std::size_t async_log_record_pool_max_local_cache_size = 4096;

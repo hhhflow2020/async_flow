@@ -26,7 +26,7 @@ public:
     tcp_server &operator=(const tcp_server &) = delete;
 
     ~tcp_server() {
-        if (running_ && on_control_thread()) {
+        if (running_ && on_owner_io_thread()) {
             static_cast<void>(stop());
         }
     }
@@ -55,7 +55,7 @@ public:
         if (running_) {
             return false;
         }
-        if (!prepare_current_control_thread()) {
+        if (!on_owner_io_thread()) {
             return false;
         }
 
@@ -79,7 +79,7 @@ public:
         if (!running_) {
             return false;
         }
-        if (!on_control_thread()) {
+        if (!on_owner_io_thread()) {
             return false;
         }
 
@@ -116,7 +116,7 @@ public:
     [[nodiscard]] bool remove_listener(
         tcp_listener_handle handle,
         remove_listener_policy policy = remove_listener_policy::stop_accept_only) noexcept {
-        if (!on_control_thread()) {
+        if (!on_owner_io_thread()) {
             return false;
         }
         listener_record *record = find_record(handle);
@@ -268,8 +268,7 @@ private:
                                                     tcp_listener_callbacks raw_callbacks,
                                                     tcp_connection_callbacks connection_callbacks,
                                                     bool connection_mode) {
-        const af::thread_ref control_thread = current_control_thread();
-        if (!control_thread) {
+        if (!on_owner_io_thread()) {
             return listener_result::failure(EPERM);
         }
 
@@ -319,30 +318,6 @@ private:
         }
         const af::runtime::thread_index index = af::runtime::current_thread_index();
         return owner_->valid_thread(index) && owner_->thread_kind_of(index) == af::thread_kind::io;
-    }
-
-    [[nodiscard]] bool on_control_thread() const noexcept {
-        return on_owner_io_thread() && control_thread_.valid() &&
-               af::runtime::current_thread_index() == control_thread_.index;
-    }
-
-    [[nodiscard]] bool prepare_current_control_thread() noexcept {
-        if (!on_owner_io_thread()) {
-            return false;
-        }
-        const af::thread_ref current_thread(af::runtime::current_thread_index());
-        if (!control_thread_) {
-            control_thread_ = current_thread;
-            return true;
-        }
-        return control_thread_ == current_thread;
-    }
-
-    [[nodiscard]] af::thread_ref current_control_thread() noexcept {
-        if (!prepare_current_control_thread()) {
-            return {};
-        }
-        return control_thread_;
     }
 
     [[nodiscard]] bool is_current_thread(af::thread_ref thread) const noexcept {
@@ -586,7 +561,6 @@ private:
 
     af::runtime *owner_{nullptr};
     tcp_server_config config_;
-    af::thread_ref control_thread_{};
     std::vector<std::unique_ptr<listener_record>> listeners_;
     std::vector<std::uint32_t> free_listener_slots_;
     std::vector<shard_record> shards_;
