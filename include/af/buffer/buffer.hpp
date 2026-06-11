@@ -11,12 +11,15 @@
 #include <utility>
 #include <vector>
 
+#include "absl/container/inlined_vector.h"
+
 namespace af {
 
 namespace detail {
 
 inline constexpr std::size_t io_buffer_pool_block_size = 16U * 1024U;
 inline constexpr std::size_t io_buffer_pool_local_cache_capacity = 256U;
+inline constexpr std::size_t buffer_chain_inline_capacity = 4U;
 
 struct buffer_storage {
     [[nodiscard]] std::byte *data() noexcept {
@@ -303,6 +306,8 @@ private:
 
 class buffer_chain {
 public:
+    using buffer_list = absl::InlinedVector<buffer, detail::buffer_chain_inline_capacity>;
+
     void push_back(buffer buf) {
         if (!buf.empty()) {
             if (!total_dirty_) {
@@ -353,13 +358,13 @@ public:
         }
     }
 
-    [[nodiscard]] std::vector<buffer> &buffers() noexcept {
+    [[nodiscard]] buffer_list &buffers() noexcept {
         compact_front();
         total_dirty_ = true;
         return buffers_;
     }
 
-    [[nodiscard]] const std::vector<buffer> &buffers() const noexcept {
+    [[nodiscard]] const buffer_list &buffers() const noexcept {
         compact_front();
         return buffers_;
     }
@@ -414,7 +419,7 @@ private:
         first_ = 0;
     }
 
-    mutable std::vector<buffer> buffers_;
+    mutable buffer_list buffers_;
     mutable std::size_t first_{0};
     mutable std::size_t total_bytes_{0};
     mutable bool total_dirty_{false};

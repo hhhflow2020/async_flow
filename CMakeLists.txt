@@ -17,6 +17,7 @@ target_link_libraries(
     asyncflow
     INTERFACE
         absl::flat_hash_map
+        absl::inlined_vector
         absl::log
         absl::log_initialize
         absl::log_internal_globals

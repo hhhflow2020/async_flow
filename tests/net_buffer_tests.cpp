@@ -124,6 +124,19 @@ TEST(NetBufferTests, BufferChainTracksTotalBytes) {
     EXPECT_EQ(chain.buffers().size(), 2U);
 }
 
+TEST(NetBufferTests, BufferChainUsesInlineStorageForSmallChains) {
+    af::buffer_chain chain;
+
+    EXPECT_GE(chain.buffers().capacity(), af::detail::buffer_chain_inline_capacity);
+
+    for (std::size_t i = 0; i < af::detail::buffer_chain_inline_capacity; ++i) {
+        chain.push_back(af::buffer::copy("x", 1));
+    }
+
+    EXPECT_EQ(chain.buffers().size(), af::detail::buffer_chain_inline_capacity);
+    EXPECT_GE(chain.buffers().capacity(), af::detail::buffer_chain_inline_capacity);
+}
+
 TEST(NetBufferTests, BufferChainRemovePrefixConsumesAcrossBuffers) {
     af::buffer_chain chain;
     chain.push_back(af::buffer::copy("ab", 2));

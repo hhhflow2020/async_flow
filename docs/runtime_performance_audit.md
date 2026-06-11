@@ -16,6 +16,7 @@
 - 日志 record pool 和 runtime task pool 都应按线程局部复用。
 - 对象池 slot 已按 cache line 对齐，block/pool 热原子字段独立对齐；日志 record pool 的 slab free-list 和扩容标志也与热路径数据分离。
 - `buffer::copy` 的小/中等 IO payload 走线程本地 16KiB 物理固定块池，避免高频收发路径反复分配和释放 `std::vector` 存储；`buffer::capacity()`、`tailroom()`、`buffer(size)` 与 `with_capacity()` 仍保持精确逻辑容量语义。
+- `buffer_chain` 使用 4 个 buffer 的 inline storage，TCP 写队列常见的短链路不需要为容器节点进入堆分配。
 
 ## 分支与系统调用
 
@@ -31,10 +32,10 @@
 - 远端 Linux Release 单次冒烟中，ordered `16/4096` 约 `7.86M logs/s`，ordered `32/2048` 约 `8.01M logs/s`；relaxed `16/4096` 约 `18.39M logs/s`，relaxed `32/2048` 约 `16.19M logs/s`。
 - reactor ready batch benchmark 覆盖 select/auto/epoll/kqueue 后端的 `64/256` source 和 `16/64/256` event budget 组合；unsupported 后端在对应平台自动 skip。
 - TCP connection 读写均有 byte budget；读路径单次 `recv` 会按本轮剩余 `read_budget_bytes` 裁剪，避免 `read_buffer_size` 大于 budget 时单连接超预算占用 IO 线程。
-- TCP echo roundtrip benchmark 覆盖 runtime `tcp_server` + loopback client 的 `64/1024/4096` 字节 payload；远端 Linux Release 冒烟约 `8.12us/8.52us/9.32us`，吞吐约 `15.0MiB/s`、`229.2MiB/s`、`838.5MiB/s`。
-- TCP multi-connection echo benchmark 覆盖 `16/64` 连接与 `64/1024` 字节 payload 组合；远端 Linux Release 冒烟中 `16x64/16x1024/64x64/64x1024` 约 `53.2us/57.3us/192us/195us`，吞吐约 `36.7MiB/s`、`545.3MiB/s`、`40.6MiB/s`、`642.2MiB/s`。
+- TCP echo roundtrip benchmark 覆盖 runtime `tcp_server` + loopback client 的 `64/1024/4096` 字节 payload；远端 Linux Release 冒烟约 `8.26us/8.31us/9.45us`，吞吐约 `14.8MiB/s`、`235.0MiB/s`、`826.9MiB/s`。
+- TCP multi-connection echo benchmark 覆盖 `16/64` 连接与 `64/1024` 字节 payload 组合；远端 Linux Release 冒烟中 `16x64/16x1024/64x64/64x1024` 约 `53.8us/57.5us/198us/203us`，吞吐约 `36.3MiB/s`、`543.9MiB/s`、`39.5MiB/s`、`615.3MiB/s`。
 - `async_log_record_pool` 已记录本线程、批量和跨线程 release 远端 Release benchmark：关键项约 `20M-116M items/s`，用于后续性能回归对比。
 
 ## 仍可提升
 
-- 后续可继续把 `buffer_chain` 的容器节点和极大 payload 的 heap storage 纳入专用 slab/pool，以进一步降低 shared ownership 控制块和大块分配的尾延迟。
+- 后续可继续把极大 payload 的 heap storage 纳入专用 slab/size-class pool，并评估 `buffer_storage` 控制块的 intrusive refcount 化，以进一步降低大块分配尾延迟和 shared ownership 成本。
