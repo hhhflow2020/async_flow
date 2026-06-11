@@ -9,8 +9,8 @@
 #include <utility>
 
 #include "af/detail/config.hpp"
-#include "af/detail/memory/object_pool_block.hpp"
-#include "af/detail/memory/object_pool_local_cache.hpp"
+#include "af/memory/object_pool_block.hpp"
+#include "af/memory/object_pool_local_cache.hpp"
 
 namespace af::detail {
 

@@ -62,6 +62,46 @@
 #error "queue headers must be installed under af/queue"
 #endif
 
+#if __has_include("af/detail/memory/contiguous_object_storage.hpp")
+#error "memory headers must live under af/memory, not af/detail/memory"
+#endif
+
+#if __has_include("af/detail/memory/object_pool.hpp")
+#error "memory headers must live under af/memory, not af/detail/memory"
+#endif
+
+#if __has_include("af/detail/memory/object_pool_block.hpp")
+#error "memory headers must live under af/memory, not af/detail/memory"
+#endif
+
+#if __has_include("af/detail/memory/object_pool_core.hpp")
+#error "memory headers must live under af/memory, not af/detail/memory"
+#endif
+
+#if __has_include("af/detail/memory/object_pool_local_cache.hpp")
+#error "memory headers must live under af/memory, not af/detail/memory"
+#endif
+
+#if !__has_include("af/memory/contiguous_object_storage.hpp")
+#error "memory headers must be installed under af/memory"
+#endif
+
+#if !__has_include("af/memory/object_pool.hpp")
+#error "memory headers must be installed under af/memory"
+#endif
+
+#if !__has_include("af/memory/object_pool_block.hpp")
+#error "memory headers must be installed under af/memory"
+#endif
+
+#if !__has_include("af/memory/object_pool_core.hpp")
+#error "memory headers must be installed under af/memory"
+#endif
+
+#if !__has_include("af/memory/object_pool_local_cache.hpp")
+#error "memory headers must be installed under af/memory"
+#endif
+
 namespace {
 
 struct forbidden_source_snippet {
@@ -233,36 +273,33 @@ TEST(PublicHeaderTests, RuntimeParallelPublicHeaderDoesNotExposeCamelCaseTypeAli
 
 TEST(PublicHeaderTests, ObjectPoolDetailHeadersDoNotExposeCamelCaseTypeAliases) {
     constexpr std::array forbidden{
-        forbidden_source_snippet{"include/af/detail/memory/object_pool.hpp", "using ObjectPool ="},
-        forbidden_source_snippet{"include/af/detail/memory/object_pool_core.hpp",
+        forbidden_source_snippet{"include/af/memory/object_pool.hpp", "using ObjectPool ="},
+        forbidden_source_snippet{"include/af/memory/object_pool_core.hpp",
                                  "using ObjectPoolCore ="},
-        forbidden_source_snippet{"include/af/detail/memory/object_pool_block.hpp",
+        forbidden_source_snippet{"include/af/memory/object_pool_block.hpp",
                                  "using ObjectPoolBlockLayout ="},
-        forbidden_source_snippet{"include/af/detail/memory/object_pool_local_cache.hpp",
+        forbidden_source_snippet{"include/af/memory/object_pool_local_cache.hpp",
                                  "using ObjectPoolLocalCache ="},
-        forbidden_source_snippet{"include/af/detail/memory/object_pool_local_cache.hpp",
+        forbidden_source_snippet{"include/af/memory/object_pool_local_cache.hpp",
                                  "using ObjectPoolDirectReleaseSet ="},
-        forbidden_source_snippet{"include/af/detail/memory/object_pool_local_cache.hpp",
+        forbidden_source_snippet{"include/af/memory/object_pool_local_cache.hpp",
                                  "using ObjectPoolSingleLocalCacheSet ="},
-        forbidden_source_snippet{"include/af/detail/memory/object_pool_local_cache.hpp",
+        forbidden_source_snippet{"include/af/memory/object_pool_local_cache.hpp",
                                  "using ObjectPoolMultiLocalCacheSet ="},
-        forbidden_source_snippet{"include/af/detail/memory/object_pool_local_cache.hpp",
+        forbidden_source_snippet{"include/af/memory/object_pool_local_cache.hpp",
                                  "using ObjectPoolLocalCacheSet ="},
-        forbidden_source_snippet{"include/af/detail/memory/object_pool.hpp",
-                                 "std::size_t ChunkSize"},
-        forbidden_source_snippet{"include/af/detail/memory/object_pool.hpp",
+        forbidden_source_snippet{"include/af/memory/object_pool.hpp", "std::size_t ChunkSize"},
+        forbidden_source_snippet{"include/af/memory/object_pool.hpp",
                                  "std::size_t RemoteReleaseBatchSize"},
-        forbidden_source_snippet{"include/af/detail/memory/object_pool.hpp",
-                                 "CacheAllocatedSlotIndex"},
-        forbidden_source_snippet{"include/af/detail/memory/object_pool_core.hpp",
-                                 "std::size_t ChunkSize"},
-        forbidden_source_snippet{"include/af/detail/memory/object_pool_core.hpp",
+        forbidden_source_snippet{"include/af/memory/object_pool.hpp", "CacheAllocatedSlotIndex"},
+        forbidden_source_snippet{"include/af/memory/object_pool_core.hpp", "std::size_t ChunkSize"},
+        forbidden_source_snippet{"include/af/memory/object_pool_core.hpp",
                                  "std::size_t RemoteReleaseBatchSize"},
-        forbidden_source_snippet{"include/af/detail/memory/object_pool_core.hpp",
+        forbidden_source_snippet{"include/af/memory/object_pool_core.hpp",
                                  "CacheAllocatedSlotIndex"},
-        forbidden_source_snippet{"include/af/detail/memory/object_pool_block.hpp",
+        forbidden_source_snippet{"include/af/memory/object_pool_block.hpp",
                                  "std::size_t ChunkSize"},
-        forbidden_source_snippet{"include/af/detail/memory/object_pool_block.hpp",
+        forbidden_source_snippet{"include/af/memory/object_pool_block.hpp",
                                  "CacheAllocatedSlotIndex"},
     };
 
@@ -276,7 +313,7 @@ TEST(PublicHeaderTests, ObjectPoolDetailHeadersDoNotExposeCamelCaseTypeAliases) 
 
 TEST(PublicHeaderTests, InfrastructureDetailHeadersDoNotExposeCamelCaseTypeAliases) {
     constexpr std::array forbidden{
-        forbidden_source_snippet{"include/af/detail/memory/contiguous_object_storage.hpp",
+        forbidden_source_snippet{"include/af/memory/contiguous_object_storage.hpp",
                                  "using ContiguousObjectStorage ="},
         forbidden_source_snippet{"include/af/detail/net/socket_address.hpp",
                                  "using SocketAddress ="},

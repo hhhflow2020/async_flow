@@ -2,7 +2,7 @@
 
 #include <cstddef>
 
-#include "af/detail/memory/object_pool_core.hpp"
+#include "af/memory/object_pool_core.hpp"
 
 namespace af::detail {
 

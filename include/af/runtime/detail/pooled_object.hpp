@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <utility>
 
-#include "af/detail/memory/object_pool.hpp"
+#include "af/memory/object_pool.hpp"
 #include "af/detail/runtime/runtime_common_state.hpp"
 
 namespace af::detail {
