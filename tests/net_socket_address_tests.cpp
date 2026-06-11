@@ -61,7 +61,6 @@ TEST(NetSocketAddressTests, LowerCaseNetAliasesMatchPublicTypes) {
 
     static_assert(std::is_enum_v<af::net::send_result>);
     static_assert(std::is_enum_v<af::net::close_reason>);
-    static_assert(std::is_same_v<af::net::tcp_accept_strategy, af::net::accept_strategy>);
     static_assert(std::is_enum_v<af::net::listener_state>);
     static_assert(std::is_enum_v<af::net::remove_listener_policy>);
     static_assert(std::is_class_v<af::net::tcp_listener_options>);

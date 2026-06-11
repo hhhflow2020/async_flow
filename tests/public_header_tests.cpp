@@ -295,6 +295,7 @@ TEST(PublicHeaderTests, NetPublicHeadersDoNotExposeCamelCaseTypeAliases) {
         forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using SendResult ="},
         forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using CloseReason ="},
         forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using AcceptStrategy ="},
+        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using accept_strategy ="},
         forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using ListenerState ="},
         forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using RemoveListenerPolicy ="},
         forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using TcpListenerOptions ="},

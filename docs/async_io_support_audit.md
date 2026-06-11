@@ -10,6 +10,8 @@
 - Linux native helper：eventfd、timerfd、sendfile、splice、openat2、statx、fallocate 等。
 - readiness poller 默认使用 LT 语义；网络 fd 由 owner reactor 线程持有，channel/connection
   只在 interest 变化、取消和关闭时更新 poller。
+- TCP connection 已有连接级 `read_budget_bytes` / `write_budget_bytes`，UDP shard 已有
+  `read_budget_datagrams`，避免单连接或单 socket 长时间占用 IO 线程。
 - kqueue timeout wait 保持一次性 timer 语义。
 - `asyncflow_select_backend_tests` 会强制关闭 epoll/kqueue 并启用 select，覆盖 fallback readiness wait。
 
@@ -37,6 +39,5 @@
 
 ## 后续建议
 
-- 为 epoll LT reactor 增加连接级读写预算，避免单连接长时间占用 IO 线程。
 - 继续补充 TCP/UDP/Unix stream/Unix datagram socket 抽象的跨平台压力测试和异常路径测试。
 - 继续把 `buffer`/`buffer_chain` 演进到显式 reserve、scatter/gather view 和池化块复用，减少 packet encode/decode 的分配和复制。

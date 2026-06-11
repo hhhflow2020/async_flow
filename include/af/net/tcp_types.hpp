@@ -33,8 +33,6 @@ enum class tcp_accept_strategy : std::uint8_t {
     single_acceptor,
 };
 
-using accept_strategy = tcp_accept_strategy;
-
 enum class listener_state : std::uint8_t {
     configured,
     starting,
