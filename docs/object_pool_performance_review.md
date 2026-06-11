@@ -10,10 +10,12 @@
 - task pool holder 的预热状态使用 cache-line 原子隔离，避免任务创建热路径与 pool 热字段 false sharing。
 - slot 按 cache line 对齐，避免不同对象共享同一 cache line 造成 false sharing。
 - block free-list 使用带版本号的 64-bit CAS，不使用 mutex。
+- TLS local cache 使用 pool token 区分同地址复用；pool 析构时先失效 lifetime token，本线程 cache 直接丢弃，其他线程在线程退出/flush 时发现 pool 已失效后丢弃，不会把远端释放缓存回写到已析构 pool。
 
 ## 日志 record pool
 
 - `async_log_record_pool` 使用固定数组 TLS local cache，命中时 acquire/release 不进入全局锁，也不需要在线程首次绑定 pool 时为 cache 做动态分配。
+- TLS local cache 同样使用 pool token 和 weak lifetime，pool 地址复用或 pool 已析构时只丢弃 stale cache，不触碰已释放 slab。
 - 每个 slab 有独立的带版本号 free-list；批量 release 会按 slab 分组，只对同一 slab 做一次链表拼接和 CAS。
 - local cache refill 会跨已有 slab 尽量填满缓存，避免某个 slab 只剩少量 slot 时频繁重复进入全局 free-list。
 - 扩容通过 `atomic_flag` 串行化，只在 slab 耗尽时进入冷路径；正常日志热路径不加锁。
@@ -106,6 +108,24 @@
 - 对象池本线程 create/destroy 与批量路径相对前次复核没有退化，批量 create/destroy 略高。
 - 对象池跨线程 remote batch 仍稳定在约 `52M items/s`，主要成本仍是跨线程同步和缓存一致性流量。
 - 日志 record pool 本线程、批量、跨线程 release 三类关键路径均能稳定出数；`1024/1024` 跨线程项 CV 偏高，后续若做 release batch 调参，应继续用该项观察尾部抖动。
+
+## 2026-06-12 TLS 生命周期修复复核
+
+本轮补充 `ObjectPoolRemoteReleaseCacheDiscardsAfterPoolDestruction`，覆盖跨线程 remote release 缓存在 pool 析构后仍滞留在线程 TLS 中的边界。修复后 remote-release TLS cache 在 pool lifetime 失效时丢弃本地缓存，避免线程退出时回写已析构 pool。
+
+远端容器输出时间：`2026-06-12T08:18Z`。命令参数：
+`--benchmark_filter='BM_ObjectPoolCreateDestroy/16384|BM_ObjectPoolRemoteBatchCrossThreadDestroyBatch/16384|BM_AsyncLogRecordPoolAcquireRelease/256' --benchmark_min_time=0.2s`。
+
+结果摘要：
+
+- `BM_AsyncLogRecordPoolAcquireRelease/256`：约 `77.9M items/s`。
+- `BM_ObjectPoolCreateDestroy/16384`：约 `250.6M items/s`。
+- `BM_ObjectPoolRemoteBatchCrossThreadDestroyBatch/16384`：约 `63.1M items/s`。
+
+判断：
+
+- 对象池新增 token 校验后，本线程 create/destroy 和跨线程 batch destroy 仍能稳定出数。
+- weak lifetime 只在 cache reset/flush/线程退出等冷路径触碰；热路径保持 local cache + free-list CAS，不引入锁。
 
 ## 建议
 

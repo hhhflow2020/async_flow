@@ -20,7 +20,7 @@
 
 queue 基础结构已从 `include/af/detail/queue/` 迁移到 `include/af/queue/`，包含 intrusive MPSC、bounded MPSC/MPMC、公共 ring 序号工具和 backoff。`tests/public_header_tests.cpp` 会阻止旧 `detail/queue` 头文件重新出现，并确认新路径可包含。
 
-对外命名继续向 lower_case 迁移：batch/crud/parallel utility、compile-time `thread_layout`、task 状态枚举、signal、buffer 以及 log 配置/句柄/后端相关主类型已迁移为 lower_case。public `af::net`、utility、log、task 状态枚举、对象池/log/基础设施 detail 与 compile-time `thread_layout` 的 CamelCase 类型 alias 已删除，并通过 public header 源码扫描测试防回归；剩余兼容命名按模块逐步收口。
+对外命名继续向 lower_case 迁移：batch/crud/parallel utility、compile-time `thread_layout`、task 状态枚举、signal、buffer 以及 log 配置/句柄/后端相关主类型已迁移为 lower_case。public `af::net`、utility、log、task 状态枚举、对象池/log/基础设施 detail 与 compile-time `thread_layout` 的 CamelCase 类型 alias 已删除，并通过 public header 源码扫描测试防回归。examples 中的 runtime task、stream tag 和业务 batch 类型也已迁移为 lower_snake_case；剩余 CamelCase 主要在测试 fixture 内部，用于覆盖旧构造路径、异常路径或平台行为。
 
 通用 service task 由 runtime executor 按预算轮询执行；service 自身负责 pending 状态和内部队列，跨线程 producer 通过 `wake_service_tasks()` 唤醒 executor。runtime async logger 现在就是一个 service task，消费热路径不进入 task 状态机；推荐手工入口是 `start_runtime_logging()`，runtime 配置了日志后会在 `runtime::start()` 中自动启动并在 `runtime::stop()` 中 drain/flush。
 
@@ -30,7 +30,7 @@ queue 基础结构已从 `include/af/detail/queue/` 迁移到 `include/af/queue/
 - runtime reactor 和网络连接生命周期分离；默认公共入口只暴露 runtime-native reactor/net。
 - 网络连接生命周期不依赖普通 task pending/resume 热路径。
 - 日志 consumer 通过通用 service task 绑定 runtime 线程，不再使用长期 runtime task 驱动消费；注册/注销仍通过短 control task 在 owner executor 上完成。
-- `make_task<T>()` 返回非空原始 task 指针，`try_make_task<T>()` 在可恢复创建失败时返回 `nullptr`；首次 `do_it`/调度会消费 created 生命周期引用，旧 RAII task handle 兼容层已移除。
+- `make_task<T>()` 返回非空原始 task 指针，`try_make_task<T>()` 在可恢复创建失败时返回 `nullptr`；推荐写法是 `auto* task = make_task<T>(runtime); task->do_it(...)` 两段式启动，examples 已统一到该形态。首次 `do_it`/调度会消费 created 生命周期引用，旧 RAII task handle 兼容层已移除。
 - service task 注册/注销要求在 owner runtime 线程执行，列表不加锁；跨线程唤醒不修改列表。
 - 对象池与日志 record pool 已具备 local cache、批量回收、无锁 free stack/slab free list 和 cache-line slot 对齐；后续性能复核应优先用 benchmark/perf 证明热点，再决定是否引入更复杂的 per-thread/per-shard 池化策略。
 
