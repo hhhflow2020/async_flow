@@ -146,6 +146,38 @@
 #error "network detail socket address header must be installed under af/net/detail"
 #endif
 
+#if !__has_include("af/net/tcp/tcp_server.hpp")
+#error "tcp public headers must be installed under af/net/tcp"
+#endif
+
+#if !__has_include("af/net/tcp/tcp_listener.hpp")
+#error "tcp public headers must be installed under af/net/tcp"
+#endif
+
+#if !__has_include("af/net/tcp/tcp_connection.hpp")
+#error "tcp public headers must be installed under af/net/tcp"
+#endif
+
+#if !__has_include("af/net/tcp/tcp_client.hpp")
+#error "tcp public headers must be installed under af/net/tcp"
+#endif
+
+#if !__has_include("af/net/udp/udp_socket.hpp")
+#error "udp public headers must be installed under af/net/udp"
+#endif
+
+#if !__has_include("af/net/unix/unix_stream_server.hpp")
+#error "unix public headers must be installed under af/net/unix"
+#endif
+
+#if !__has_include("af/net/unix/unix_stream_client.hpp")
+#error "unix public headers must be installed under af/net/unix"
+#endif
+
+#if !__has_include("af/net/unix/unix_datagram_socket.hpp")
+#error "unix public headers must be installed under af/net/unix"
+#endif
+
 #if __has_include("af/detail/log/async_logger.hpp")
 #error "log detail headers must live under af/log/detail"
 #endif
@@ -561,6 +593,40 @@ TEST(PublicHeaderTests, NetUmbrellaExposesRuntimeNativeApi) {
     static_assert(std::is_class_v<af::net::udp_socket>);
     static_assert(std::is_class_v<af::net::unix_stream_server>);
     static_assert(std::is_class_v<af::net::unix_datagram_socket>);
+}
+
+TEST(PublicHeaderTests, NetUmbrellaUsesProtocolPublicHeaders) {
+    constexpr std::array required{
+        forbidden_source_snippet{"include/af/net.hpp", "af/net/tcp/tcp_server.hpp"},
+        forbidden_source_snippet{"include/af/net.hpp", "af/net/tcp/tcp_client.hpp"},
+        forbidden_source_snippet{"include/af/net.hpp", "af/net/tcp/tcp_connection.hpp"},
+        forbidden_source_snippet{"include/af/net.hpp", "af/net/tcp/tcp_listener.hpp"},
+        forbidden_source_snippet{"include/af/net.hpp", "af/net/udp/udp_socket.hpp"},
+        forbidden_source_snippet{"include/af/net.hpp", "af/net/unix/unix_stream_server.hpp"},
+        forbidden_source_snippet{"include/af/net.hpp", "af/net/unix/unix_stream_client.hpp"},
+        forbidden_source_snippet{"include/af/net.hpp", "af/net/unix/unix_datagram_socket.hpp"},
+    };
+
+    const std::string content = read_source_file("include/af/net.hpp");
+    ASSERT_FALSE(content.empty());
+    for (const forbidden_source_snippet item : required) {
+        EXPECT_NE(content.find(item.snippet), std::string::npos)
+            << item.relative_path << " should contain " << item.snippet;
+    }
+
+    constexpr std::array forbidden{
+        forbidden_source_snippet{"include/af/net.hpp", "af/net/tcp_client_runtime.hpp"},
+        forbidden_source_snippet{"include/af/net.hpp", "af/net/tcp_connection_runtime.hpp"},
+        forbidden_source_snippet{"include/af/net.hpp", "af/net/tcp_listener.hpp"},
+        forbidden_source_snippet{"include/af/net.hpp", "af/net/tcp_server_control.hpp"},
+        forbidden_source_snippet{"include/af/net.hpp", "af/net/udp_socket_runtime.hpp"},
+        forbidden_source_snippet{"include/af/net.hpp", "af/net/unix_socket.hpp"},
+    };
+
+    for (const forbidden_source_snippet item : forbidden) {
+        EXPECT_EQ(content.find(item.snippet), std::string::npos)
+            << item.relative_path << " still contains " << item.snippet;
+    }
 }
 
 TEST(PublicHeaderTests, NetPublicHeadersDoNotExposeCamelCaseTypeAliases) {
