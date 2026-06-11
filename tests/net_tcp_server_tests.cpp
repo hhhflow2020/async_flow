@@ -1108,6 +1108,69 @@ TEST(NetTcpServerTests, RuntimeTcpConnectionPauseReadStopsCurrentDrainLoop) {
     runtime.stop();
 }
 
+TEST(NetTcpServerTests, RuntimeTcpConnectionReadBudgetCapsSingleRecv) {
+    af::runtime_config config;
+    config.threads = {af::io_threads("net-rt-io", 1)};
+    config.logger.consumer_thread = af::thread_selector::io(0);
+
+    af::runtime runtime(config);
+    RuntimeTcpListenerState state;
+
+    ASSERT_TRUE(runtime.start());
+    ASSERT_TRUE(wait_until([&] { return runtime.active_thread_count() == 1; }));
+
+    const af::thread_ref io_thread = runtime.select_thread_ref(af::thread_selector::io(0));
+    af::net::tcp_server server(runtime);
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        af::net::tcp_connection_callbacks callbacks;
+        callbacks.owner = &state;
+        callbacks.on_accept = &runtime_tcp_connection_accept;
+        callbacks.on_read = &runtime_tcp_connection_pause_after_first_read;
+        callbacks.on_close = &runtime_tcp_connection_close;
+
+        af::net::tcp_listener_config listener_config;
+        listener_config.name = "runtime-server-read-budget-cap";
+        listener_config.endpoint = af::net::tcp_endpoint::loopback_v4(0);
+        listener_config.threads = {io_thread};
+        listener_config.options.reuse_port = false;
+        listener_config.options.read_budget_bytes = 1024U;
+        listener_config.options.read_buffer_size = 4096U;
+
+        const af::net::listener_result listener =
+            server.add_listener(std::move(listener_config), callbacks);
+        bool ok = listener.ok() && server.start();
+        const af::net::tcp_endpoint *endpoint = server.local_endpoint(listener.listener);
+        ok = ok && endpoint != nullptr;
+        if (ok) {
+            state.port.store(endpoint->port, std::memory_order_release);
+        }
+        state.start_ok.store(ok, std::memory_order_release);
+        state.started.store(true, std::memory_order_release);
+    }));
+
+    ASSERT_TRUE(wait_until([&] { return state.started.load(std::memory_order_acquire); }));
+    ASSERT_TRUE(state.start_ok.load(std::memory_order_acquire));
+    ASSERT_GT(state.port.load(std::memory_order_acquire), 0U);
+
+    UniqueFd fd = connect_loopback(state.port.load(std::memory_order_acquire));
+    ASSERT_GE(fd.get(), 0);
+    const std::vector<std::byte> payload(64U * 1024U, std::byte{0x79});
+    send_all(fd.get(), payload.data(), payload.size());
+
+    ASSERT_TRUE(wait_until([&] { return state.reads.load(std::memory_order_acquire) >= 1; }));
+    EXPECT_GT(state.first_read_size.load(std::memory_order_acquire), 0U);
+    EXPECT_LE(state.first_read_size.load(std::memory_order_acquire), 1024U);
+
+    ASSERT_TRUE(runtime.post(io_thread, [&] {
+        state.stop_ok.store(server.stop(), std::memory_order_release);
+        state.stopped.store(true, std::memory_order_release);
+    }));
+    ASSERT_TRUE(wait_until([&] { return state.stopped.load(std::memory_order_acquire); }));
+    EXPECT_TRUE(state.stop_ok.load(std::memory_order_acquire));
+
+    runtime.stop();
+}
+
 TEST(NetTcpServerTests, RuntimeTcpConnectionHandleReportsClosedAfterServerStop) {
     af::runtime_config config;
     config.threads = {af::io_threads("net-rt-io", 1)};

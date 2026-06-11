@@ -323,7 +323,9 @@ private:
 
         std::size_t consumed = 0;
         while (alive() && !read_paused_ && consumed < config_.read_budget_bytes) {
-            const ssize_t n = ::recv(fd_, read_buffer_.data(), read_buffer_.size(), 0);
+            const std::size_t remaining_budget = config_.read_budget_bytes - consumed;
+            const std::size_t read_size = std::min(read_buffer_.size(), remaining_budget);
+            const ssize_t n = ::recv(fd_, read_buffer_.data(), read_size, 0);
             if (n > 0) {
                 const std::size_t size = static_cast<std::size_t>(n);
                 consumed += size;
