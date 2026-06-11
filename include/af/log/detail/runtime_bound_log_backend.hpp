@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "af/detail/config.hpp"
-#include "af/detail/log/log_backend.hpp"
+#include "af/log/detail/log_backend.hpp"
 #include "af/memory/contiguous_object_storage.hpp"
 #include "af/queue/bounded_mpsc_queue.hpp"
 #include "af/detail/runtime/runtime_service_task.hpp"

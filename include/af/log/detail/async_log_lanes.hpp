@@ -5,8 +5,8 @@
 #include <cstdint>
 
 #include "af/detail/config.hpp"
-#include "af/detail/log/async_log_record_pool.hpp"
-#include "af/detail/log/log_record.hpp"
+#include "af/log/detail/async_log_record_pool.hpp"
+#include "af/log/detail/log_record.hpp"
 #include "af/memory/cache_line.hpp"
 #include "af/memory/contiguous_object_storage.hpp"
 #include "af/queue/bounded_mpsc_queue.hpp"

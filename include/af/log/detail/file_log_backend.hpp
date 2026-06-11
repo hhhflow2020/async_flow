@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include "af/detail/log/log_backend.hpp"
+#include "af/log/detail/log_backend.hpp"
 
 #include <fcntl.h>
 #include <sys/uio.h>

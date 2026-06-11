@@ -1,6 +1,6 @@
 #pragma once
 
-#include "af/detail/log/absl_log_sink.hpp"
+#include "af/log/detail/absl_log_sink.hpp"
 
 namespace af {
 

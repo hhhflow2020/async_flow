@@ -146,6 +146,14 @@
 #error "network detail socket address header must be installed under af/net/detail"
 #endif
 
+#if __has_include("af/detail/log/async_logger.hpp")
+#error "log detail headers must live under af/log/detail"
+#endif
+
+#if !__has_include("af/log/detail/async_logger.hpp")
+#error "log detail headers must be installed under af/log/detail"
+#endif
+
 #if __has_include("af/runtime/reactor.hpp")
 #error "reactor headers must live under af/reactor, not af/runtime"
 #endif
@@ -664,31 +672,31 @@ TEST(PublicHeaderTests, PlatformHeadersDoNotExposeLegacyAsyncIoFacadeNames) {
 
 TEST(PublicHeaderTests, LogPublicHeadersDoNotExposeCamelCaseTypeAliases) {
     constexpr std::array forbidden{
-        forbidden_source_snippet{"include/af/detail/log/async_log_config.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_log_config.hpp",
                                  "using LogOverflowPolicy ="},
-        forbidden_source_snippet{"include/af/detail/log/async_log_config.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_log_config.hpp",
                                  "using LogOrdering ="},
-        forbidden_source_snippet{"include/af/detail/log/async_log_config.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_log_config.hpp",
                                  "using AsyncLogConfig ="},
-        forbidden_source_snippet{"include/af/detail/log/async_log_config.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_log_config.hpp",
                                  "using AsyncLogStats ="},
-        forbidden_source_snippet{"include/af/detail/log/async_logger.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_logger.hpp",
                                  "using RuntimeInstanceAbslAsyncLogSink ="},
-        forbidden_source_snippet{"include/af/detail/log/async_logger.hpp", "using AsyncLogger ="},
-        forbidden_source_snippet{"include/af/detail/log/absl_log_sink.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_logger.hpp", "using AsyncLogger ="},
+        forbidden_source_snippet{"include/af/log/detail/absl_log_sink.hpp",
                                  "using AsyncLogHandle ="},
-        forbidden_source_snippet{"include/af/detail/log/file_log_backend.hpp",
+        forbidden_source_snippet{"include/af/log/detail/file_log_backend.hpp",
                                  "using FileLogBackendConfig ="},
-        forbidden_source_snippet{"include/af/detail/log/file_log_backend.hpp",
+        forbidden_source_snippet{"include/af/log/detail/file_log_backend.hpp",
                                  "using FileLogBackend ="},
-        forbidden_source_snippet{"include/af/detail/log/log_backend.hpp", "using LogBackend ="},
-        forbidden_source_snippet{"include/af/detail/log/network_log_backend.hpp",
+        forbidden_source_snippet{"include/af/log/detail/log_backend.hpp", "using LogBackend ="},
+        forbidden_source_snippet{"include/af/log/detail/network_log_backend.hpp",
                                  "using UdpLogBackendConfig ="},
-        forbidden_source_snippet{"include/af/detail/log/network_log_backend.hpp",
+        forbidden_source_snippet{"include/af/log/detail/network_log_backend.hpp",
                                  "using TcpLogBackendConfig ="},
-        forbidden_source_snippet{"include/af/detail/log/network_log_backend.hpp",
+        forbidden_source_snippet{"include/af/log/detail/network_log_backend.hpp",
                                  "using UdpLogBackend ="},
-        forbidden_source_snippet{"include/af/detail/log/network_log_backend.hpp",
+        forbidden_source_snippet{"include/af/log/detail/network_log_backend.hpp",
                                  "using TcpLogBackend ="},
     };
 
@@ -702,58 +710,58 @@ TEST(PublicHeaderTests, LogPublicHeadersDoNotExposeCamelCaseTypeAliases) {
 
 TEST(PublicHeaderTests, LogDetailHeadersDoNotExposeCamelCaseTypeAliases) {
     constexpr std::array forbidden{
-        forbidden_source_snippet{"include/af/detail/log/log_record.hpp", "using LogRecord ="},
-        forbidden_source_snippet{"include/af/detail/log/async_log_drain_waiter.hpp",
+        forbidden_source_snippet{"include/af/log/detail/log_record.hpp", "using LogRecord ="},
+        forbidden_source_snippet{"include/af/log/detail/async_log_drain_waiter.hpp",
                                  "using AsyncLogDrainWaiter ="},
-        forbidden_source_snippet{"include/af/detail/log/async_log_record_pool.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_log_record_pool.hpp",
                                  "using AsyncLogRecordPoolKind ="},
-        forbidden_source_snippet{"include/af/detail/log/async_log_record_pool.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_log_record_pool.hpp",
                                  "using AsyncLogRecordPoolSlot ="},
-        forbidden_source_snippet{"include/af/detail/log/async_log_record_pool.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_log_record_pool.hpp",
                                  "using AsyncLogRecordPool ="},
-        forbidden_source_snippet{"include/af/detail/log/async_log_lanes.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_log_lanes.hpp",
                                  "using AsyncLogStatCounter ="},
-        forbidden_source_snippet{"include/af/detail/log/async_log_lanes.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_log_lanes.hpp",
                                  "using AsyncLogQueueShard ="},
-        forbidden_source_snippet{"include/af/detail/log/async_log_lanes.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_log_lanes.hpp",
                                  "using AsyncLogOrderedQueue ="},
-        forbidden_source_snippet{"include/af/detail/log/async_log_lanes.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_log_lanes.hpp",
                                  "using AsyncLogProducerShard ="},
-        forbidden_source_snippet{"include/af/detail/log/async_log_lanes.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_log_lanes.hpp",
                                  "using AsyncLogRuntimeLane ="},
-        forbidden_source_snippet{"include/af/detail/log/async_log_lanes.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_log_lanes.hpp",
                                  "using AsyncLogQueueShardStorage ="},
-        forbidden_source_snippet{"include/af/detail/log/async_log_lanes.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_log_lanes.hpp",
                                  "using AsyncLogProducerShardStorage ="},
-        forbidden_source_snippet{"include/af/detail/log/async_log_lanes.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_log_lanes.hpp",
                                  "using AsyncLogRuntimeLaneStorage ="},
-        forbidden_source_snippet{"include/af/detail/log/async_log_consumer.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_log_consumer.hpp",
                                  "using AsyncLogConsumerWakeTarget ="},
-        forbidden_source_snippet{"include/af/detail/log/async_log_consumer.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_log_consumer.hpp",
                                  "using AsyncLogConsumerController ="},
-        forbidden_source_snippet{"include/af/detail/log/async_log_consumer.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_log_consumer.hpp",
                                  "using RuntimeInstanceAsyncLogConsumerController ="},
-        forbidden_source_snippet{"include/af/detail/log/network_log_backend.hpp",
+        forbidden_source_snippet{"include/af/log/detail/network_log_backend.hpp",
                                  "using LogMmsgHeader ="},
-        forbidden_source_snippet{"include/af/detail/log/runtime_instance_async_log_consumer.hpp",
+        forbidden_source_snippet{"include/af/log/detail/runtime_instance_async_log_consumer.hpp",
                                  "using RuntimeInstanceAsyncLogConsumerControlOperation ="},
-        forbidden_source_snippet{"include/af/detail/log/runtime_instance_async_log_consumer.hpp",
+        forbidden_source_snippet{"include/af/log/detail/runtime_instance_async_log_consumer.hpp",
                                  "using RuntimeInstanceAsyncLogConsumerControlCompletion ="},
-        forbidden_source_snippet{"include/af/detail/log/runtime_instance_async_log_consumer.hpp",
+        forbidden_source_snippet{"include/af/log/detail/runtime_instance_async_log_consumer.hpp",
                                  "using RuntimeInstanceAsyncLogConsumerControlTask ="},
-        forbidden_source_snippet{"include/af/detail/log/runtime_bound_log_backend.hpp",
+        forbidden_source_snippet{"include/af/log/detail/runtime_bound_log_backend.hpp",
                                  "using Batch ="},
-        forbidden_source_snippet{"include/af/detail/log/runtime_bound_log_backend.hpp",
+        forbidden_source_snippet{"include/af/log/detail/runtime_bound_log_backend.hpp",
                                  "using ControlOperation ="},
-        forbidden_source_snippet{"include/af/detail/log/runtime_bound_log_backend.hpp",
+        forbidden_source_snippet{"include/af/log/detail/runtime_bound_log_backend.hpp",
                                  "using ControlCompletion ="},
-        forbidden_source_snippet{"include/af/detail/log/runtime_bound_log_backend.hpp",
+        forbidden_source_snippet{"include/af/log/detail/runtime_bound_log_backend.hpp",
                                  "using RuntimeBoundLogBatch ="},
-        forbidden_source_snippet{"include/af/detail/log/runtime_bound_log_backend.hpp",
+        forbidden_source_snippet{"include/af/log/detail/runtime_bound_log_backend.hpp",
                                  "using RuntimeBoundLogBackendConfig ="},
-        forbidden_source_snippet{"include/af/detail/log/runtime_bound_log_backend.hpp",
+        forbidden_source_snippet{"include/af/log/detail/runtime_bound_log_backend.hpp",
                                  "using RuntimeBoundLogBackendStats ="},
-        forbidden_source_snippet{"include/af/detail/log/runtime_bound_log_backend.hpp",
+        forbidden_source_snippet{"include/af/log/detail/runtime_bound_log_backend.hpp",
                                  "using RuntimeBoundLogBackend ="},
     };
 
@@ -766,7 +774,7 @@ TEST(PublicHeaderTests, LogDetailHeadersDoNotExposeCamelCaseTypeAliases) {
 }
 
 TEST(PublicHeaderTests, LogRecordPoolExpansionAvoidsAtomicFlagWriteSpin) {
-    const std::string content = read_source_file("include/af/detail/log/async_log_record_pool.hpp");
+    const std::string content = read_source_file("include/af/log/detail/async_log_record_pool.hpp");
     ASSERT_FALSE(content.empty());
 
     EXPECT_EQ(content.find("std::atomic_flag expanding_"), std::string::npos);
@@ -821,22 +829,22 @@ TEST(PublicHeaderTests, HotRuntimeAtomicsUseCacheLineWrappers) {
                                  "cache_line_atomic<std::uint32_t> wake_epoch_"},
         forbidden_source_snippet{"include/af/runtime/detail/executor.hpp",
                                  "cache_line_atomic<bool> stop_requested_"},
-        forbidden_source_snippet{"include/af/detail/log/async_logger.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_logger.hpp",
                                  "cache_line_atomic<bool> started_"},
-        forbidden_source_snippet{"include/af/detail/log/async_logger.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_logger.hpp",
                                  "cache_line_atomic<bool> accepting_"},
-        forbidden_source_snippet{"include/af/detail/log/async_logger.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_logger.hpp",
                                  "cache_line_atomic<bool> stopping_"},
         forbidden_source_snippet{
-            "include/af/detail/log/async_logger.hpp",
+            "include/af/log/detail/async_logger.hpp",
             "cache_line_atomic<detail::async_log_consumer_wake_target *> consumer_wake_target_"},
-        forbidden_source_snippet{"include/af/detail/log/async_logger.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_logger.hpp",
                                  "cache_line_atomic<std::size_t> next_ordered_producer_shard_"},
-        forbidden_source_snippet{"include/af/detail/log/async_logger.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_logger.hpp",
                                  "cache_line_atomic<std::size_t> next_producer_shard_"},
-        forbidden_source_snippet{"include/af/detail/log/async_logger.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_logger.hpp",
                                  "cache_line_atomic<std::size_t> pending_"},
-        forbidden_source_snippet{"include/af/detail/log/async_logger.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_logger.hpp",
                                  "cache_line_atomic<std::size_t> ready_"},
         forbidden_source_snippet{"include/af/runtime/detail/pooled_object.hpp",
                                  "cache_line_atomic<std::size_t> reserved_slots"},
@@ -852,7 +860,7 @@ TEST(PublicHeaderTests, HotRuntimeAtomicsUseCacheLineWrappers) {
     constexpr std::array forbidden{
         forbidden_source_snippet{"include/af/runtime/detail/executor.hpp",
                                  "alignas(hardware_cache_line_size) std::atomic"},
-        forbidden_source_snippet{"include/af/detail/log/async_logger.hpp",
+        forbidden_source_snippet{"include/af/log/detail/async_logger.hpp",
                                  "alignas(detail::hardware_cache_line_size) std::atomic"},
     };
 

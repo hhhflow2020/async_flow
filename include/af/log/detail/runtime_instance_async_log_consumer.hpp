@@ -7,7 +7,7 @@
 #include <memory>
 #include <vector>
 
-#include "af/detail/log/async_logger.hpp"
+#include "af/log/detail/async_logger.hpp"
 #include "af/detail/runtime/runtime_service_task.hpp"
 #include "af/detail/runtime/timed_atomic_wait.hpp"
 #include "af/memory/cache_line.hpp"

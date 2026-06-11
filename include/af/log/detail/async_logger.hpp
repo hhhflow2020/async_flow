@@ -9,11 +9,11 @@
 #include <vector>
 
 #include "af/detail/config.hpp"
-#include "af/detail/log/async_log_config.hpp"
-#include "af/detail/log/async_log_consumer.hpp"
-#include "af/detail/log/async_log_drain_waiter.hpp"
-#include "af/detail/log/async_log_lanes.hpp"
-#include "af/detail/log/async_log_record_pool.hpp"
+#include "af/log/detail/async_log_config.hpp"
+#include "af/log/detail/async_log_consumer.hpp"
+#include "af/log/detail/async_log_drain_waiter.hpp"
+#include "af/log/detail/async_log_lanes.hpp"
+#include "af/log/detail/async_log_record_pool.hpp"
 #include "af/queue/queue_backoff.hpp"
 #include "af/memory/cache_line.hpp"
 #include "af/platform/hardware_threads.hpp"
@@ -181,6 +181,6 @@ private:
 
 } // namespace af
 
-#include "af/detail/log/async_logger_config_impl.hpp"
-#include "af/detail/log/async_logger_consumer_impl.hpp"
-#include "af/detail/log/async_logger_producer_impl.hpp"
+#include "af/log/detail/async_logger_config_impl.hpp"
+#include "af/log/detail/async_logger_consumer_impl.hpp"
+#include "af/log/detail/async_logger_producer_impl.hpp"

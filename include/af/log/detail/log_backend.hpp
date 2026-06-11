@@ -3,7 +3,7 @@
 #include <chrono>
 #include "af/span.hpp"
 
-#include "af/detail/log/log_record.hpp"
+#include "af/log/detail/log_record.hpp"
 
 namespace af {
 

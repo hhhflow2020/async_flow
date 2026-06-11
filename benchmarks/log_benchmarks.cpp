@@ -11,7 +11,7 @@
 #include <benchmark/benchmark.h>
 
 #include "af/log.hpp"
-#include "af/detail/log/async_log_record_pool.hpp"
+#include "af/log/detail/async_log_record_pool.hpp"
 
 namespace {
 

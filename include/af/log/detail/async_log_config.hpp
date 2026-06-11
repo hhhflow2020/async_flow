@@ -6,7 +6,7 @@
 #include <memory>
 #include <vector>
 
-#include "af/detail/log/log_backend.hpp"
+#include "af/log/detail/log_backend.hpp"
 
 namespace af {
 
