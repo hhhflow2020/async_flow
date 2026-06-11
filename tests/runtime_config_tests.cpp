@@ -26,6 +26,7 @@
 #include "af/platform.hpp"
 #include "af/runtime.hpp"
 #include "af/runtime_config.hpp"
+#include "af/thread_layout.hpp"
 
 namespace {
 
@@ -72,6 +73,9 @@ static_assert(af::log_ordering::ordered == af::LogOrdering::Ordered);
 static_assert(af::log_ordering::relaxed == af::LogOrdering::Relaxed);
 static_assert(af::log_overflow_policy::drop_newest == af::LogOverflowPolicy::DropNewest);
 static_assert(af::log_overflow_policy::block == af::LogOverflowPolicy::Block);
+
+struct layout_logic_tag;
+struct layout_io_tag;
 
 [[nodiscard]] bool wait_for_active_threads(af::runtime &runtime, std::uint16_t expected) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
@@ -840,6 +844,41 @@ TEST(RuntimeConfigTests, ThreadLayoutGroupsCarryKindNameAndIndexMetadata) {
     EXPECT_EQ(resolved.thread_name(log.front()), "log");
     EXPECT_EQ(resolved.thread_group_offset(io.at(1)), 1U);
     EXPECT_EQ(resolved.thread_group_offset(log.front()), 0U);
+}
+
+TEST(RuntimeConfigTests, CompileTimeThreadLayoutUsesLowerCaseTypeNames) {
+    using logic_spec = af::thread_group_spec<layout_logic_tag, 3, af::thread_kind::cpu>;
+    using io_spec = af::thread_group_spec<layout_io_tag, 2, af::thread_kind::io>;
+    using lower_layout = af::static_thread_layout<logic_spec, io_spec>;
+
+    static_assert(
+        std::is_same_v<logic_spec, af::ThreadGroupSpec<layout_logic_tag, 3, af::thread_kind::cpu>>);
+    static_assert(std::is_same_v<lower_layout, af::ThreadLayout<logic_spec, io_spec>>);
+    static_assert(std::is_same_v<typename lower_layout::thread, typename lower_layout::Thread>);
+
+    const auto layout = af::thread_layout(logic_spec{"logic"}, io_spec{"io"});
+    using layout_type = decltype(layout);
+    using thread = typename layout_type::thread;
+    static_assert(std::is_same_v<af::thread_id<typename layout_type::thread_shape>, thread>);
+    static_assert(
+        std::is_same_v<af::static_thread_group<thread, 3, 2>, af::ThreadGroup<thread, 3, 2>>);
+
+    const auto logic = layout_type::template group<layout_logic_tag>();
+    const auto io = layout_type::template group<layout_io_tag>();
+    EXPECT_EQ(layout_type::thread_count, 5U);
+    EXPECT_EQ(layout_type::group_begin_index<layout_logic_tag>(), 0U);
+    EXPECT_EQ(layout_type::group_count<layout_io_tag>(), 2U);
+    EXPECT_EQ(logic.at(2).index(), 2U);
+    EXPECT_EQ(io.at(0).index(), 3U);
+    EXPECT_EQ(io.shard(3U).index(), 4U);
+    EXPECT_TRUE(io.contains(io.at<1>()));
+    EXPECT_FALSE(io.contains(logic.front()));
+    EXPECT_EQ(io.offset_of(io.at<1>()), 1U);
+    EXPECT_EQ(layout.thread_kind(logic.front()), af::thread_kind::cpu);
+    EXPECT_EQ(layout.thread_kind(io.front()), af::thread_kind::io);
+    EXPECT_EQ(layout.thread_name(logic.front()), "logic");
+    EXPECT_EQ(layout.thread_name(io.at<1>()), "io");
+    EXPECT_EQ(layout.thread_group_offset(io.at<1>()), 1U);
 }
 
 TEST(RuntimeConfigTests, DefaultsAndOverridesPoolTimerAndServiceBudgets) {

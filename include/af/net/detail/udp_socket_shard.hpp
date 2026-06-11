@@ -99,7 +99,7 @@ struct runtime_udp_shard {
     static void on_event(void *owner, af::fd_event_source &source, std::uint32_t events) noexcept {
         static_cast<void>(source);
         auto *shard = static_cast<runtime_udp_shard *>(owner);
-        if (shard != nullptr) {
+        if (shard != nullptr && shard->active()) {
             shard->handle_events(events);
         }
     }
@@ -130,7 +130,7 @@ struct runtime_udp_shard {
         }
 
         std::size_t received = 0;
-        while (fd >= 0 && received < options.read_budget_datagrams) {
+        while (fd >= 0 && active() && received < options.read_budget_datagrams) {
             sockaddr_storage peer_storage{};
             iovec iov{};
             iov.iov_base = read_buffer.data();
@@ -144,6 +144,9 @@ struct runtime_udp_shard {
 
             const ssize_t n = ::recvmsg(fd, &message, 0);
             if (n >= 0) {
+                if (!active()) {
+                    return;
+                }
                 ++received;
                 const std::size_t size = static_cast<std::size_t>(n);
                 if (size > options.max_datagram_size ||

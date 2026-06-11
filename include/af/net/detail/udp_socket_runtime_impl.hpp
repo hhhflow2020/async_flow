@@ -96,6 +96,7 @@ inline bool udp_socket::stop() noexcept {
             stop_shard_on_owner(*shard);
             continue;
         }
+        shard->active_.store(false, std::memory_order_release);
         try {
             const bool posted = state_->owner->post(shard->owner_thread, [shard]() mutable {
                 if (shard != nullptr) {
