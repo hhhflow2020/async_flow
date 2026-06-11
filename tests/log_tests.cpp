@@ -259,6 +259,7 @@ TEST(LogTests, AsyncLogConfigProfilesSelectQueueStrategy) {
 
 TEST(LogTests, RuntimeLogConfigCarriesRecordPoolConfig) {
     af::log_config source = af::log_config::relaxed();
+    source.min_level = af::log_level::warning;
     source.queue_capacity = 16;
     source.queue_shard_count = 2;
     source.runtime_thread_count = 3;
@@ -269,6 +270,7 @@ TEST(LogTests, RuntimeLogConfigCarriesRecordPoolConfig) {
     const af::async_log_config target = af::make_async_log_config(source, 5);
 
     EXPECT_EQ(target.ordering, af::log_ordering::relaxed);
+    EXPECT_EQ(target.min_level, af::log_level::warning);
     EXPECT_EQ(target.queue_capacity, 16U);
     EXPECT_EQ(target.queue_shard_count, 2U);
     EXPECT_EQ(target.runtime_thread_count, 3U);
@@ -398,6 +400,31 @@ private:
     mutable std::mutex mutex_;
     std::vector<std::string> messages_;
 };
+
+class ScopedAfMinLogLevel final {
+public:
+    ScopedAfMinLogLevel() : previous_(af::min_log_level()) {}
+
+    ScopedAfMinLogLevel(const ScopedAfMinLogLevel &) = delete;
+    ScopedAfMinLogLevel &operator=(const ScopedAfMinLogLevel &) = delete;
+
+    ~ScopedAfMinLogLevel() {
+        af::set_min_log_level(previous_);
+    }
+
+private:
+    af::log_level previous_;
+};
+
+[[nodiscard]] std::string counted_log_payload(std::atomic<int> &calls) {
+    calls.fetch_add(1, std::memory_order_relaxed);
+    return "filtered info log";
+}
+
+[[nodiscard]] bool counted_log_condition(std::atomic<int> &calls) {
+    calls.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
 
 class RuntimeInstanceThreadObservingLogBackend final : public af::log_backend {
 public:
@@ -558,6 +585,41 @@ private:
     af::runtime runtime_;
 };
 
+TEST(LogTests, RuntimeLogConfigMinLevelSkipsDisabledLogBeforeFormatting) {
+    ScopedAfMinLogLevel restore_min_level;
+    LogTestRuntimeGuard runtime_guard;
+
+    af::async_log_config config = af::async_log_config::ordered();
+    config.min_level = af::log_level::warning;
+    auto backend = std::make_unique<CapturingLogBackend>();
+    CapturingLogBackend *backend_observer = backend.get();
+    config.backends.push_back(std::move(backend));
+
+    auto logging = af::start_runtime_logging(runtime_guard.runtime(), std::move(config),
+                                             runtime_guard.runtime_1());
+    ASSERT_NE(logging, nullptr);
+
+    std::atomic<int> formatted{0};
+    std::atomic<int> conditions{0};
+    AF_LOG(INFO) << counted_log_payload(formatted);
+    AF_LOG_IF(INFO, counted_log_condition(conditions)) << counted_log_payload(formatted);
+    AF_LOG(WARNING) << "visible warning min-level log";
+
+    ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
+    logging->stop();
+
+    EXPECT_EQ(formatted.load(std::memory_order_relaxed), 0);
+    EXPECT_EQ(conditions.load(std::memory_order_relaxed), 0);
+
+    const std::vector<std::string> messages = backend_observer->messages();
+    std::string merged;
+    for (const std::string &message : messages) {
+        merged += message;
+    }
+    EXPECT_EQ(merged.find("filtered info log"), std::string::npos);
+    EXPECT_NE(merged.find("visible warning min-level log"), std::string::npos);
+}
+
 template <typename TaskT, typename... Args>
 [[nodiscard]] bool start_log_task(af::runtime &runtime, Args &&...args) {
     auto task = af::make_task<TaskT>(runtime);
@@ -578,7 +640,7 @@ public:
 
 private:
     af::task_result run_task() noexcept override {
-        LOG(INFO) << "runtime lane log";
+        AF_LOG(INFO) << "runtime lane log";
         completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
@@ -600,7 +662,7 @@ public:
 
 private:
     af::task_result run_task() noexcept override {
-        LOG(INFO) << marker_;
+        AF_LOG(INFO) << marker_;
         completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
@@ -622,7 +684,7 @@ public:
 
 private:
     af::task_result run_task() noexcept override {
-        LOG(INFO) << "runtime owner stops async logging";
+        AF_LOG(INFO) << "runtime owner stops async logging";
         logging_->stop();
         completed_->fetch_add(1, std::memory_order_release);
         return done();
@@ -651,7 +713,7 @@ private:
     af::task_result run_task() noexcept override {
         observed_task_id_->store(task_id(), std::memory_order_release);
         observed_current_task_id_->store(af::runtime::current_task_id(), std::memory_order_release);
-        LOG(INFO) << message_;
+        AF_LOG(INFO) << message_;
         completed_->fetch_add(1, std::memory_order_release);
         return done();
     }
@@ -674,7 +736,7 @@ public:
 
 private:
     af::task_result run_task() noexcept override {
-        LOG(INFO) << "runtime instance task id disabled log";
+        AF_LOG(INFO) << "runtime instance task id disabled log";
         completed_.fetch_add(1, std::memory_order_release);
         return done();
     }
@@ -835,7 +897,7 @@ TEST(LogTests, AsyncFileBackendWritesAbslFormattedMessages) {
     auto logging = af::start_runtime_logging(runtime_guard.runtime(), std::move(config),
                                              runtime_guard.runtime_1());
 
-    LOG(INFO) << "af async file backend test";
+    AF_LOG(INFO) << "af async file backend test";
 
     ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
     logging.reset();
@@ -870,7 +932,7 @@ TEST(LogTests, RuntimeAwareSinkUsesConfiguredRuntimeThreadName) {
     LogTestRuntimeGuard runtime_guard;
     auto logging = af::start_runtime_logging(runtime_guard.runtime(), std::move(config),
                                              runtime_guard.runtime_1());
-    LOG(INFO) << "named runtime log consumer thread";
+    AF_LOG(INFO) << "named runtime log consumer thread";
     ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
     logging->stop();
 
@@ -973,11 +1035,11 @@ TEST(LogTests, QueueOverflowDropsNewestWithoutBlockingProducer) {
     auto logging = af::start_runtime_logging(runtime_guard.runtime(), std::move(config),
                                              runtime_guard.runtime_1());
 
-    LOG(INFO) << "block log worker";
+    AF_LOG(INFO) << "block log worker";
     ASSERT_TRUE(blocking_backend->wait_until_entered(std::chrono::seconds(2)));
 
     for (int i = 0; i < 256; ++i) {
-        LOG(INFO) << "overflow candidate " << i;
+        AF_LOG(INFO) << "overflow candidate " << i;
     }
 
     EXPECT_GT(logging->stats().dropped, 0U);
@@ -1001,14 +1063,14 @@ TEST(LogTests, RuntimeAwareSinkUsesRuntimeLaneWhenExternalMpscIsFull) {
     auto logging = af::start_runtime_logging(runtime_guard.runtime(), std::move(config),
                                              runtime_guard.runtime_1());
 
-    LOG(INFO) << "block log worker";
+    AF_LOG(INFO) << "block log worker";
     ASSERT_TRUE(blocking_backend->wait_until_entered(std::chrono::seconds(2)));
 
-    LOG(INFO) << "external mpsc fill one";
-    LOG(INFO) << "external mpsc fill two";
+    AF_LOG(INFO) << "external mpsc fill one";
+    AF_LOG(INFO) << "external mpsc fill two";
     const af::async_log_stats filled = logging->stats();
 
-    LOG(INFO) << "external mpsc overflow";
+    AF_LOG(INFO) << "external mpsc overflow";
     const af::async_log_stats overflowed = logging->stats();
     ASSERT_GT(overflowed.dropped, filled.dropped);
 
@@ -1039,7 +1101,7 @@ TEST(LogTests, RuntimeAwareSinkDrainsOnConfiguredRuntimeThread) {
     auto logging = af::start_runtime_logging(runtime_guard.runtime(), std::move(config),
                                              runtime_guard.runtime_1());
 
-    LOG(INFO) << "runtime-bound consumer external log";
+    AF_LOG(INFO) << "runtime-bound consumer external log";
 
     ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
     logging->stop();
@@ -1072,7 +1134,7 @@ TEST(LogTests, RuntimeInstanceAwareSinkDrainsOnConfiguredRuntimeThread) {
     log_config.backends.push_back(std::move(backend));
     auto logging = af::start_runtime_logging(runtime, std::move(log_config), consumer_thread);
 
-    LOG(INFO) << "runtime instance-bound consumer external log";
+    AF_LOG(INFO) << "runtime instance-bound consumer external log";
 
     ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
     logging->stop(std::chrono::milliseconds(250));
@@ -1109,7 +1171,7 @@ TEST(LogTests, RuntimeInstanceAsyncLoggingUsesStructuredLoggerConfig) {
     ASSERT_TRUE(runtime.start());
     ASSERT_TRUE(runtime.logger_started());
 
-    LOG(INFO) << "runtime config async logger";
+    AF_LOG(INFO) << "runtime config async logger";
 
     ASSERT_TRUE(runtime.flush_logger(std::chrono::seconds(2)));
     runtime.stop();
@@ -1146,7 +1208,7 @@ TEST(LogTests, RuntimeInstanceStructuredUdpBackendSendsFromRuntimeConfig) {
     ASSERT_TRUE(runtime.start());
     ASSERT_TRUE(runtime.logger_started());
 
-    LOG(INFO) << "runtime config udp backend";
+    AF_LOG(INFO) << "runtime config udp backend";
 
     ASSERT_TRUE(runtime.flush_logger(std::chrono::seconds(2)));
 
@@ -1218,7 +1280,7 @@ TEST(LogTests, RuntimeInstanceOwnedAsyncLoggerDrainsWhenRuntimeStops) {
     ASSERT_TRUE(runtime.start());
     ASSERT_TRUE(runtime.logger_started());
 
-    LOG(INFO) << "runtime owned async logger drains on stop";
+    AF_LOG(INFO) << "runtime owned async logger drains on stop";
     runtime.stop();
     EXPECT_FALSE(runtime.logger_started());
 
@@ -1285,7 +1347,7 @@ TEST(LogTests, RuntimeAwareSinkDefaultConsumerPrefersIoThread) {
     config.backends.push_back(std::move(backend));
     auto logging = af::start_runtime_logging(runtime, std::move(config));
 
-    LOG(INFO) << "default runtime-bound consumer external log";
+    AF_LOG(INFO) << "default runtime-bound consumer external log";
 
     ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
     logging->stop();
@@ -1329,7 +1391,7 @@ TEST(LogTests, RuntimeBoundLogBackendRunsInnerBackendOnConfiguredIoThread) {
     config.backends.push_back(af::detail::make_runtime_bound_log_backend(std::move(bound_config)));
     auto logging = af::start_runtime_logging(runtime, std::move(config), cpu_thread);
 
-    LOG(INFO) << "runtime-bound backend configured io thread";
+    AF_LOG(INFO) << "runtime-bound backend configured io thread";
 
     ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
     EXPECT_EQ(observing_backend->record_count(), 1U);

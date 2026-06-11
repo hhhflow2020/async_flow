@@ -29,8 +29,8 @@ public:
 private:
     af::task_result run_task() noexcept override {
         for (std::uint32_t i = 0; i < runtime_file_records_per_task; ++i) {
-            LOG(INFO) << "runtime file log task=" << task_id_ << " seq=" << i
-                      << " thread=" << af::runtime::current_thread_index();
+            AF_LOG(INFO) << "runtime file log task=" << task_id_ << " seq=" << i
+                         << " thread=" << af::runtime::current_thread_index();
         }
         completed_.fetch_add(1, std::memory_order_release);
         return done();
@@ -103,7 +103,7 @@ int main(int argc, char **argv) {
     }
 
     const bool completed_all = wait_for_completion(completed, task_count);
-    LOG(INFO) << "external runtime file log after runtime tasks";
+    AF_LOG(INFO) << "external runtime file log after runtime tasks";
 
     const bool flushed = runtime.flush_logger(5s);
     runtime.stop();

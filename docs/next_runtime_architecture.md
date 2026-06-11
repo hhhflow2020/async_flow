@@ -185,6 +185,7 @@ struct reactor_config {
 ```cpp
 struct log_config {
     log_ordering ordering = log_ordering::ordered;
+    log_level min_level = log_level::info;
     thread_selector consumer_thread = thread_selector::cpu(0);
     std::size_t queue_capacity = 1U << 16U;
     std::size_t shard_count = 0;
@@ -196,7 +197,7 @@ struct log_config {
 };
 ```
 
-日志等级过滤必须发生在格式化之前。不匹配等级时不格式化用户消息，也不申请 `log_record`。
+日志等级过滤必须发生在格式化之前。不匹配等级时不格式化用户消息，也不申请 `log_record`。用户侧日志入口使用 `AF_LOG(INFO)` / `AF_LOG_IF(INFO, condition)`，该入口先检查 `log_config::min_level` 或运行时 `set_min_log_level()` 维护的前端等级，再进入 Abseil stream 格式化。
 
 ### shutdown_config
 
@@ -554,7 +555,7 @@ TCP IO 线程负责从连接输入 buffer 中解析完整包，拿到完整包�
 logger 由 runtime 拥有，消费者绑定到 runtime 某个线程，以 service task 方式运行：
 
 ```text
-LOG
+AF_LOG
  -> level check
  -> Abseil format
  -> acquire log_record

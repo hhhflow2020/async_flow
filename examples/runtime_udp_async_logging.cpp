@@ -32,8 +32,8 @@ public:
 private:
     af::task_result run_task() noexcept override {
         for (std::uint32_t i = 0; i < runtime_udp_records_per_task; ++i) {
-            LOG(INFO) << "runtime udp log task=" << task_id_ << " seq=" << i
-                      << " thread=" << af::runtime::current_thread_index();
+            AF_LOG(INFO) << "runtime udp log task=" << task_id_ << " seq=" << i
+                         << " thread=" << af::runtime::current_thread_index();
         }
         completed_.fetch_add(1, std::memory_order_release);
         return done();
@@ -182,7 +182,7 @@ int main() {
     }
 
     const bool completed_all = wait_for_completion(completed, task_count);
-    LOG(INFO) << "external udp log after runtime tasks";
+    AF_LOG(INFO) << "external udp log after runtime tasks";
 
     const bool flushed = runtime.flush_logger(5s);
     runtime.stop();

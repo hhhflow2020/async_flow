@@ -87,15 +87,15 @@ private:
                 static_cast<unsigned char>(std::tolower(static_cast<int>(ch))));
         }
 
-        LOG(INFO) << "tcp echo lowercased bytes=" << size << " slot=" << conn_.slot()
-                  << " generation=" << conn_.generation();
+        AF_LOG(INFO) << "tcp echo lowercased bytes=" << size << " slot=" << conn_.slot()
+                     << " generation=" << conn_.generation();
         const af::net::send_result result = conn_.send(std::move(payload_));
         if (result == af::net::send_result::backpressure) {
-            LOG(WARNING) << "tcp echo send backpressure slot=" << conn_.slot()
-                         << " generation=" << conn_.generation();
+            AF_LOG(WARNING) << "tcp echo send backpressure slot=" << conn_.slot()
+                            << " generation=" << conn_.generation();
         } else if (result == af::net::send_result::closed) {
-            LOG(INFO) << "tcp echo send skipped closed slot=" << conn_.slot()
-                      << " generation=" << conn_.generation();
+            AF_LOG(INFO) << "tcp echo send skipped closed slot=" << conn_.slot()
+                         << " generation=" << conn_.generation();
         }
         return done();
     }
@@ -106,13 +106,13 @@ private:
 
 void echo_on_accept(void *owner, af::net::tcp_connection_ref conn) noexcept {
     static_cast<void>(owner);
-    LOG(INFO) << "tcp echo accepted slot=" << conn.slot() << " generation=" << conn.generation();
+    AF_LOG(INFO) << "tcp echo accepted slot=" << conn.slot() << " generation=" << conn.generation();
 }
 
 void echo_on_read(void *owner, af::net::tcp_connection_ref conn, af::buffer_view bytes) noexcept {
     auto *state = static_cast<echo_shard_state *>(owner);
-    LOG(INFO) << "tcp echo received bytes=" << bytes.size() << " slot=" << conn.slot()
-              << " generation=" << conn.generation();
+    AF_LOG(INFO) << "tcp echo received bytes=" << bytes.size() << " slot=" << conn.slot()
+                 << " generation=" << conn.generation();
     if (state == nullptr || state->runtime == nullptr || bytes.empty()) {
         return;
     }
@@ -121,8 +121,8 @@ void echo_on_read(void *owner, af::net::tcp_connection_ref conn, af::buffer_view
     try {
         payload = af::buffer::copy(bytes);
     } catch (...) {
-        LOG(ERROR) << "tcp echo failed to copy payload slot=" << conn.slot()
-                   << " generation=" << conn.generation();
+        AF_LOG(ERROR) << "tcp echo failed to copy payload slot=" << conn.slot()
+                      << " generation=" << conn.generation();
         conn.close(af::net::close_reason::error);
         return;
     }
@@ -130,8 +130,8 @@ void echo_on_read(void *owner, af::net::tcp_connection_ref conn, af::buffer_view
     auto task = af::make_task<lowercase_echo_task>(*state->runtime);
     const bool started = task->do_it(state->cpu_thread, conn.handle(), std::move(payload));
     if (!started) {
-        LOG(ERROR) << "tcp echo failed to schedule compute task slot=" << conn.slot()
-                   << " generation=" << conn.generation();
+        AF_LOG(ERROR) << "tcp echo failed to schedule compute task slot=" << conn.slot()
+                      << " generation=" << conn.generation();
         conn.close(af::net::close_reason::error);
     }
 }
@@ -139,8 +139,8 @@ void echo_on_read(void *owner, af::net::tcp_connection_ref conn, af::buffer_view
 void echo_on_close(void *owner, af::net::tcp_connection_ref conn,
                    af::net::close_reason reason) noexcept {
     static_cast<void>(owner);
-    LOG(INFO) << "tcp echo closed slot=" << conn.slot() << " generation=" << conn.generation()
-              << " reason=" << static_cast<unsigned>(reason);
+    AF_LOG(INFO) << "tcp echo closed slot=" << conn.slot() << " generation=" << conn.generation()
+                 << " reason=" << static_cast<unsigned>(reason);
 }
 
 [[nodiscard]] af::net::tcp_server_config make_server_config() noexcept {
@@ -179,12 +179,12 @@ void start_server_shard(af::net::tcp_server &server, echo_shard_state &state,
         server.add_listener(std::move(listener_config), callbacks);
     const bool ok = listener.ok() && server.start();
     if (ok) {
-        LOG(INFO) << "tcp echo shard started thread=" << io_thread.index
-                  << " listener_slot=" << listener.listener.slot()
-                  << " listener_generation=" << listener.listener.generation();
+        AF_LOG(INFO) << "tcp echo shard started thread=" << io_thread.index
+                     << " listener_slot=" << listener.listener.slot()
+                     << " listener_generation=" << listener.listener.generation();
     } else {
-        LOG(ERROR) << "tcp echo shard start failed thread=" << io_thread.index
-                   << " error=" << (listener.error == 0 ? EIO : listener.error);
+        AF_LOG(ERROR) << "tcp echo shard start failed thread=" << io_thread.index
+                      << " error=" << (listener.error == 0 ? EIO : listener.error);
     }
     state.lifecycle->record_start(ok, listener.error == 0 ? EIO : listener.error);
 }
@@ -197,7 +197,7 @@ void start_server_shard(af::net::tcp_server &server, echo_shard_state &state,
         }
         const af::signal_wait_result result = signals.wait_for(std::chrono::seconds(1));
         if (result.ok()) {
-            LOG(INFO) << "tcp echo received signal=" << result.signal;
+            AF_LOG(INFO) << "tcp echo received signal=" << result.signal;
             return true;
         }
         if (result.error != EAGAIN) {
@@ -293,9 +293,9 @@ int main(int argc, char **argv) {
         af::net::tcp_server *server = servers[i].get();
         if (!runtime.post(io_thread, [server, lifecycle] {
                 if (server == nullptr || !server->stop()) {
-                    LOG(ERROR) << "tcp echo server shard stop failed";
+                    AF_LOG(ERROR) << "tcp echo server shard stop failed";
                 } else {
-                    LOG(INFO) << "tcp echo shard stopped";
+                    AF_LOG(INFO) << "tcp echo shard stopped";
                 }
                 lifecycle->record_stop();
             })) {

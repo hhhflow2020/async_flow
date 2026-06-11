@@ -32,6 +32,6 @@
 
 ## 正确性
 
-- 日志等级过滤在前端完成，不匹配等级不格式化用户消息。
+- 日志等级过滤在 `AF_LOG` / `AF_LOG_IF` 前端完成，不匹配等级不进入 Abseil stream 格式化，也不申请 `log_record`。
 - runtime task id 插入用户日志字段开头，不改变整行统一前缀。
 - consumer 停止前需要 drain 已接受 record。

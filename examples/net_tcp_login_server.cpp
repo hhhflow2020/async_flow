@@ -129,8 +129,8 @@ public:
 
 private:
     af::task_result run_task() noexcept override {
-        LOG(INFO) << "login task running user=" << user_id_ << " slot=" << conn_.slot()
-                  << " generation=" << conn_.generation();
+        AF_LOG(INFO) << "login task running user=" << user_id_ << " slot=" << conn_.slot()
+                     << " generation=" << conn_.generation();
 
         asyncflow::examples::net::LoginResponse response;
         response.set_ok(!user_id_.empty() && !token_.empty());
@@ -138,23 +138,23 @@ private:
 
         std::string payload;
         if (!response.SerializeToString(&payload)) {
-            LOG(ERROR) << "failed to serialize login response user=" << user_id_;
+            AF_LOG(ERROR) << "failed to serialize login response user=" << user_id_;
             return done();
         }
 
         af::buffer packet = make_packet(login_response_id, std::move(payload));
         if (packet.empty()) {
-            LOG(ERROR) << "failed to encode login response user=" << user_id_;
+            AF_LOG(ERROR) << "failed to encode login response user=" << user_id_;
             return done();
         }
 
         const af::net::send_result result = conn_.send(std::move(packet));
         if (result == af::net::send_result::backpressure) {
-            LOG(WARNING) << "login response backpressure user=" << user_id_
-                         << " slot=" << conn_.slot();
+            AF_LOG(WARNING) << "login response backpressure user=" << user_id_
+                            << " slot=" << conn_.slot();
         } else if (result == af::net::send_result::closed) {
-            LOG(INFO) << "login response skipped closed user=" << user_id_
-                      << " slot=" << conn_.slot();
+            AF_LOG(INFO) << "login response skipped closed user=" << user_id_
+                         << " slot=" << conn_.slot();
         }
         return done();
     }
@@ -210,8 +210,8 @@ template <typename Fn>
 
 void login_on_accept(void *owner, af::net::tcp_connection_ref conn) noexcept {
     static_cast<void>(owner);
-    LOG(INFO) << "login connection accepted slot=" << conn.slot()
-              << " generation=" << conn.generation();
+    AF_LOG(INFO) << "login connection accepted slot=" << conn.slot()
+                 << " generation=" << conn.generation();
 }
 
 void login_on_read(void *owner, af::net::tcp_connection_ref conn, af::buffer_view bytes) noexcept {
@@ -226,35 +226,35 @@ void login_on_read(void *owner, af::net::tcp_connection_ref conn, af::buffer_vie
     const packet_parse_result result = parser.feed(bytes, [&](std::uint16_t packet_id,
                                                               af::buffer_view payload) {
         if (packet_id != login_request_id) {
-            LOG(WARNING) << "unknown login packet id=" << packet_id << " slot=" << handle.slot();
+            AF_LOG(WARNING) << "unknown login packet id=" << packet_id << " slot=" << handle.slot();
             return;
         }
 
         asyncflow::examples::net::LoginRequest request;
         if (!request.ParseFromArray(payload.data(), static_cast<int>(payload.size()))) {
-            LOG(WARNING) << "invalid login protobuf slot=" << handle.slot();
+            AF_LOG(WARNING) << "invalid login protobuf slot=" << handle.slot();
             return;
         }
 
-        LOG(INFO) << "login packet parsed user=" << request.user_id() << " slot=" << handle.slot()
-                  << " generation=" << handle.generation();
+        AF_LOG(INFO) << "login packet parsed user=" << request.user_id()
+                     << " slot=" << handle.slot() << " generation=" << handle.generation();
         auto task = af::make_task<login_task>(*state->runtime);
         const bool started = task->do_it(state->cpu_thread, handle, std::string(request.user_id()),
                                          std::string(request.token()));
         if (!started) {
-            LOG(ERROR) << "failed to schedule login task user=" << request.user_id()
-                       << " slot=" << handle.slot();
+            AF_LOG(ERROR) << "failed to schedule login task user=" << request.user_id()
+                          << " slot=" << handle.slot();
             static_cast<void>(handle.close());
         }
     });
 
     if (result == packet_parse_result::protocol_error) {
-        LOG(WARNING) << "login protocol error slot=" << conn.slot()
-                     << " generation=" << conn.generation();
+        AF_LOG(WARNING) << "login protocol error slot=" << conn.slot()
+                        << " generation=" << conn.generation();
         conn.close(af::net::close_reason::error);
     } else if (result == packet_parse_result::out_of_memory) {
-        LOG(ERROR) << "login parser out of memory slot=" << conn.slot()
-                   << " generation=" << conn.generation();
+        AF_LOG(ERROR) << "login parser out of memory slot=" << conn.slot()
+                      << " generation=" << conn.generation();
         conn.close(af::net::close_reason::error);
     }
 }
@@ -265,8 +265,9 @@ void login_on_close(void *owner, af::net::tcp_connection_ref conn,
     if (state != nullptr) {
         state->parsers.erase(connection_key(conn.handle()));
     }
-    LOG(INFO) << "login connection closed slot=" << conn.slot()
-              << " generation=" << conn.generation() << " reason=" << static_cast<unsigned>(reason);
+    AF_LOG(INFO) << "login connection closed slot=" << conn.slot()
+                 << " generation=" << conn.generation()
+                 << " reason=" << static_cast<unsigned>(reason);
 }
 
 [[nodiscard]] af::net::tcp_server_config make_server_config() noexcept {
@@ -305,12 +306,12 @@ void start_server_shard(af::net::tcp_server &server, login_shard_state &state,
         server.add_listener(std::move(listener_config), callbacks);
     const bool ok = listener.ok() && server.start();
     if (ok) {
-        LOG(INFO) << "tcp login shard started thread=" << io_thread.index
-                  << " listener_slot=" << listener.listener.slot()
-                  << " listener_generation=" << listener.listener.generation();
+        AF_LOG(INFO) << "tcp login shard started thread=" << io_thread.index
+                     << " listener_slot=" << listener.listener.slot()
+                     << " listener_generation=" << listener.listener.generation();
     } else {
-        LOG(ERROR) << "tcp login shard start failed thread=" << io_thread.index
-                   << " error=" << (listener.error == 0 ? EIO : listener.error);
+        AF_LOG(ERROR) << "tcp login shard start failed thread=" << io_thread.index
+                      << " error=" << (listener.error == 0 ? EIO : listener.error);
     }
     state.lifecycle->record_start(ok, listener.error == 0 ? EIO : listener.error);
 }
@@ -323,7 +324,7 @@ void start_server_shard(af::net::tcp_server &server, login_shard_state &state,
         }
         const af::signal_wait_result result = signals.wait_for(std::chrono::seconds(1));
         if (result.ok()) {
-            LOG(INFO) << "tcp login received signal=" << result.signal;
+            AF_LOG(INFO) << "tcp login received signal=" << result.signal;
             return true;
         }
         if (result.error != EAGAIN) {
@@ -419,9 +420,9 @@ int main(int argc, char **argv) {
         af::net::tcp_server *server = servers[i].get();
         if (!runtime.post(io_thread, [server, lifecycle] {
                 if (server == nullptr || !server->stop()) {
-                    LOG(ERROR) << "tcp login server shard stop failed";
+                    AF_LOG(ERROR) << "tcp login server shard stop failed";
                 } else {
-                    LOG(INFO) << "tcp login shard stopped";
+                    AF_LOG(INFO) << "tcp login shard stopped";
                 }
                 lifecycle->record_stop();
             })) {

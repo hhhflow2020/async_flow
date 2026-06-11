@@ -14,6 +14,7 @@
 #include <variant>
 
 #include "absl/base/log_severity.h"
+#include "absl/log/globals.h"
 #include "absl/log/initialize.h"
 #include "absl/log/internal/globals.h"
 #include "absl/log/log_entry.h"
@@ -30,6 +31,80 @@
 #include "af/thread_kind.hpp"
 
 namespace af {
+
+namespace detail {
+
+alignas(hardware_cache_line_size) inline std::atomic<log_level> global_min_log_level{
+    log_level::info};
+
+[[nodiscard]] constexpr int log_level_rank(log_level level) noexcept {
+    switch (level) {
+    case log_level::info:
+        return 0;
+    case log_level::warning:
+        return 1;
+    case log_level::error:
+        return 2;
+    case log_level::fatal:
+        return 3;
+    case log_level::off:
+        return 4;
+    }
+    return 0;
+}
+
+[[nodiscard]] constexpr absl::LogSeverityAtLeast to_absl_min_log_level(log_level level) noexcept {
+    switch (level) {
+    case log_level::info:
+        return absl::LogSeverityAtLeast::kInfo;
+    case log_level::warning:
+        return absl::LogSeverityAtLeast::kWarning;
+    case log_level::error:
+        return absl::LogSeverityAtLeast::kError;
+    case log_level::fatal:
+        return absl::LogSeverityAtLeast::kFatal;
+    case log_level::off:
+        return absl::LogSeverityAtLeast::kInfinity;
+    }
+    return absl::LogSeverityAtLeast::kInfo;
+}
+
+inline constexpr log_level af_log_level_INFO = log_level::info;
+inline constexpr log_level af_log_level_WARNING = log_level::warning;
+inline constexpr log_level af_log_level_ERROR = log_level::error;
+inline constexpr log_level af_log_level_FATAL = log_level::fatal;
+inline constexpr log_level af_log_level_QFATAL = log_level::fatal;
+inline constexpr log_level af_log_level_DO_NOT_SUBMIT = log_level::error;
+
+#if defined(NDEBUG)
+inline constexpr log_level af_log_level_DFATAL = log_level::error;
+#else
+inline constexpr log_level af_log_level_DFATAL = log_level::fatal;
+#endif
+
+} // namespace detail
+
+inline void set_min_log_level(log_level level) noexcept {
+    const log_level previous = detail::global_min_log_level.load(std::memory_order_relaxed);
+    if (detail::log_level_rank(level) > detail::log_level_rank(previous)) {
+        detail::global_min_log_level.store(level, std::memory_order_release);
+        absl::SetMinLogLevel(detail::to_absl_min_log_level(level));
+        return;
+    }
+
+    absl::SetMinLogLevel(detail::to_absl_min_log_level(level));
+    detail::global_min_log_level.store(level, std::memory_order_release);
+}
+
+[[nodiscard]] inline log_level min_log_level() noexcept {
+    return detail::global_min_log_level.load(std::memory_order_acquire);
+}
+
+[[nodiscard]] inline bool should_log(log_level severity) noexcept {
+    const log_level minimum = min_log_level();
+    return minimum != log_level::off &&
+           detail::log_level_rank(severity) >= detail::log_level_rank(minimum);
+}
 
 namespace detail {
 
@@ -240,6 +315,7 @@ inline void apply_async_log_config_fields(
     }
 
     target.queue_capacity = source.queue_capacity;
+    target.min_level = source.min_level;
     target.record_pool_local_cache_size = source.record_pool.local_cache_size;
     target.record_pool_slab_object_count = source.record_pool.slab_object_count;
     target.max_batch_size = source.max_batch_records;
@@ -435,6 +511,7 @@ start_runtime_logging(runtime &owner, async_log_config config,
         throw std::runtime_error("failed to start runtime async log consumer");
     }
     initialize_absl_log_once();
+    set_min_log_level(config.min_level);
 
     auto handle = std::make_unique<async_log_handle>(
         logger, std::make_unique<runtime_instance_absl_async_log_sink>(owner, logger),

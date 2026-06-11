@@ -20,6 +20,14 @@ enum class log_ordering : std::uint8_t {
     relaxed,
 };
 
+enum class log_level : std::int8_t {
+    info,
+    warning,
+    error,
+    fatal,
+    off,
+};
+
 inline constexpr std::size_t async_log_record_pool_max_local_cache_size = 4096;
 
 struct async_log_config {
@@ -83,6 +91,7 @@ struct async_log_config {
     std::size_t overflow_spin_count{64};
     log_overflow_policy overflow_policy{log_overflow_policy::drop_newest};
     log_ordering ordering{log_ordering::ordered};
+    log_level min_level{log_level::info};
     std::chrono::milliseconds flush_poll_interval{std::chrono::milliseconds(1)};
     std::chrono::milliseconds fatal_flush_timeout{std::chrono::milliseconds(200)};
     std::vector<std::unique_ptr<log_backend>> backends;

@@ -33,8 +33,8 @@ public:
 private:
     af::task_result run_task() noexcept override {
         for (std::uint32_t i = 0; i < runtime_tcp_records_per_task; ++i) {
-            LOG(INFO) << "runtime tcp log task=" << task_id_ << " seq=" << i
-                      << " thread=" << af::runtime::current_thread_index();
+            AF_LOG(INFO) << "runtime tcp log task=" << task_id_ << " seq=" << i
+                         << " thread=" << af::runtime::current_thread_index();
         }
         completed_.fetch_add(1, std::memory_order_release);
         return done();
@@ -226,11 +226,11 @@ int main() {
         return 1;
     }
 
-    LOG(INFO) << "tcp log backend warmup";
+    AF_LOG(INFO) << "tcp log backend warmup";
     const bool warmup_flushed = runtime.flush_logger(5s);
     const bool connected = wait_until_true(accepted_connection);
     const int received_after_connect = received.load(std::memory_order_acquire);
-    LOG(INFO) << "tcp log backend ready";
+    AF_LOG(INFO) << "tcp log backend ready";
     const bool ready_flushed = runtime.flush_logger(5s);
     const bool ready_received = wait_for_count(received, received_after_connect + 1);
     const int received_before_tasks = received.load(std::memory_order_acquire);
@@ -253,7 +253,7 @@ int main() {
     }
 
     const bool completed_all = wait_for_completion(completed, task_count);
-    LOG(INFO) << "external tcp log after runtime tasks";
+    AF_LOG(INFO) << "external tcp log after runtime tasks";
 
     const bool flushed = runtime.flush_logger(5s);
     runtime.stop();

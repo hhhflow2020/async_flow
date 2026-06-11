@@ -125,7 +125,7 @@ config.logger.backends = {
 };
 ```
 
-ordered 日志默认提供全局 sequence，consumer 按批 merge 后尽量保持后端写入顺序；relaxed 日志适合只追求吞吐、不要求跨线程全局顺序的场景。日志等级是运行时可设置的，等级不匹配的日志不会进入格式化热路径。
+ordered 日志默认提供全局 sequence，consumer 按批 merge 后尽量保持后端写入顺序；relaxed 日志适合只追求吞吐、不要求跨线程全局顺序的场景。用户日志入口使用 `AF_LOG` / `AF_LOG_IF`，日志等级是运行时可设置的，等级不匹配的日志不会进入格式化热路径。
 
 ## 性能边界
 

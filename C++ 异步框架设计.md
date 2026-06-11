@@ -126,7 +126,7 @@ LOG
  -> recycle log_record
 ```
 
-默认 ordered 策略，支持 relaxed 策略作为显式配置。日志等级过滤发生在格式化之前，不匹配等级时不会格式化用户消息。日志队列 bounded，默认满时 drop newest 并记录 dropped counter；log record pool 不 bounded。
+默认 ordered 策略，支持 relaxed 策略作为显式配置。用户日志入口使用 `AF_LOG` / `AF_LOG_IF`，日志等级过滤发生在 Abseil stream 格式化之前，不匹配等级时不会格式化用户消息。日志队列 bounded，默认满时 drop newest 并记录 dropped counter；log record pool 不 bounded。
 
 ## 性能边界
 

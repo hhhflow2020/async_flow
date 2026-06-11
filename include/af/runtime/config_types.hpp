@@ -362,6 +362,7 @@ struct log_config {
     }
 
     log_ordering ordering{log_ordering::ordered};
+    log_level min_level{log_level::info};
     thread_selector consumer_thread{thread_selector::cpu(0)};
     std::size_t queue_capacity{1U << 16U};
     std::size_t queue_shard_count{0};
