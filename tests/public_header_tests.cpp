@@ -463,6 +463,23 @@ TEST(PublicHeaderTests, LogDetailHeadersDoNotExposeCamelCaseTypeAliases) {
     }
 }
 
+TEST(PublicHeaderTests, LogBenchmarksCoverHighConcurrencyOrderedProducerRegression) {
+    const std::string content = read_source_file("benchmarks/log_benchmarks.cpp");
+    ASSERT_FALSE(content.empty());
+
+    const std::size_t ordered_begin =
+        content.find("BENCHMARK(BM_AsyncLoggerOrderedExternalProducers)");
+    ASSERT_NE(ordered_begin, std::string::npos);
+    const std::size_t relaxed_begin =
+        content.find("BENCHMARK(BM_AsyncLoggerRelaxedExternalProducers)");
+    ASSERT_NE(relaxed_begin, std::string::npos);
+    ASSERT_LT(ordered_begin, relaxed_begin);
+
+    const std::string ordered_block = content.substr(ordered_begin, relaxed_begin - ordered_begin);
+    EXPECT_NE(ordered_block.find("->Args({16, 4096})"), std::string::npos);
+    EXPECT_NE(ordered_block.find("->Args({32, 2048})"), std::string::npos);
+}
+
 TEST(PublicHeaderTests, LogUmbrellaExposesLowerCaseNames) {
     static_assert(std::is_enum_v<af::log_overflow_policy>);
     static_assert(std::is_enum_v<af::log_ordering>);

@@ -287,6 +287,8 @@ BENCHMARK(BM_AsyncLoggerOrderedExternalProducers)
     ->Args({1, 8192})
     ->Args({4, 8192})
     ->Args({8, 8192})
+    ->Args({16, 4096})
+    ->Args({32, 2048})
     ->UseRealTime()
     ->Unit(benchmark::kMillisecond);
 
@@ -294,6 +296,8 @@ BENCHMARK(BM_AsyncLoggerRelaxedExternalProducers)
     ->Args({1, 8192})
     ->Args({4, 8192})
     ->Args({8, 8192})
+    ->Args({16, 4096})
+    ->Args({32, 2048})
     ->UseRealTime()
     ->Unit(benchmark::kMillisecond);
 
