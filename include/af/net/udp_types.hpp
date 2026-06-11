@@ -18,20 +18,20 @@ namespace detail {
 struct runtime_udp_shard;
 } // namespace detail
 
-enum class UdpSendResult : std::uint8_t {
-    Accepted,
-    Queued,
-    Backpressure,
-    Closed,
-    Unsupported,
-    accepted = Accepted,
-    queued = Queued,
-    backpressure = Backpressure,
-    closed = Closed,
-    unsupported = Unsupported,
+enum class udp_send_result : std::uint8_t {
+    accepted,
+    queued,
+    backpressure,
+    closed,
+    unsupported,
+    Accepted = accepted,
+    Queued = queued,
+    Backpressure = backpressure,
+    Closed = closed,
+    Unsupported = unsupported,
 };
 
-struct UdpSocketOptions {
+struct udp_socket_options {
     bool reuse_port{true};
     bool ipv6_only{true};
     std::size_t read_budget_datagrams{64};
@@ -41,13 +41,13 @@ struct UdpSocketOptions {
     bool unlink_unix_path_on_close{true};
 };
 
-struct UdpSocketRuntimeConfig {};
+struct udp_socket_runtime_config {};
 
-class UdpPeer {
+class udp_peer {
 public:
-    UdpPeer() = default;
+    udp_peer() = default;
 
-    UdpPeer(const sockaddr *address, socklen_t size) noexcept {
+    udp_peer(const sockaddr *address, socklen_t size) noexcept {
         assign(address, size);
     }
 
@@ -67,7 +67,7 @@ public:
         return address_.size;
     }
 
-    [[nodiscard]] UdpEndpoint endpoint() const {
+    [[nodiscard]] udp_endpoint endpoint() const {
         return af::detail::endpoint_from_socket_address(native_address(), address_.size);
     }
 
@@ -93,9 +93,9 @@ private:
     af::detail::SocketAddress address_{};
 };
 
-using udp_send_result = UdpSendResult;
-using udp_socket_options = UdpSocketOptions;
-using udp_socket_runtime_config = UdpSocketRuntimeConfig;
-using udp_peer = UdpPeer;
+using UdpSendResult = udp_send_result;
+using UdpSocketOptions = udp_socket_options;
+using UdpSocketRuntimeConfig = udp_socket_runtime_config;
+using UdpPeer = udp_peer;
 
 } // namespace af::net

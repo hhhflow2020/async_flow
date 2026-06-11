@@ -20,16 +20,16 @@ struct SocketAddress {
     int family{AF_UNSPEC};
 };
 
-[[nodiscard]] inline bool socket_address_from_endpoint(const af::net::TcpEndpoint &endpoint,
+[[nodiscard]] inline bool socket_address_from_endpoint(const af::net::tcp_endpoint &endpoint,
                                                        SocketAddress &address,
                                                        int &error) noexcept {
     address = SocketAddress{};
     error = 0;
 
-    const bool prefer_ipv6 = endpoint.family == af::net::AddressFamily::IPv6 ||
-                             (endpoint.family == af::net::AddressFamily::Unspecified &&
+    const bool prefer_ipv6 = endpoint.family == af::net::address_family::ipv6 ||
+                             (endpoint.family == af::net::address_family::unspecified &&
                               endpoint.address.find(':') != std::string::npos);
-    if (endpoint.family == af::net::AddressFamily::Unix) {
+    if (endpoint.family == af::net::address_family::unix_domain) {
         if (endpoint.address.empty()) {
             error = EINVAL;
             return false;
@@ -74,8 +74,8 @@ struct SocketAddress {
     return true;
 }
 
-[[nodiscard]] inline af::net::TcpEndpoint endpoint_from_socket_address(const sockaddr *address,
-                                                                       socklen_t size) {
+[[nodiscard]] inline af::net::tcp_endpoint endpoint_from_socket_address(const sockaddr *address,
+                                                                        socklen_t size) {
     if (address == nullptr || size == 0) {
         return {};
     }
@@ -85,16 +85,16 @@ struct SocketAddress {
         if (::inet_ntop(AF_INET, &ipv4->sin_addr, text, sizeof(text)) == nullptr) {
             return {};
         }
-        return af::net::TcpEndpoint::host(text, ntohs(ipv4->sin_port),
-                                          af::net::AddressFamily::IPv4);
+        return af::net::tcp_endpoint::host(text, ntohs(ipv4->sin_port),
+                                           af::net::address_family::ipv4);
     }
     if (address->sa_family == AF_INET6 && size >= static_cast<socklen_t>(sizeof(sockaddr_in6))) {
         const auto *ipv6 = reinterpret_cast<const sockaddr_in6 *>(address);
         if (::inet_ntop(AF_INET6, &ipv6->sin6_addr, text, sizeof(text)) == nullptr) {
             return {};
         }
-        return af::net::TcpEndpoint::host(text, ntohs(ipv6->sin6_port),
-                                          af::net::AddressFamily::IPv6);
+        return af::net::tcp_endpoint::host(text, ntohs(ipv6->sin6_port),
+                                           af::net::address_family::ipv6);
     }
     if (address->sa_family == AF_UNIX && size > offsetof(sockaddr_un, sun_path)) {
         const auto *unix_address = reinterpret_cast<const sockaddr_un *>(address);
@@ -104,7 +104,7 @@ struct SocketAddress {
         while (path_size < max_size && unix_address->sun_path[path_size] != '\0') {
             ++path_size;
         }
-        return af::net::TcpEndpoint::unix_path(std::string(unix_address->sun_path, path_size));
+        return af::net::tcp_endpoint::unix_path(std::string(unix_address->sun_path, path_size));
     }
     return {};
 }

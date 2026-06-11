@@ -289,12 +289,12 @@ private:
     }
 
     [[nodiscard]] bool should_unlink_bound_unix_path() const noexcept {
-        return config_.endpoint.family == AddressFamily::Unix &&
+        return config_.endpoint.family == address_family::unix_domain &&
                config_.options.unlink_unix_path_on_close;
     }
 
     static void unlink_unix_path(const tcp_endpoint &endpoint) noexcept {
-        if (endpoint.family == AddressFamily::Unix && !endpoint.address.empty()) {
+        if (endpoint.family == address_family::unix_domain && !endpoint.address.empty()) {
             static_cast<void>(::unlink(endpoint.address.c_str()));
         }
     }

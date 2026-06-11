@@ -6,64 +6,64 @@
 
 namespace af::net {
 
-enum class AddressFamily : std::uint8_t {
-    Unspecified,
-    IPv4,
-    IPv6,
-    Unix,
-    unspecified = Unspecified,
-    ipv4 = IPv4,
-    ipv6 = IPv6,
-    unix_domain = Unix,
+enum class address_family : std::uint8_t {
+    unspecified,
+    ipv4,
+    ipv6,
+    unix_domain,
+    Unspecified = unspecified,
+    IPv4 = ipv4,
+    IPv6 = ipv6,
+    Unix = unix_domain,
 };
 
-struct IpEndpoint {
+struct ip_endpoint {
     std::string address{"0.0.0.0"};
     std::uint16_t port{0};
-    AddressFamily family{AddressFamily::IPv4};
+    address_family family{address_family::ipv4};
 
-    [[nodiscard]] static IpEndpoint any(std::uint16_t port) {
+    [[nodiscard]] static ip_endpoint any(std::uint16_t port) {
         return any_v4(port);
     }
 
-    [[nodiscard]] static IpEndpoint loopback(std::uint16_t port) {
+    [[nodiscard]] static ip_endpoint loopback(std::uint16_t port) {
         return loopback_v4(port);
     }
 
-    [[nodiscard]] static IpEndpoint any_v4(std::uint16_t port) {
-        return {"0.0.0.0", port, AddressFamily::IPv4};
+    [[nodiscard]] static ip_endpoint any_v4(std::uint16_t port) {
+        return {"0.0.0.0", port, address_family::ipv4};
     }
 
-    [[nodiscard]] static IpEndpoint any_v6(std::uint16_t port) {
-        return {"::", port, AddressFamily::IPv6};
+    [[nodiscard]] static ip_endpoint any_v6(std::uint16_t port) {
+        return {"::", port, address_family::ipv6};
     }
 
-    [[nodiscard]] static IpEndpoint loopback_v4(std::uint16_t port) {
-        return {"127.0.0.1", port, AddressFamily::IPv4};
+    [[nodiscard]] static ip_endpoint loopback_v4(std::uint16_t port) {
+        return {"127.0.0.1", port, address_family::ipv4};
     }
 
-    [[nodiscard]] static IpEndpoint loopback_v6(std::uint16_t port) {
-        return {"::1", port, AddressFamily::IPv6};
+    [[nodiscard]] static ip_endpoint loopback_v6(std::uint16_t port) {
+        return {"::1", port, address_family::ipv6};
     }
 
-    [[nodiscard]] static IpEndpoint host(std::string address, std::uint16_t port,
-                                         AddressFamily family = AddressFamily::Unspecified) {
+    [[nodiscard]] static ip_endpoint host(std::string address, std::uint16_t port,
+                                          address_family family = address_family::unspecified) {
         return {std::move(address), port, family};
     }
 
-    [[nodiscard]] static IpEndpoint unix_path(std::string path) {
-        return {std::move(path), 0, AddressFamily::Unix};
+    [[nodiscard]] static ip_endpoint unix_path(std::string path) {
+        return {std::move(path), 0, address_family::unix_domain};
     }
 };
 
-using TcpEndpoint = IpEndpoint;
-using UdpEndpoint = IpEndpoint;
-using UnixEndpoint = IpEndpoint;
+using tcp_endpoint = ip_endpoint;
+using udp_endpoint = ip_endpoint;
+using unix_endpoint = ip_endpoint;
 
-using address_family = AddressFamily;
-using ip_endpoint = IpEndpoint;
-using tcp_endpoint = TcpEndpoint;
-using udp_endpoint = UdpEndpoint;
-using unix_endpoint = UnixEndpoint;
+using AddressFamily = address_family;
+using IpEndpoint = ip_endpoint;
+using TcpEndpoint = tcp_endpoint;
+using UdpEndpoint = udp_endpoint;
+using UnixEndpoint = unix_endpoint;
 
 } // namespace af::net

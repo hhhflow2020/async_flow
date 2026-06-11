@@ -4,15 +4,15 @@
 
 namespace af::net {
 
-struct TcpClientOptions {
-    TcpListenerOptions connection;
+struct tcp_client_options {
+    tcp_listener_options connection;
     bool no_delay{true};
     bool keep_alive{false};
 };
 
-struct TcpClientRuntimeConfig {};
+struct tcp_client_runtime_config {};
 
-using tcp_client_options = TcpClientOptions;
-using tcp_client_runtime_config = TcpClientRuntimeConfig;
+using TcpClientOptions = tcp_client_options;
+using TcpClientRuntimeConfig = tcp_client_runtime_config;
 
 } // namespace af::net

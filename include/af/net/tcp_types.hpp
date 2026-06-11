@@ -13,58 +13,58 @@
 
 namespace af::net {
 
-enum class SendResult : std::uint8_t {
-    Accepted,
-    Queued,
-    Backpressure,
-    Closed,
-    Unsupported,
-    accepted = Accepted,
-    queued = Queued,
-    backpressure = Backpressure,
-    closed = Closed,
-    unsupported = Unsupported,
+enum class send_result : std::uint8_t {
+    accepted,
+    queued,
+    backpressure,
+    closed,
+    unsupported,
+    Accepted = accepted,
+    Queued = queued,
+    Backpressure = backpressure,
+    Closed = closed,
+    Unsupported = unsupported,
 };
 
-enum class CloseReason : std::uint8_t {
-    Local,
-    Peer,
-    Error,
-    local = Local,
-    peer = Peer,
-    error = Error,
+enum class close_reason : std::uint8_t {
+    local,
+    peer,
+    error,
+    Local = local,
+    Peer = peer,
+    Error = error,
 };
 
-enum class AcceptStrategy : std::uint8_t {
-    Auto,
-    ReusePortPerIoThread,
-    SingleAcceptor,
-    auto_select = Auto,
-    reuse_port_per_io_thread = ReusePortPerIoThread,
-    single_acceptor = SingleAcceptor,
+enum class accept_strategy : std::uint8_t {
+    auto_select,
+    reuse_port_per_io_thread,
+    single_acceptor,
+    Auto = auto_select,
+    ReusePortPerIoThread = reuse_port_per_io_thread,
+    SingleAcceptor = single_acceptor,
 };
 
-enum class ListenerState : std::uint8_t {
-    Configured,
-    Starting,
-    Active,
-    Failed,
-    Removed,
-    configured = Configured,
-    starting = Starting,
-    active = Active,
-    failed = Failed,
-    removed = Removed,
+enum class listener_state : std::uint8_t {
+    configured,
+    starting,
+    active,
+    failed,
+    removed,
+    Configured = configured,
+    Starting = starting,
+    Active = active,
+    Failed = failed,
+    Removed = removed,
 };
 
-enum class RemoveListenerPolicy : std::uint8_t {
-    StopAcceptOnly,
-    CloseExistingConnections,
-    stop_accept_only = StopAcceptOnly,
-    close_existing_connections = CloseExistingConnections,
+enum class remove_listener_policy : std::uint8_t {
+    stop_accept_only,
+    close_existing_connections,
+    StopAcceptOnly = stop_accept_only,
+    CloseExistingConnections = close_existing_connections,
 };
 
-struct TcpListenerOptions {
+struct tcp_listener_options {
     int backlog{4096};
     bool reuse_port{true};
     bool ipv6_only{true};
@@ -79,7 +79,7 @@ struct TcpListenerOptions {
     bool unlink_unix_path_on_close{true};
 };
 
-struct TcpConnectionConfig {
+struct tcp_connection_config {
     std::size_t read_buffer_size{16U * 1024U};
     std::size_t read_budget_bytes{512U * 1024U};
     std::size_t write_budget_bytes{512U * 1024U};
@@ -88,20 +88,20 @@ struct TcpConnectionConfig {
     bool keepalive{true};
 };
 
-struct TcpServerConfig {
-    TcpConnectionConfig connection;
+struct tcp_server_config {
+    tcp_connection_config connection;
     std::chrono::milliseconds connection_close_timeout{std::chrono::seconds(5)};
 };
 
-struct TcpListenerConfig {
+struct tcp_listener_config {
     std::string name;
-    TcpEndpoint endpoint;
+    tcp_endpoint endpoint;
     std::vector<af::thread_ref> threads;
-    TcpListenerOptions options;
-    AcceptStrategy accept_strategy{AcceptStrategy::Auto};
+    tcp_listener_options options;
+    accept_strategy accept_strategy{af::net::accept_strategy::auto_select};
 };
 
-struct ListenerId {
+struct listener_id {
     std::uint32_t slot{0};
     std::uint32_t generation{0};
 
@@ -109,17 +109,17 @@ struct ListenerId {
         return generation != 0U;
     }
 
-    [[nodiscard]] friend bool operator==(ListenerId lhs, ListenerId rhs) noexcept {
+    [[nodiscard]] friend bool operator==(listener_id lhs, listener_id rhs) noexcept {
         return lhs.slot == rhs.slot && lhs.generation == rhs.generation;
     }
 
-    [[nodiscard]] friend bool operator!=(ListenerId lhs, ListenerId rhs) noexcept {
+    [[nodiscard]] friend bool operator!=(listener_id lhs, listener_id rhs) noexcept {
         return !(lhs == rhs);
     }
 };
 
-struct TcpListenerHandle {
-    ListenerId id{};
+struct tcp_listener_handle {
+    listener_id id{};
 
     [[nodiscard]] bool valid() const noexcept {
         return id.valid();
@@ -133,39 +133,40 @@ struct TcpListenerHandle {
         return id.generation;
     }
 
-    [[nodiscard]] friend bool operator==(TcpListenerHandle lhs, TcpListenerHandle rhs) noexcept {
+    [[nodiscard]] friend bool operator==(tcp_listener_handle lhs,
+                                         tcp_listener_handle rhs) noexcept {
         return lhs.id == rhs.id;
     }
 };
 
-struct ListenerResult {
-    TcpListenerHandle listener{};
+struct listener_result {
+    tcp_listener_handle listener{};
     int error{0};
 
     [[nodiscard]] bool ok() const noexcept {
         return error == 0 && listener.valid();
     }
 
-    [[nodiscard]] static ListenerResult success(TcpListenerHandle handle) noexcept {
-        return ListenerResult{handle, 0};
+    [[nodiscard]] static listener_result success(tcp_listener_handle handle) noexcept {
+        return listener_result{handle, 0};
     }
 
-    [[nodiscard]] static ListenerResult failure(int err) noexcept {
-        return ListenerResult{TcpListenerHandle{}, err == 0 ? EINVAL : err};
+    [[nodiscard]] static listener_result failure(int err) noexcept {
+        return listener_result{tcp_listener_handle{}, err == 0 ? EINVAL : err};
     }
 };
 
-using send_result = SendResult;
-using close_reason = CloseReason;
-using accept_strategy = AcceptStrategy;
-using listener_state = ListenerState;
-using remove_listener_policy = RemoveListenerPolicy;
-using tcp_listener_options = TcpListenerOptions;
-using tcp_connection_config = TcpConnectionConfig;
-using tcp_listener_config = TcpListenerConfig;
-using tcp_server_config = TcpServerConfig;
-using listener_id = ListenerId;
-using tcp_listener_handle = TcpListenerHandle;
-using listener_result = ListenerResult;
+using SendResult = send_result;
+using CloseReason = close_reason;
+using AcceptStrategy = accept_strategy;
+using ListenerState = listener_state;
+using RemoveListenerPolicy = remove_listener_policy;
+using TcpListenerOptions = tcp_listener_options;
+using TcpConnectionConfig = tcp_connection_config;
+using TcpListenerConfig = tcp_listener_config;
+using TcpServerConfig = tcp_server_config;
+using ListenerId = listener_id;
+using TcpListenerHandle = tcp_listener_handle;
+using ListenerResult = listener_result;
 
 } // namespace af::net
