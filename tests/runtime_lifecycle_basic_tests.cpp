@@ -243,7 +243,7 @@ private:
         case Result::Failed:
             return failed();
         case Result::Cancelled:
-            return cancelled();
+            return cancel();
         }
         return failed();
     }

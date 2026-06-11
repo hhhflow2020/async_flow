@@ -167,7 +167,7 @@ protected:
         return task_result::failed;
     }
 
-    [[nodiscard]] static constexpr task_result cancelled() noexcept {
+    [[nodiscard]] static constexpr task_result cancel() noexcept {
         return task_result::cancelled;
     }
 

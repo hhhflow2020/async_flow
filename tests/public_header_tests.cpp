@@ -31,6 +31,14 @@ public:
         return decltype(test_reschedule<runtime_task_legacy_schedule_probe>(0))::value;
     }
 
+    [[nodiscard]] static constexpr bool has_cancel_helper() noexcept {
+        return decltype(test_cancel<runtime_task_legacy_schedule_probe>(0))::value;
+    }
+
+    [[nodiscard]] static constexpr bool has_cancelled_helper() noexcept {
+        return decltype(test_cancelled<runtime_task_legacy_schedule_probe>(0))::value;
+    }
+
 private:
     template <typename TaskT>
     [[nodiscard]] static auto test_schedule(int) noexcept
@@ -58,6 +66,18 @@ private:
 
     template <typename> [[nodiscard]] static std::false_type test_reschedule(...) noexcept;
 
+    template <typename TaskT>
+    [[nodiscard]] static auto test_cancel(int) noexcept
+        -> decltype(std::declval<TaskT &>().cancel(), std::true_type{});
+
+    template <typename> [[nodiscard]] static std::false_type test_cancel(...) noexcept;
+
+    template <typename TaskT>
+    [[nodiscard]] static auto test_cancelled(int) noexcept
+        -> decltype(std::declval<TaskT &>().cancelled(), std::true_type{});
+
+    template <typename> [[nodiscard]] static std::false_type test_cancelled(...) noexcept;
+
     af::task_result run_task() noexcept override {
         return done();
     }
@@ -81,6 +101,8 @@ TEST(PublicHeaderTests, RuntimeTaskExposesOnlyExplicitScheduleNames) {
     static_assert(!runtime_task_legacy_schedule_probe::has_short_pending());
     static_assert(!runtime_task_legacy_schedule_probe::has_again_helper());
     static_assert(runtime_task_legacy_schedule_probe::has_reschedule_helper());
+    static_assert(runtime_task_legacy_schedule_probe::has_cancel_helper());
+    static_assert(!runtime_task_legacy_schedule_probe::has_cancelled_helper());
 }
 
 TEST(PublicHeaderTests, NetUmbrellaExposesRuntimeNativeApi) {
