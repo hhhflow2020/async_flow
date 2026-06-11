@@ -42,6 +42,4 @@ public:
     void notify_drained() noexcept {}
 };
 
-using AsyncLogDrainWaiter = async_log_drain_waiter;
-
 } // namespace af::detail

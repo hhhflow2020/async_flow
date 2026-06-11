@@ -71,8 +71,6 @@ struct log_mmsg_header {
     unsigned int msg_len{0};
 };
 
-using LogMmsgHeader = log_mmsg_header;
-
 [[nodiscard]] inline int log_sendmmsg(int fd, log_mmsg_header *messages, unsigned int count,
                                       int flags) noexcept {
     return static_cast<int>(::syscall(SYS_sendmmsg, fd, messages, count, flags));

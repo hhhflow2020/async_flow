@@ -28,5 +28,5 @@
 - 为 TCP reactor 增加连接读写预算和批量 ready 队列。
 - 为 IO buffer 增加按线程固定大小池。
 - 为 ordered logging 的单 MPSC 队列补充高并发 perf regression 测试。
-- 持续记录 `AsyncLogRecordPool` 单线程、批量和跨线程 release benchmark 结果，避免日志池优化退化。
+- 持续记录 `async_log_record_pool` 单线程、批量和跨线程 release benchmark 结果，避免日志池优化退化。
 - 对 epoll/kqueue poll batch 大小做 benchmark。

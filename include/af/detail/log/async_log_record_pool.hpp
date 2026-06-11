@@ -586,8 +586,4 @@ inline void release_async_log_records(af::span<log_record *const> records) noexc
     }
 }
 
-using AsyncLogRecordPoolKind = async_log_record_pool_kind;
-using AsyncLogRecordPoolSlot = async_log_record_pool_slot;
-using AsyncLogRecordPool = async_log_record_pool;
-
 } // namespace af::detail

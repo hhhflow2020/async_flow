@@ -12,10 +12,10 @@
 
 ## 日志 record pool
 
-- `AsyncLogRecordPool` 使用固定数组 TLS local cache，命中时 acquire/release 不进入全局锁，也不需要在线程首次绑定 pool 时为 cache 做动态分配。
+- `async_log_record_pool` 使用固定数组 TLS local cache，命中时 acquire/release 不进入全局锁，也不需要在线程首次绑定 pool 时为 cache 做动态分配。
 - 每个 slab 有独立的带版本号 free-list；批量 release 会按 slab 分组，只对同一 slab 做一次链表拼接和 CAS。
 - 扩容通过 `atomic_flag` 串行化，只在 slab 耗尽时进入冷路径；正常日志热路径不加锁。
-- `LogRecord` 按 cache line 对齐，默认 1024 字节 inline message，普通日志不会触发 heap 分配。
+- `log_record` 按 cache line 对齐，默认 1024 字节 inline message，普通日志不会触发 heap 分配。
 
 ## 性能判断
 
@@ -31,7 +31,7 @@
 - block 扩容仍可能在突发创建时发生。
 - 过大的 local cache 会提高驻留内存。
 - 过小的 remote batch 会增加跨线程回收开销。
-- `AsyncLogRecordPool` 的 TLS cache 容量上限为 4096 条 record 指针；这是每线程缓存上限，不是 pool 总容量上限。pool 仍会按 slab 持续扩展到 OOM。
+- `async_log_record_pool` 的 TLS cache 容量上限为 4096 条 record 指针；这是每线程缓存上限，不是 pool 总容量上限。pool 仍会按 slab 持续扩展到 OOM。
 - 日志 record pool 的 slab 列表扩容仍是全局冷路径，高峰前应通过 `record_pool.slab_object_count` 配置足够初始容量。
 
 ## 复核覆盖

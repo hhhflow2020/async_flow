@@ -280,10 +280,4 @@ inline task_result runtime_instance_async_log_consumer_control_task::run_task() 
     return done();
 }
 
-using RuntimeInstanceAsyncLogConsumerControlOperation =
-    runtime_instance_async_log_consumer_control_operation;
-using RuntimeInstanceAsyncLogConsumerControlCompletion =
-    runtime_instance_async_log_consumer_control_completion;
-using RuntimeInstanceAsyncLogConsumerControlTask = runtime_instance_async_log_consumer_control_task;
-
 } // namespace af::detail

@@ -56,46 +56,30 @@ AF_TEST_DEFINE_ENUM_VALUE_DETECTOR(has_unregister_value, Unregister);
 
 TEST(LogTests, LogDetailTypesExposeLowerCasePrimaryNames) {
     static_assert(std::is_class_v<af::runtime_instance_absl_async_log_sink>);
-    static_assert(std::is_same_v<af::detail::log_record, af::detail::LogRecord>);
-    static_assert(
-        std::is_same_v<af::detail::async_log_drain_waiter, af::detail::AsyncLogDrainWaiter>);
-    static_assert(
-        std::is_same_v<af::detail::async_log_record_pool, af::detail::AsyncLogRecordPool>);
-    static_assert(
-        std::is_same_v<af::detail::async_log_record_pool_slot, af::detail::AsyncLogRecordPoolSlot>);
-    static_assert(
-        std::is_same_v<af::detail::async_log_record_pool_kind, af::detail::AsyncLogRecordPoolKind>);
+    static_assert(std::is_class_v<af::detail::log_record>);
+    static_assert(std::is_class_v<af::detail::async_log_drain_waiter>);
+    static_assert(std::is_class_v<af::detail::async_log_record_pool>);
+    static_assert(std::is_class_v<af::detail::async_log_record_pool_slot>);
+    static_assert(std::is_enum_v<af::detail::async_log_record_pool_kind>);
     static_assert(af::detail::async_log_record_pool_kind::shared ==
                   af::detail::async_log_record_pool_kind::shared);
     static_assert(!has_shared_value<af::detail::async_log_record_pool_kind>::value);
+    static_assert(std::is_class_v<af::detail::async_log_stat_counter>);
+    static_assert(std::is_class_v<af::detail::async_log_queue_shard>);
+    static_assert(std::is_class_v<af::detail::async_log_ordered_queue>);
+    static_assert(std::is_class_v<af::detail::async_log_producer_shard>);
+    static_assert(std::is_class_v<af::detail::async_log_runtime_lane>);
+    static_assert(std::is_class_v<af::detail::async_log_queue_shard_storage>);
+    static_assert(std::is_class_v<af::detail::async_log_producer_shard_storage>);
+    static_assert(std::is_class_v<af::detail::async_log_runtime_lane_storage>);
+    static_assert(std::is_class_v<af::detail::async_log_consumer_wake_target>);
+    static_assert(std::is_class_v<af::detail::async_log_consumer_controller>);
     static_assert(
-        std::is_same_v<af::detail::async_log_stat_counter, af::detail::AsyncLogStatCounter>);
+        std::is_enum_v<af::detail::runtime_instance_async_log_consumer_control_operation>);
     static_assert(
-        std::is_same_v<af::detail::async_log_queue_shard, af::detail::AsyncLogQueueShard>);
-    static_assert(
-        std::is_same_v<af::detail::async_log_ordered_queue, af::detail::AsyncLogOrderedQueue>);
-    static_assert(
-        std::is_same_v<af::detail::async_log_producer_shard, af::detail::AsyncLogProducerShard>);
-    static_assert(
-        std::is_same_v<af::detail::async_log_runtime_lane, af::detail::AsyncLogRuntimeLane>);
-    static_assert(std::is_same_v<af::detail::async_log_queue_shard_storage,
-                                 af::detail::AsyncLogQueueShardStorage>);
-    static_assert(std::is_same_v<af::detail::async_log_producer_shard_storage,
-                                 af::detail::AsyncLogProducerShardStorage>);
-    static_assert(std::is_same_v<af::detail::async_log_runtime_lane_storage,
-                                 af::detail::AsyncLogRuntimeLaneStorage>);
-    static_assert(std::is_same_v<af::detail::async_log_consumer_wake_target,
-                                 af::detail::AsyncLogConsumerWakeTarget>);
-    static_assert(std::is_same_v<af::detail::async_log_consumer_controller,
-                                 af::detail::AsyncLogConsumerController>);
-    static_assert(std::is_same_v<af::detail::runtime_instance_async_log_consumer_control_operation,
-                                 af::detail::RuntimeInstanceAsyncLogConsumerControlOperation>);
-    static_assert(std::is_same_v<af::detail::runtime_instance_async_log_consumer_control_completion,
-                                 af::detail::RuntimeInstanceAsyncLogConsumerControlCompletion>);
-    static_assert(std::is_same_v<af::detail::runtime_instance_async_log_consumer_control_task,
-                                 af::detail::RuntimeInstanceAsyncLogConsumerControlTask>);
-    static_assert(std::is_same_v<af::detail::runtime_instance_async_log_consumer_controller,
-                                 af::detail::RuntimeInstanceAsyncLogConsumerController>);
+        std::is_class_v<af::detail::runtime_instance_async_log_consumer_control_completion>);
+    static_assert(std::is_class_v<af::detail::runtime_instance_async_log_consumer_control_task>);
+    static_assert(std::is_class_v<af::detail::runtime_instance_async_log_consumer_controller>);
     static_assert(
         af::detail::runtime_instance_async_log_consumer_control_operation::register_consumer ==
         af::detail::runtime_instance_async_log_consumer_control_operation::register_consumer);
@@ -113,18 +97,14 @@ TEST(LogTests, LogDetailTypesExposeLowerCasePrimaryNames) {
     static_assert(std::is_class_v<af::tcp_log_backend_options>);
     static_assert(std::is_class_v<af::tcp_log_backend>);
 #if defined(__linux__)
-    static_assert(std::is_same_v<af::detail::log_mmsg_header, af::detail::LogMmsgHeader>);
+    static_assert(std::is_class_v<af::detail::log_mmsg_header>);
 #endif
-    static_assert(
-        std::is_same_v<af::detail::runtime_bound_log_batch, af::detail::RuntimeBoundLogBatch>);
+    static_assert(std::is_class_v<af::detail::runtime_bound_log_batch>);
     static_assert(std::is_same_v<af::detail::runtime_bound_log_backend::batch,
-                                 af::detail::runtime_bound_log_backend::Batch>);
-    static_assert(std::is_same_v<af::detail::runtime_bound_log_backend_config,
-                                 af::detail::RuntimeBoundLogBackendConfig>);
-    static_assert(std::is_same_v<af::detail::runtime_bound_log_backend_stats,
-                                 af::detail::RuntimeBoundLogBackendStats>);
-    static_assert(
-        std::is_same_v<af::detail::runtime_bound_log_backend, af::detail::RuntimeBoundLogBackend>);
+                                 af::detail::runtime_bound_log_batch>);
+    static_assert(std::is_class_v<af::detail::runtime_bound_log_backend_config>);
+    static_assert(std::is_class_v<af::detail::runtime_bound_log_backend_stats>);
+    static_assert(std::is_class_v<af::detail::runtime_bound_log_backend>);
 }
 
 [[nodiscard]] std::string read_file(const std::filesystem::path &path) {

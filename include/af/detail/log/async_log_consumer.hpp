@@ -30,8 +30,4 @@ public:
 
 class runtime_instance_async_log_consumer_controller;
 
-using AsyncLogConsumerWakeTarget = async_log_consumer_wake_target;
-using AsyncLogConsumerController = async_log_consumer_controller;
-using RuntimeInstanceAsyncLogConsumerController = runtime_instance_async_log_consumer_controller;
-
 } // namespace af::detail

@@ -73,7 +73,6 @@ struct runtime_bound_log_backend_stats {
 class runtime_bound_log_backend final : public log_backend, public runtime_service_task {
 public:
     using batch = runtime_bound_log_batch;
-    using Batch = batch;
 
     explicit runtime_bound_log_backend(runtime_bound_log_backend_config config)
         : owner_(config.owner), thread_(config.thread), backend_(std::move(config.backend)),
@@ -189,14 +188,10 @@ private:
         unregister_service,
     };
 
-    using ControlOperation = control_operation;
-
     struct control_completion {
         std::atomic<bool> done{false};
         std::atomic<bool> ok{false};
     };
-
-    using ControlCompletion = control_completion;
 
     [[nodiscard]] static std::size_t normalize_max_batch_records(std::size_t requested) noexcept {
         constexpr std::size_t max_supported_records = 1024;
@@ -464,11 +459,6 @@ private:
     cache_line_atomic<bool> shutdown_started_{false};
     cache_line_atomic<bool> finished_{false};
 };
-
-using RuntimeBoundLogBatch = runtime_bound_log_batch;
-using RuntimeBoundLogBackendConfig = runtime_bound_log_backend_config;
-using RuntimeBoundLogBackendStats = runtime_bound_log_backend_stats;
-using RuntimeBoundLogBackend = runtime_bound_log_backend;
 
 [[nodiscard]] inline std::unique_ptr<log_backend>
 make_runtime_bound_log_backend(runtime_bound_log_backend_config config) {

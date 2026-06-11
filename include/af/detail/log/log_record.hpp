@@ -63,6 +63,4 @@ private:
     void *pool_slot_{nullptr};
 };
 
-using LogRecord = log_record;
-
 } // namespace af::detail
