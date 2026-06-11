@@ -14,16 +14,18 @@
 
 namespace af::detail {
 
-struct SocketAddress {
+struct socket_address {
     sockaddr_storage storage{};
     socklen_t size{0};
     int family{AF_UNSPEC};
 };
 
+using SocketAddress = socket_address;
+
 [[nodiscard]] inline bool socket_address_from_endpoint(const af::net::tcp_endpoint &endpoint,
-                                                       SocketAddress &address,
+                                                       socket_address &address,
                                                        int &error) noexcept {
-    address = SocketAddress{};
+    address = socket_address{};
     error = 0;
 
     const bool prefer_ipv6 = endpoint.family == af::net::address_family::ipv6 ||

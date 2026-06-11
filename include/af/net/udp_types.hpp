@@ -77,7 +77,7 @@ private:
     friend struct detail::runtime_udp_shard;
 
     void assign(const sockaddr *address, socklen_t size) noexcept {
-        address_ = af::detail::SocketAddress{};
+        address_ = af::detail::socket_address{};
         if (address == nullptr || size == 0U || size > sizeof(address_.storage)) {
             return;
         }
@@ -86,11 +86,11 @@ private:
         address_.family = address->sa_family;
     }
 
-    [[nodiscard]] const af::detail::SocketAddress &socket_address() const noexcept {
+    [[nodiscard]] const af::detail::socket_address &socket_address() const noexcept {
         return address_;
     }
 
-    af::detail::SocketAddress address_{};
+    af::detail::socket_address address_{};
 };
 
 using UdpSendResult = udp_send_result;

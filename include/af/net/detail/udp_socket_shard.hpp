@@ -47,13 +47,13 @@ struct runtime_udp_shard {
     }
 
     [[nodiscard]] bool
-    supports_peer_address(const af::detail::SocketAddress &address) const noexcept {
+    supports_peer_address(const af::detail::socket_address &address) const noexcept {
         return address.size != 0U &&
                address.family == socket_family.load(std::memory_order_acquire);
     }
 
     [[nodiscard]] bool resolve_endpoint(udp_endpoint endpoint,
-                                        af::detail::SocketAddress &address) const noexcept {
+                                        af::detail::socket_address &address) const noexcept {
         int address_error = 0;
         return af::detail::socket_address_from_endpoint(std::move(endpoint), address,
                                                         address_error) &&
@@ -79,12 +79,12 @@ struct runtime_udp_shard {
     }
 
     [[nodiscard]] udp_send_result send_to(af::buffer buffer,
-                                          const af::detail::SocketAddress &address) noexcept {
+                                          const af::detail::socket_address &address) noexcept {
         return send_impl(buffer.view(), &address);
     }
 
     [[nodiscard]] udp_send_result send_to(af::buffer_view view,
-                                          const af::detail::SocketAddress &address) noexcept {
+                                          const af::detail::socket_address &address) noexcept {
         return send_impl(view, &address);
     }
 
@@ -174,7 +174,7 @@ struct runtime_udp_shard {
     }
 
     [[nodiscard]] udp_send_result send_impl(af::buffer_view view,
-                                            const af::detail::SocketAddress *address) noexcept {
+                                            const af::detail::socket_address *address) noexcept {
         if (fd < 0 || !active()) {
             return udp_send_result::closed;
         }
@@ -241,7 +241,7 @@ struct runtime_udp_shard {
     udp_socket_options options{};
     udp_endpoint local_endpoint{};
     udp_endpoint remote_endpoint{};
-    af::detail::SocketAddress remote_address{};
+    af::detail::socket_address remote_address{};
     std::vector<std::byte> read_buffer;
     std::atomic<int> socket_family{AF_UNSPEC};
     alignas(af::detail::hardware_cache_line_size) std::atomic<std::uint32_t> generation_{0};
@@ -259,7 +259,7 @@ runtime_udp_start_shard_on_owner(const std::shared_ptr<runtime_udp_state> &state
         return false;
     }
 
-    af::detail::SocketAddress local{};
+    af::detail::socket_address local{};
     int address_error = 0;
     if (!af::detail::socket_address_from_endpoint(config.local_endpoint, local, address_error)) {
         return false;
@@ -305,7 +305,7 @@ runtime_udp_start_shard_on_owner(const std::shared_ptr<runtime_udp_state> &state
         return false;
     }
 
-    af::detail::SocketAddress remote{};
+    af::detail::socket_address remote{};
     if (config.connect_remote) {
         if (!af::detail::socket_address_from_endpoint(config.remote_endpoint, remote,
                                                       address_error) ||
@@ -323,7 +323,7 @@ runtime_udp_start_shard_on_owner(const std::shared_ptr<runtime_udp_state> &state
     }
 
     udp_endpoint local_endpoint = config.local_endpoint;
-    af::detail::SocketAddress actual_local{};
+    af::detail::socket_address actual_local{};
     socklen_t actual_size = sizeof(actual_local.storage);
     if (::getsockname(fd, reinterpret_cast<sockaddr *>(&actual_local.storage), &actual_size) == 0) {
         actual_local.size = actual_size;

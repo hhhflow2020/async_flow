@@ -147,7 +147,7 @@ inline int udp_socket::validate_config(const udp_socket_config &config) const no
         return EINVAL;
     }
 
-    af::detail::SocketAddress local{};
+    af::detail::socket_address local{};
     int address_error = 0;
     if (!af::detail::socket_address_from_endpoint(config.local_endpoint, local, address_error)) {
         return address_error == 0 ? EINVAL : address_error;
@@ -159,7 +159,7 @@ inline int udp_socket::validate_config(const udp_socket_config &config) const no
         return EINVAL;
     }
     if (config.connect_remote) {
-        af::detail::SocketAddress remote{};
+        af::detail::socket_address remote{};
         if (!af::detail::socket_address_from_endpoint(config.remote_endpoint, remote,
                                                       address_error)) {
             return address_error == 0 ? EINVAL : address_error;
@@ -222,7 +222,7 @@ inline udp_send_result udp_socket::send_on_owner(af::thread_ref thread, std::uin
 
 inline udp_send_result
 udp_socket::send_to_on_owner(af::thread_ref thread, std::uint32_t generation, af::buffer buffer,
-                             const af::detail::SocketAddress &address) noexcept {
+                             const af::detail::socket_address &address) noexcept {
     auto shard = shard_for_thread(thread);
     if (shard == nullptr || !shard->matches_generation(generation)) {
         return udp_send_result::closed;
@@ -232,7 +232,7 @@ udp_socket::send_to_on_owner(af::thread_ref thread, std::uint32_t generation, af
 
 inline udp_send_result
 udp_socket::send_to_on_owner(af::thread_ref thread, std::uint32_t generation, af::buffer_view view,
-                             const af::detail::SocketAddress &address) noexcept {
+                             const af::detail::socket_address &address) noexcept {
     auto shard = shard_for_thread(thread);
     if (shard == nullptr || !shard->matches_generation(generation)) {
         return udp_send_result::closed;
@@ -373,7 +373,7 @@ inline udp_send_result udp_socket_handle::send_to(af::buffer buffer,
     if (state == nullptr || shard == nullptr) {
         return udp_send_result::closed;
     }
-    af::detail::SocketAddress address{};
+    af::detail::socket_address address{};
     if (!shard->resolve_endpoint(std::move(endpoint), address)) {
         return udp_send_result::unsupported;
     }
@@ -405,7 +405,7 @@ inline udp_send_result udp_socket_handle::send_to(af::buffer_view view,
     if (state == nullptr || shard == nullptr) {
         return udp_send_result::closed;
     }
-    af::detail::SocketAddress address{};
+    af::detail::socket_address address{};
     if (!shard->resolve_endpoint(std::move(endpoint), address)) {
         return udp_send_result::unsupported;
     }
@@ -438,7 +438,7 @@ inline udp_send_result udp_socket_handle::send_to(af::buffer buffer,
     if (state == nullptr || shard == nullptr) {
         return udp_send_result::closed;
     }
-    const af::detail::SocketAddress &address = peer.socket_address();
+    const af::detail::socket_address &address = peer.socket_address();
     if (!shard->supports_peer_address(address)) {
         return udp_send_result::unsupported;
     }
@@ -470,7 +470,7 @@ inline udp_send_result udp_socket_handle::send_to(af::buffer_view view,
     if (state == nullptr || shard == nullptr) {
         return udp_send_result::closed;
     }
-    const af::detail::SocketAddress &address = peer.socket_address();
+    const af::detail::socket_address &address = peer.socket_address();
     if (!shard->supports_peer_address(address)) {
         return udp_send_result::unsupported;
     }
@@ -526,7 +526,7 @@ inline udp_send_result udp_socket_ref::send_to(af::buffer buffer,
     if (shard_ == nullptr) {
         return udp_send_result::closed;
     }
-    af::detail::SocketAddress address{};
+    af::detail::socket_address address{};
     return shard_->resolve_endpoint(std::move(endpoint), address)
                ? shard_->send_to(std::move(buffer), address)
                : udp_send_result::unsupported;
@@ -537,7 +537,7 @@ inline udp_send_result udp_socket_ref::send_to(af::buffer_view view,
     if (shard_ == nullptr) {
         return udp_send_result::closed;
     }
-    af::detail::SocketAddress address{};
+    af::detail::socket_address address{};
     return shard_->resolve_endpoint(std::move(endpoint), address) ? shard_->send_to(view, address)
                                                                   : udp_send_result::unsupported;
 }

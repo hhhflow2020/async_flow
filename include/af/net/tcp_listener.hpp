@@ -63,7 +63,7 @@ public:
             return false;
         }
 
-        af::detail::SocketAddress address;
+        af::detail::socket_address address;
         int error = 0;
         if (!af::detail::socket_address_from_endpoint(config.endpoint, address, error)) {
             notify_error(error);
@@ -102,7 +102,7 @@ public:
             return false;
         }
 
-        af::detail::SocketAddress local_address;
+        af::detail::socket_address local_address;
         socklen_t local_size = sizeof(local_address.storage);
         if (::getsockname(fd, reinterpret_cast<sockaddr *>(&local_address.storage), &local_size) ==
             0) {

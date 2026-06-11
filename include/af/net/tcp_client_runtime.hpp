@@ -97,10 +97,10 @@ private:
     [[nodiscard]] bool normalize_connect_config(tcp_client_connect_config &config) const noexcept;
     [[nodiscard]] int
     validate_connect_config(const tcp_client_connect_config &config) const noexcept;
-    [[nodiscard]] int open_socket(const af::detail::SocketAddress &remote,
-                                  const af::detail::SocketAddress &local, bool bind_local,
+    [[nodiscard]] int open_socket(const af::detail::socket_address &remote,
+                                  const af::detail::socket_address &local, bool bind_local,
                                   const tcp_client_connect_config &config) noexcept;
-    [[nodiscard]] bool start_pending_connect(int fd, af::detail::SocketAddress remote,
+    [[nodiscard]] bool start_pending_connect(int fd, af::detail::socket_address remote,
                                              tcp_client_connect_config config,
                                              tcp_client_callbacks callbacks,
                                              bool already_connected = false) noexcept;
@@ -152,7 +152,7 @@ private:
         tcp_client *client{nullptr};
         af::thread_ref owner_thread{};
         int fd{-1};
-        af::detail::SocketAddress remote{};
+        af::detail::socket_address remote{};
         tcp_client_connect_config config;
         tcp_client_callbacks callbacks{};
         tcp_endpoint local_endpoint{};

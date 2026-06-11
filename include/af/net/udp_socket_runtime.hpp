@@ -154,10 +154,10 @@ private:
                                                 af::buffer_view view) noexcept;
     [[nodiscard]] udp_send_result
     send_to_on_owner(af::thread_ref thread, std::uint32_t generation, af::buffer buffer,
-                     const af::detail::SocketAddress &address) noexcept;
+                     const af::detail::socket_address &address) noexcept;
     [[nodiscard]] udp_send_result
     send_to_on_owner(af::thread_ref thread, std::uint32_t generation, af::buffer_view view,
-                     const af::detail::SocketAddress &address) noexcept;
+                     const af::detail::socket_address &address) noexcept;
 
     [[nodiscard]] std::shared_ptr<detail::runtime_udp_shard>
     shard_for_thread(af::thread_ref thread) const noexcept;

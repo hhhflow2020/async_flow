@@ -22,6 +22,8 @@ struct NetAliasRuntime;
 } // namespace
 
 TEST(NetSocketAddressTests, LowerCaseNetAliasesMatchPublicTypes) {
+    static_assert(std::is_same_v<af::detail::socket_address, af::detail::SocketAddress>);
+
     static_assert(std::is_same_v<af::net::address_family, af::net::AddressFamily>);
     static_assert(std::is_same_v<af::net::ip_endpoint, af::net::IpEndpoint>);
     static_assert(std::is_same_v<af::net::tcp_endpoint, af::net::TcpEndpoint>);
@@ -133,7 +135,7 @@ TEST(NetSocketAddressTests, TcpListenerConfigAcceptsRuntimeThreadRefs) {
 TEST(NetSocketAddressTests, ConvertsIpv4EndpointToSocketAddress) {
     const af::net::TcpEndpoint endpoint =
         af::net::TcpEndpoint::host("127.0.0.1", 43210, af::net::AddressFamily::IPv4);
-    af::detail::SocketAddress address{};
+    af::detail::socket_address address{};
     int error = 0;
 
     ASSERT_TRUE(af::detail::socket_address_from_endpoint(endpoint, address, error));
@@ -149,7 +151,7 @@ TEST(NetSocketAddressTests, ConvertsIpv4EndpointToSocketAddress) {
 TEST(NetSocketAddressTests, ConvertsIpv6EndpointToSocketAddress) {
     const af::net::TcpEndpoint endpoint =
         af::net::TcpEndpoint::host("::1", 44321, af::net::AddressFamily::IPv6);
-    af::detail::SocketAddress address{};
+    af::detail::socket_address address{};
     int error = 0;
 
     ASSERT_TRUE(af::detail::socket_address_from_endpoint(endpoint, address, error));
@@ -163,7 +165,7 @@ TEST(NetSocketAddressTests, ConvertsIpv6EndpointToSocketAddress) {
 }
 
 TEST(NetSocketAddressTests, InfersAddressFamilyForHostFactory) {
-    af::detail::SocketAddress address{};
+    af::detail::socket_address address{};
     int error = 0;
 
     ASSERT_TRUE(af::detail::socket_address_from_endpoint(af::net::TcpEndpoint::host("::", 1234),
@@ -190,7 +192,7 @@ TEST(NetSocketAddressTests, ConvertsSocketAddressBackToEndpoint) {
 
 TEST(NetSocketAddressTests, ConvertsUnixEndpointToSocketAddress) {
     const af::net::UnixEndpoint endpoint = af::net::UnixEndpoint::unix_path("/tmp/af-test.sock");
-    af::detail::SocketAddress address{};
+    af::detail::socket_address address{};
     int error = 0;
 
     ASSERT_TRUE(af::detail::socket_address_from_endpoint(endpoint, address, error));

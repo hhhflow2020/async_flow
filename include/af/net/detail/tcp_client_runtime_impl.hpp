@@ -42,13 +42,13 @@ inline bool tcp_client::connect(tcp_client_connect_config config,
         return false;
     }
 
-    af::detail::SocketAddress remote;
+    af::detail::socket_address remote;
     int address_error = 0;
     if (!af::detail::socket_address_from_endpoint(config.remote_endpoint, remote, address_error)) {
         return false;
     }
 
-    af::detail::SocketAddress local;
+    af::detail::socket_address local;
     if (config.bind_local) {
         if (!af::detail::socket_address_from_endpoint(config.local_endpoint, local,
                                                       address_error)) {
@@ -169,8 +169,8 @@ tcp_client::validate_connect_config(const tcp_client_connect_config &config) con
     return 0;
 }
 
-inline int tcp_client::open_socket(const af::detail::SocketAddress &remote,
-                                   const af::detail::SocketAddress &local, bool bind_local,
+inline int tcp_client::open_socket(const af::detail::socket_address &remote,
+                                   const af::detail::socket_address &local, bool bind_local,
                                    const tcp_client_connect_config &config) noexcept {
     const bool unix_domain = remote.family == AF_UNIX;
     int fd = ::socket(remote.family, SOCK_STREAM, unix_domain ? 0 : IPPROTO_TCP);
@@ -211,7 +211,7 @@ inline int tcp_client::open_socket(const af::detail::SocketAddress &remote,
     return fd;
 }
 
-inline bool tcp_client::start_pending_connect(int fd, af::detail::SocketAddress remote,
+inline bool tcp_client::start_pending_connect(int fd, af::detail::socket_address remote,
                                               tcp_client_connect_config config,
                                               tcp_client_callbacks callbacks,
                                               bool already_connected) noexcept {
@@ -329,7 +329,7 @@ inline bool tcp_client::adopt_connected_socket(pending_connect &pending) noexcep
         entry = acquire_connection_slot();
         entry->client = this;
 
-        af::detail::SocketAddress local_address;
+        af::detail::socket_address local_address;
         socklen_t local_size = sizeof(local_address.storage);
         tcp_endpoint local_endpoint;
         if (::getsockname(owned_fd, reinterpret_cast<sockaddr *>(&local_address.storage),
@@ -341,7 +341,7 @@ inline bool tcp_client::adopt_connected_socket(pending_connect &pending) noexcep
             local_endpoint = pending.config.local_endpoint;
         }
 
-        af::detail::SocketAddress peer_address;
+        af::detail::socket_address peer_address;
         socklen_t peer_size = sizeof(peer_address.storage);
         tcp_endpoint peer_endpoint;
         if (::getpeername(owned_fd, reinterpret_cast<sockaddr *>(&peer_address.storage),
