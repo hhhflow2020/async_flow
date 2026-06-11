@@ -234,6 +234,7 @@ if(ASYNCFLOW_BUILD_BENCHMARKS)
         benchmarks/runtime_parallel_benchmarks.cpp
         benchmarks/runtime_post_benchmarks.cpp
         benchmarks/runtime_timer_benchmarks.cpp
+        benchmarks/tcp_benchmarks.cpp
     )
     target_link_libraries(asyncflow_runtime_benchmarks PRIVATE AsyncFlow::AsyncFlow benchmark::benchmark)
 endif()

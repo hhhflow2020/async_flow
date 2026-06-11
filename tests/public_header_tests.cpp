@@ -493,6 +493,16 @@ TEST(PublicHeaderTests, ReactorBenchmarksCoverPollBatchSizes) {
     EXPECT_NE(content.find("BM_ReactorKqueueReadyBatchDispatch"), std::string::npos);
 }
 
+TEST(PublicHeaderTests, TcpBenchmarksCoverEchoRoundTrip) {
+    const std::string cmake = read_source_file("CMakeLists.txt");
+    ASSERT_FALSE(cmake.empty());
+    EXPECT_NE(cmake.find("benchmarks/tcp_benchmarks.cpp"), std::string::npos);
+
+    const std::string content = read_source_file("benchmarks/tcp_benchmarks.cpp");
+    ASSERT_FALSE(content.empty());
+    EXPECT_NE(content.find("BM_TcpEchoRoundTrip"), std::string::npos);
+}
+
 TEST(PublicHeaderTests, LogUmbrellaExposesLowerCaseNames) {
     static_assert(std::is_enum_v<af::log_overflow_policy>);
     static_assert(std::is_enum_v<af::log_ordering>);
