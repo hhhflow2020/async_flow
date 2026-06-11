@@ -6,7 +6,7 @@
 - `runtime/runtime.hpp`、`runtime/detail/runtime_lifecycle.hpp`：runtime 实例生命周期、线程启动停止、task/service/reactor 注册入口。
 - `runtime/detail/executor.hpp`、`runtime/detail/executor_impl.hpp`：executor 对象布局、intrusive MPSC inbox、task 执行循环、service task 轮询。
 - `reactor/reactor.hpp`、`reactor/detail/epoll_reactor.hpp`、`reactor/detail/kqueue_reactor.hpp`、`reactor/detail/select_reactor.hpp`：统一 reactor 抽象和平台 backend；`af/reactor.hpp` 是 reactor 模块 umbrella。
-- `runtime/detail/timer_backend.hpp`：executor 本地 timer backend，默认分层时间轮。
+- `timer/timer_backend.hpp`：executor 本地 timer backend，默认分层时间轮；timer 数据结构已从 runtime detail 目录移入 timer 模块。
 - `runtime/task.hpp`、`runtime/task_impl.hpp`：runtime task 创建、调度、task id 和对象池生命周期。
 - `detail/runtime/`：只保留 `atomic_wait`、`cpu_relax`、`runtime_common_state`、`runtime_service_task`、`timed_atomic_wait` 等跨模块底层组件。
 

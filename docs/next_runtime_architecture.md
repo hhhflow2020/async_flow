@@ -646,10 +646,6 @@ include/af/
       executor.hpp
       executor_loop.hpp
       task_pool.hpp
-      timer_backend.hpp
-      epoll_reactor.hpp
-      kqueue_reactor.hpp
-      select_reactor.hpp
   queue/
     intrusive_mpsc_queue.hpp
     bounded_mpsc_queue.hpp
@@ -661,11 +657,16 @@ include/af/
     slab_pool.hpp
     cache_line.hpp
   timer/
+    timer_backend.hpp
     timer_wheel.hpp
     hierarchical_timer_wheel.hpp
   reactor/
     reactor.hpp
     fd_event_source.hpp
+    detail/
+      epoll_reactor.hpp
+      kqueue_reactor.hpp
+      select_reactor.hpp
   net/
     endpoint.hpp
     tcp/

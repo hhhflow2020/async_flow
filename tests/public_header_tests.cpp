@@ -166,6 +166,14 @@
 #error "select reactor backend header must be installed under af/reactor/detail"
 #endif
 
+#if __has_include("af/runtime/detail/timer_backend.hpp")
+#error "timer backend headers must live under af/timer, not af/runtime/detail"
+#endif
+
+#if !__has_include("af/timer/timer_backend.hpp")
+#error "timer backend header must be installed under af/timer"
+#endif
+
 #if __has_include("af/detail/thread/hardware_threads.hpp")
 #error "platform thread headers must live under af/platform, not af/detail/thread"
 #endif
@@ -428,11 +436,9 @@ TEST(PublicHeaderTests, InfrastructureDetailHeadersDoNotExposeCamelCaseTypeAlias
                                  "using RuntimeTaskPool ="},
         forbidden_source_snippet{"include/af/runtime/detail/task_pool.hpp",
                                  "using RuntimeTaskPoolHolder ="},
-        forbidden_source_snippet{"include/af/runtime/detail/timer_backend.hpp",
-                                 "using RuntimeTimerEntry ="},
-        forbidden_source_snippet{"include/af/runtime/detail/timer_backend.hpp",
-                                 "using RuntimeTimerHeap ="},
-        forbidden_source_snippet{"include/af/runtime/detail/timer_backend.hpp",
+        forbidden_source_snippet{"include/af/timer/timer_backend.hpp", "using RuntimeTimerEntry ="},
+        forbidden_source_snippet{"include/af/timer/timer_backend.hpp", "using RuntimeTimerHeap ="},
+        forbidden_source_snippet{"include/af/timer/timer_backend.hpp",
                                  "using RuntimeHierarchicalTimerWheel ="},
         forbidden_source_snippet{"include/af/runtime/detail/pooled_object.hpp",
                                  "LocalCacheCapacity"},
