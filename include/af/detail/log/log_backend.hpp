@@ -7,12 +7,12 @@
 
 namespace af {
 
-class LogBackend {
+class log_backend {
 public:
-    LogBackend() = default;
-    LogBackend(const LogBackend &) = delete;
-    LogBackend &operator=(const LogBackend &) = delete;
-    virtual ~LogBackend() = default;
+    log_backend() = default;
+    log_backend(const log_backend &) = delete;
+    log_backend &operator=(const log_backend &) = delete;
+    virtual ~log_backend() = default;
 
     virtual void write_batch(af::Span<detail::LogRecord *const> records) noexcept = 0;
     virtual void flush() noexcept {}
@@ -26,6 +26,6 @@ public:
     }
 };
 
-using log_backend = LogBackend;
+using LogBackend = log_backend;
 
 } // namespace af

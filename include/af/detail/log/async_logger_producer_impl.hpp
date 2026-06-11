@@ -5,8 +5,8 @@
 
 namespace af {
 
-inline bool AsyncLogger::try_log(std::string_view message) noexcept {
-    if (ordering_ == LogOrdering::Ordered) [[likely]] {
+inline bool async_logger::try_log(std::string_view message) noexcept {
+    if (ordering_ == log_ordering::ordered) [[likely]] {
         return try_log_ordered(message);
     }
 
@@ -14,9 +14,9 @@ inline bool AsyncLogger::try_log(std::string_view message) noexcept {
     return try_log_on_lane(shard, message);
 }
 
-inline bool AsyncLogger::try_log_from_runtime_thread(std::uint16_t thread_index,
-                                                     std::string_view message) noexcept {
-    if (ordering_ == LogOrdering::Ordered) [[likely]] {
+inline bool async_logger::try_log_from_runtime_thread(std::uint16_t thread_index,
+                                                      std::string_view message) noexcept {
+    if (ordering_ == log_ordering::ordered) [[likely]] {
         return try_log(message);
     }
 
@@ -29,7 +29,7 @@ inline bool AsyncLogger::try_log_from_runtime_thread(std::uint16_t thread_index,
 }
 
 template <typename Lane>
-inline bool AsyncLogger::try_log_on_lane(Lane &lane, std::string_view message) noexcept {
+inline bool async_logger::try_log_on_lane(Lane &lane, std::string_view message) noexcept {
     if (!accepting_.load(std::memory_order_acquire)) {
         record_dropped(lane);
         return false;
@@ -57,7 +57,7 @@ inline bool AsyncLogger::try_log_on_lane(Lane &lane, std::string_view message) n
     return true;
 }
 
-inline detail::AsyncLogProducerShard &AsyncLogger::ordered_producer_shard() noexcept {
+inline detail::AsyncLogProducerShard &async_logger::ordered_producer_shard() noexcept {
     thread_local OrderedProducerShardCache cache;
     if (cache.logger != this || cache.token != cache_token_) [[unlikely]] {
         const std::size_t shard_index =
@@ -71,7 +71,7 @@ inline detail::AsyncLogProducerShard &AsyncLogger::ordered_producer_shard() noex
     return *cache.shard;
 }
 
-inline detail::AsyncLogQueueShard &AsyncLogger::producer_shard() noexcept {
+inline detail::AsyncLogQueueShard &async_logger::producer_shard() noexcept {
     thread_local ProducerShardCache cache;
     if (cache.logger != this || cache.token != cache_token_) [[unlikely]] {
         const std::size_t shard_index =
@@ -84,7 +84,7 @@ inline detail::AsyncLogQueueShard &AsyncLogger::producer_shard() noexcept {
     return *cache.shard;
 }
 
-inline bool AsyncLogger::try_log_ordered(std::string_view message) noexcept {
+inline bool async_logger::try_log_ordered(std::string_view message) noexcept {
     detail::AsyncLogProducerShard &producer = ordered_producer_shard();
     if (!accepting_.load(std::memory_order_acquire)) {
         record_dropped(producer);
@@ -113,18 +113,18 @@ inline bool AsyncLogger::try_log_ordered(std::string_view message) noexcept {
     return true;
 }
 
-template <typename Lane> inline void AsyncLogger::record_accepted(Lane &lane) noexcept {
+template <typename Lane> inline void async_logger::record_accepted(Lane &lane) noexcept {
     lane.accepted.add(1U);
 }
 
-template <typename Lane> inline void AsyncLogger::record_dropped(Lane &lane) noexcept {
+template <typename Lane> inline void async_logger::record_dropped(Lane &lane) noexcept {
     lane.dropped.add(1U);
 }
 
 template <typename Lane>
-inline detail::LogRecord *AsyncLogger::acquire_record(Lane &lane,
-                                                      std::string_view message) noexcept {
-    if (overflow_policy_ == LogOverflowPolicy::DropNewest) {
+inline detail::LogRecord *async_logger::acquire_record(Lane &lane,
+                                                       std::string_view message) noexcept {
+    if (overflow_policy_ == log_overflow_policy::drop_newest) {
         return lane.records.try_acquire(message);
     }
 
@@ -139,8 +139,8 @@ inline detail::LogRecord *AsyncLogger::acquire_record(Lane &lane,
 }
 
 template <typename Lane>
-inline bool AsyncLogger::push_record(Lane &lane, detail::LogRecord *record) noexcept {
-    if (overflow_policy_ == LogOverflowPolicy::DropNewest) {
+inline bool async_logger::push_record(Lane &lane, detail::LogRecord *record) noexcept {
+    if (overflow_policy_ == log_overflow_policy::drop_newest) {
         return accepting_.load(std::memory_order_acquire) && lane.queue.try_push(record);
     }
 
@@ -154,9 +154,9 @@ inline bool AsyncLogger::push_record(Lane &lane, detail::LogRecord *record) noex
     return false;
 }
 
-inline bool AsyncLogger::push_ordered_record(detail::LogRecord *record) noexcept {
+inline bool async_logger::push_ordered_record(detail::LogRecord *record) noexcept {
     AF_ASSERT(ordered_queue_ != nullptr);
-    if (overflow_policy_ == LogOverflowPolicy::DropNewest) {
+    if (overflow_policy_ == log_overflow_policy::drop_newest) {
         return accepting_.load(std::memory_order_acquire) && ordered_queue_->queue.try_push(record);
     }
 
@@ -170,22 +170,22 @@ inline bool AsyncLogger::push_ordered_record(detail::LogRecord *record) noexcept
     return false;
 }
 
-inline void AsyncLogger::release_record(detail::LogRecord *record) noexcept {
+inline void async_logger::release_record(detail::LogRecord *record) noexcept {
     detail::release_async_log_record(record);
 }
 
-inline void AsyncLogger::release_unpublished_record(detail::AsyncLogQueueShard &,
-                                                    detail::LogRecord *record) noexcept {
+inline void async_logger::release_unpublished_record(detail::AsyncLogQueueShard &,
+                                                     detail::LogRecord *record) noexcept {
     release_record(record);
 }
 
-inline void AsyncLogger::release_unpublished_record(detail::AsyncLogProducerShard &,
-                                                    detail::LogRecord *record) noexcept {
+inline void async_logger::release_unpublished_record(detail::AsyncLogProducerShard &,
+                                                     detail::LogRecord *record) noexcept {
     release_record(record);
 }
 
-inline void AsyncLogger::release_unpublished_record(detail::AsyncLogRuntimeLane &lane,
-                                                    detail::LogRecord *record) noexcept {
+inline void async_logger::release_unpublished_record(detail::AsyncLogRuntimeLane &lane,
+                                                     detail::LogRecord *record) noexcept {
     static_cast<void>(lane);
     release_record(record);
 }

@@ -21,18 +21,18 @@ namespace af {
 
 class RuntimeInstanceAbslAsyncLogSink;
 
-class AsyncLogger {
+class async_logger {
 public:
-    explicit AsyncLogger(AsyncLogConfig config);
+    explicit async_logger(async_log_config config);
 
-    AsyncLogger(const AsyncLogger &) = delete;
-    AsyncLogger &operator=(const AsyncLogger &) = delete;
+    async_logger(const async_logger &) = delete;
+    async_logger &operator=(const async_logger &) = delete;
 
-    ~AsyncLogger();
+    ~async_logger();
 
     [[nodiscard]] bool try_log(std::string_view message) noexcept;
     [[nodiscard]] bool flush(std::chrono::milliseconds timeout) noexcept;
-    [[nodiscard]] AsyncLogStats stats() const noexcept;
+    [[nodiscard]] async_log_stats stats() const noexcept;
     [[nodiscard]] std::chrono::milliseconds fatal_flush_timeout() const noexcept;
 
 private:
@@ -54,23 +54,23 @@ private:
     [[nodiscard]] std::size_t max_batch_size() const noexcept;
 
     struct ProducerShardCache {
-        const AsyncLogger *logger{nullptr};
+        const async_logger *logger{nullptr};
         std::uint64_t token{0};
         detail::AsyncLogQueueShard *shard{nullptr};
     };
 
     struct OrderedProducerShardCache {
-        const AsyncLogger *logger{nullptr};
+        const async_logger *logger{nullptr};
         std::uint64_t token{0};
         detail::AsyncLogProducerShard *shard{nullptr};
     };
 
-    [[nodiscard]] static LogOrdering validate_ordering(LogOrdering ordering);
-    [[nodiscard]] static std::size_t relaxed_queue_shard_count_for_ordering(LogOrdering ordering,
+    [[nodiscard]] static log_ordering validate_ordering(log_ordering ordering);
+    [[nodiscard]] static std::size_t relaxed_queue_shard_count_for_ordering(log_ordering ordering,
                                                                             std::size_t requested);
     [[nodiscard]] static std::size_t
-    ordered_producer_shard_count_for_ordering(LogOrdering ordering, std::size_t requested);
-    [[nodiscard]] static std::size_t runtime_thread_count_for_ordering(LogOrdering ordering,
+    ordered_producer_shard_count_for_ordering(log_ordering ordering, std::size_t requested);
+    [[nodiscard]] static std::size_t runtime_thread_count_for_ordering(log_ordering ordering,
                                                                        std::size_t requested);
     [[nodiscard]] static std::size_t default_queue_shard_count() noexcept;
     [[nodiscard]] static std::size_t normalize_queue_shard_count(std::size_t requested);
@@ -88,7 +88,7 @@ private:
     [[nodiscard]] static std::size_t record_pool_slab_capacity(std::size_t requested,
                                                                std::size_t fallback);
     [[nodiscard]] static std::unique_ptr<detail::AsyncLogOrderedQueue>
-    make_ordered_queue(LogOrdering ordering, std::size_t queue_capacity);
+    make_ordered_queue(log_ordering ordering, std::size_t queue_capacity);
     [[nodiscard]] static detail::AsyncLogProducerShardStorage
     make_ordered_producer_shards(std::size_t shard_count, std::size_t record_capacity,
                                  std::size_t record_pool_slab_object_count,
@@ -144,7 +144,7 @@ private:
     static inline std::atomic<std::uint64_t> next_cache_token_{1};
 
     const std::uint64_t cache_token_;
-    const LogOrdering ordering_;
+    const log_ordering ordering_;
     const std::size_t queue_shard_count_;
     const std::size_t queue_shard_mask_;
     const std::size_t ordered_producer_shard_count_;
@@ -156,10 +156,10 @@ private:
     detail::AsyncLogRuntimeLaneStorage runtime_lanes_;
     const std::size_t max_batch_size_;
     const std::size_t overflow_spin_count_;
-    const LogOverflowPolicy overflow_policy_;
+    const log_overflow_policy overflow_policy_;
     const std::chrono::milliseconds flush_poll_interval_;
     const std::chrono::milliseconds fatal_flush_timeout_;
-    std::vector<std::unique_ptr<LogBackend>> backends_;
+    std::vector<std::unique_ptr<log_backend>> backends_;
 
     alignas(detail::hardware_cache_line_size) std::atomic<bool> started_{false};
     alignas(detail::hardware_cache_line_size) std::atomic<bool> accepting_{false};
@@ -178,7 +178,7 @@ private:
     detail::AsyncLogDrainWaiter drain_waiter_;
 };
 
-using async_logger = AsyncLogger;
+using AsyncLogger = async_logger;
 
 } // namespace af
 

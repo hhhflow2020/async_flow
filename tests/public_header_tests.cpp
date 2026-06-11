@@ -24,13 +24,15 @@ TEST(PublicHeaderTests, NetUmbrellaExposesRuntimeNativeApi) {
 }
 
 TEST(PublicHeaderTests, LogUmbrellaExposesLowerCaseNames) {
-    static_assert(std::is_same_v<af::log_overflow_policy, af::LogOverflowPolicy>);
-    static_assert(std::is_same_v<af::log_ordering, af::LogOrdering>);
-    static_assert(std::is_same_v<af::async_log_config, af::AsyncLogConfig>);
-    static_assert(std::is_same_v<af::async_log_stats, af::AsyncLogStats>);
-    static_assert(std::is_same_v<af::async_logger, af::AsyncLogger>);
-    static_assert(std::is_same_v<af::log_backend, af::LogBackend>);
-    static_assert(std::is_same_v<af::async_log_handle, af::AsyncLogHandle>);
+    static_assert(std::is_same_v<af::LogOverflowPolicy, af::log_overflow_policy>);
+    static_assert(std::is_same_v<af::LogOrdering, af::log_ordering>);
+    static_assert(std::is_same_v<af::AsyncLogConfig, af::async_log_config>);
+    static_assert(std::is_same_v<af::AsyncLogStats, af::async_log_stats>);
+    static_assert(std::is_same_v<af::AsyncLogger, af::async_logger>);
+    static_assert(std::is_same_v<af::LogBackend, af::log_backend>);
+    static_assert(std::is_same_v<af::AsyncLogHandle, af::async_log_handle>);
+    af::async_log_config config = af::async_log_config::ordered();
+    EXPECT_EQ(config.ordering, af::log_ordering::ordered);
 }
 
 TEST(PublicHeaderTests, UtilityUmbrellaExposesLowerCaseNames) {

@@ -156,37 +156,37 @@ TEST(LogTests, LogSocketNonblockingHelperReportsInvalidFd) {
 }
 
 TEST(LogTests, AsyncLogConfigProfilesSelectQueueStrategy) {
-    af::AsyncLogConfig ordered = af::AsyncLogConfig::ordered();
+    af::async_log_config ordered = af::async_log_config::ordered();
     ordered.use_ordered(4);
-    EXPECT_EQ(ordered.ordering, af::LogOrdering::Ordered);
+    EXPECT_EQ(ordered.ordering, af::log_ordering::ordered);
     EXPECT_EQ(ordered.queue_shard_count, 4U);
     EXPECT_EQ(ordered.runtime_thread_count, 0U);
 
-    const af::AsyncLogConfig ordered_factory = af::AsyncLogConfig::ordered(3);
-    EXPECT_EQ(ordered_factory.ordering, af::LogOrdering::Ordered);
+    const af::async_log_config ordered_factory = af::async_log_config::ordered(3);
+    EXPECT_EQ(ordered_factory.ordering, af::log_ordering::ordered);
     EXPECT_EQ(ordered_factory.queue_shard_count, 3U);
     EXPECT_EQ(ordered_factory.runtime_thread_count, 0U);
 
-    af::AsyncLogConfig relaxed = af::AsyncLogConfig::relaxed();
+    af::async_log_config relaxed = af::async_log_config::relaxed();
     relaxed.use_relaxed(8, 16);
-    EXPECT_EQ(relaxed.ordering, af::LogOrdering::Relaxed);
+    EXPECT_EQ(relaxed.ordering, af::log_ordering::relaxed);
     EXPECT_EQ(relaxed.runtime_thread_count, 8U);
     EXPECT_EQ(relaxed.queue_shard_count, 16U);
 
-    const af::AsyncLogConfig relaxed_factory = af::AsyncLogConfig::relaxed(6, 12);
-    EXPECT_EQ(relaxed_factory.ordering, af::LogOrdering::Relaxed);
+    const af::async_log_config relaxed_factory = af::async_log_config::relaxed(6, 12);
+    EXPECT_EQ(relaxed_factory.ordering, af::log_ordering::relaxed);
     EXPECT_EQ(relaxed_factory.runtime_thread_count, 6U);
     EXPECT_EQ(relaxed_factory.queue_shard_count, 12U);
 
     relaxed.use_ordered(2);
-    EXPECT_EQ(relaxed.ordering, af::LogOrdering::Ordered);
+    EXPECT_EQ(relaxed.ordering, af::log_ordering::ordered);
     EXPECT_EQ(relaxed.queue_shard_count, 2U);
     EXPECT_EQ(relaxed.runtime_thread_count, 0U);
 
     ordered.use_relaxed();
-    EXPECT_EQ(ordered.ordering, af::LogOrdering::Relaxed);
-    EXPECT_EQ(ordered.runtime_thread_count, af::AsyncLogConfig::auto_runtime_thread_count);
-    EXPECT_EQ(ordered.queue_shard_count, af::AsyncLogConfig::auto_queue_shard_count);
+    EXPECT_EQ(ordered.ordering, af::log_ordering::relaxed);
+    EXPECT_EQ(ordered.runtime_thread_count, af::async_log_config::auto_runtime_thread_count);
+    EXPECT_EQ(ordered.queue_shard_count, af::async_log_config::auto_queue_shard_count);
     EXPECT_EQ(ordered.record_pool_local_cache_size, 256U);
     EXPECT_EQ(ordered.record_pool_slab_object_count, 0U);
 }
@@ -200,9 +200,9 @@ TEST(LogTests, RuntimeLogConfigCarriesRecordPoolConfig) {
     source.record_pool.local_cache_size = 5;
     source.record_pool.slab_object_count = 7;
 
-    const af::AsyncLogConfig target = af::make_async_log_config(source, 5);
+    const af::async_log_config target = af::make_async_log_config(source, 5);
 
-    EXPECT_EQ(target.ordering, af::LogOrdering::Relaxed);
+    EXPECT_EQ(target.ordering, af::log_ordering::relaxed);
     EXPECT_EQ(target.queue_capacity, 16U);
     EXPECT_EQ(target.queue_shard_count, 2U);
     EXPECT_EQ(target.runtime_thread_count, 3U);
@@ -235,7 +235,7 @@ TEST(LogTests, RecordPoolLocalCacheIgnoresStaleSlotsWhenPoolAddressIsReused) {
     pool->~Pool();
 }
 
-class BlockingLogBackend final : public af::LogBackend {
+class BlockingLogBackend final : public af::log_backend {
 public:
     void write_batch(af::Span<af::detail::LogRecord *const> records) noexcept override {
         static_cast<void>(records);
@@ -264,7 +264,7 @@ private:
     bool released_{false};
 };
 
-class CountingLogBackend final : public af::LogBackend {
+class CountingLogBackend final : public af::log_backend {
 public:
     void write_batch(af::Span<af::detail::LogRecord *const> records) noexcept override {
         record_count_.fetch_add(records.size(), std::memory_order_relaxed);
@@ -278,7 +278,7 @@ private:
     std::atomic<std::size_t> record_count_{0};
 };
 
-class CapturingLogBackend final : public af::LogBackend {
+class CapturingLogBackend final : public af::log_backend {
 public:
     void write_batch(af::Span<af::detail::LogRecord *const> records) noexcept override {
         std::lock_guard lock(mutex_);
@@ -297,7 +297,7 @@ private:
     std::vector<std::string> messages_;
 };
 
-class RuntimeInstanceThreadObservingLogBackend final : public af::LogBackend {
+class RuntimeInstanceThreadObservingLogBackend final : public af::log_backend {
 public:
     RuntimeInstanceThreadObservingLogBackend(af::runtime &owner,
                                              af::runtime::thread_index expected_thread)
@@ -365,7 +365,7 @@ template <typename T> bool wait_until_at_least(std::atomic<T> &value, T expected
 }
 
 #if defined(__linux__) || defined(__APPLE__)
-class ThreadNameLogBackend final : public af::LogBackend {
+class ThreadNameLogBackend final : public af::log_backend {
 public:
     void write_batch(af::Span<af::detail::LogRecord *const> records) noexcept override {
         static_cast<void>(records);
@@ -400,7 +400,7 @@ private:
 
 class ScopedRuntimeInstanceLogConsumer {
 public:
-    ScopedRuntimeInstanceLogConsumer(af::runtime &runtime, std::shared_ptr<af::AsyncLogger> logger,
+    ScopedRuntimeInstanceLogConsumer(af::runtime &runtime, std::shared_ptr<af::async_logger> logger,
                                      af::runtime::thread_index thread,
                                      std::size_t max_batches_per_run)
         : controller_(std::make_unique<af::detail::RuntimeInstanceAsyncLogConsumerController>(
@@ -512,7 +512,7 @@ class RuntimeStopLoggingTask final : public af::runtime_task {
 public:
     RuntimeStopLoggingTask(factory_token token, af::runtime &owner) : runtime_task(token, owner) {}
 
-    bool do_it(af::runtime::thread_index target, af::AsyncLogHandle *logging,
+    bool do_it(af::runtime::thread_index target, af::async_log_handle *logging,
                std::atomic<int> *completed) noexcept {
         logging_ = logging;
         completed_ = completed;
@@ -527,7 +527,7 @@ private:
         return done();
     }
 
-    af::AsyncLogHandle *logging_{nullptr};
+    af::async_log_handle *logging_{nullptr};
     std::atomic<int> *completed_{nullptr};
 };
 
@@ -728,7 +728,7 @@ TEST(LogTests, AsyncFileBackendWritesAbslFormattedMessages) {
     const auto path = std::filesystem::path(::testing::TempDir()) / "asyncflow-log-file.log";
     std::filesystem::remove(path);
 
-    af::AsyncLogConfig config;
+    af::async_log_config config;
     config.backends.push_back(af::make_file_log_backend({.path = path, .append = false}));
     LogTestRuntimeGuard runtime_guard;
     auto logging = af::start_runtime_logging(runtime_guard.runtime(), std::move(config),
@@ -748,7 +748,7 @@ TEST(LogTests, RuntimeAsyncLoggingRejectsInvalidConsumerThread) {
 
     EXPECT_THROW(
         {
-            af::AsyncLogConfig config;
+            af::async_log_config config;
             config.backends.push_back(std::make_unique<CountingLogBackend>());
             auto logging =
                 af::start_runtime_logging(runtime_guard.runtime(), std::move(config),
@@ -763,7 +763,7 @@ TEST(LogTests, RuntimeAwareSinkUsesConfiguredRuntimeThreadName) {
     auto backend = std::make_unique<ThreadNameLogBackend>();
     auto *thread_name_backend = backend.get();
 
-    af::AsyncLogConfig config;
+    af::async_log_config config;
     config.backends.push_back(std::move(backend));
 
     LogTestRuntimeGuard runtime_guard;
@@ -781,7 +781,7 @@ TEST(LogTests, RuntimeAwareSinkKeepsProducerThreadIdInAbslPrefix) {
     auto backend = std::make_unique<CapturingLogBackend>();
     auto *capturing_backend = backend.get();
 
-    af::AsyncLogConfig config;
+    af::async_log_config config;
     config.backends.push_back(std::move(backend));
 
     LogTestRuntimeGuard runtime_guard;
@@ -814,14 +814,14 @@ TEST(LogTests, RuntimeAwareSinkKeepsProducerThreadIdInAbslPrefix) {
 }
 
 TEST(LogTests, ProducerShardCacheRefreshesWhenLoggerReusesAddress) {
-    alignas(af::AsyncLogger) unsigned char storage[sizeof(af::AsyncLogger)];
+    alignas(af::async_logger) unsigned char storage[sizeof(af::async_logger)];
     LogTestRuntimeGuard runtime_guard;
 
     auto make_config = [](std::size_t shard_count, CountingLogBackend *&counter) {
         auto backend = std::make_unique<CountingLogBackend>();
         counter = backend.get();
 
-        af::AsyncLogConfig config = af::AsyncLogConfig::relaxed(0U, shard_count);
+        af::async_log_config config = af::async_log_config::relaxed(0U, shard_count);
         config.queue_capacity = 8;
         config.max_batch_size = 4;
         config.backends.push_back(std::move(backend));
@@ -829,10 +829,10 @@ TEST(LogTests, ProducerShardCacheRefreshesWhenLoggerReusesAddress) {
     };
 
     CountingLogBackend *first_counter = nullptr;
-    af::AsyncLogger *first =
-        ::new (static_cast<void *>(storage)) af::AsyncLogger(make_config(1, first_counter));
+    af::async_logger *first =
+        ::new (static_cast<void *>(storage)) af::async_logger(make_config(1, first_counter));
     {
-        std::shared_ptr<af::AsyncLogger> first_logger(first, [](af::AsyncLogger *) {});
+        std::shared_ptr<af::async_logger> first_logger(first, [](af::async_logger *) {});
         ScopedRuntimeInstanceLogConsumer first_consumer(runtime_guard.runtime(), first_logger,
                                                         runtime_guard.runtime_1(), 64);
         ASSERT_TRUE(first_consumer.start());
@@ -841,13 +841,13 @@ TEST(LogTests, ProducerShardCacheRefreshesWhenLoggerReusesAddress) {
         EXPECT_EQ(first_counter->record_count(), 1U);
         first_consumer.shutdown();
     }
-    first->~AsyncLogger();
+    first->~async_logger();
 
     CountingLogBackend *second_counter = nullptr;
-    af::AsyncLogger *second =
-        ::new (static_cast<void *>(storage)) af::AsyncLogger(make_config(8, second_counter));
+    af::async_logger *second =
+        ::new (static_cast<void *>(storage)) af::async_logger(make_config(8, second_counter));
     {
-        std::shared_ptr<af::AsyncLogger> second_logger(second, [](af::AsyncLogger *) {});
+        std::shared_ptr<af::async_logger> second_logger(second, [](af::async_logger *) {});
         ScopedRuntimeInstanceLogConsumer second_consumer(runtime_guard.runtime(), second_logger,
                                                          runtime_guard.runtime_1(), 64);
         ASSERT_TRUE(second_consumer.start());
@@ -856,17 +856,17 @@ TEST(LogTests, ProducerShardCacheRefreshesWhenLoggerReusesAddress) {
         EXPECT_EQ(second_counter->record_count(), 1U);
         second_consumer.shutdown();
     }
-    second->~AsyncLogger();
+    second->~async_logger();
 }
 
 TEST(LogTests, QueueOverflowDropsNewestWithoutBlockingProducer) {
     auto backend = std::make_unique<BlockingLogBackend>();
     auto *blocking_backend = backend.get();
 
-    af::AsyncLogConfig config;
+    af::async_log_config config;
     config.queue_capacity = 2;
     config.max_batch_size = 1;
-    config.overflow_policy = af::LogOverflowPolicy::DropNewest;
+    config.overflow_policy = af::log_overflow_policy::drop_newest;
     config.backends.push_back(std::move(backend));
     LogTestRuntimeGuard runtime_guard;
     auto logging = af::start_runtime_logging(runtime_guard.runtime(), std::move(config),
@@ -891,11 +891,11 @@ TEST(LogTests, RuntimeAwareSinkUsesRuntimeLaneWhenExternalMpscIsFull) {
     auto backend = std::make_unique<BlockingLogBackend>();
     auto *blocking_backend = backend.get();
 
-    af::AsyncLogConfig config = af::AsyncLogConfig::relaxed(0U, 1U);
+    af::async_log_config config = af::async_log_config::relaxed(0U, 1U);
     config.queue_capacity = 1;
     config.runtime_lane_capacity = 2;
     config.max_batch_size = 1;
-    config.overflow_policy = af::LogOverflowPolicy::DropNewest;
+    config.overflow_policy = af::log_overflow_policy::drop_newest;
     config.backends.push_back(std::move(backend));
     auto logging = af::start_runtime_logging(runtime_guard.runtime(), std::move(config),
                                              runtime_guard.runtime_1());
@@ -905,10 +905,10 @@ TEST(LogTests, RuntimeAwareSinkUsesRuntimeLaneWhenExternalMpscIsFull) {
 
     LOG(INFO) << "external mpsc fill one";
     LOG(INFO) << "external mpsc fill two";
-    const af::AsyncLogStats filled = logging->stats();
+    const af::async_log_stats filled = logging->stats();
 
     LOG(INFO) << "external mpsc overflow";
-    const af::AsyncLogStats overflowed = logging->stats();
+    const af::async_log_stats overflowed = logging->stats();
     ASSERT_GT(overflowed.dropped, filled.dropped);
 
     std::atomic<int> runtime_completed{0};
@@ -916,7 +916,7 @@ TEST(LogTests, RuntimeAwareSinkUsesRuntimeLaneWhenExternalMpscIsFull) {
                                                &runtime_completed));
     ASSERT_TRUE(wait_until_at_least(runtime_completed, 1));
 
-    const af::AsyncLogStats after_runtime = logging->stats();
+    const af::async_log_stats after_runtime = logging->stats();
     EXPECT_EQ(after_runtime.accepted, overflowed.accepted + 1U);
 
     blocking_backend->release();
@@ -931,7 +931,7 @@ TEST(LogTests, RuntimeAwareSinkDrainsOnConfiguredRuntimeThread) {
         runtime_guard.runtime(), runtime_guard.runtime_1());
     auto *observing_backend = backend.get();
 
-    af::AsyncLogConfig config;
+    af::async_log_config config;
     config.queue_capacity = 16;
     config.max_batch_size = 4;
     config.backends.push_back(std::move(backend));
@@ -965,7 +965,7 @@ TEST(LogTests, RuntimeInstanceAwareSinkDrainsOnConfiguredRuntimeThread) {
         std::make_unique<RuntimeInstanceThreadObservingLogBackend>(runtime, consumer_thread);
     auto *observing_backend = backend.get();
 
-    af::AsyncLogConfig log_config;
+    af::async_log_config log_config;
     log_config.queue_capacity = 16;
     log_config.max_batch_size = 4;
     log_config.backends.push_back(std::move(backend));
@@ -1147,7 +1147,7 @@ TEST(LogTests, RuntimeAwareSinkCanStopFromConsumerRuntimeThread) {
     auto backend = std::make_unique<CapturingLogBackend>();
     auto *capturing_backend = backend.get();
 
-    af::AsyncLogConfig config;
+    af::async_log_config config;
     config.queue_capacity = 16;
     config.max_batch_size = 4;
     config.backends.push_back(std::move(backend));
@@ -1179,7 +1179,7 @@ TEST(LogTests, RuntimeAwareSinkDefaultConsumerPrefersIoThread) {
     auto backend = std::make_unique<RuntimeInstanceThreadObservingLogBackend>(runtime, io_thread);
     auto *observing_backend = backend.get();
 
-    af::AsyncLogConfig config;
+    af::async_log_config config;
     config.queue_capacity = 16;
     config.max_batch_size = 4;
     config.backends.push_back(std::move(backend));
@@ -1223,7 +1223,7 @@ TEST(LogTests, RuntimeBoundLogBackendRunsInnerBackendOnConfiguredIoThread) {
     bound_config.max_batch_records = 4;
     bound_config.max_batches_per_run = 4;
 
-    af::AsyncLogConfig config;
+    af::async_log_config config;
     config.queue_capacity = 16;
     config.max_batch_size = 4;
     config.backends.push_back(af::detail::make_runtime_bound_log_backend(std::move(bound_config)));
@@ -1266,11 +1266,11 @@ TEST(LogTests, RuntimeLaneRecordPoolReusesSlotsAcrossFlushes) {
     auto backend = std::make_unique<CountingLogBackend>();
     auto *counting_backend = backend.get();
 
-    af::AsyncLogConfig config = af::AsyncLogConfig::relaxed(1U, 1U);
+    af::async_log_config config = af::async_log_config::relaxed(1U, 1U);
     config.queue_capacity = 1;
     config.runtime_lane_capacity = 1;
     config.max_batch_size = 1;
-    config.overflow_policy = af::LogOverflowPolicy::DropNewest;
+    config.overflow_policy = af::log_overflow_policy::drop_newest;
     config.backends.push_back(std::move(backend));
 
     LogTestRuntimeGuard runtime_guard;
@@ -1286,7 +1286,7 @@ TEST(LogTests, RuntimeLaneRecordPoolReusesSlotsAcrossFlushes) {
         ASSERT_TRUE(logging->flush(std::chrono::seconds(2)));
     }
 
-    const af::AsyncLogStats stats = logging->stats();
+    const af::async_log_stats stats = logging->stats();
     EXPECT_EQ(stats.accepted, static_cast<std::uint64_t>(record_count));
     EXPECT_EQ(stats.dropped, 0U);
     EXPECT_EQ(counting_backend->record_count(), static_cast<std::size_t>(record_count));
@@ -1318,7 +1318,7 @@ TEST(LogTests, RuntimeAwareSinkTagsFirstUserLogFieldWithRuntimeTaskId) {
     const auto path = std::filesystem::temp_directory_path() / "async_flow_task_id_log.txt";
     std::filesystem::remove(path);
 
-    af::AsyncLogConfig config;
+    af::async_log_config config;
     config.queue_capacity = 16;
     config.backends.push_back(af::make_file_log_backend({.path = path, .append = false}));
     LogTestRuntimeGuard runtime_guard;
@@ -1357,7 +1357,7 @@ TEST(LogTests, RuntimeAwareSinkTagsEachUserLogLineAfterPrefix) {
     const auto path = std::filesystem::temp_directory_path() / "async_flow_multiline_task_log.txt";
     std::filesystem::remove(path);
 
-    af::AsyncLogConfig config;
+    af::async_log_config config;
     config.queue_capacity = 16;
     config.backends.push_back(af::make_file_log_backend({.path = path, .append = false}));
     LogTestRuntimeGuard runtime_guard;
@@ -1423,15 +1423,15 @@ TEST(LogTests, BlockOverflowWaitsForQueueCapacity) {
     auto backend = std::make_unique<BlockingLogBackend>();
     auto *blocking_backend = backend.get();
 
-    af::AsyncLogConfig config;
+    af::async_log_config config;
     config.queue_capacity = 1;
     config.queue_shard_count = 1;
     config.max_batch_size = 1;
-    config.overflow_policy = af::LogOverflowPolicy::Block;
+    config.overflow_policy = af::log_overflow_policy::block;
     config.backends.push_back(std::move(backend));
 
     LogTestRuntimeGuard runtime_guard;
-    auto logger = std::make_shared<af::AsyncLogger>(std::move(config));
+    auto logger = std::make_shared<af::async_logger>(std::move(config));
     ScopedRuntimeInstanceLogConsumer consumer(runtime_guard.runtime(), logger,
                                               runtime_guard.runtime_1(), 64);
     ASSERT_TRUE(consumer.start());
@@ -1472,15 +1472,15 @@ TEST(LogTests, OrderedLoggingIsDefaultSingleMpscQueue) {
     auto backend = std::make_unique<BlockingLogBackend>();
     auto *blocking_backend = backend.get();
 
-    af::AsyncLogConfig config;
+    af::async_log_config config;
     config.queue_capacity = 1;
     config.queue_shard_count = 4;
     config.max_batch_size = 1;
-    config.overflow_policy = af::LogOverflowPolicy::DropNewest;
+    config.overflow_policy = af::log_overflow_policy::drop_newest;
     config.backends.push_back(std::move(backend));
 
     LogTestRuntimeGuard runtime_guard;
-    auto logger = std::make_shared<af::AsyncLogger>(std::move(config));
+    auto logger = std::make_shared<af::async_logger>(std::move(config));
     ScopedRuntimeInstanceLogConsumer consumer(runtime_guard.runtime(), logger,
                                               runtime_guard.runtime_1(), 64);
     ASSERT_TRUE(consumer.start());
@@ -1503,7 +1503,7 @@ TEST(LogTests, OrderedLoggingIsDefaultSingleMpscQueue) {
     }
 
     EXPECT_EQ(accepted.load(std::memory_order_acquire), 2);
-    const af::AsyncLogStats stats = logger->stats();
+    const af::async_log_stats stats = logger->stats();
     EXPECT_EQ(stats.accepted, 3U);
     EXPECT_EQ(stats.dropped, 2U);
 
@@ -1516,15 +1516,15 @@ TEST(LogTests, OrderedLoggingPreservesSingleProducerFifoAcrossBatches) {
     auto backend = std::make_unique<CapturingLogBackend>();
     auto *capturing_backend = backend.get();
 
-    af::AsyncLogConfig config;
+    af::async_log_config config;
     config.queue_capacity = 256;
     config.queue_shard_count = 1;
     config.max_batch_size = 7;
-    config.overflow_policy = af::LogOverflowPolicy::DropNewest;
+    config.overflow_policy = af::log_overflow_policy::drop_newest;
     config.backends.push_back(std::move(backend));
 
     LogTestRuntimeGuard runtime_guard;
-    auto logger = std::make_shared<af::AsyncLogger>(std::move(config));
+    auto logger = std::make_shared<af::async_logger>(std::move(config));
     ScopedRuntimeInstanceLogConsumer consumer(runtime_guard.runtime(), logger,
                                               runtime_guard.runtime_1(), 64);
     ASSERT_TRUE(consumer.start());
@@ -1541,7 +1541,7 @@ TEST(LogTests, OrderedLoggingPreservesSingleProducerFifoAcrossBatches) {
         EXPECT_EQ(messages[static_cast<std::size_t>(index)],
                   "ordered-fifo-" + std::to_string(index));
     }
-    const af::AsyncLogStats stats = logger->stats();
+    const af::async_log_stats stats = logger->stats();
     EXPECT_EQ(stats.accepted, static_cast<std::uint64_t>(record_count));
     EXPECT_EQ(stats.dropped, 0U);
     consumer.shutdown();
@@ -1551,15 +1551,15 @@ TEST(LogTests, OrderedLoggingConcurrentProducersDrainWithoutLossOrDuplicates) {
     auto backend = std::make_unique<CapturingLogBackend>();
     auto *capturing_backend = backend.get();
 
-    af::AsyncLogConfig config;
+    af::async_log_config config;
     config.queue_capacity = 8192;
     config.queue_shard_count = 8;
     config.max_batch_size = 128;
-    config.overflow_policy = af::LogOverflowPolicy::DropNewest;
+    config.overflow_policy = af::log_overflow_policy::drop_newest;
     config.backends.push_back(std::move(backend));
 
     LogTestRuntimeGuard runtime_guard;
-    auto logger = std::make_shared<af::AsyncLogger>(std::move(config));
+    auto logger = std::make_shared<af::async_logger>(std::move(config));
     ScopedRuntimeInstanceLogConsumer consumer(runtime_guard.runtime(), logger,
                                               runtime_guard.runtime_1(), 256);
     ASSERT_TRUE(consumer.start());
@@ -1599,7 +1599,7 @@ TEST(LogTests, OrderedLoggingConcurrentProducersDrainWithoutLossOrDuplicates) {
 
     EXPECT_EQ(failures.load(std::memory_order_acquire), 0);
     ASSERT_TRUE(logger->flush(std::chrono::seconds(5)));
-    const af::AsyncLogStats stats = logger->stats();
+    const af::async_log_stats stats = logger->stats();
     EXPECT_EQ(stats.accepted, static_cast<std::uint64_t>(expected_records));
     EXPECT_EQ(stats.dropped, 0U);
     expect_exact_indexed_log_set(capturing_backend->messages(), prefix, expected_records);
@@ -1610,14 +1610,14 @@ TEST(LogTests, ShardedQueuesAvoidSingleQueueProducerContention) {
     auto backend = std::make_unique<BlockingLogBackend>();
     auto *blocking_backend = backend.get();
 
-    af::AsyncLogConfig config = af::AsyncLogConfig::relaxed(0U, 4U);
+    af::async_log_config config = af::async_log_config::relaxed(0U, 4U);
     config.queue_capacity = 1;
     config.max_batch_size = 1;
-    config.overflow_policy = af::LogOverflowPolicy::DropNewest;
+    config.overflow_policy = af::log_overflow_policy::drop_newest;
     config.backends.push_back(std::move(backend));
 
     LogTestRuntimeGuard runtime_guard;
-    auto logger = std::make_shared<af::AsyncLogger>(std::move(config));
+    auto logger = std::make_shared<af::async_logger>(std::move(config));
     ScopedRuntimeInstanceLogConsumer consumer(runtime_guard.runtime(), logger,
                                               runtime_guard.runtime_1(), 64);
     ASSERT_TRUE(consumer.start());
@@ -1651,14 +1651,14 @@ TEST(LogTests, RelaxedLoggingConcurrentProducersDrainWithoutLossOrDuplicates) {
     auto backend = std::make_unique<CapturingLogBackend>();
     auto *capturing_backend = backend.get();
 
-    af::AsyncLogConfig config = af::AsyncLogConfig::relaxed(0U, 8U);
+    af::async_log_config config = af::async_log_config::relaxed(0U, 8U);
     config.queue_capacity = 8192;
     config.max_batch_size = 128;
-    config.overflow_policy = af::LogOverflowPolicy::DropNewest;
+    config.overflow_policy = af::log_overflow_policy::drop_newest;
     config.backends.push_back(std::move(backend));
 
     LogTestRuntimeGuard runtime_guard;
-    auto logger = std::make_shared<af::AsyncLogger>(std::move(config));
+    auto logger = std::make_shared<af::async_logger>(std::move(config));
     ScopedRuntimeInstanceLogConsumer consumer(runtime_guard.runtime(), logger,
                                               runtime_guard.runtime_1(), 256);
     ASSERT_TRUE(consumer.start());
@@ -1698,7 +1698,7 @@ TEST(LogTests, RelaxedLoggingConcurrentProducersDrainWithoutLossOrDuplicates) {
 
     EXPECT_EQ(failures.load(std::memory_order_acquire), 0);
     ASSERT_TRUE(logger->flush(std::chrono::seconds(5)));
-    const af::AsyncLogStats stats = logger->stats();
+    const af::async_log_stats stats = logger->stats();
     EXPECT_EQ(stats.accepted, static_cast<std::uint64_t>(expected_records));
     EXPECT_EQ(stats.dropped, 0U);
     expect_exact_indexed_log_set(capturing_backend->messages(), prefix, expected_records);
@@ -1709,14 +1709,14 @@ TEST(LogTests, ShardedQueuesDrainConcurrentProducers) {
     auto backend = std::make_unique<CountingLogBackend>();
     auto *counting_backend = backend.get();
 
-    af::AsyncLogConfig config = af::AsyncLogConfig::relaxed(0U, 8U);
+    af::async_log_config config = af::async_log_config::relaxed(0U, 8U);
     config.queue_capacity = 4096;
     config.max_batch_size = 64;
-    config.overflow_policy = af::LogOverflowPolicy::DropNewest;
+    config.overflow_policy = af::log_overflow_policy::drop_newest;
     config.backends.push_back(std::move(backend));
 
     LogTestRuntimeGuard runtime_guard;
-    auto logger = std::make_shared<af::AsyncLogger>(std::move(config));
+    auto logger = std::make_shared<af::async_logger>(std::move(config));
     ScopedRuntimeInstanceLogConsumer consumer(runtime_guard.runtime(), logger,
                                               runtime_guard.runtime_1(), 64);
     ASSERT_TRUE(consumer.start());
@@ -1742,7 +1742,7 @@ TEST(LogTests, ShardedQueuesDrainConcurrentProducers) {
     }
 
     ASSERT_TRUE(logger->flush(std::chrono::seconds(2)));
-    const af::AsyncLogStats stats = logger->stats();
+    const af::async_log_stats stats = logger->stats();
     EXPECT_EQ(accepted.load(std::memory_order_acquire), expected_records);
     EXPECT_EQ(stats.accepted, static_cast<std::uint64_t>(expected_records));
     EXPECT_EQ(stats.dropped, 0U);
@@ -1754,15 +1754,15 @@ TEST(LogTests, RecordPoolReusesSlotsAcrossFlushes) {
     auto backend = std::make_unique<CountingLogBackend>();
     auto *counting_backend = backend.get();
 
-    af::AsyncLogConfig config;
+    af::async_log_config config;
     config.queue_capacity = 1;
     config.queue_shard_count = 1;
     config.max_batch_size = 1;
-    config.overflow_policy = af::LogOverflowPolicy::DropNewest;
+    config.overflow_policy = af::log_overflow_policy::drop_newest;
     config.backends.push_back(std::move(backend));
 
     LogTestRuntimeGuard runtime_guard;
-    auto logger = std::make_shared<af::AsyncLogger>(std::move(config));
+    auto logger = std::make_shared<af::async_logger>(std::move(config));
     ScopedRuntimeInstanceLogConsumer consumer(runtime_guard.runtime(), logger,
                                               runtime_guard.runtime_1(), 64);
     ASSERT_TRUE(consumer.start());
@@ -1773,7 +1773,7 @@ TEST(LogTests, RecordPoolReusesSlotsAcrossFlushes) {
         ASSERT_TRUE(logger->flush(std::chrono::seconds(2)));
     }
 
-    const af::AsyncLogStats stats = logger->stats();
+    const af::async_log_stats stats = logger->stats();
     EXPECT_EQ(stats.accepted, static_cast<std::uint64_t>(record_count));
     EXPECT_EQ(stats.dropped, 0U);
     EXPECT_EQ(counting_backend->record_count(), static_cast<std::size_t>(record_count));

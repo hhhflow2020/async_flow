@@ -48,7 +48,7 @@ class RuntimeInstanceAsyncLogConsumerController final : public RuntimeServiceTas
                                                         public AsyncLogConsumerWakeTarget,
                                                         public AsyncLogConsumerController {
 public:
-    RuntimeInstanceAsyncLogConsumerController(runtime &owner, std::shared_ptr<AsyncLogger> logger,
+    RuntimeInstanceAsyncLogConsumerController(runtime &owner, std::shared_ptr<async_logger> logger,
                                               runtime::thread_index thread,
                                               std::size_t max_batches_per_run)
         : owner_(owner), logger_(std::move(logger)), thread_(thread),
@@ -242,7 +242,7 @@ private:
     }
 
     runtime &owner_;
-    std::shared_ptr<AsyncLogger> logger_;
+    std::shared_ptr<async_logger> logger_;
     runtime::thread_index thread_;
     std::size_t max_batches_per_run_;
     std::vector<LogRecord *> batch_;

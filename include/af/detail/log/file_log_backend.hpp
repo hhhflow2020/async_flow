@@ -26,7 +26,7 @@ struct FileLogBackendConfig {
     std::size_t write_batch_iov{64};
 };
 
-class FileLogBackend final : public LogBackend {
+class FileLogBackend final : public log_backend {
 public:
     explicit FileLogBackend(FileLogBackendConfig config)
         : path_(config.path.string()), append_(config.append), close_on_exec_(config.close_on_exec),
@@ -133,7 +133,7 @@ private:
     std::vector<iovec> iovecs_;
 };
 
-[[nodiscard]] inline std::unique_ptr<LogBackend>
+[[nodiscard]] inline std::unique_ptr<log_backend>
 make_file_log_backend(FileLogBackendConfig config) {
     return std::make_unique<FileLogBackend>(std::move(config));
 }

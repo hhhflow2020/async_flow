@@ -9,7 +9,7 @@
 
 namespace af {
 
-inline AsyncLogger::AsyncLogger(AsyncLogConfig config)
+inline async_logger::async_logger(async_log_config config)
     : cache_token_(next_cache_token_.fetch_add(1U, std::memory_order_relaxed)),
       ordering_(validate_ordering(config.ordering)),
       queue_shard_count_(
@@ -47,8 +47,8 @@ inline AsyncLogger::AsyncLogger(AsyncLogConfig config)
       flush_poll_interval_(config.flush_poll_interval),
       fatal_flush_timeout_(config.fatal_flush_timeout), backends_(std::move(config.backends)) {}
 
-inline AsyncLogStats AsyncLogger::stats() const noexcept {
-    AsyncLogStats result;
+inline async_log_stats async_logger::stats() const noexcept {
+    async_log_stats result;
     for (const detail::AsyncLogProducerShard &shard : ordered_producer_shards_) {
         result.accepted += shard.accepted.load();
         result.dropped += shard.dropped.load();
@@ -64,71 +64,71 @@ inline AsyncLogStats AsyncLogger::stats() const noexcept {
     return result;
 }
 
-inline std::chrono::milliseconds AsyncLogger::fatal_flush_timeout() const noexcept {
+inline std::chrono::milliseconds async_logger::fatal_flush_timeout() const noexcept {
     return fatal_flush_timeout_;
 }
 
-inline LogOrdering AsyncLogger::validate_ordering(LogOrdering ordering) {
+inline log_ordering async_logger::validate_ordering(log_ordering ordering) {
     switch (ordering) {
-    case LogOrdering::Ordered:
-    case LogOrdering::Relaxed:
+    case log_ordering::ordered:
+    case log_ordering::relaxed:
         return ordering;
     }
     throw std::invalid_argument("invalid async log ordering");
 }
 
-inline std::size_t AsyncLogger::relaxed_queue_shard_count_for_ordering(LogOrdering ordering,
-                                                                       std::size_t requested) {
-    if (ordering == LogOrdering::Ordered) {
+inline std::size_t async_logger::relaxed_queue_shard_count_for_ordering(log_ordering ordering,
+                                                                        std::size_t requested) {
+    if (ordering == log_ordering::ordered) {
         return 0U;
     }
     return normalize_queue_shard_count(requested);
 }
 
-inline std::size_t AsyncLogger::ordered_producer_shard_count_for_ordering(LogOrdering ordering,
-                                                                          std::size_t requested) {
-    if (ordering == LogOrdering::Relaxed) {
+inline std::size_t async_logger::ordered_producer_shard_count_for_ordering(log_ordering ordering,
+                                                                           std::size_t requested) {
+    if (ordering == log_ordering::relaxed) {
         return 0U;
     }
     return normalize_queue_shard_count(requested);
 }
 
-inline std::size_t AsyncLogger::runtime_thread_count_for_ordering(LogOrdering ordering,
-                                                                  std::size_t requested) {
+inline std::size_t async_logger::runtime_thread_count_for_ordering(log_ordering ordering,
+                                                                   std::size_t requested) {
     const std::size_t validated = validate_runtime_thread_count(requested);
-    return ordering == LogOrdering::Relaxed ? validated : 0U;
+    return ordering == log_ordering::relaxed ? validated : 0U;
 }
 
-inline std::size_t AsyncLogger::default_queue_shard_count() noexcept {
+inline std::size_t async_logger::default_queue_shard_count() noexcept {
     const std::size_t hardware_threads = detail::hardware_thread_count();
     return hardware_threads == 0U
                ? 1U
                : detail::next_power_of_two(static_cast<std::size_t>(hardware_threads));
 }
 
-inline std::size_t AsyncLogger::normalize_queue_shard_count(std::size_t requested) {
+inline std::size_t async_logger::normalize_queue_shard_count(std::size_t requested) {
     const std::size_t shard_count = requested == 0U ? default_queue_shard_count() : requested;
     return detail::checked_next_power_of_two(shard_count == 0U ? 1U : shard_count,
                                              "async log queue shard count is too large");
 }
 
-inline std::size_t AsyncLogger::validate_runtime_thread_count(std::size_t requested) {
+inline std::size_t async_logger::validate_runtime_thread_count(std::size_t requested) {
     if (requested > static_cast<std::size_t>(std::numeric_limits<std::uint16_t>::max())) {
         throw std::length_error("async log runtime thread count is out of range");
     }
     return requested;
 }
 
-inline std::size_t AsyncLogger::queue_capacity_per_shard(std::size_t total_capacity,
-                                                         std::size_t shard_count) noexcept {
+inline std::size_t async_logger::queue_capacity_per_shard(std::size_t total_capacity,
+                                                          std::size_t shard_count) noexcept {
     const std::size_t capacity = total_capacity == 0U ? 1U : total_capacity;
     const std::size_t per_shard = capacity / shard_count + (capacity % shard_count != 0U);
     return std::max<std::size_t>(2U, per_shard);
 }
 
 inline std::size_t
-AsyncLogger::queue_capacity_per_runtime_thread(std::size_t total_capacity,
-                                               std::size_t thread_count) noexcept {
+async_logger::queue_capacity_per_runtime_thread(std::size_t total_capacity,
+                                                std::size_t thread_count) noexcept {
     if (thread_count == 0U) {
         return 0U;
     }
@@ -137,8 +137,8 @@ AsyncLogger::queue_capacity_per_runtime_thread(std::size_t total_capacity,
     return std::max<std::size_t>(2U, per_thread);
 }
 
-inline std::size_t AsyncLogger::record_capacity_per_shard(std::size_t queue_capacity,
-                                                          std::size_t max_batch_size) {
+inline std::size_t async_logger::record_capacity_per_shard(std::size_t queue_capacity,
+                                                           std::size_t max_batch_size) {
     const std::size_t batch_capacity = max_batch_size == 0U ? 1U : max_batch_size;
     if (queue_capacity > std::numeric_limits<std::size_t>::max() - batch_capacity) {
         throw std::length_error("async log record pool capacity overflow");
@@ -146,7 +146,7 @@ inline std::size_t AsyncLogger::record_capacity_per_shard(std::size_t queue_capa
     return queue_capacity + batch_capacity;
 }
 
-inline std::size_t AsyncLogger::ordered_record_capacity_per_producer_shard(
+inline std::size_t async_logger::ordered_record_capacity_per_producer_shard(
     std::size_t total_capacity, std::size_t shard_count, std::size_t max_batch_size) {
     if (shard_count == 0U) {
         return 0U;
@@ -155,8 +155,8 @@ inline std::size_t AsyncLogger::ordered_record_capacity_per_producer_shard(
                                      max_batch_size);
 }
 
-inline std::size_t AsyncLogger::record_pool_slab_capacity(std::size_t requested,
-                                                          std::size_t fallback) {
+inline std::size_t async_logger::record_pool_slab_capacity(std::size_t requested,
+                                                           std::size_t fallback) {
     if (requested == 0U) {
         return fallback == 0U ? 1U : fallback;
     }
@@ -167,17 +167,17 @@ inline std::size_t AsyncLogger::record_pool_slab_capacity(std::size_t requested,
 }
 
 inline std::unique_ptr<detail::AsyncLogOrderedQueue>
-AsyncLogger::make_ordered_queue(LogOrdering ordering, std::size_t queue_capacity) {
-    if (ordering == LogOrdering::Relaxed) {
+async_logger::make_ordered_queue(log_ordering ordering, std::size_t queue_capacity) {
+    if (ordering == log_ordering::relaxed) {
         return nullptr;
     }
     return std::make_unique<detail::AsyncLogOrderedQueue>(queue_capacity);
 }
 
 inline detail::AsyncLogProducerShardStorage
-AsyncLogger::make_ordered_producer_shards(std::size_t shard_count, std::size_t record_capacity,
-                                          std::size_t record_pool_slab_object_count,
-                                          std::size_t record_pool_local_cache_size) {
+async_logger::make_ordered_producer_shards(std::size_t shard_count, std::size_t record_capacity,
+                                           std::size_t record_pool_slab_object_count,
+                                           std::size_t record_pool_local_cache_size) {
     detail::AsyncLogProducerShardStorage shards;
     if (shard_count == 0U) {
         return shards;
@@ -191,7 +191,7 @@ AsyncLogger::make_ordered_producer_shards(std::size_t shard_count, std::size_t r
     return shards;
 }
 
-inline detail::AsyncLogQueueShardStorage AsyncLogger::make_queue_shards(
+inline detail::AsyncLogQueueShardStorage async_logger::make_queue_shards(
     std::size_t shard_count, std::size_t capacity_per_shard, std::size_t max_batch_size,
     std::size_t record_pool_slab_object_count, std::size_t record_pool_local_cache_size) {
     detail::AsyncLogQueueShardStorage shards;
@@ -209,7 +209,7 @@ inline detail::AsyncLogQueueShardStorage AsyncLogger::make_queue_shards(
     return shards;
 }
 
-inline detail::AsyncLogRuntimeLaneStorage AsyncLogger::make_runtime_lanes(
+inline detail::AsyncLogRuntimeLaneStorage async_logger::make_runtime_lanes(
     std::size_t thread_count, std::size_t capacity_per_thread, std::size_t max_batch_size,
     std::size_t record_pool_slab_object_count, std::size_t record_pool_local_cache_size) {
     detail::AsyncLogRuntimeLaneStorage lanes;

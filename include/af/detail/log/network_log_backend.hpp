@@ -79,7 +79,7 @@ struct LogMmsgHeader {
 
 } // namespace detail
 
-class UdpLogBackend final : public LogBackend {
+class UdpLogBackend final : public log_backend {
 public:
     explicit UdpLogBackend(UdpLogBackendConfig config) : config_(std::move(config)) {}
 
@@ -219,7 +219,7 @@ private:
 #endif
 };
 
-class TcpLogBackend final : public LogBackend {
+class TcpLogBackend final : public log_backend {
 public:
     explicit TcpLogBackend(TcpLogBackendConfig config) : config_(std::move(config)) {}
 
@@ -386,11 +386,11 @@ private:
     std::array<iovec, max_iov_count> iovecs_{};
 };
 
-[[nodiscard]] inline std::unique_ptr<LogBackend> make_udp_log_backend(UdpLogBackendConfig config) {
+[[nodiscard]] inline std::unique_ptr<log_backend> make_udp_log_backend(UdpLogBackendConfig config) {
     return std::make_unique<UdpLogBackend>(std::move(config));
 }
 
-[[nodiscard]] inline std::unique_ptr<LogBackend> make_tcp_log_backend(TcpLogBackendConfig config) {
+[[nodiscard]] inline std::unique_ptr<log_backend> make_tcp_log_backend(TcpLogBackendConfig config) {
     return std::make_unique<TcpLogBackend>(std::move(config));
 }
 

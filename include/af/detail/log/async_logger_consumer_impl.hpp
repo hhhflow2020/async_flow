@@ -9,11 +9,11 @@
 
 namespace af {
 
-inline AsyncLogger::~AsyncLogger() {
+inline async_logger::~async_logger() {
     shutdown();
 }
 
-inline bool AsyncLogger::flush(std::chrono::milliseconds timeout) noexcept {
+inline bool async_logger::flush(std::chrono::milliseconds timeout) noexcept {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     if (!drain_waiter_.wait_until_drained(pending_, deadline, flush_poll_interval_,
                                           [this] { notify_consumer(); })) {
@@ -22,7 +22,8 @@ inline bool AsyncLogger::flush(std::chrono::milliseconds timeout) noexcept {
     return flush_backends_until(deadline);
 }
 
-inline bool AsyncLogger::start_bound_consumer(detail::AsyncLogConsumerWakeTarget &target) noexcept {
+inline bool
+async_logger::start_bound_consumer(detail::AsyncLogConsumerWakeTarget &target) noexcept {
     bool expected = false;
     if (!started_.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
                                           std::memory_order_acquire)) {
@@ -35,34 +36,34 @@ inline bool AsyncLogger::start_bound_consumer(detail::AsyncLogConsumerWakeTarget
     return true;
 }
 
-inline void AsyncLogger::stop_bound_consumer_admission() noexcept {
+inline void async_logger::stop_bound_consumer_admission() noexcept {
     accepting_.store(false, std::memory_order_release);
     stopping_.store(true, std::memory_order_relaxed);
 }
 
-inline void AsyncLogger::finish_bound_consumer_shutdown() noexcept {
+inline void async_logger::finish_bound_consumer_shutdown() noexcept {
     consumer_wake_target_.store(nullptr, std::memory_order_release);
     shutdown_backends();
     started_.store(false, std::memory_order_release);
 }
 
-inline bool AsyncLogger::consumer_stop_requested() const noexcept {
+inline bool async_logger::consumer_stop_requested() const noexcept {
     return stopping_.load(std::memory_order_relaxed);
 }
 
-inline std::size_t AsyncLogger::pending_record_count() const noexcept {
+inline std::size_t async_logger::pending_record_count() const noexcept {
     return pending_.load(std::memory_order_acquire);
 }
 
-inline std::size_t AsyncLogger::ready_record_count() const noexcept {
+inline std::size_t async_logger::ready_record_count() const noexcept {
     return ready_.load(std::memory_order_acquire);
 }
 
-inline std::size_t AsyncLogger::max_batch_size() const noexcept {
+inline std::size_t async_logger::max_batch_size() const noexcept {
     return max_batch_size_;
 }
 
-inline void AsyncLogger::shutdown() noexcept {
+inline void async_logger::shutdown() noexcept {
     const bool was_started = started_.exchange(false, std::memory_order_acq_rel);
     accepting_.store(false, std::memory_order_release);
     stopping_.store(true, std::memory_order_relaxed);
@@ -72,7 +73,7 @@ inline void AsyncLogger::shutdown() noexcept {
     }
 }
 
-inline void AsyncLogger::abandon_pending_record() noexcept {
+inline void async_logger::abandon_pending_record() noexcept {
     const auto previous = pending_.fetch_sub(1U, std::memory_order_relaxed);
     AF_ASSERT(previous != 0U);
     if (previous == 1U) {
@@ -81,8 +82,8 @@ inline void AsyncLogger::abandon_pending_record() noexcept {
     }
 }
 
-inline bool AsyncLogger::drain_some(std::vector<detail::LogRecord *> &batch,
-                                    std::size_t max_write_batches) noexcept {
+inline bool async_logger::drain_some(std::vector<detail::LogRecord *> &batch,
+                                     std::size_t max_write_batches) noexcept {
     if (max_write_batches == 0U) {
         max_write_batches = 1U;
     }
@@ -123,9 +124,9 @@ inline bool AsyncLogger::drain_some(std::vector<detail::LogRecord *> &batch,
     }
 }
 
-inline void AsyncLogger::collect_batch(std::vector<detail::LogRecord *> &batch,
-                                       std::size_t max_records) noexcept {
-    if (ordering_ == LogOrdering::Ordered) [[likely]] {
+inline void async_logger::collect_batch(std::vector<detail::LogRecord *> &batch,
+                                        std::size_t max_records) noexcept {
+    if (ordering_ == log_ordering::ordered) [[likely]] {
         collect_ordered_batch(batch, max_records);
         return;
     }
@@ -140,8 +141,8 @@ inline void AsyncLogger::collect_batch(std::vector<detail::LogRecord *> &batch,
     prefer_runtime_drain_ = !prefer_runtime_drain_;
 }
 
-inline void AsyncLogger::collect_ordered_batch(std::vector<detail::LogRecord *> &batch,
-                                               std::size_t max_records) noexcept {
+inline void async_logger::collect_ordered_batch(std::vector<detail::LogRecord *> &batch,
+                                                std::size_t max_records) noexcept {
     AF_ASSERT(ordered_queue_ != nullptr);
     constexpr std::size_t max_queue_drain_count = 64;
     std::array<detail::LogRecord *, max_queue_drain_count> drained;
@@ -155,8 +156,8 @@ inline void AsyncLogger::collect_ordered_batch(std::vector<detail::LogRecord *> 
     }
 }
 
-inline void AsyncLogger::collect_shard_batch(std::vector<detail::LogRecord *> &batch,
-                                             std::size_t max_records) noexcept {
+inline void async_logger::collect_shard_batch(std::vector<detail::LogRecord *> &batch,
+                                              std::size_t max_records) noexcept {
     constexpr std::size_t max_queue_drain_count = 64;
     std::array<detail::LogRecord *, max_queue_drain_count> drained;
     std::size_t empty_visits = 0;
@@ -176,8 +177,8 @@ inline void AsyncLogger::collect_shard_batch(std::vector<detail::LogRecord *> &b
     }
 }
 
-inline void AsyncLogger::collect_runtime_batch(std::vector<detail::LogRecord *> &batch,
-                                               std::size_t max_records) noexcept {
+inline void async_logger::collect_runtime_batch(std::vector<detail::LogRecord *> &batch,
+                                                std::size_t max_records) noexcept {
     if (runtime_thread_count_ == 0U) {
         return;
     }
@@ -204,14 +205,14 @@ inline void AsyncLogger::collect_runtime_batch(std::vector<detail::LogRecord *> 
     }
 }
 
-inline void AsyncLogger::flush_backends() noexcept {
+inline void async_logger::flush_backends() noexcept {
     for (auto &backend : backends_) {
         backend->flush();
     }
 }
 
 inline bool
-AsyncLogger::flush_backends_until(std::chrono::steady_clock::time_point deadline) noexcept {
+async_logger::flush_backends_until(std::chrono::steady_clock::time_point deadline) noexcept {
     for (auto &backend : backends_) {
         const auto now = std::chrono::steady_clock::now();
         const auto remaining =
@@ -224,13 +225,13 @@ AsyncLogger::flush_backends_until(std::chrono::steady_clock::time_point deadline
     return true;
 }
 
-inline void AsyncLogger::shutdown_backends() noexcept {
+inline void async_logger::shutdown_backends() noexcept {
     for (auto &backend : backends_) {
         backend->shutdown();
     }
 }
 
-inline void AsyncLogger::notify_consumer() noexcept {
+inline void async_logger::notify_consumer() noexcept {
     detail::AsyncLogConsumerWakeTarget *target =
         consumer_wake_target_.load(std::memory_order_acquire);
     if (target != nullptr) {

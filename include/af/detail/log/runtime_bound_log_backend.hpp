@@ -57,7 +57,7 @@ public:
 struct RuntimeBoundLogBackendConfig {
     runtime *owner{nullptr};
     runtime::thread_index thread{runtime_invalid_thread_index};
-    std::unique_ptr<LogBackend> backend;
+    std::unique_ptr<log_backend> backend;
     std::size_t batch_queue_capacity{1024};
     std::size_t max_batch_records{64};
     std::size_t max_batches_per_run{64};
@@ -70,7 +70,7 @@ struct RuntimeBoundLogBackendStats {
     std::uint64_t flushes{0};
 };
 
-class RuntimeBoundLogBackend final : public LogBackend, public RuntimeServiceTask {
+class RuntimeBoundLogBackend final : public log_backend, public RuntimeServiceTask {
 public:
     using Batch = RuntimeBoundLogBatch;
 
@@ -438,7 +438,7 @@ private:
 
     runtime *owner_{nullptr};
     runtime::thread_index thread_{runtime_invalid_thread_index};
-    std::unique_ptr<LogBackend> backend_;
+    std::unique_ptr<log_backend> backend_;
     const std::size_t max_batch_records_;
     const std::size_t max_batches_per_run_;
     BoundedMpscQueue<Batch> ready_batches_;
@@ -460,7 +460,7 @@ private:
     CacheLineAtomic<bool> finished_{false};
 };
 
-[[nodiscard]] inline std::unique_ptr<LogBackend>
+[[nodiscard]] inline std::unique_ptr<log_backend>
 make_runtime_bound_log_backend(RuntimeBoundLogBackendConfig config) {
     return std::make_unique<RuntimeBoundLogBackend>(std::move(config));
 }

@@ -28,7 +28,7 @@
 
 namespace af {
 
-class AsyncLogHandle;
+class async_log_handle;
 
 enum class runtime_state : std::uint8_t {
     stopped,
@@ -405,7 +405,7 @@ private:
     runtime_config_resolution resolution_;
     std::vector<std::unique_ptr<detail::runtime_executor>> executors_;
     std::vector<ordered_batch_state> ordered_batch_state_;
-    std::unique_ptr<AsyncLogHandle> owned_logger_;
+    std::unique_ptr<async_log_handle> owned_logger_;
     std::atomic<runtime_state> state_{runtime_state::stopped};
     std::atomic<bool> owned_logger_stop_started_{false};
     std::atomic<thread_index> active_thread_count_{0};
