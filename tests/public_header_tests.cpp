@@ -501,6 +501,7 @@ TEST(PublicHeaderTests, TcpBenchmarksCoverEchoRoundTrip) {
     const std::string content = read_source_file("benchmarks/tcp_benchmarks.cpp");
     ASSERT_FALSE(content.empty());
     EXPECT_NE(content.find("BM_TcpEchoRoundTrip"), std::string::npos);
+    EXPECT_NE(content.find("BM_TcpEchoMultiConnectionRoundTrip"), std::string::npos);
 }
 
 TEST(PublicHeaderTests, LogUmbrellaExposesLowerCaseNames) {

@@ -30,9 +30,10 @@
 - reactor ready batch benchmark 覆盖 select/auto/epoll/kqueue 后端的 `64/256` source 和 `16/64/256` event budget 组合；unsupported 后端在对应平台自动 skip。
 - TCP connection 读写均有 byte budget；读路径单次 `recv` 会按本轮剩余 `read_budget_bytes` 裁剪，避免 `read_buffer_size` 大于 budget 时单连接超预算占用 IO 线程。
 - TCP echo roundtrip benchmark 覆盖 runtime `tcp_server` + loopback client 的 `64/1024/4096` 字节 payload；远端 Linux Release 冒烟约 `8.02us/8.56us/9.27us`，吞吐约 `15.2MiB/s`、`228.3MiB/s`、`843.2MiB/s`。
+- TCP multi-connection echo benchmark 覆盖 `16/64` 连接与 `64/1024` 字节 payload 组合；远端 Linux Release 冒烟中 `16x64/16x1024/64x64/64x1024` 约 `65.7us/71.5us/192us/200us`，吞吐约 `29.7MiB/s`、`437.2MiB/s`、`40.6MiB/s`、`625.5MiB/s`。
 - `async_log_record_pool` 已记录本线程、批量和跨线程 release 远端 Release benchmark：关键项约 `20M-116M items/s`，用于后续性能回归对比。
 
 ## 仍可提升
 
-- 为 TCP reactor 增加批量 ready 队列和多连接并发压力 benchmark。
+- 为 TCP reactor 增加批量 ready 队列。
 - 为 IO buffer 增加按线程固定大小池。

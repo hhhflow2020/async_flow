@@ -153,9 +153,8 @@ void on_tcp_echo_read(void *owner, af::net::tcp_connection_ref conn,
     static_cast<void>(conn.send(bytes));
 }
 
-void BM_TcpEchoRoundTrip(benchmark::State &state) {
-    const auto payload_size = static_cast<std::size_t>(state.range(0));
-
+void run_tcp_echo_roundtrip_benchmark(benchmark::State &state, std::size_t connection_count,
+                                      std::size_t payload_size) {
     af::runtime_config runtime_config;
     runtime_config.threads = {af::io_threads("bench-tcp-io", 1)};
     runtime_config.logger.consumer_thread = af::thread_selector::io(0);
@@ -237,10 +236,22 @@ void BM_TcpEchoRoundTrip(benchmark::State &state) {
         return;
     }
 
-    unique_fd client = connect_loopback(port.load(std::memory_order_acquire));
-    if (client.get() < 0 || !set_io_timeout(client.get())) {
+    std::vector<unique_fd> clients;
+    clients.reserve(connection_count);
+    for (std::size_t i = 0; i < connection_count; ++i) {
+        unique_fd client = connect_loopback(port.load(std::memory_order_acquire));
+        if (client.get() < 0 || !set_io_timeout(client.get())) {
+            clients.clear();
+            stop_runtime();
+            state.SkipWithError("failed to connect benchmark clients");
+            return;
+        }
+        clients.push_back(std::move(client));
+    }
+
+    if (clients.empty()) {
         stop_runtime();
-        state.SkipWithError("failed to connect benchmark client");
+        state.SkipWithError("tcp echo benchmark requires at least one connection");
         return;
     }
 
@@ -249,38 +260,76 @@ void BM_TcpEchoRoundTrip(benchmark::State &state) {
     for (std::size_t i = 0; i < payload.size(); ++i) {
         payload[i] = static_cast<std::byte>(i & 0xffU);
     }
-    if (!echo_roundtrip(client.get(), payload, received, true)) {
-        client.reset();
-        stop_runtime();
-        state.SkipWithError("tcp echo warmup failed");
-        return;
+    for (unique_fd &client : clients) {
+        if (!echo_roundtrip(client.get(), payload, received, true)) {
+            clients.clear();
+            stop_runtime();
+            state.SkipWithError("tcp echo warmup failed");
+            return;
+        }
     }
 
     bool failed = false;
     for (auto _ : state) {
-        if (!echo_roundtrip(client.get(), payload, received, false)) {
-            state.SkipWithError("tcp echo roundtrip failed");
-            failed = true;
+        for (unique_fd &client : clients) {
+            if (!send_all(client.get(), payload.data(), payload.size())) {
+                state.SkipWithError("tcp echo send failed");
+                failed = true;
+                break;
+            }
+        }
+        if (failed) {
+            break;
+        }
+        for (unique_fd &client : clients) {
+            if (!recv_exact(client.get(), received.data(), received.size())) {
+                state.SkipWithError("tcp echo receive failed");
+                failed = true;
+                break;
+            }
+            benchmark::DoNotOptimize(received.data());
+        }
+        if (failed) {
             break;
         }
     }
 
-    client.reset();
+    clients.clear();
     if (!stop_runtime()) {
         state.SkipWithError("tcp server stop failed");
     }
 
     if (!failed) {
-        state.SetItemsProcessed(state.iterations());
-        state.SetBytesProcessed(state.iterations() * static_cast<std::int64_t>(payload_size) * 2);
+        const auto item_count = static_cast<std::int64_t>(connection_count);
+        state.SetItemsProcessed(state.iterations() * item_count);
+        state.SetBytesProcessed(state.iterations() * item_count *
+                                static_cast<std::int64_t>(payload_size) * 2);
+        state.counters["connections"] = benchmark::Counter(static_cast<double>(connection_count));
         state.counters["payload_bytes"] = benchmark::Counter(static_cast<double>(payload_size));
     }
+}
+
+void BM_TcpEchoRoundTrip(benchmark::State &state) {
+    run_tcp_echo_roundtrip_benchmark(state, 1U, static_cast<std::size_t>(state.range(0)));
+}
+
+void BM_TcpEchoMultiConnectionRoundTrip(benchmark::State &state) {
+    run_tcp_echo_roundtrip_benchmark(state, static_cast<std::size_t>(state.range(0)),
+                                     static_cast<std::size_t>(state.range(1)));
 }
 
 BENCHMARK(BM_TcpEchoRoundTrip)
     ->Arg(64)
     ->Arg(1024)
     ->Arg(4096)
+    ->UseRealTime()
+    ->Unit(benchmark::kMicrosecond);
+
+BENCHMARK(BM_TcpEchoMultiConnectionRoundTrip)
+    ->Args({16, 64})
+    ->Args({16, 1024})
+    ->Args({64, 64})
+    ->Args({64, 1024})
     ->UseRealTime()
     ->Unit(benchmark::kMicrosecond);
 
