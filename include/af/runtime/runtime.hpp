@@ -349,7 +349,7 @@ public:
     void stop() noexcept;
 
 private:
-    using ordered_batch_state = detail::OrderedBatchState;
+    using ordered_batch_state = detail::ordered_batch_state;
 
     enum class ordered_guard_decision : std::uint8_t {
         run,

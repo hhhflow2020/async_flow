@@ -8,13 +8,6 @@
 
 namespace af::detail {
 
-enum class RuntimeStatus : std::uint8_t {
-    Stopped,
-    Starting,
-    Running,
-    Stopping,
-};
-
 template <typename T> struct alignas(hardware_cache_line_size) cache_line_atomic {
     std::atomic<T> value;
 
@@ -73,43 +66,10 @@ template <typename T> struct alignas(hardware_cache_line_size) cache_line_atomic
 
 template <typename T> using CacheLineAtomic = cache_line_atomic<T>;
 
-struct alignas(hardware_cache_line_size) OrderedBatchState {
+struct alignas(hardware_cache_line_size) ordered_batch_state {
     std::uint64_t last_applied_batch_id{0};
 };
 
-struct ExternalPostCounter {
-    cache_line_atomic<std::uint32_t> value{0};
-};
-
-template <typename RuntimeT> struct RuntimeParallelGroup {
-    using Task = typename RuntimeT::Task;
-    using Thread = typename RuntimeT::Thread;
-
-    std::atomic<std::uint32_t> pending{0};
-    Task *owner{nullptr};
-    std::uint16_t resume_thread{RuntimeT::invalid_thread_index};
-    std::atomic<std::uint32_t> failed{0};
-
-    void init(std::uint32_t target_count, Task *group_owner,
-              std::uint16_t group_resume_thread) noexcept {
-        pending.store(target_count, std::memory_order_relaxed);
-        owner = group_owner;
-        resume_thread = group_resume_thread;
-        failed.store(0, std::memory_order_relaxed);
-    }
-
-    void complete(bool ok, bool resume_owner = true) noexcept {
-        if (!ok) {
-            failed.fetch_add(1, std::memory_order_relaxed);
-        }
-        if (pending.fetch_sub(1, std::memory_order_acq_rel) == 1U) {
-            if (resume_owner && owner != nullptr && resume_thread < RuntimeT::thread_count) {
-                RuntimeT::set_task_parallel_failures(owner, failed.load(std::memory_order_acquire));
-                RuntimeT::post_blocking(RuntimeT::thread_from_index(resume_thread), owner);
-            }
-            RuntimeT::destroy_parallel_group(this);
-        }
-    }
-};
+using OrderedBatchState = ordered_batch_state;
 
 } // namespace af::detail
