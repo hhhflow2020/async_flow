@@ -10,7 +10,35 @@
 
 #include <gtest/gtest.h>
 
+#if __has_include("af/io.hpp")
+#error "legacy task IO facade must not be installed"
+#endif
+
+#if __has_include("af/io_socket.hpp")
+#error "legacy task IO facade must not be installed"
+#endif
+
+#if __has_include("af/io_file.hpp")
+#error "legacy task IO facade must not be installed"
+#endif
+
+#if __has_include("af/io_types.hpp")
+#error "legacy task IO facade must not be installed"
+#endif
+
+#if __has_include("af/detail/io/socket/io_socket_accept.hpp")
+#error "legacy task IO facade must not be installed"
+#endif
+
+#if __has_include("af/detail/io_adapters_aliases.hpp")
+#error "legacy task IO facade must not be installed"
+#endif
+
 #if __has_include("af/detail/task/task_io_state.hpp")
+#error "legacy task IO facade must not be installed"
+#endif
+
+#if __has_include("af/detail/task_io_state.hpp")
 #error "legacy task IO facade must not be installed"
 #endif
 
