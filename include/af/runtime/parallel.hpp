@@ -8,11 +8,11 @@ namespace af {
 
 namespace detail {
 
-struct RuntimeInstanceParallelGroup;
+struct runtime_instance_parallel_group;
 
-void destroy_runtime_instance_parallel_group(RuntimeInstanceParallelGroup *group) noexcept;
+void destroy_runtime_instance_parallel_group(runtime_instance_parallel_group *group) noexcept;
 
-struct RuntimeInstanceParallelGroup {
+struct runtime_instance_parallel_group {
     std::atomic<std::uint32_t> pending{0};
     runtime *owner{nullptr};
     runtime_task *owner_task{nullptr};
@@ -50,8 +50,10 @@ struct RuntimeInstanceParallelGroup {
     }
 };
 
+using RuntimeInstanceParallelGroup = runtime_instance_parallel_group;
+
 using runtime_instance_parallel_group_pool_type =
-    object_pool<RuntimeInstanceParallelGroup, 4096, 64, false, 1, 4, 256>;
+    object_pool<runtime_instance_parallel_group, 4096, 64, false, 1, 4, 256>;
 
 using RuntimeInstanceParallelGroupPool = runtime_instance_parallel_group_pool_type;
 
@@ -61,15 +63,16 @@ runtime_instance_parallel_group_pool() {
     return pool;
 }
 
-[[nodiscard]] inline RuntimeInstanceParallelGroup *
+[[nodiscard]] inline runtime_instance_parallel_group *
 create_runtime_instance_parallel_group(runtime &owner, std::uint32_t target_count,
                                        runtime_task *task, std::uint16_t resume_thread) {
-    RuntimeInstanceParallelGroup *group = runtime_instance_parallel_group_pool().create();
+    runtime_instance_parallel_group *group = runtime_instance_parallel_group_pool().create();
     group->init(owner, target_count, task, resume_thread);
     return group;
 }
 
-inline void destroy_runtime_instance_parallel_group(RuntimeInstanceParallelGroup *group) noexcept {
+inline void
+destroy_runtime_instance_parallel_group(runtime_instance_parallel_group *group) noexcept {
     runtime_instance_parallel_group_pool().destroy(group);
 }
 
@@ -205,7 +208,7 @@ bool runtime::parallel_shards_impl(std::bool_constant<Ordered>, thread_group_ref
         return detail::runtime_task_access::schedule_to(owner, current_thread_index_);
     }
 
-    detail::RuntimeInstanceParallelGroup *group = nullptr;
+    detail::runtime_instance_parallel_group *group = nullptr;
     try {
         group = detail::create_runtime_instance_parallel_group(*this, target_count, owner,
                                                                current_thread_index_);
@@ -413,7 +416,7 @@ template <typename Op, typename Handler, bool Ordered>
 class runtime::parallel_shard_task final : public runtime_task {
 public:
     parallel_shard_task(factory_token token, runtime &owner,
-                        detail::RuntimeInstanceParallelGroup *group, std::uint16_t shard_index,
+                        detail::runtime_instance_parallel_group *group, std::uint16_t shard_index,
                         std::uint64_t batch_id, ordered_batch_options options,
                         std::vector<Op> &&ops, Handler handler)
         : runtime_task(token, owner), group_(group), shard_index_(shard_index), batch_id_(batch_id),
@@ -431,7 +434,7 @@ private:
         return done();
     }
 
-    detail::RuntimeInstanceParallelGroup *group_{nullptr};
+    detail::runtime_instance_parallel_group *group_{nullptr};
     std::uint16_t shard_index_{0};
     std::uint64_t batch_id_{0};
     ordered_batch_options options_;
