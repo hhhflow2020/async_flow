@@ -973,6 +973,56 @@ TEST(RuntimeConfigTests, ThreadLayoutGroupsCarryKindNameAndIndexMetadata) {
     EXPECT_EQ(resolved.thread_group_offset(log.front()), 0U);
 }
 
+TEST(RuntimeConfigTests, ThreadGroupRefUsesContiguousViewWhenPossible) {
+    af::runtime_config config;
+    config.threads = {
+        af::io_threads("io", 2),
+        af::cpu_threads("logic", 3),
+        af::cpu_threads("log", 1),
+    };
+
+    const auto resolution = af::resolve_runtime_config(config);
+    ASSERT_TRUE(resolution);
+    const auto &resolved = resolution.resolved;
+
+    const af::thread_group_ref io = resolved.io_thread_group();
+    const af::thread_group_ref logic = resolved.thread_group("logic");
+    const af::thread_group_ref log = resolved.thread_group("log");
+
+    EXPECT_TRUE(io.is_contiguous());
+    EXPECT_TRUE(logic.is_contiguous());
+    EXPECT_TRUE(log.is_contiguous());
+    EXPECT_EQ(io.begin_index(), 0U);
+    EXPECT_EQ(logic.begin_index(), 2U);
+    EXPECT_EQ(log.begin_index(), 5U);
+    EXPECT_EQ(logic.at(0), af::thread_ref(2));
+    EXPECT_EQ(logic.at(2), af::thread_ref(4));
+    EXPECT_EQ(logic.shard(5U), af::thread_ref(4));
+    EXPECT_TRUE(logic.contains(af::thread_ref(3)));
+    EXPECT_FALSE(logic.contains(af::thread_ref(1)));
+}
+
+TEST(RuntimeConfigTests, ThreadGroupRefKeepsListViewForNonContiguousKindGroups) {
+    af::runtime_config config;
+    config.threads = {
+        af::io_threads("front_io", 1),
+        af::cpu_threads("logic", 1),
+        af::io_threads("back_io", 1),
+    };
+
+    const auto resolution = af::resolve_runtime_config(config);
+    ASSERT_TRUE(resolution);
+    const af::thread_group_ref io = resolution.resolved.io_thread_group();
+
+    EXPECT_FALSE(io.is_contiguous());
+    EXPECT_EQ(io.size(), 2U);
+    EXPECT_EQ(io.at(0), af::thread_ref(0));
+    EXPECT_EQ(io.at(1), af::thread_ref(2));
+    EXPECT_EQ(io.shard(3U), af::thread_ref(2));
+    EXPECT_TRUE(io.contains(af::thread_ref(2)));
+    EXPECT_FALSE(io.contains(af::thread_ref(1)));
+}
+
 TEST(RuntimeConfigTests, CompileTimeThreadLayoutUsesLowerCaseTypeNames) {
     using logic_spec = af::thread_group_spec<layout_logic_tag, 3, af::thread_kind::cpu>;
     using io_spec = af::thread_group_spec<layout_io_tag, 2, af::thread_kind::io>;

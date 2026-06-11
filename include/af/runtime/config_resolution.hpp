@@ -246,11 +246,11 @@ struct resolved_runtime_config {
     }
 
     [[nodiscard]] thread_group_ref io_thread_group() const noexcept {
-        return thread_group_ref(io_threads.data(), io_threads.size());
+        return thread_group_view(io_threads);
     }
 
     [[nodiscard]] thread_group_ref cpu_thread_group() const noexcept {
-        return thread_group_ref(cpu_threads.data(), cpu_threads.size());
+        return thread_group_view(cpu_threads);
     }
 
     [[nodiscard]] thread_group_ref thread_group(std::size_t group_index) const noexcept {
@@ -258,7 +258,7 @@ struct resolved_runtime_config {
             return {};
         }
         const runtime_thread_group_info &group = thread_groups[group_index];
-        return thread_group_ref(all_threads.data() + group.begin, group.count);
+        return thread_group_ref(all_threads.data() + group.begin, group.count, group.begin, true);
     }
 
     [[nodiscard]] thread_group_ref thread_group(std::string_view name) const noexcept {
@@ -268,6 +268,29 @@ struct resolved_runtime_config {
             }
         }
         return {};
+    }
+
+private:
+    [[nodiscard]] static bool
+    thread_indices_are_contiguous(const std::vector<std::uint16_t> &threads) noexcept {
+        if (threads.empty()) {
+            return false;
+        }
+        const std::uint16_t begin = threads.front();
+        for (std::size_t index = 1; index < threads.size(); ++index) {
+            if (threads[index] != static_cast<std::uint16_t>(begin + index)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    [[nodiscard]] static thread_group_ref
+    thread_group_view(const std::vector<std::uint16_t> &threads) noexcept {
+        if (thread_indices_are_contiguous(threads)) {
+            return thread_group_ref(threads.data(), threads.size(), threads.front(), true);
+        }
+        return thread_group_ref(threads.data(), threads.size());
     }
 };
 

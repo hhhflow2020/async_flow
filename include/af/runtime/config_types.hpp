@@ -108,6 +108,9 @@ public:
     constexpr thread_group_ref() noexcept = default;
     constexpr thread_group_ref(const std::uint16_t *threads, std::size_t count) noexcept
         : threads_(threads), count_(count) {}
+    constexpr thread_group_ref(const std::uint16_t *threads, std::size_t count,
+                               std::uint16_t begin_index, bool contiguous) noexcept
+        : threads_(threads), count_(count), begin_index_(begin_index), contiguous_(contiguous) {}
 
     [[nodiscard]] constexpr bool empty() const noexcept {
         return count_ == 0;
@@ -125,6 +128,14 @@ public:
         return threads_;
     }
 
+    [[nodiscard]] constexpr bool is_contiguous() const noexcept {
+        return contiguous_;
+    }
+
+    [[nodiscard]] constexpr std::uint16_t begin_index() const noexcept {
+        return contiguous_ ? begin_index_ : runtime_invalid_thread_index;
+    }
+
     [[nodiscard]] constexpr const_iterator begin() const noexcept {
         return threads_;
     }
@@ -134,7 +145,13 @@ public:
     }
 
     [[nodiscard]] constexpr thread_ref at(std::size_t index) const noexcept {
-        if (threads_ == nullptr || index >= count_) {
+        if (index >= count_) {
+            return {};
+        }
+        if (contiguous_) {
+            return thread_ref(static_cast<std::uint16_t>(begin_index_ + index));
+        }
+        if (threads_ == nullptr) {
             return {};
         }
         return thread_ref(threads_[index]);
@@ -149,13 +166,29 @@ public:
     }
 
     [[nodiscard]] constexpr thread_ref shard(std::size_t value) const noexcept {
-        if (threads_ == nullptr || count_ == 0) {
+        if (count_ == 0) {
             return {};
         }
-        return thread_ref(threads_[value % count_]);
+        const std::size_t index = value % count_;
+        if (contiguous_) {
+            return thread_ref(static_cast<std::uint16_t>(begin_index_ + index));
+        }
+        if (threads_ == nullptr) {
+            return {};
+        }
+        return thread_ref(threads_[index]);
     }
 
     [[nodiscard]] constexpr bool contains(thread_ref thread) const noexcept {
+        if (!thread.valid()) {
+            return false;
+        }
+        if (contiguous_) {
+            const std::size_t offset = thread.index >= begin_index_
+                                           ? static_cast<std::size_t>(thread.index - begin_index_)
+                                           : count_;
+            return offset < count_;
+        }
         if (threads_ == nullptr) {
             return false;
         }
@@ -170,6 +203,8 @@ public:
 private:
     const std::uint16_t *threads_{nullptr};
     std::size_t count_{0};
+    std::uint16_t begin_index_{runtime_invalid_thread_index};
+    bool contiguous_{false};
 };
 
 struct thread_affinity_config {
