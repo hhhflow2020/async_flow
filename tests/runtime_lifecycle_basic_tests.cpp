@@ -291,7 +291,7 @@ private:
         case State::Logic:
             (*seen_)[2].store(af::runtime::current_thread_index(), std::memory_order_release);
             state_ = State::Finish;
-            return again();
+            return reschedule();
 
         case State::Finish:
             (*seen_)[3].store(af::runtime::current_thread_index(), std::memory_order_release);

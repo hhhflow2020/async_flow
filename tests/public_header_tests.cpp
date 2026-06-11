@@ -23,6 +23,14 @@ public:
         return decltype(test_pending<runtime_task_legacy_schedule_probe>(0))::value;
     }
 
+    [[nodiscard]] static constexpr bool has_again_helper() noexcept {
+        return decltype(test_again<runtime_task_legacy_schedule_probe>(0))::value;
+    }
+
+    [[nodiscard]] static constexpr bool has_reschedule_helper() noexcept {
+        return decltype(test_reschedule<runtime_task_legacy_schedule_probe>(0))::value;
+    }
+
 private:
     template <typename TaskT>
     [[nodiscard]] static auto test_schedule(int) noexcept
@@ -37,6 +45,18 @@ private:
                     std::true_type{});
 
     template <typename> [[nodiscard]] static std::false_type test_pending(...) noexcept;
+
+    template <typename TaskT>
+    [[nodiscard]] static auto test_again(int) noexcept
+        -> decltype(std::declval<TaskT &>().again(), std::true_type{});
+
+    template <typename> [[nodiscard]] static std::false_type test_again(...) noexcept;
+
+    template <typename TaskT>
+    [[nodiscard]] static auto test_reschedule(int) noexcept
+        -> decltype(std::declval<TaskT &>().reschedule(), std::true_type{});
+
+    template <typename> [[nodiscard]] static std::false_type test_reschedule(...) noexcept;
 
     af::task_result run_task() noexcept override {
         return done();
@@ -59,6 +79,8 @@ TEST(PublicHeaderTests, AsyncFlowUmbrellaExposesRuntimeInstanceApi) {
 TEST(PublicHeaderTests, RuntimeTaskExposesOnlyExplicitScheduleNames) {
     static_assert(!runtime_task_legacy_schedule_probe::has_short_schedule());
     static_assert(!runtime_task_legacy_schedule_probe::has_short_pending());
+    static_assert(!runtime_task_legacy_schedule_probe::has_again_helper());
+    static_assert(runtime_task_legacy_schedule_probe::has_reschedule_helper());
 }
 
 TEST(PublicHeaderTests, NetUmbrellaExposesRuntimeNativeApi) {

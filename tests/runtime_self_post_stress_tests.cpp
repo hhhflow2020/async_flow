@@ -155,7 +155,7 @@ private:
     af::task_result run_task() noexcept override {
         const int runs = run_count_->fetch_add(1, std::memory_order_acq_rel) + 1;
         if (runs < iteration_count_) {
-            return again();
+            return reschedule();
         }
         if (remaining_->fetch_sub(1, std::memory_order_acq_rel) == 1) {
             af::detail::atomic_notify_one(*remaining_);

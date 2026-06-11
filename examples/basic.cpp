@@ -117,7 +117,7 @@ private:
 
     af::task_result back_to_logic() noexcept {
         state_ = state::finish;
-        return again();
+        return reschedule();
     }
 
     af::task_result finish() noexcept {

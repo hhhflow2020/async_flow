@@ -286,7 +286,7 @@ private:
         }
 
         state_ = State::FinishAgain;
-        return again();
+        return reschedule();
     }
 
     [[nodiscard]] bool wait_for_wake() const noexcept {

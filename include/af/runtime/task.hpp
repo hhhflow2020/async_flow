@@ -159,10 +159,6 @@ protected:
         return task_result::pending;
     }
 
-    [[nodiscard]] static constexpr task_result again() noexcept {
-        return task_result::again;
-    }
-
     [[nodiscard]] static constexpr task_result reschedule() noexcept {
         return task_result::again;
     }
