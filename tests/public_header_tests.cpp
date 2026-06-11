@@ -154,6 +154,10 @@
 #error "reactor public header must be installed under af/reactor"
 #endif
 
+#if !__has_include("af/reactor/fd_event_source.hpp")
+#error "reactor fd event source header must be installed under af/reactor"
+#endif
+
 #if !__has_include("af/reactor/detail/epoll_reactor.hpp")
 #error "epoll reactor backend header must be installed under af/reactor/detail"
 #endif
@@ -440,6 +444,11 @@ TEST(PublicHeaderTests, InfrastructureDetailHeadersDoNotExposeCamelCaseTypeAlias
                                  "using OrderedBatchState ="},
         forbidden_source_snippet{"include/af/detail/runtime/runtime_service_task.hpp",
                                  "using RuntimeServiceTask ="},
+        forbidden_source_snippet{"include/af/reactor/fd_event_source.hpp", "using FdEventSource ="},
+        forbidden_source_snippet{"include/af/reactor/fd_event_source.hpp",
+                                 "using FdEventCallback ="},
+        forbidden_source_snippet{"include/af/reactor/fd_event_source.hpp",
+                                 "using ReactorReadable ="},
         forbidden_source_snippet{"include/af/runtime/detail/pooled_object.hpp",
                                  "using RuntimePooledObjectPool ="},
         forbidden_source_snippet{"include/af/runtime/detail/pooled_object.hpp",

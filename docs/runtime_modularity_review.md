@@ -5,7 +5,7 @@
 - `runtime/config_types.hpp`、`runtime/config_resolution.hpp`：public 结构化 runtime 配置类型与解析校验入口，`runtime_config.hpp` 只保留 umbrella include。
 - `runtime/runtime.hpp`、`runtime/detail/runtime_lifecycle.hpp`：runtime 实例生命周期、线程启动停止、task/service/reactor 注册入口。
 - `runtime/detail/executor.hpp`、`runtime/detail/executor_impl.hpp`：executor 对象布局、intrusive MPSC inbox、task 执行循环、service task 轮询。
-- `reactor/reactor.hpp`、`reactor/detail/epoll_reactor.hpp`、`reactor/detail/kqueue_reactor.hpp`、`reactor/detail/select_reactor.hpp`：统一 reactor 抽象和平台 backend；`af/reactor.hpp` 是 reactor 模块 umbrella。
+- `reactor/reactor.hpp`、`reactor/fd_event_source.hpp`、`reactor/detail/epoll_reactor.hpp`、`reactor/detail/kqueue_reactor.hpp`、`reactor/detail/select_reactor.hpp`：统一 reactor 抽象、fd event source 和平台 backend；`af/reactor.hpp` 是 reactor 模块 umbrella。
 - `timer/timer_backend.hpp`、`timer/timer_entry.hpp`、`timer/timer_heap.hpp`、`timer/hierarchical_timer_wheel.hpp`：executor 本地 timer backend 聚合入口、timer entry、min-heap backend 与默认分层时间轮；timer 数据结构已从 runtime detail 目录移入 timer 模块并按职责拆分。
 - `runtime/task.hpp`、`runtime/task_impl.hpp`：runtime task 创建、调度、task id 和对象池生命周期。
 - `detail/runtime/`：只保留 `atomic_wait`、`cpu_relax`、`runtime_common_state`、`runtime_service_task`、`timed_atomic_wait` 等跨模块底层组件。

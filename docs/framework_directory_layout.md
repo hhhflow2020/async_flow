@@ -5,7 +5,7 @@
 当前目录按职责拆分：
 
 - `include/af/runtime/`：runtime 配置、实例生命周期、executor、task 和 timer backend。
-- `include/af/reactor/`：统一 reactor 抽象以及 epoll/kqueue/select backend。
+- `include/af/reactor/`：统一 reactor 抽象、fd event source 以及 epoll/kqueue/select backend。
 - `include/af/detail/runtime/`：atomic wait、cpu relax、service task 等跨模块底层组件。
 - `include/af/queue/`：intrusive MPSC、bounded MPSC/MPMC 队列和 backoff。
 - `include/af/memory/`：对象池和连续对象存储。
