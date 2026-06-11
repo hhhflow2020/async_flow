@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "af/detail/config.hpp"
+#include "af/memory/cache_line.hpp"
 #include "af/memory/object_pool_block.hpp"
 #include "af/memory/object_pool_local_cache.hpp"
 

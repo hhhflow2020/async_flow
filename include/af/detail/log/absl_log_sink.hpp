@@ -28,6 +28,7 @@
 #include "af/detail/log/runtime_bound_log_backend.hpp"
 #include "af/detail/log/runtime_instance_async_log_consumer.hpp"
 #include "af/detail/runtime/atomic_wait.hpp"
+#include "af/memory/cache_line.hpp"
 #include "af/thread_kind.hpp"
 
 namespace af {

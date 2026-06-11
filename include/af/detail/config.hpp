@@ -57,8 +57,6 @@
 
 namespace af::detail {
 
-inline constexpr std::size_t hardware_cache_line_size = 64;
-
 inline constexpr bool platform_windows = false;
 
 #if defined(__linux__)

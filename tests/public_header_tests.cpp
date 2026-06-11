@@ -110,6 +110,10 @@
 #error "memory headers must live under af/memory, not af/detail/memory"
 #endif
 
+#if __has_include("af/detail/memory/cache_line.hpp")
+#error "cache-line utilities must live under af/memory, not af/detail/memory"
+#endif
+
 #if !__has_include("af/memory/contiguous_object_storage.hpp")
 #error "memory headers must be installed under af/memory"
 #endif
@@ -128,6 +132,10 @@
 
 #if !__has_include("af/memory/object_pool_local_cache.hpp")
 #error "memory headers must be installed under af/memory"
+#endif
+
+#if !__has_include("af/memory/cache_line.hpp")
+#error "cache-line utilities must be installed under af/memory"
 #endif
 
 #if __has_include("af/runtime/reactor.hpp")
@@ -444,6 +452,7 @@ TEST(PublicHeaderTests, InfrastructureDetailHeadersDoNotExposeCamelCaseTypeAlias
                                  "using OrderedBatchState ="},
         forbidden_source_snippet{"include/af/detail/runtime/runtime_service_task.hpp",
                                  "using RuntimeServiceTask ="},
+        forbidden_source_snippet{"include/af/memory/cache_line.hpp", "using CacheLineAtomic ="},
         forbidden_source_snippet{"include/af/reactor/fd_event_source.hpp", "using FdEventSource ="},
         forbidden_source_snippet{"include/af/reactor/fd_event_source.hpp",
                                  "using FdEventCallback ="},
@@ -474,6 +483,24 @@ TEST(PublicHeaderTests, InfrastructureDetailHeadersDoNotExposeCamelCaseTypeAlias
         EXPECT_EQ(content.find(item.snippet), std::string::npos)
             << item.relative_path << " still contains " << item.snippet;
     }
+}
+
+TEST(PublicHeaderTests, CacheLineUtilitiesLiveUnderMemoryModule) {
+    const std::string memory_header = read_source_file("include/af/memory/cache_line.hpp");
+    ASSERT_FALSE(memory_header.empty());
+    EXPECT_NE(memory_header.find("inline constexpr std::size_t hardware_cache_line_size"),
+              std::string::npos);
+    EXPECT_NE(memory_header.find("struct alignas(hardware_cache_line_size) cache_line_atomic"),
+              std::string::npos);
+
+    const std::string config_header = read_source_file("include/af/detail/config.hpp");
+    ASSERT_FALSE(config_header.empty());
+    EXPECT_EQ(config_header.find("hardware_cache_line_size"), std::string::npos);
+
+    const std::string runtime_common =
+        read_source_file("include/af/detail/runtime/runtime_common_state.hpp");
+    ASSERT_FALSE(runtime_common.empty());
+    EXPECT_EQ(runtime_common.find("cache_line_atomic"), std::string::npos);
 }
 
 TEST(PublicHeaderTests, NetUmbrellaExposesRuntimeNativeApi) {

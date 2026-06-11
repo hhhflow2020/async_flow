@@ -11,6 +11,8 @@
 #include <sys/uio.h>
 #include <unistd.h>
 
+#include "af/memory/cache_line.hpp"
+
 namespace af::net::detail {
 
 inline void runtime_udp_unlink_unix_path(const udp_endpoint &endpoint) noexcept {

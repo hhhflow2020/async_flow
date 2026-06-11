@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "af/detail/config.hpp"
+#include "af/memory/cache_line.hpp"
 #include "af/runtime/config_types.hpp"
 #include "af/runtime/work.hpp"
 #include "af/task.hpp"

@@ -9,8 +9,8 @@
 
 #include "af/detail/config.hpp"
 #include "af/queue/intrusive_mpsc_queue.hpp"
-#include "af/detail/runtime/runtime_common_state.hpp"
 #include "af/detail/runtime/runtime_service_task.hpp"
+#include "af/memory/cache_line.hpp"
 #include "af/runtime/config_resolution.hpp"
 #include "af/reactor/reactor.hpp"
 #include "af/runtime/work.hpp"

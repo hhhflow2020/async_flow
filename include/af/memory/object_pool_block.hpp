@@ -7,6 +7,7 @@
 #include <type_traits>
 
 #include "af/detail/config.hpp"
+#include "af/memory/cache_line.hpp"
 
 namespace af::detail {
 

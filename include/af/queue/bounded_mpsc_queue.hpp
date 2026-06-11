@@ -8,6 +8,7 @@
 
 #include "af/queue/bounded_queue_common.hpp"
 #include "af/detail/config.hpp"
+#include "af/memory/cache_line.hpp"
 
 namespace af::detail {
 

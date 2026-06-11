@@ -4,7 +4,7 @@
 #include <utility>
 
 #include "af/memory/object_pool.hpp"
-#include "af/detail/runtime/runtime_common_state.hpp"
+#include "af/memory/cache_line.hpp"
 
 namespace af::detail {
 

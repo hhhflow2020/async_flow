@@ -17,6 +17,7 @@
 #include "af/detail/runtime/atomic_wait.hpp"
 #include "af/detail/runtime/runtime_common_state.hpp"
 #include "af/detail/runtime/runtime_service_task.hpp"
+#include "af/memory/cache_line.hpp"
 #include "af/parallel.hpp"
 #include "af/runtime/config_resolution.hpp"
 #include "af/runtime/detail/executor.hpp"

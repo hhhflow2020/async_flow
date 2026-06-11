@@ -3,6 +3,7 @@
 #include <atomic>
 
 #include "af/detail/config.hpp"
+#include "af/memory/cache_line.hpp"
 #include "af/queue/queue_backoff.hpp"
 
 namespace af::detail {
