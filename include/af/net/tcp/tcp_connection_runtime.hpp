@@ -16,6 +16,7 @@
 #include "af/net/endpoint.hpp"
 #include "af/net/tcp/tcp_types.hpp"
 #include "af/runtime.hpp"
+#include "folly/io/IOBuf.h"
 
 #include <sys/socket.h>
 #include <sys/uio.h>
@@ -395,17 +396,21 @@ private:
         if (max_bytes == 0U) {
             return 0;
         }
-        std::array<af::buffer_view, 64> views{};
+        std::array<const folly::IOBuf *, 64> buffers{};
         std::array<iovec, 64> iov{};
-        const std::size_t count = output_.fill_views(views);
+        const std::size_t count = output_.fill_iobufs(buffers);
         std::size_t send_count = 0;
         std::size_t remaining = max_bytes;
         for (std::size_t i = 0; i < count && remaining != 0U; ++i) {
-            const std::size_t size = std::min(views[i].size(), remaining);
+            const folly::IOBuf *buf = buffers[i];
+            if (buf == nullptr) {
+                continue;
+            }
+            const std::size_t size = std::min(buf->length(), remaining);
             if (size == 0U) {
                 continue;
             }
-            iov[send_count].iov_base = const_cast<std::byte *>(views[i].data());
+            iov[send_count].iov_base = const_cast<void *>(static_cast<const void *>(buf->data()));
             iov[send_count].iov_len = size;
             ++send_count;
             remaining -= size;

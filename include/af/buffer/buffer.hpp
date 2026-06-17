@@ -122,6 +122,10 @@ public:
         return {data(), size()};
     }
 
+    [[nodiscard]] const folly::IOBuf *iobuf() const noexcept {
+        return iobuf_.get();
+    }
+
     [[nodiscard]] std::size_t capacity() const noexcept {
         return iobuf_ == nullptr ? 0U : iobuf_->capacity();
     }
@@ -316,6 +320,19 @@ public:
                 continue;
             }
             views[count] = buffers_[i].view();
+            ++count;
+        }
+        return count;
+    }
+
+    [[nodiscard]] std::size_t fill_iobufs(af::span<const folly::IOBuf *> iobufs) const noexcept {
+        std::size_t count = 0;
+        for (std::size_t i = first_; i < buffers_.size() && count < iobufs.size(); ++i) {
+            const buffer &buf = buffers_[i];
+            if (buf.empty()) {
+                continue;
+            }
+            iobufs[count] = buf.iobuf();
             ++count;
         }
         return count;

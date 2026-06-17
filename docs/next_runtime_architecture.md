@@ -628,7 +628,7 @@ running task 不强杀；pending task、timer task 和尚未执行的控制 task
 - handler 按 listener/shard 拷贝，避免多个 IO 线程共享 handler 状态。
 - hot path 优先数组、vector、slot table 和 generation；冷控制面可使用 `absl::flat_hash_map`。
 - 网络输入尽量使用 `buffer_view` 零拷贝解析；输出优先 move buffer 和 scatter/gather。`af::buffer`
-  直接以 Folly `IOBuf` 作为底层存储，依赖其 headroom/tailroom、clone/unshare 和 chain 语义继续推进零拷贝 IO。
+  直接以 Folly `IOBuf` 作为底层存储，依赖其 headroom/tailroom、clone/unshare 和 chain 语义继续推进零拷贝 IO；TCP 输出热路径从 `buffer_chain::fill_iobufs()` 取得 IOBuf 视图后生成 `iovec`。
 - 分支预测上把成功路径、非错误路径和常见 readiness 路径作为直线代码，错误、关闭、溢出走冷函数。
 
 ## 目录布局

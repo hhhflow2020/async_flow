@@ -27,7 +27,7 @@
 
 网络内部 socket address helper 已从全局 `detail/net/socket_address.hpp` 移到 `net/detail/socket_address.hpp`，使网络 detail 归属到 net 模块下。
 
-网络公开入口开始按协议拆分：`af/net.hpp` 现在通过 `net/tcp/tcp_server.hpp`、`net/tcp/tcp_client.hpp`、`net/tcp/tcp_connection.hpp`、`net/tcp/tcp_listener.hpp`、`net/udp/udp_socket.hpp` 和 `net/unix/*` 聚合 TCP/UDP/Unix API，不再直接包含旧平铺实现头。TCP/UDP/Unix 的实现头已迁移到对应协议目录，旧平铺头仅保留为很薄的兼容转发头，并由 public header 测试限制其继续膨胀。
+网络公开入口开始按协议拆分：`af/net.hpp` 现在通过 `net/tcp/tcp_server.hpp`、`net/tcp/tcp_client.hpp`、`net/tcp/tcp_connection.hpp`、`net/tcp/tcp_listener.hpp`、`net/udp/udp_socket.hpp` 和 `net/unix/*` 聚合 TCP/UDP/Unix API，不再直接包含旧平铺实现头。TCP/UDP/Unix 的实现头已迁移到对应协议目录，旧平铺兼容转发头已移除，并由 public header 测试阻止这些 legacy path 重新出现。
 
 queue 基础结构已从 `include/af/detail/queue/` 迁移到 `include/af/queue/`，包含 intrusive MPSC、bounded MPSC/MPMC、公共 ring 序号工具和 backoff。`tests/public_header_tests.cpp` 会阻止旧 `detail/queue` 头文件重新出现，并确认新路径可包含。
 
@@ -37,7 +37,7 @@ queue 基础结构已从 `include/af/detail/queue/` 迁移到 `include/af/queue/
 
 对外命名继续向 lower_case 迁移：batch/crud/parallel utility、compile-time `thread_layout`、task 状态枚举、signal、buffer 以及 log 配置/句柄/后端相关主类型已迁移为 lower_case。public `af::net`、utility、log、task 状态枚举、对象池/log/基础设施 detail 与 compile-time `thread_layout` 的 CamelCase 类型 alias 已删除，并通过 public header 源码扫描测试防回归。examples 中的 runtime task、stream tag 和业务 batch 类型也已迁移为 lower_snake_case；剩余 CamelCase 主要在测试 fixture 内部，用于覆盖旧构造路径、异常路径或平台行为。
 
-`af::buffer` 已从自研 TLS size-class storage 迁移为直接使用 Folly `IOBuf` 底层存储；`buffer` 继续保留现有简洁 API，copy/slice 通过 `cloneOne()` 共享底层数据，写入前通过 `unshareOne()` 保证 mutable 路径安全。public header 测试会阻止 buffer 模块回退到旧 `io_buffer_pool_cache`/`pooled_buffer_storage` 路径。
+`af::buffer` 已从自研 TLS size-class storage 迁移为直接使用 Folly `IOBuf` 底层存储；`buffer` 继续保留现有简洁 API，copy/slice 通过 `cloneOne()` 共享底层数据，写入前通过 `unshareOne()` 保证 mutable 路径安全。`buffer::iobuf()` 和 `buffer_chain::fill_iobufs()` 为网络层提供只读 IOBuf scatter 视图，TCP flush 热路径已直接基于 IOBuf 生成 `iovec`。public header 测试会阻止 buffer 模块回退到旧 `io_buffer_pool_cache`/`pooled_buffer_storage` 路径。
 
 通用 service task 由 runtime executor 按预算轮询执行；service 自身负责 pending 状态和内部队列，跨线程 producer 通过 `wake_service_tasks()` 唤醒 executor。runtime async logger 现在就是一个 service task，消费热路径不进入 task 状态机；推荐手工入口是 `start_runtime_logging()`，runtime 配置了日志后会在 `runtime::start()` 中自动启动并在 `runtime::stop()` 中 drain/flush。
 

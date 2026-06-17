@@ -15,8 +15,8 @@
 - inbox producer/consumer 游标按 cache line 拆分，降低 false sharing。
 - 日志 record pool 和 runtime task pool 都应按线程局部复用。
 - 对象池 slot 已按 cache line 对齐，block/pool 热原子字段独立对齐；日志 record pool 的 slab free-list 和扩容标志也与热路径数据分离。
-- `buffer::copy` 的小/中等 IO payload 走线程本地 16KiB 物理固定块池，16KiB-256KiB payload 走线程本地 raw aligned size-class 池，避免高频收发路径反复分配和释放 `std::vector` 存储；`buffer::capacity()`、`tailroom()`、`buffer(size)` 与 `with_capacity()` 仍保持精确逻辑容量语义。
-- `buffer_chain` 使用 4 个 buffer 的 inline storage，TCP 写队列常见的短链路不需要为容器节点进入堆分配。
+- `buffer` 直接使用 Folly `IOBuf` 管理 IO payload，复用其 headroom/tailroom、clone/unshare 和共享存储语义；框架不再维护自研 IO buffer size-class 池。
+- `buffer_chain` 使用 4 个 buffer 的 inline storage，TCP 写队列常见的短链路不需要为容器节点进入堆分配；TCP flush 通过 `buffer_chain::fill_iobufs()` 从 IOBuf 直接生成 `iovec`。
 
 ## 分支与系统调用
 

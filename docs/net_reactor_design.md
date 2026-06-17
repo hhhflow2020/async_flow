@@ -319,7 +319,7 @@ UDP 无连接状态。业务层如果需要会话语义，可以维护 `peer end
 - Unix stream 复用 TCP stream connection 热路径，只有地址族、path unlink 和 accept 策略是 Unix 专属逻辑。
 - Unix datagram 使用独立 API，但复用 datagram shard 热路径；单 path 只绑定一个 IO shard，避免多线程重复 bind 同一路径。
 - UDP 跨线程发送使用 runtime task 显式调度到 owner IO shard；默认 handle 轮询分散外部生产者，热路径建议业务缓存 shard handle 并按会话固定亲和性。
-- `buffer` 已使用 Folly `IOBuf` 作为底层存储，支持共享底层数据的零拷贝 `slice()`、写前 `unshareOne()`、前后缀消费和 head/tail room 查询；`buffer_chain` 已缓存总长度并支持跨 buffer 前缀消费。后续应继续把 scatter/gather 和 prepend/append reserve 往 IOBuf 链式语义靠拢。
+- `buffer` 已使用 Folly `IOBuf` 作为底层存储，支持共享底层数据的零拷贝 `slice()`、写前 `unshareOne()`、前后缀消费和 head/tail room 查询；`buffer_chain` 已缓存总长度、支持跨 buffer 前缀消费，并通过 `fill_iobufs()` 为 TCP `sendmsg` 热路径提供 IOBuf scatter 视图。后续应继续把 prepend/append reserve 和真正的 IOBuf chain 语义补齐。
 - TCP stream server/client、UDP socket、Unix stream/datagram socket 控制面属于单 reactor 线程，不使用 mutex、condition variable 或同步 barrier；accept/connect/read/write 热路径不使用全局锁。
 
 ## 后续

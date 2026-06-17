@@ -42,6 +42,46 @@
 #error "legacy task IO facade must not be installed"
 #endif
 
+#if __has_include("af/net/tcp_types.hpp")
+#error "legacy flat net headers must not be installed"
+#endif
+
+#if __has_include("af/net/tcp_client_types.hpp")
+#error "legacy flat net headers must not be installed"
+#endif
+
+#if __has_include("af/net/tcp_client_runtime.hpp")
+#error "legacy flat net headers must not be installed"
+#endif
+
+#if __has_include("af/net/tcp_connection_handle.hpp")
+#error "legacy flat net headers must not be installed"
+#endif
+
+#if __has_include("af/net/tcp_connection_runtime.hpp")
+#error "legacy flat net headers must not be installed"
+#endif
+
+#if __has_include("af/net/tcp_listener.hpp")
+#error "legacy flat net headers must not be installed"
+#endif
+
+#if __has_include("af/net/tcp_server_control.hpp")
+#error "legacy flat net headers must not be installed"
+#endif
+
+#if __has_include("af/net/udp_types.hpp")
+#error "legacy flat net headers must not be installed"
+#endif
+
+#if __has_include("af/net/udp_socket_runtime.hpp")
+#error "legacy flat net headers must not be installed"
+#endif
+
+#if __has_include("af/net/unix_socket.hpp")
+#error "legacy flat net headers must not be installed"
+#endif
+
 #if __has_include("af/detail/queue/bounded_mpmc_queue.hpp")
 #error "queue headers must live under af/queue, not af/detail/queue"
 #endif
@@ -633,35 +673,6 @@ TEST(PublicHeaderTests, NetUmbrellaUsesProtocolPublicHeaders) {
     }
 }
 
-TEST(PublicHeaderTests, LegacyFlatNetHeadersAreThinCompatibilityForwarders) {
-    constexpr std::array forwarders{
-        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "af/net/tcp/tcp_types.hpp"},
-        forbidden_source_snippet{"include/af/net/tcp_client_types.hpp",
-                                 "af/net/tcp/tcp_client_types.hpp"},
-        forbidden_source_snippet{"include/af/net/tcp_client_runtime.hpp",
-                                 "af/net/tcp/tcp_client.hpp"},
-        forbidden_source_snippet{"include/af/net/tcp_connection_handle.hpp",
-                                 "af/net/tcp/tcp_connection_handle.hpp"},
-        forbidden_source_snippet{"include/af/net/tcp_connection_runtime.hpp",
-                                 "af/net/tcp/tcp_connection_runtime.hpp"},
-        forbidden_source_snippet{"include/af/net/tcp_listener.hpp", "af/net/tcp/tcp_listener.hpp"},
-        forbidden_source_snippet{"include/af/net/tcp_server_control.hpp",
-                                 "af/net/tcp/tcp_server.hpp"},
-        forbidden_source_snippet{"include/af/net/udp_types.hpp", "af/net/udp/udp_types.hpp"},
-        forbidden_source_snippet{"include/af/net/udp_socket_runtime.hpp",
-                                 "af/net/udp/udp_socket.hpp"},
-        forbidden_source_snippet{"include/af/net/unix_socket.hpp", "af/net/unix/unix_socket.hpp"},
-    };
-
-    for (const forbidden_source_snippet item : forwarders) {
-        const std::string content = read_source_file(item.relative_path);
-        ASSERT_FALSE(content.empty()) << item.relative_path;
-        EXPECT_NE(content.find(item.snippet), std::string::npos)
-            << item.relative_path << " should forward to " << item.snippet;
-        EXPECT_LT(content.size(), 128U) << item.relative_path << " should stay a thin forwarder";
-    }
-}
-
 TEST(PublicHeaderTests, NetPublicHeadersDoNotExposeCamelCaseTypeAliases) {
     constexpr std::array forbidden{
         forbidden_source_snippet{"include/af/net/endpoint.hpp", "using AddressFamily ="},
@@ -1094,6 +1105,8 @@ TEST(PublicHeaderTests, BufferUsesFollyIobufStorage) {
     EXPECT_NE(content.find("folly::IOBuf::createCombined"), std::string::npos);
     EXPECT_NE(content.find("cloneOne()"), std::string::npos);
     EXPECT_NE(content.find("unshareOne()"), std::string::npos);
+    EXPECT_NE(content.find("const folly::IOBuf *iobuf()"), std::string::npos);
+    EXPECT_NE(content.find("fill_iobufs"), std::string::npos);
     EXPECT_EQ(content.find("io_buffer_pool_cache"), std::string::npos);
     EXPECT_EQ(content.find("pooled_buffer_storage"), std::string::npos);
 }

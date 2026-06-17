@@ -4,6 +4,7 @@
 
 #include "af/buffer/buffer.hpp"
 
+#include "folly/io/IOBuf.h"
 #include "gtest/gtest.h"
 
 TEST(NetBufferTests, BufferCopyKeepsPayload) {
@@ -13,6 +14,16 @@ TEST(NetBufferTests, BufferCopyKeepsPayload) {
 
     ASSERT_EQ(buffer.size(), input.size());
     EXPECT_EQ(std::memcmp(buffer.data(), input.data(), input.size()), 0);
+}
+
+TEST(NetBufferTests, BufferExposesReadOnlyIobufStorage) {
+    af::buffer buffer = af::buffer::copy("payload", 7);
+
+    const folly::IOBuf *iobuf = buffer.iobuf();
+
+    ASSERT_NE(iobuf, nullptr);
+    EXPECT_EQ(iobuf->length(), 7U);
+    EXPECT_EQ(std::memcmp(iobuf->data(), "payload", 7), 0);
 }
 
 TEST(NetBufferTests, BufferCopyDoesNotExposePooledBlockTailroom) {
@@ -196,6 +207,25 @@ TEST(NetBufferTests, BufferChainFillsScatterGatherViews) {
     ASSERT_EQ(count, 2U);
     EXPECT_EQ(views[0].string_view(), "ab");
     EXPECT_EQ(views[1].string_view(), "cde");
+    EXPECT_EQ(chain.size(), 7U);
+}
+
+TEST(NetBufferTests, BufferChainFillsIobufsForScatterGather) {
+    af::buffer_chain chain;
+    chain.push_back(af::buffer::copy("ab", 2));
+    chain.push_back(af::buffer::copy("cde", 3));
+    chain.push_back(af::buffer::copy("fg", 2));
+
+    std::array<const folly::IOBuf *, 2> iobufs{};
+    const std::size_t count = chain.fill_iobufs(iobufs);
+
+    ASSERT_EQ(count, 2U);
+    ASSERT_NE(iobufs[0], nullptr);
+    ASSERT_NE(iobufs[1], nullptr);
+    EXPECT_EQ(iobufs[0]->length(), 2U);
+    EXPECT_EQ(iobufs[1]->length(), 3U);
+    EXPECT_EQ(std::memcmp(iobufs[0]->data(), "ab", 2), 0);
+    EXPECT_EQ(std::memcmp(iobufs[1]->data(), "cde", 3), 0);
     EXPECT_EQ(chain.size(), 7U);
 }
 
