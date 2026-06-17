@@ -615,10 +615,14 @@ TEST(PublicHeaderTests, NetUmbrellaUsesProtocolPublicHeaders) {
     }
 
     constexpr std::array forbidden{
+        forbidden_source_snippet{"include/af/net.hpp", "af/net/tcp_types.hpp"},
+        forbidden_source_snippet{"include/af/net.hpp", "af/net/tcp_client_types.hpp"},
         forbidden_source_snippet{"include/af/net.hpp", "af/net/tcp_client_runtime.hpp"},
+        forbidden_source_snippet{"include/af/net.hpp", "af/net/tcp_connection_handle.hpp"},
         forbidden_source_snippet{"include/af/net.hpp", "af/net/tcp_connection_runtime.hpp"},
         forbidden_source_snippet{"include/af/net.hpp", "af/net/tcp_listener.hpp"},
         forbidden_source_snippet{"include/af/net.hpp", "af/net/tcp_server_control.hpp"},
+        forbidden_source_snippet{"include/af/net.hpp", "af/net/udp_types.hpp"},
         forbidden_source_snippet{"include/af/net.hpp", "af/net/udp_socket_runtime.hpp"},
         forbidden_source_snippet{"include/af/net.hpp", "af/net/unix_socket.hpp"},
     };
@@ -629,6 +633,35 @@ TEST(PublicHeaderTests, NetUmbrellaUsesProtocolPublicHeaders) {
     }
 }
 
+TEST(PublicHeaderTests, LegacyFlatNetHeadersAreThinCompatibilityForwarders) {
+    constexpr std::array forwarders{
+        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "af/net/tcp/tcp_types.hpp"},
+        forbidden_source_snippet{"include/af/net/tcp_client_types.hpp",
+                                 "af/net/tcp/tcp_client_types.hpp"},
+        forbidden_source_snippet{"include/af/net/tcp_client_runtime.hpp",
+                                 "af/net/tcp/tcp_client.hpp"},
+        forbidden_source_snippet{"include/af/net/tcp_connection_handle.hpp",
+                                 "af/net/tcp/tcp_connection_handle.hpp"},
+        forbidden_source_snippet{"include/af/net/tcp_connection_runtime.hpp",
+                                 "af/net/tcp/tcp_connection_runtime.hpp"},
+        forbidden_source_snippet{"include/af/net/tcp_listener.hpp", "af/net/tcp/tcp_listener.hpp"},
+        forbidden_source_snippet{"include/af/net/tcp_server_control.hpp",
+                                 "af/net/tcp/tcp_server.hpp"},
+        forbidden_source_snippet{"include/af/net/udp_types.hpp", "af/net/udp/udp_types.hpp"},
+        forbidden_source_snippet{"include/af/net/udp_socket_runtime.hpp",
+                                 "af/net/udp/udp_socket.hpp"},
+        forbidden_source_snippet{"include/af/net/unix_socket.hpp", "af/net/unix/unix_socket.hpp"},
+    };
+
+    for (const forbidden_source_snippet item : forwarders) {
+        const std::string content = read_source_file(item.relative_path);
+        ASSERT_FALSE(content.empty()) << item.relative_path;
+        EXPECT_NE(content.find(item.snippet), std::string::npos)
+            << item.relative_path << " should forward to " << item.snippet;
+        EXPECT_LT(content.size(), 128U) << item.relative_path << " should stay a thin forwarder";
+    }
+}
+
 TEST(PublicHeaderTests, NetPublicHeadersDoNotExposeCamelCaseTypeAliases) {
     constexpr std::array forbidden{
         forbidden_source_snippet{"include/af/net/endpoint.hpp", "using AddressFamily ="},
@@ -636,26 +669,29 @@ TEST(PublicHeaderTests, NetPublicHeadersDoNotExposeCamelCaseTypeAliases) {
         forbidden_source_snippet{"include/af/net/endpoint.hpp", "using TcpEndpoint ="},
         forbidden_source_snippet{"include/af/net/endpoint.hpp", "using UdpEndpoint ="},
         forbidden_source_snippet{"include/af/net/endpoint.hpp", "using UnixEndpoint ="},
-        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using SendResult ="},
-        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using CloseReason ="},
-        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using AcceptStrategy ="},
-        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using accept_strategy ="},
-        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using ListenerState ="},
-        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using RemoveListenerPolicy ="},
-        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using TcpListenerOptions ="},
-        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using TcpConnectionConfig ="},
-        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using TcpListenerConfig ="},
-        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using TcpServerConfig ="},
-        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using ListenerId ="},
-        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using TcpListenerHandle ="},
-        forbidden_source_snippet{"include/af/net/tcp_types.hpp", "using ListenerResult ="},
-        forbidden_source_snippet{"include/af/net/tcp_client_types.hpp", "using TcpClientOptions ="},
-        forbidden_source_snippet{"include/af/net/tcp_client_types.hpp",
+        forbidden_source_snippet{"include/af/net/tcp/tcp_types.hpp", "using SendResult ="},
+        forbidden_source_snippet{"include/af/net/tcp/tcp_types.hpp", "using CloseReason ="},
+        forbidden_source_snippet{"include/af/net/tcp/tcp_types.hpp", "using AcceptStrategy ="},
+        forbidden_source_snippet{"include/af/net/tcp/tcp_types.hpp", "using accept_strategy ="},
+        forbidden_source_snippet{"include/af/net/tcp/tcp_types.hpp", "using ListenerState ="},
+        forbidden_source_snippet{"include/af/net/tcp/tcp_types.hpp",
+                                 "using RemoveListenerPolicy ="},
+        forbidden_source_snippet{"include/af/net/tcp/tcp_types.hpp", "using TcpListenerOptions ="},
+        forbidden_source_snippet{"include/af/net/tcp/tcp_types.hpp", "using TcpConnectionConfig ="},
+        forbidden_source_snippet{"include/af/net/tcp/tcp_types.hpp", "using TcpListenerConfig ="},
+        forbidden_source_snippet{"include/af/net/tcp/tcp_types.hpp", "using TcpServerConfig ="},
+        forbidden_source_snippet{"include/af/net/tcp/tcp_types.hpp", "using ListenerId ="},
+        forbidden_source_snippet{"include/af/net/tcp/tcp_types.hpp", "using TcpListenerHandle ="},
+        forbidden_source_snippet{"include/af/net/tcp/tcp_types.hpp", "using ListenerResult ="},
+        forbidden_source_snippet{"include/af/net/tcp/tcp_client_types.hpp",
+                                 "using TcpClientOptions ="},
+        forbidden_source_snippet{"include/af/net/tcp/tcp_client_types.hpp",
                                  "using TcpClientRuntimeConfig ="},
-        forbidden_source_snippet{"include/af/net/udp_types.hpp", "using UdpSendResult ="},
-        forbidden_source_snippet{"include/af/net/udp_types.hpp", "using UdpSocketOptions ="},
-        forbidden_source_snippet{"include/af/net/udp_types.hpp", "using UdpSocketRuntimeConfig ="},
-        forbidden_source_snippet{"include/af/net/udp_types.hpp", "using UdpPeer ="},
+        forbidden_source_snippet{"include/af/net/udp/udp_types.hpp", "using UdpSendResult ="},
+        forbidden_source_snippet{"include/af/net/udp/udp_types.hpp", "using UdpSocketOptions ="},
+        forbidden_source_snippet{"include/af/net/udp/udp_types.hpp",
+                                 "using UdpSocketRuntimeConfig ="},
+        forbidden_source_snippet{"include/af/net/udp/udp_types.hpp", "using UdpPeer ="},
     };
 
     for (const forbidden_source_snippet item : forbidden) {

@@ -11,10 +11,10 @@
 
 #include "af/detail/config.hpp"
 #include "af/net/detail/socket_address.hpp"
-#include "af/net/tcp_connection_runtime.hpp"
+#include "af/net/tcp/tcp_connection_runtime.hpp"
 #include "af/net/endpoint.hpp"
-#include "af/net/tcp_listener.hpp"
-#include "af/net/tcp_types.hpp"
+#include "af/net/tcp/tcp_listener.hpp"
+#include "af/net/tcp/tcp_types.hpp"
 #include "af/runtime.hpp"
 #include "af/thread_kind.hpp"
 

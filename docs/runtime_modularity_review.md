@@ -27,7 +27,7 @@
 
 网络内部 socket address helper 已从全局 `detail/net/socket_address.hpp` 移到 `net/detail/socket_address.hpp`，使网络 detail 归属到 net 模块下。
 
-网络公开入口开始按协议拆分：`af/net.hpp` 现在通过 `net/tcp/tcp_server.hpp`、`net/tcp/tcp_client.hpp`、`net/tcp/tcp_connection.hpp`、`net/tcp/tcp_listener.hpp`、`net/udp/udp_socket.hpp` 和 `net/unix/*` 聚合 TCP/UDP/Unix API，不再直接包含旧平铺实现头。旧平铺头暂时保留以降低迁移风险。
+网络公开入口开始按协议拆分：`af/net.hpp` 现在通过 `net/tcp/tcp_server.hpp`、`net/tcp/tcp_client.hpp`、`net/tcp/tcp_connection.hpp`、`net/tcp/tcp_listener.hpp`、`net/udp/udp_socket.hpp` 和 `net/unix/*` 聚合 TCP/UDP/Unix API，不再直接包含旧平铺实现头。TCP/UDP/Unix 的实现头已迁移到对应协议目录，旧平铺头仅保留为很薄的兼容转发头，并由 public header 测试限制其继续膨胀。
 
 queue 基础结构已从 `include/af/detail/queue/` 迁移到 `include/af/queue/`，包含 intrusive MPSC、bounded MPSC/MPMC、公共 ring 序号工具和 backoff。`tests/public_header_tests.cpp` 会阻止旧 `detail/queue` 头文件重新出现，并确认新路径可包含。
 

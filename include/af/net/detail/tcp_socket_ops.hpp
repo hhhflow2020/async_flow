@@ -2,7 +2,7 @@
 
 #include <cerrno>
 
-#include "af/net/tcp_types.hpp"
+#include "af/net/tcp/tcp_types.hpp"
 
 #include <fcntl.h>
 #include <netinet/in.h>
