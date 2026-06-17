@@ -13,6 +13,7 @@ target_include_directories(
         $<INSTALL_INTERFACE:include>
 )
 find_package(absl CONFIG REQUIRED)
+find_package(folly CONFIG REQUIRED)
 target_link_libraries(
     asyncflow
     INTERFACE
@@ -24,6 +25,7 @@ target_link_libraries(
         absl::log_internal_globals
         absl::log_sink
         absl::log_sink_registry
+        folly::folly
 )
 
 option(ASYNCFLOW_BUILD_EXAMPLES "Build AsyncFlow examples" ON)

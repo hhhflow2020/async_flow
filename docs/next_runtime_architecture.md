@@ -5,12 +5,13 @@
 ## 目标
 
 - C++17 标准，允许使用 C++17 及以上编译器编译。
-- conan 管理第三方依赖：`abseil/20260107.1`、`gtest/1.17.0`、`benchmark/1.9.5`、`protobuf/7.35.0`。
+- conan 管理第三方依赖：`abseil/20260107.1`、`gtest/1.17.0`、`benchmark/1.9.5`、`protobuf/7.35.0`、`folly/2024.08.12.00`。
 - 使用现代 CMake：target 级 include、compile feature、link library 和测试/benchmark 目标。
 - 类、函数、枚举值和变量使用 `lower_case`；成员变量额外使用尾部 `_`。
 - 配置使用普通 `struct`，允许少量命名工厂函数，不使用 builder 链式构造。
 - 线程类型只保留 `thread_kind::io` 和 `thread_kind::cpu`。
 - IO 后端只保留 `epoll`、`kqueue`、`select` 三类 reactor backend；不保留 `io_uring` 路径和兼容桩。
+- 当前只在 `af::buffer` 使用 Folly `IOBuf`；Linux 上 ConanCenter 的完整 `folly` recipe 会传递构建 `liburing` 和 Folly 自身 async io_uring 源文件。AsyncFlow 框架代码仍不提供 io_uring backend；如果依赖层也必须完全不出现 liburing，需要后续改为 iobuf-only 自建包或定制 recipe。
 - 每个 executor 一个 intrusive unbounded MPSC task inbox；不使用 local queue，不使用 SPSC queue。
 - CPU executor 空闲等待使用 futex/atomic wait，IO executor 空闲等待进入 reactor poll。
 - 对象池是高性能分配器，不承担固定容量背压；除非系统内存耗尽，否则持续扩展 slab。
@@ -626,7 +627,8 @@ running task 不强杀；pending task、timer task 和尚未执行的控制 task
 - TCP 读写按预算 drain，避免单连接饿死同 reactor 上的 task/timer/service。
 - handler 按 listener/shard 拷贝，避免多个 IO 线程共享 handler 状态。
 - hot path 优先数组、vector、slot table 和 generation；冷控制面可使用 `absl::flat_hash_map`。
-- 网络输入尽量使用 `buffer_view` 零拷贝解析；输出优先 move buffer 和 scatter/gather。
+- 网络输入尽量使用 `buffer_view` 零拷贝解析；输出优先 move buffer 和 scatter/gather。`af::buffer`
+  直接以 Folly `IOBuf` 作为底层存储，依赖其 headroom/tailroom、clone/unshare 和 chain 语义继续推进零拷贝 IO。
 - 分支预测上把成功路径、非错误路径和常见 readiness 路径作为直线代码，错误、关闭、溢出走冷函数。
 
 ## 目录布局

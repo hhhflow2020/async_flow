@@ -1,262 +1,22 @@
 #pragma once
 
 #include <algorithm>
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <memory>
-#include <new>
-#include "af/span.hpp"
 #include <string_view>
 #include <utility>
 
 #include "absl/container/inlined_vector.h"
+#include "af/span.hpp"
+#include "folly/io/IOBuf.h"
 
 namespace af {
 
 namespace detail {
 
-inline constexpr std::size_t io_buffer_pool_block_size = 16U * 1024U;
-inline constexpr std::size_t io_buffer_pool_local_cache_capacity = 256U;
-inline constexpr std::array<std::size_t, 4> io_buffer_pool_large_size_classes{
-    32U * 1024U,
-    64U * 1024U,
-    128U * 1024U,
-    256U * 1024U,
-};
-inline constexpr std::size_t io_buffer_pool_large_cache_capacity = 16U;
 inline constexpr std::size_t buffer_chain_inline_capacity = 4U;
-
-[[nodiscard]] inline std::byte *allocate_aligned_bytes(std::size_t capacity) {
-    if (capacity == 0U) {
-        return nullptr;
-    }
-    return static_cast<std::byte *>(::operator new[](capacity, std::align_val_t(64)));
-}
-
-inline void release_aligned_bytes(std::byte *data) noexcept {
-    if (data != nullptr) {
-        ::operator delete[](data, std::align_val_t(64));
-    }
-}
-
-[[nodiscard]] inline std::size_t large_buffer_size_class_index(std::size_t size) noexcept {
-    for (std::size_t i = 0; i < io_buffer_pool_large_size_classes.size(); ++i) {
-        if (size <= io_buffer_pool_large_size_classes[i]) {
-            return i;
-        }
-    }
-    return io_buffer_pool_large_size_classes.size();
-}
-
-struct buffer_storage {
-    buffer_storage() = default;
-
-    buffer_storage(const buffer_storage &) = delete;
-    buffer_storage &operator=(const buffer_storage &) = delete;
-
-    buffer_storage(buffer_storage &&) = delete;
-    buffer_storage &operator=(buffer_storage &&) = delete;
-
-    [[nodiscard]] std::byte *data() noexcept {
-        return data_;
-    }
-
-    [[nodiscard]] const std::byte *data() const noexcept {
-        return data_;
-    }
-
-    [[nodiscard]] std::size_t capacity() const noexcept {
-        return capacity_;
-    }
-
-    [[nodiscard]] std::size_t physical_capacity() const noexcept {
-        return physical_capacity_;
-    }
-
-    void set_capacity(std::size_t capacity) noexcept {
-        capacity_ = capacity;
-    }
-
-protected:
-    std::byte *data_{nullptr};
-    std::size_t capacity_{0};
-    std::size_t physical_capacity_{0};
-};
-
-struct heap_buffer_storage final : buffer_storage {
-    explicit heap_buffer_storage(std::size_t capacity) : bytes(allocate_aligned_bytes(capacity)) {
-        data_ = bytes;
-        capacity_ = capacity;
-        physical_capacity_ = capacity;
-    }
-
-    ~heap_buffer_storage() {
-        release_aligned_bytes(bytes);
-    }
-
-    std::byte *bytes{nullptr};
-};
-
-struct pooled_buffer_storage final : buffer_storage {
-    pooled_buffer_storage() noexcept {
-        data_ = bytes.data();
-        capacity_ = bytes.size();
-        physical_capacity_ = bytes.size();
-    }
-
-    alignas(64) std::array<std::byte, io_buffer_pool_block_size> bytes;
-};
-
-struct large_pooled_buffer_storage final : buffer_storage {
-    explicit large_pooled_buffer_storage(std::size_t capacity)
-        : bytes(allocate_aligned_bytes(capacity)) {
-        data_ = bytes;
-        capacity_ = capacity;
-        physical_capacity_ = capacity;
-    }
-
-    ~large_pooled_buffer_storage() {
-        release_aligned_bytes(bytes);
-    }
-
-    std::byte *bytes{nullptr};
-};
-
-class io_buffer_pool_cache {
-public:
-    io_buffer_pool_cache() = default;
-
-    io_buffer_pool_cache(const io_buffer_pool_cache &) = delete;
-    io_buffer_pool_cache &operator=(const io_buffer_pool_cache &) = delete;
-
-    ~io_buffer_pool_cache() {
-        while (size_ != 0U) {
-            delete slots_[--size_];
-            slots_[size_] = nullptr;
-        }
-    }
-
-    [[nodiscard]] pooled_buffer_storage *acquire() {
-        if (size_ != 0U) [[likely]] {
-            pooled_buffer_storage *storage = slots_[--size_];
-            slots_[size_] = nullptr;
-            return storage;
-        }
-        return new pooled_buffer_storage();
-    }
-
-    void release(pooled_buffer_storage *storage) noexcept {
-        if (storage == nullptr) {
-            return;
-        }
-        if (size_ < slots_.size()) [[likely]] {
-            slots_[size_++] = storage;
-            return;
-        }
-        delete storage;
-    }
-
-private:
-    std::array<pooled_buffer_storage *, io_buffer_pool_local_cache_capacity> slots_{};
-    std::size_t size_{0};
-};
-
-class io_large_buffer_pool_cache {
-public:
-    io_large_buffer_pool_cache() = default;
-
-    io_large_buffer_pool_cache(const io_large_buffer_pool_cache &) = delete;
-    io_large_buffer_pool_cache &operator=(const io_large_buffer_pool_cache &) = delete;
-
-    ~io_large_buffer_pool_cache() {
-        for (std::size_t index = 0; index < slots_.size(); ++index) {
-            while (sizes_[index] != 0U) {
-                delete slots_[index][--sizes_[index]];
-                slots_[index][sizes_[index]] = nullptr;
-            }
-        }
-    }
-
-    [[nodiscard]] large_pooled_buffer_storage *acquire(std::size_t index) {
-        if (index >= io_buffer_pool_large_size_classes.size()) {
-            return nullptr;
-        }
-        if (sizes_[index] != 0U) [[likely]] {
-            large_pooled_buffer_storage *storage = slots_[index][--sizes_[index]];
-            slots_[index][sizes_[index]] = nullptr;
-            return storage;
-        }
-        return new large_pooled_buffer_storage(io_buffer_pool_large_size_classes[index]);
-    }
-
-    void release(std::size_t index, large_pooled_buffer_storage *storage) noexcept {
-        if (storage == nullptr) {
-            return;
-        }
-        if (index < slots_.size() && sizes_[index] < slots_[index].size()) [[likely]] {
-            slots_[index][sizes_[index]++] = storage;
-            return;
-        }
-        delete storage;
-    }
-
-private:
-    using slot_list =
-        std::array<large_pooled_buffer_storage *, io_buffer_pool_large_cache_capacity>;
-
-    std::array<slot_list, io_buffer_pool_large_size_classes.size()> slots_{};
-    std::array<std::size_t, io_buffer_pool_large_size_classes.size()> sizes_{};
-};
-
-[[nodiscard]] inline io_buffer_pool_cache &thread_io_buffer_pool() noexcept {
-    thread_local io_buffer_pool_cache cache;
-    return cache;
-}
-
-[[nodiscard]] inline io_large_buffer_pool_cache &thread_large_io_buffer_pool() noexcept {
-    thread_local io_large_buffer_pool_cache cache;
-    return cache;
-}
-
-[[nodiscard]] inline std::shared_ptr<buffer_storage>
-make_exact_buffer_storage(std::size_t capacity) {
-    return std::make_shared<heap_buffer_storage>(capacity);
-}
-
-[[nodiscard]] inline std::shared_ptr<buffer_storage>
-make_pooled_buffer_storage(std::size_t capacity) {
-    pooled_buffer_storage *storage = thread_io_buffer_pool().acquire();
-    storage->set_capacity(capacity);
-    return std::shared_ptr<buffer_storage>(storage, [](buffer_storage *raw) noexcept {
-        thread_io_buffer_pool().release(static_cast<pooled_buffer_storage *>(raw));
-    });
-}
-
-[[nodiscard]] inline std::shared_ptr<buffer_storage>
-make_large_pooled_buffer_storage(std::size_t capacity) {
-    const std::size_t index = large_buffer_size_class_index(capacity);
-    if (index >= io_buffer_pool_large_size_classes.size()) {
-        return make_exact_buffer_storage(capacity);
-    }
-    large_pooled_buffer_storage *storage = thread_large_io_buffer_pool().acquire(index);
-    storage->set_capacity(capacity);
-    return std::shared_ptr<buffer_storage>(storage, [index](buffer_storage *raw) noexcept {
-        thread_large_io_buffer_pool().release(index,
-                                              static_cast<large_pooled_buffer_storage *>(raw));
-    });
-}
-
-[[nodiscard]] inline std::shared_ptr<buffer_storage> make_copy_buffer_storage(std::size_t size) {
-    if (size == 0U) {
-        return make_exact_buffer_storage(size);
-    }
-    if (size <= io_buffer_pool_block_size) [[likely]] {
-        return make_pooled_buffer_storage(size);
-    }
-    return make_large_pooled_buffer_storage(size);
-}
 
 } // namespace detail
 
@@ -298,20 +58,34 @@ public:
 
     buffer() = default;
 
-    explicit buffer(std::size_t size)
-        : storage_(detail::make_exact_buffer_storage(size)), size_(size) {}
+    explicit buffer(std::size_t size) : iobuf_(make_iobuf(size, 0U)) {
+        if (iobuf_ != nullptr) {
+            iobuf_->append(size);
+        }
+    }
+
+    buffer(const buffer &other) : iobuf_(clone_one(other.iobuf_)) {}
+    buffer &operator=(const buffer &other) {
+        if (this != &other) {
+            iobuf_ = clone_one(other.iobuf_);
+        }
+        return *this;
+    }
+
+    buffer(buffer &&) noexcept = default;
+    buffer &operator=(buffer &&) noexcept = default;
 
     [[nodiscard]] static buffer with_capacity(std::size_t capacity, std::size_t headroom = 0U) {
         if (headroom > capacity) {
             headroom = capacity;
         }
-        return buffer(detail::make_exact_buffer_storage(capacity), headroom, 0U);
+        return buffer(make_iobuf(capacity, headroom));
     }
 
     [[nodiscard]] static buffer copy(buffer_view view) {
-        buffer result(detail::make_copy_buffer_storage(view.size()), 0U, view.size());
+        buffer result = with_capacity(view.size());
         if (!view.empty()) {
-            std::memcpy(result.mutable_data(), view.data(), view.size());
+            static_cast<void>(result.try_append(view));
         }
         return result;
     }
@@ -321,69 +95,69 @@ public:
     }
 
     [[nodiscard]] std::byte *mutable_data() noexcept {
-        return storage_ == nullptr ? nullptr : storage_->data() + offset_;
+        return ensure_writable() ? to_byte(iobuf_->writableData()) : nullptr;
     }
 
     [[nodiscard]] std::byte *tail_data() noexcept {
-        return storage_ == nullptr ? nullptr : storage_->data() + offset_ + size_;
+        return ensure_writable() ? to_byte(iobuf_->writableTail()) : nullptr;
     }
 
     [[nodiscard]] const std::byte *data() const noexcept {
-        return storage_ == nullptr ? nullptr : storage_->data() + offset_;
+        return iobuf_ == nullptr ? nullptr : to_const_byte(iobuf_->data());
     }
 
     [[nodiscard]] const std::byte *tail_data() const noexcept {
-        return storage_ == nullptr ? nullptr : storage_->data() + offset_ + size_;
+        return iobuf_ == nullptr ? nullptr : to_const_byte(iobuf_->tail());
     }
 
     [[nodiscard]] std::size_t size() const noexcept {
-        return size_;
+        return iobuf_ == nullptr ? 0U : iobuf_->length();
     }
 
     [[nodiscard]] bool empty() const noexcept {
-        return size_ == 0U;
+        return size() == 0U;
     }
 
     [[nodiscard]] buffer_view view() const noexcept {
-        return {data(), size_};
+        return {data(), size()};
     }
 
     [[nodiscard]] std::size_t capacity() const noexcept {
-        return storage_ == nullptr ? 0U : storage_->capacity();
+        return iobuf_ == nullptr ? 0U : iobuf_->capacity();
     }
 
     [[nodiscard]] std::size_t headroom() const noexcept {
-        return storage_ == nullptr ? 0U : offset_;
+        return iobuf_ == nullptr ? 0U : iobuf_->headroom();
     }
 
     [[nodiscard]] std::size_t tailroom() const noexcept {
-        if (storage_ == nullptr) {
-            return 0U;
-        }
-        const std::size_t end = offset_ + size_;
-        return end >= storage_->capacity() ? 0U : storage_->capacity() - end;
+        return iobuf_ == nullptr ? 0U : iobuf_->tailroom();
     }
 
     [[nodiscard]] bool try_append_uninitialized(std::size_t count) noexcept {
-        if (count > tailroom()) {
+        if (count > tailroom() || !ensure_writable() || count > iobuf_->tailroom()) {
             return false;
         }
-        size_ += count;
+        iobuf_->append(count);
         return true;
     }
 
     [[nodiscard]] std::byte *try_append_uninitialized_data(std::size_t count) noexcept {
-        std::byte *tail = tail_data();
-        return try_append_uninitialized(count) ? tail : nullptr;
+        if (count > tailroom() || !ensure_writable() || count > iobuf_->tailroom()) {
+            return nullptr;
+        }
+        std::byte *tail = to_byte(iobuf_->writableTail());
+        iobuf_->append(count);
+        return tail;
     }
 
     [[nodiscard]] bool try_append(buffer_view view) noexcept {
-        if (view.size() > tailroom()) {
+        if (view.size() > tailroom() || !ensure_writable() || view.size() > iobuf_->tailroom()) {
             return false;
         }
         if (!view.empty()) {
-            std::memcpy(tail_data(), view.data(), view.size());
-            size_ += view.size();
+            std::memcpy(iobuf_->writableTail(), view.data(), view.size());
+            iobuf_->append(view.size());
         }
         return true;
     }
@@ -392,41 +166,82 @@ public:
         return try_append(buffer_view(data, size));
     }
 
-    [[nodiscard]] buffer slice(std::size_t offset, std::size_t count = npos) const noexcept {
-        if (storage_ == nullptr || offset > size_) {
+    [[nodiscard]] buffer slice(std::size_t offset, std::size_t count = npos) const {
+        if (iobuf_ == nullptr || offset > size()) {
             return {};
         }
-        const std::size_t available = size_ - offset;
+        std::unique_ptr<folly::IOBuf> cloned = iobuf_->cloneOne();
+        if (offset != 0U) {
+            cloned->trimStart(offset);
+        }
+        const std::size_t available = cloned->length();
         const std::size_t slice_size = count == npos || count > available ? available : count;
-        return buffer(storage_, offset_ + offset, slice_size);
+        if (slice_size < available) {
+            cloned->trimEnd(available - slice_size);
+        }
+        return buffer(std::move(cloned));
     }
 
     void remove_prefix(std::size_t count) noexcept {
-        if (count >= size_) {
-            offset_ += size_;
-            size_ = 0;
+        if (iobuf_ == nullptr) {
             return;
         }
-        offset_ += count;
-        size_ -= count;
+        const std::size_t consumed = std::min(count, iobuf_->length());
+        iobuf_->trimStart(consumed);
     }
 
     void remove_suffix(std::size_t count) noexcept {
-        if (count >= size_) {
-            size_ = 0;
+        if (iobuf_ == nullptr) {
             return;
         }
-        size_ -= count;
+        const std::size_t consumed = std::min(count, iobuf_->length());
+        iobuf_->trimEnd(consumed);
     }
 
 private:
-    buffer(std::shared_ptr<detail::buffer_storage> storage, std::size_t offset,
-           std::size_t size) noexcept
-        : storage_(std::move(storage)), offset_(offset), size_(size) {}
+    explicit buffer(std::unique_ptr<folly::IOBuf> iobuf) noexcept : iobuf_(std::move(iobuf)) {}
 
-    std::shared_ptr<detail::buffer_storage> storage_;
-    std::size_t offset_{0};
-    std::size_t size_{0};
+    [[nodiscard]] static std::unique_ptr<folly::IOBuf> make_iobuf(std::size_t capacity,
+                                                                  std::size_t headroom) {
+        if (capacity == 0U) {
+            return nullptr;
+        }
+        std::unique_ptr<folly::IOBuf> iobuf = folly::IOBuf::createCombined(capacity);
+        if (iobuf->capacity() > capacity) {
+            iobuf->trimWritableTail(iobuf->capacity() - capacity);
+        }
+        if (headroom != 0U) {
+            iobuf->advance(headroom);
+        }
+        return iobuf;
+    }
+
+    [[nodiscard]] static std::unique_ptr<folly::IOBuf>
+    clone_one(const std::unique_ptr<folly::IOBuf> &iobuf) {
+        return iobuf == nullptr ? nullptr : iobuf->cloneOne();
+    }
+
+    [[nodiscard]] bool ensure_writable() noexcept {
+        if (iobuf_ == nullptr) {
+            return false;
+        }
+        try {
+            iobuf_->unshareOne();
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    [[nodiscard]] static std::byte *to_byte(std::uint8_t *data) noexcept {
+        return reinterpret_cast<std::byte *>(data);
+    }
+
+    [[nodiscard]] static const std::byte *to_const_byte(const std::uint8_t *data) noexcept {
+        return reinterpret_cast<const std::byte *>(data);
+    }
+
+    std::unique_ptr<folly::IOBuf> iobuf_;
 };
 
 class buffer_chain {

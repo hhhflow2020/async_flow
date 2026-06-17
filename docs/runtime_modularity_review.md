@@ -37,6 +37,8 @@ queue 基础结构已从 `include/af/detail/queue/` 迁移到 `include/af/queue/
 
 对外命名继续向 lower_case 迁移：batch/crud/parallel utility、compile-time `thread_layout`、task 状态枚举、signal、buffer 以及 log 配置/句柄/后端相关主类型已迁移为 lower_case。public `af::net`、utility、log、task 状态枚举、对象池/log/基础设施 detail 与 compile-time `thread_layout` 的 CamelCase 类型 alias 已删除，并通过 public header 源码扫描测试防回归。examples 中的 runtime task、stream tag 和业务 batch 类型也已迁移为 lower_snake_case；剩余 CamelCase 主要在测试 fixture 内部，用于覆盖旧构造路径、异常路径或平台行为。
 
+`af::buffer` 已从自研 TLS size-class storage 迁移为直接使用 Folly `IOBuf` 底层存储；`buffer` 继续保留现有简洁 API，copy/slice 通过 `cloneOne()` 共享底层数据，写入前通过 `unshareOne()` 保证 mutable 路径安全。public header 测试会阻止 buffer 模块回退到旧 `io_buffer_pool_cache`/`pooled_buffer_storage` 路径。
+
 通用 service task 由 runtime executor 按预算轮询执行；service 自身负责 pending 状态和内部队列，跨线程 producer 通过 `wake_service_tasks()` 唤醒 executor。runtime async logger 现在就是一个 service task，消费热路径不进入 task 状态机；推荐手工入口是 `start_runtime_logging()`，runtime 配置了日志后会在 `runtime::start()` 中自动启动并在 `runtime::stop()` 中 drain/flush。
 
 ## 模块边界

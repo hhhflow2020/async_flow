@@ -21,12 +21,12 @@
 - 扩容通过 cache-line 隔离的 `atomic<bool>` CAS 门闩串行化。抢不到扩容权的生产者只读观察门闩并优先复用已发布 slab，避免 `test_and_set` 写自旋造成扩容冷路径上的 cache line 来回失效；正常日志热路径不加锁。
 - `log_record` 按 cache line 对齐，默认 1024 字节 inline message，普通日志不会触发 heap 分配。
 
-## IO buffer pool
+## IO buffer
 
-- `buffer::copy` 的 1-16KiB payload 走线程本地固定 16KiB 物理块池，避免短消息反复分配。
-- 16KiB-256KiB payload 走 32/64/128/256KiB 线程本地 raw aligned size-class 池，释放时回到最后释放线程的本地 LIFO cache。
-- `buffer(size)`、`with_capacity()` 和超过 256KiB 的 copy payload 走 exact raw aligned heap storage，不再使用会整块 value-initialize 的 `std::vector<std::byte>`。
-- public `capacity()` 和 `tailroom()` 保持逻辑容量语义，池化只影响物理容量和复用路径。
+- `af::buffer` 不再维护自研 TLS size-class storage，直接使用 Folly `IOBuf` 作为底层存储。
+- `with_capacity()` 使用 `IOBuf::createCombined()` 预留连续 headroom/tailroom，避免 `std::vector<std::byte>` 的整块 value-initialize。
+- copy/slice 路径依赖 `cloneOne()` 的共享底层数据；mutable 路径进入 `writableData()`/`writableTail()` 前先 `unshareOne()`，避免共享视图被写穿。
+- `capacity()`、`headroom()` 和 `tailroom()` 继续保留逻辑容量语义，后续零拷贝链式输出应优先复用 Folly IOBuf 的块链能力，而不是恢复框架内 buffer pool。
 
 ## 性能判断
 
@@ -148,10 +148,32 @@
 - 扩容门闩从 `atomic_flag` 改为 `atomic<bool>` CAS 后，热路径 benchmark 与前次复核同量级，没有观察到本线程、批量或跨线程 release 路径退化。
 - 扩容等待者只读观察门闩并优先复用已发布 slab，可以减少突发扩容时的 producer cache line 写争用；该收益主要体现在冷路径争用行为，热路径 benchmark 用于确认没有引入额外成本。
 
+## 2026-06-18 Folly IOBuf 迁移后复核
+
+本轮将 `af::buffer` 从框架自研 TLS IO buffer pool 迁移为 Folly `IOBuf` 底层存储。远端 gcc Release clean build 和全量 `ctest` 均通过：`312` 个测试通过，`4` 个平台/场景测试按逻辑跳过。
+
+远端容器输出时间：`2026-06-18T08:52Z`。命令参数：
+`--benchmark_filter='ObjectPool|AsyncLogRecordPool' --benchmark_min_time=0.05s --benchmark_repetitions=3 --benchmark_report_aggregates_only=true`。
+
+结果摘要：
+
+- `BM_AsyncLogRecordPoolAcquireRelease/256_mean`：约 `77.4M items/s`，CV `0.04%`。
+- `BM_AsyncLogRecordPoolBatchAcquireRelease/64/256_mean`：约 `118.5M items/s`，CV `0.05%`。
+- `BM_AsyncLogRecordPoolCrossThreadReleaseBatch/64/256/real_time_mean`：约 `21.5M items/s`，CV `1.14%`。
+- `BM_ObjectPoolCreateDestroy/1024_mean`：约 `333.9M items/s`，CV `1.02%`。
+- `BM_ObjectPoolRemoteBatchCrossThreadDestroyBatch/1024_mean`：约 `54.3M items/s`，CV `1.35%`。
+- `BM_ObjectPoolRemoteBatchCrossThreadDestroyBatch/16384_mean`：约 `68.9M items/s`，CV `0.30%`。
+
+判断：
+
+- buffer 存储迁移没有改变 task 对象池和日志 record pool 的热路径结构；对象池仍是 local cache + tagged free-list，日志池仍是 TLS cache + slab free-list。
+- 日志 record pool 本线程和批量路径与前次复核同量级；跨线程 release 仍主要受原子同步和 cache coherency 流量影响。
+- 对象池本线程 create/destroy 与 remote batch 跨线程回收均稳定出数，没有观察到 Folly IOBuf 依赖引入后导致 pool 热路径退化。
+
 ## 建议
 
 - 对高频 task 设置合理的 `task_pool_chunk_size`。
 - 让 `task_pool_remote_release_batch_size` 小于等于 local cache capacity。
 - 压测时同时观察吞吐、p99 延迟和 resident memory。
-- 对网络连接、日志 record、buffer 等对象维持按线程局部池化。
+- 对网络连接、日志 record 等框架自管对象维持按线程局部池化；buffer 复用交给 Folly IOBuf，不再在框架内维护第二套 IO buffer pool。
 - 日志压测需要分别覆盖 ordered logger、runtime lane、外部 producer、record pool acquire/release、跨线程批量 release 五类路径。

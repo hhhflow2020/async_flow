@@ -29,27 +29,6 @@ TEST(NetBufferTests, BufferCopyDoesNotExposePooledBlockTailroom) {
     EXPECT_FALSE(one.try_append("b", 1));
 }
 
-TEST(NetBufferTests, CopyStorageUsesFixedBlocksForSmallPayloads) {
-    auto small = af::detail::make_copy_buffer_storage(4);
-    auto large = af::detail::make_copy_buffer_storage(af::detail::io_buffer_pool_block_size + 1U);
-    auto empty = af::detail::make_copy_buffer_storage(0);
-
-    EXPECT_EQ(small->capacity(), 4U);
-    EXPECT_EQ(small->physical_capacity(), af::detail::io_buffer_pool_block_size);
-    EXPECT_EQ(large->capacity(), af::detail::io_buffer_pool_block_size + 1U);
-    EXPECT_EQ(empty->capacity(), 0U);
-    EXPECT_EQ(empty->physical_capacity(), 0U);
-}
-
-TEST(NetBufferTests, LargeCopyStorageUsesSizeClassPool) {
-    const std::size_t payload_size = af::detail::io_buffer_pool_block_size + 1U;
-    auto storage = af::detail::make_copy_buffer_storage(payload_size);
-
-    EXPECT_EQ(storage->capacity(), payload_size);
-    EXPECT_GT(storage->physical_capacity(), storage->capacity());
-    EXPECT_EQ(storage->physical_capacity(), af::detail::io_buffer_pool_large_size_classes[0]);
-}
-
 TEST(NetBufferTests, BufferWithCapacityTracksHeadroomAndTailroom) {
     af::buffer buffer = af::buffer::with_capacity(16, 4);
 
@@ -120,6 +99,29 @@ TEST(NetBufferTests, BufferSliceSharesStorageWithoutCopying) {
     buffer.remove_prefix(4);
     EXPECT_EQ(buffer.view().string_view(), "ef");
     EXPECT_EQ(slice.view().string_view(), "cde");
+}
+
+TEST(NetBufferTests, BufferCopyKeepsIndependentViewState) {
+    af::buffer first = af::buffer::copy("abcdef", 6);
+    af::buffer second = first;
+
+    first.remove_prefix(2);
+    first.remove_suffix(2);
+
+    EXPECT_EQ(first.view().string_view(), "cd");
+    EXPECT_EQ(second.view().string_view(), "abcdef");
+}
+
+TEST(NetBufferTests, BufferSliceUnsharesBeforeMutableWrite) {
+    af::buffer original = af::buffer::copy("abcdef", 6);
+    af::buffer slice = original.slice(1, 3);
+
+    std::byte *data = slice.mutable_data();
+    ASSERT_NE(data, nullptr);
+    data[0] = std::byte{'X'};
+
+    EXPECT_EQ(original.view().string_view(), "abcdef");
+    EXPECT_EQ(slice.view().string_view(), "Xcd");
 }
 
 TEST(NetBufferTests, BufferChainTracksTotalBytes) {

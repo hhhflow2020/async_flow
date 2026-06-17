@@ -38,4 +38,4 @@
 
 ## 仍可提升
 
-- 后续可继续评估超过 256KiB 的极大 payload 是否需要更多 size class，并评估 `buffer_storage` 控制块的 intrusive refcount 化，以进一步降低极端大块分配尾延迟和 shared ownership 成本。
+- buffer 已迁移为 Folly `IOBuf` 底层存储；后续性能复核应关注 IOBuf chain、clone/unshare、scatter/gather 输出和大 payload 尾延迟，不再扩展框架自研 `buffer_storage` size class。

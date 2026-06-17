@@ -1086,3 +1086,14 @@ TEST(PublicHeaderTests, UtilityUmbrellaExposesLowerCaseNames) {
     static_assert(std::is_class_v<af::signal_wait_result>);
     static_assert(std::is_class_v<af::signal_set>);
 }
+
+TEST(PublicHeaderTests, BufferUsesFollyIobufStorage) {
+    const std::string content = read_source_file("include/af/buffer/buffer.hpp");
+    ASSERT_FALSE(content.empty());
+    EXPECT_NE(content.find("#include \"folly/io/IOBuf.h\""), std::string::npos);
+    EXPECT_NE(content.find("folly::IOBuf::createCombined"), std::string::npos);
+    EXPECT_NE(content.find("cloneOne()"), std::string::npos);
+    EXPECT_NE(content.find("unshareOne()"), std::string::npos);
+    EXPECT_EQ(content.find("io_buffer_pool_cache"), std::string::npos);
+    EXPECT_EQ(content.find("pooled_buffer_storage"), std::string::npos);
+}
